@@ -1,0 +1,7 @@
+---
+alwaysApply: true
+---
+
+If requirements are ambiguous: list assumptions explicitly.
+
+Output should be “PR-ready”: code + tests + brief notes.

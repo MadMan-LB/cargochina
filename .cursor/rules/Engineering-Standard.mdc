@@ -1,0 +1,17 @@
+---
+alwaysApply: true
+---
+
+Always propose a short plan before editing.
+Prefer minimal diffs; do not rewrite whole files unless requested.
+Any DB change must include:
+migration file
+rollback note
+updated schema notes
+Any endpoint change must include:
+request/response examples
+validation
+authorization check
+tests (at least smoke)
+Never commit secrets; use env vars.
+Add structured logs for important workflows.
