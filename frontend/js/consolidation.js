@@ -109,6 +109,14 @@ async function openDraftModal(id) {
                 .join("");
         document.getElementById("draftOrderList").textContent =
             (draftRes.data.order_ids || []).join(", ") || "none";
+        const orderIds = draftRes.data.order_ids || [];
+        const allOrders = [...(ordersRes.data || []), ...(res2.data || [])];
+        document.getElementById("draftRemoveOrder").innerHTML = orderIds
+            .map((oid) => {
+                const o = allOrders.find((x) => x.id == oid);
+                return `<option value="${oid}">#${oid} ${escapeHtml(o ? o.customer_name : "")}</option>`;
+            })
+            .join("");
         new bootstrap.Modal(document.getElementById("draftModal")).show();
     } catch (e) {
         showToast(e.message, "danger");
@@ -129,6 +137,27 @@ async function addOrdersToDraft() {
             { order_ids: orderIds },
         );
         showToast("Orders added");
+        openDraftModal(currentDraftId);
+        loadShipmentDrafts();
+    } catch (e) {
+        showToast(e.message, "danger");
+    }
+}
+
+async function removeOrdersFromDraft() {
+    const sel = document.getElementById("draftRemoveOrder");
+    const orderIds = Array.from(sel.selectedOptions).map((o) => o.value);
+    if (!orderIds.length) {
+        showToast("Select orders to remove", "danger");
+        return;
+    }
+    try {
+        await api(
+            "POST",
+            "/shipment-drafts/" + currentDraftId + "/remove-orders",
+            { order_ids: orderIds },
+        );
+        showToast("Orders removed");
         openDraftModal(currentDraftId);
         loadShipmentDrafts();
     } catch (e) {

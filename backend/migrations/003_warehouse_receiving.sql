@@ -12,7 +12,7 @@ IF NOT EXISTS warehouse_receipts
 (10,4) NOT NULL DEFAULT 0,
     actual_weight DECIMAL
 (10,4) NOT NULL DEFAULT 0,
-    condition VARCHAR
+    receipt_condition VARCHAR
 (20) NOT NULL DEFAULT 'good',
     notes TEXT,
     received_by INT UNSIGNED,
@@ -27,8 +27,8 @@ REFERENCES users
 DELETE
 SET NULL
 ,
-    CONSTRAINT chk_condition CHECK
-(condition IN
+    CONSTRAINT chk_receipt_condition CHECK
+(receipt_condition IN
 ('good', 'damaged', 'partial'))
 );
 

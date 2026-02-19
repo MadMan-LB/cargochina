@@ -267,6 +267,18 @@ Any AI/engineer working on this system must follow these operating rules:
 ## 15) DB_CHANGELOG (keep updating)
 > Add entries as changes happen. Newest on top.
 
+- 2025-02-19 — Migration 003 fix: `condition` → `receipt_condition` (MySQL reserved word)
+  - Change: Renamed column in warehouse_receipts
+  - Reason: `condition` is reserved in MySQL/MariaDB
+  - Rollback: ALTER TABLE warehouse_receipts CHANGE receipt_condition condition VARCHAR(20);
+
+- 2025-02-19 — Migrations 006–007 (Seed admin, system_config)
+  - Change: Seed SuperAdmin user (admin@salameh.com / password); system_config table for editable thresholds
+  - Reason: RBAC requires default admin; SuperAdmin needs to edit variance/confirmation settings
+  - Affected tables: users, user_roles, system_config
+  - Migration steps: Run `php backend/migrations/run.php`
+  - Rollback: DELETE FROM user_roles WHERE user_id IN (SELECT id FROM users WHERE email='admin@salameh.com'); DELETE FROM users WHERE email='admin@salameh.com'; DROP TABLE system_config;
+
 - 2025-02-19 — Migrations 003–005 (Warehouse, Notifications, Consolidation)
   - Change: warehouse_receipts, warehouse_receipt_photos, notifications, customer_confirmations, containers, shipment_drafts, shipment_draft_orders
   - Reason: Full pipeline Stages 2–3 + notifications
@@ -290,6 +302,16 @@ Any AI/engineer working on this system must follow these operating rules:
 
 ## 16) DECISION_LOG (keep updating)
 > Capture CEO/ops decisions. Newest on top.
+
+- 2025-02-19 — Default variance thresholds and confirmation policy
+  - Decision: VARIANCE_THRESHOLD_PERCENT=10, VARIANCE_THRESHOLD_ABS_CBM=0.1, CONFIRMATION_REQUIRED=variance-only
+  - Rationale: Placeholder values until CEO locks; config editable by SuperAdmin in admin UI
+  - Impacted modules: receiving, config, admin_config
+
+- 2025-02-19 — RBAC enforcement
+  - Decision: Approve orders (ChinaAdmin, LebanonAdmin, SuperAdmin); Receive (WarehouseStaff, SuperAdmin); Containers/Users/Config (SuperAdmin only)
+  - Rationale: Align with spec section 9
+  - Impacted modules: api/index.php, rbac.php, all handlers
 
 - YYYY-MM-DD — (TBD)
   - Decision:

@@ -76,17 +76,22 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $so = $pdo->prepare("SELECT order_id FROM shipment_draft_orders WHERE shipment_draft_id = ?");
                 $so->execute([$id]);
                 $orderIds = array_column($so->fetchAll(PDO::FETCH_ASSOC), 'order_id');
-                $ph = implode(',', array_fill(0, count($orderIds), '?'));
-                $totals = $pdo->prepare("SELECT COALESCE(SUM(declared_cbm),0), COALESCE(SUM(declared_weight),0) FROM order_items WHERE order_id IN ($ph)");
-                $totals->execute($orderIds);
-                $row = $totals->fetch(PDO::FETCH_NUM);
-                $totalCbm = (float) $row[0];
-                $totalWeight = (float) $row[1];
+                $totalCbm = 0.0;
+                $totalWeight = 0.0;
+                if (!empty($orderIds)) {
+                    $ph = implode(',', array_fill(0, count($orderIds), '?'));
+                    $totals = $pdo->prepare("SELECT COALESCE(SUM(declared_cbm),0), COALESCE(SUM(declared_weight),0) FROM order_items WHERE order_id IN ($ph)");
+                    $totals->execute($orderIds);
+                    $row = $totals->fetch(PDO::FETCH_NUM);
+                    $totalCbm = (float) $row[0];
+                    $totalWeight = (float) $row[1];
+                }
                 $c = $pdo->prepare("SELECT max_cbm, max_weight FROM containers WHERE id = ?");
                 $c->execute([$containerId]);
                 $cont = $c->fetch(PDO::FETCH_ASSOC);
-                if (!$cont || $totalCbm > $cont['max_cbm'] || $totalWeight > $cont['max_weight']) {
-                    jsonError('Capacity exceeded', 400);
+                if (!$cont) jsonError('Container not found', 404);
+                if ($totalCbm > $cont['max_cbm'] || $totalWeight > $cont['max_weight']) {
+                    jsonError('Capacity exceeded: total CBM/weight exceeds container limits', 400);
                 }
                 $pdo->prepare("UPDATE shipment_drafts SET container_id = ? WHERE id = ?")->execute([$containerId, $id]);
                 $ph = implode(',', array_fill(0, count($orderIds), '?'));
@@ -107,6 +112,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $so = $pdo->prepare("SELECT order_id FROM shipment_draft_orders WHERE shipment_draft_id = ?");
                 $so->execute([$id]);
                 $orderIds = array_column($so->fetchAll(PDO::FETCH_ASSOC), 'order_id');
+                if (empty($orderIds)) jsonError('Draft must have at least one order to finalize', 400);
                 foreach ($orderIds as $oid) {
                     $st = $pdo->prepare("SELECT status FROM orders WHERE id = ?");
                     $st->execute([$oid]);
@@ -119,7 +125,26 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $pdo->prepare("UPDATE shipment_drafts SET status='finalized' WHERE id=?")->execute([$id]);
                 $ph = implode(',', array_fill(0, count($orderIds), '?'));
                 $pdo->prepare("UPDATE orders SET status='FinalizedAndPushedToTracking' WHERE id IN ($ph)")->execute($orderIds);
+                $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('shipment_draft',?,?,?,?)")
+                    ->execute([$id, 'finalize', json_encode(['order_ids' => $orderIds, 'tracking_result' => $result]), $userId]);
                 jsonResponse(['data' => ['status' => 'finalized', 'tracking_result' => $result]]);
+                break;
+            }
+            if ($action === 'remove-orders') {
+                $orderIds = $input['order_ids'] ?? [];
+                if (empty($orderIds)) jsonError('order_ids required', 400);
+                $del = $pdo->prepare("DELETE FROM shipment_draft_orders WHERE shipment_draft_id = ? AND order_id = ?");
+                foreach ($orderIds as $oid) {
+                    $del->execute([$id, $oid]);
+                    $pdo->prepare("UPDATE orders SET status='ReadyForConsolidation' WHERE id = ? AND status = 'ConsolidatedIntoShipmentDraft'")->execute([$oid]);
+                }
+                $stmt = $pdo->prepare("SELECT * FROM shipment_drafts WHERE id = ?");
+                $stmt->execute([$id]);
+                $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                $so = $pdo->prepare("SELECT order_id FROM shipment_draft_orders WHERE shipment_draft_id = ?");
+                $so->execute([$id]);
+                $row['order_ids'] = array_column($so->fetchAll(PDO::FETCH_ASSOC), 'order_id');
+                jsonResponse(['data' => $row]);
                 break;
             }
             jsonError('Invalid action', 400);

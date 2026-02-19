@@ -188,7 +188,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 $pdo->beginTransaction();
                 try {
-                    $pdo->prepare("INSERT INTO warehouse_receipts (order_id, actual_cartons, actual_cbm, actual_weight, condition, notes, received_by) VALUES (?,?,?,?,?,?,?)")
+                    $pdo->prepare("INSERT INTO warehouse_receipts (order_id, actual_cartons, actual_cbm, actual_weight, receipt_condition, notes, received_by) VALUES (?,?,?,?,?,?,?)")
                         ->execute([$id, $actualCartons, $actualCbm, $actualWeight, $condition, $input['notes'] ?? null, $userId]);
                     $receiptId = (int) $pdo->lastInsertId();
                     $insPhoto = $pdo->prepare("INSERT INTO warehouse_receipt_photos (receipt_id, file_path) VALUES (?,?)");

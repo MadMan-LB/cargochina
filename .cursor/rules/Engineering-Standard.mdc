@@ -8,6 +8,7 @@ Any DB change must include:
 migration file
 rollback note
 updated schema notes
+After adding or modifying migrations, always run: php backend/migrations/run.php (or c:\xampp\php\php.exe backend/migrations/run.php on Windows)
 Any endpoint change must include:
 request/response examples
 validation

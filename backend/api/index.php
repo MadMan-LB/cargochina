@@ -31,12 +31,50 @@ if (!file_exists($handlerFile)) {
 }
 
 require_once dirname(__DIR__, 2) . '/backend/config/database.php';
+require_once __DIR__ . '/helpers.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
 $input = [];
 if (in_array($method, ['POST', 'PUT', 'PATCH'])) {
     $raw = file_get_contents('php://input');
     $input = $raw ? (json_decode($raw, true) ?? []) : $_POST;
+}
+
+// RBAC: public resources skip auth
+$rbac = require dirname(__DIR__, 2) . '/backend/config/rbac.php';
+$publicResources = $rbac['public'] ?? [];
+if (!in_array($resource, $publicResources)) {
+    $userId = getAuthUserId();
+    if (!$userId) {
+        http_response_code(401);
+        echo json_encode(['error' => true, 'message' => 'Unauthorized']);
+        exit;
+    }
+    if ($resource === 'containers' && !hasAnyRole($rbac['containers'] ?? [])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'orders' && $action === 'approve' && !hasAnyRole($rbac['orders']['approve'] ?? [])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'orders' && $action === 'receive' && !hasAnyRole($rbac['orders']['receive'] ?? [])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'users' && !hasAnyRole($rbac['users'] ?? [])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'config' && !hasAnyRole($rbac['config'] ?? [])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
 }
 
 $handler = require $handlerFile;

@@ -1,6 +1,8 @@
 .env
 backend/uploads/*
 !backend/uploads/.gitkeep
+logs/*
+!logs/.gitkeep
 vendor/
 composer.lock
 *.log

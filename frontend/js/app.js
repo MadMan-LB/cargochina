@@ -5,7 +5,11 @@
 const API_BASE = "/cargochina/api/v1";
 
 async function api(method, path, body = null) {
-    const opts = { method, headers: { "Content-Type": "application/json" } };
+    const opts = {
+        method,
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+    };
     if (body && (method === "POST" || method === "PUT")) {
         opts.body = JSON.stringify(body);
     }

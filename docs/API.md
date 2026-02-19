@@ -1,6 +1,12 @@
 # CLMS API Reference
 
-Base URL: `/api/v1/`
+Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
+
+**Authentication:** Session-based. Login via `POST /auth/login`. All endpoints except `auth` require an active session.
+
+## Authentication
+- `POST /auth/login` — `{email, password}` — Returns `{user_id, name, roles}`. **Public.**
+- `POST /auth/logout` — Destroys session. **Public.**
 
 ## Customers
 - `GET /customers` — List all
@@ -19,13 +25,14 @@ Base URL: `/api/v1/`
 ## Products
 - `GET /products` — List all
 - `GET /products/{id}` — Get one
-- `GET /products/suggest?q=...` — Suggest by description/HS code
-- `POST /products` — Create `{supplier_id?, cbm, weight, packaging?, hs_code?, description_cn?, description_en?}`
+- `GET /products/suggest?q=...` — Suggest by description/HS code (with similarity score)
+- `POST /products` — Create `{supplier_id?, cbm, weight, packaging?, hs_code?, description_cn?, description_en?, force_create?}` — Use `force_create: true` to bypass duplicate check
 - `PUT /products/{id}` — Update
 - `DELETE /products/{id}` — Delete
 
 ## Translations
 - `POST /translations` — Lookup/translate `{text, source_lang?, target_lang?}` — returns `{translated, cached}`
+- `POST /translate` — Translate via TranslationService `{text, source_lang?, target_lang?}` — returns `{translated}`
 
 ## Orders
 - `GET /orders?status=&customer_id=` — List (optional filters)
@@ -45,13 +52,26 @@ Base URL: `/api/v1/`
 - `POST /notifications/{id}/read` — Mark read
 
 ## Containers
-- `GET /containers` — List all
-- `POST /containers` — Create `{code, max_cbm, max_weight}`
+- `GET /containers` — List all — **SuperAdmin only**
+- `POST /containers` — Create `{code, max_cbm, max_weight}` — **SuperAdmin only**
 
 ## Shipment Drafts
 - `GET /shipment-drafts` — List all
 - `GET /shipment-drafts/{id}` — Get one
 - `POST /shipment-drafts` — Create new draft
 - `POST /shipment-drafts/{id}/add-orders` — Add orders `{order_ids: []}`
+- `POST /shipment-drafts/{id}/remove-orders` — Remove orders `{order_ids: []}`
 - `POST /shipment-drafts/{id}/assign-container` — Assign `{container_id}`
-- `POST /shipment-drafts/{id}/finalize` — Finalize and push to tracking
+- `POST /shipment-drafts/{id}/finalize` — Finalize and push to tracking (logs to `logs/tracking_push.log`)
+
+## Users (SuperAdmin only)
+- `GET /users` — List all users with roles
+
+## Config (SuperAdmin only)
+- `GET /config` — Get system config (thresholds, etc.)
+- `PUT /config` — Update `{config: {VARIANCE_THRESHOLD_PERCENT?, VARIANCE_THRESHOLD_ABS_CBM?, ...}}`
+
+## RBAC
+- **Approve orders:** ChinaAdmin, LebanonAdmin, SuperAdmin
+- **Receive orders:** WarehouseStaff, SuperAdmin
+- **Containers, Users, Config:** SuperAdmin

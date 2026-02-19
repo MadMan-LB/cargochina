@@ -1,6 +1,9 @@
 <?php
+require_once __DIR__ . '/auth_check.php';
 $currentPage = $currentPage ?? 'dashboard';
 $pageTitle = $pageTitle ?? 'CLMS Dashboard';
+$userRoles = $_SESSION['user_roles'] ?? [];
+$isSuperAdmin = in_array('SuperAdmin', $userRoles);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -41,8 +44,31 @@ $pageTitle = $pageTitle ?? 'CLMS Dashboard';
           <li class="nav-item">
             <a class="nav-link <?= $currentPage === 'consolidation' ? 'active' : '' ?>" href="consolidation.php">Consolidation</a>
           </li>
+          <li class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle <?= $currentPage === 'notifications' ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown" id="notificationsDropdown">
+              Notifications <span class="badge bg-danger d-none" id="notifBadge">0</span>
+            </a>
+            <ul class="dropdown-menu dropdown-menu-end" id="notificationsMenu" aria-labelledby="notificationsDropdown">
+              <li><a class="dropdown-item" href="notifications.php">View all</a></li>
+              <li>
+                <hr class="dropdown-divider">
+              </li>
+              <li>
+                <div class="dropdown-item text-muted" id="notifPlaceholder">Loading...</div>
+              </li>
+            </ul>
+          </li>
+          <?php if ($isSuperAdmin): ?>
+            <li class="nav-item dropdown">
+              <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">Admin</a>
+              <ul class="dropdown-menu">
+                <li><a class="dropdown-item" href="admin_users.php">Users</a></li>
+                <li><a class="dropdown-item" href="admin_config.php">Configuration</a></li>
+              </ul>
+            </li>
+          <?php endif; ?>
           <li class="nav-item">
-            <a class="nav-link <?= $currentPage === 'notifications' ? 'active' : '' ?>" href="notifications.php">Notifications</a>
+            <a class="nav-link" href="login.php?logout=1">Logout</a>
           </li>
         </ul>
       </div>

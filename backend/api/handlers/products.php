@@ -17,9 +17,25 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     jsonResponse(['data' => []]);
                 }
                 $like = "%$q%";
-                $stmt = $pdo->prepare("SELECT id, description_cn, description_en, cbm, weight FROM products WHERE description_cn LIKE ? OR description_en LIKE ? OR hs_code LIKE ? LIMIT 10");
+                $stmt = $pdo->prepare("SELECT id, description_cn, description_en, cbm, weight, hs_code FROM products WHERE description_cn LIKE ? OR description_en LIKE ? OR hs_code LIKE ? LIMIT 20");
                 $stmt->execute([$like, $like, $like]);
-                jsonResponse(['data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
+                $candidates = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                $qLower = mb_strtolower($q);
+                $scored = [];
+                foreach ($candidates as $c) {
+                    $similarity = 0;
+                    foreach (['description_cn', 'description_en', 'hs_code'] as $f) {
+                        $v = $c[$f] ?? '';
+                        if ($v === '') continue;
+                        similar_text($qLower, mb_strtolower($v), $pct);
+                        $similarity = max($similarity, $pct);
+                        if (stripos($v, $q) !== false) $similarity = max($similarity, 85);
+                    }
+                    $c['similarity'] = round($similarity, 1);
+                    $scored[] = $c;
+                }
+                usort($scored, fn($a, $b) => $b['similarity'] <=> $a['similarity']);
+                jsonResponse(['data' => array_slice($scored, 0, 10)]);
             }
             if ($id === null) {
                 $stmt = $pdo->query("SELECT p.*, s.name as supplier_name FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id ORDER BY p.id DESC");
@@ -39,6 +55,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             jsonResponse(['data' => $row]);
 
         case 'POST':
+            $forceCreate = !empty($input['force_create']);
             $cbm = (float) ($input['cbm'] ?? 0);
             $weight = (float) ($input['weight'] ?? 0);
             if ($cbm < 0 || $weight < 0) {
@@ -50,6 +67,22 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $descriptionCn = $input['description_cn'] ?? null;
             $descriptionEn = $input['description_en'] ?? null;
             $imagePaths = isset($input['image_paths']) ? json_encode($input['image_paths']) : null;
+            if (!$forceCreate && ($descriptionCn || $descriptionEn || $hsCode)) {
+                $search = trim($descriptionCn ?: $descriptionEn ?: $hsCode ?: '');
+                if (strlen($search) >= 2) {
+                    $like = '%' . $search . '%';
+                    $stmt = $pdo->prepare("SELECT id, description_cn, description_en, hs_code FROM products WHERE description_cn LIKE ? OR description_en LIKE ? OR hs_code LIKE ? LIMIT 10");
+                    $stmt->execute([$like, $like, $like]);
+                    $dupes = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                    foreach ($dupes as $d) {
+                        $compare = $d['description_cn'] ?: $d['description_en'] ?: $d['hs_code'] ?: '';
+                        similar_text($search, $compare, $pct);
+                        if ($pct >= 70) {
+                            jsonError('Possible duplicate product. Use force_create=true to create anyway, or reuse existing product #' . $d['id'], 409, ['suggested_ids' => array_column($dupes, 'id')]);
+                        }
+                    }
+                }
+            }
             $stmt = $pdo->prepare("INSERT INTO products (supplier_id, cbm, weight, packaging, hs_code, description_cn, description_en, image_paths) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
             $stmt->execute([$supplierId, $cbm, $weight, $packaging, $hsCode, $descriptionCn, $descriptionEn, $imagePaths]);
             $newId = (int) $pdo->lastInsertId();

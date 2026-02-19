@@ -74,7 +74,8 @@ require 'includes/layout.php';
           </select>
           <button type="button" class="btn btn-sm btn-outline-primary mt-1" onclick="assignContainerToDraft()">Assign</button>
         </div>
-        <div><strong>Orders in draft:</strong> <span id="draftOrderList"></span></div>
+        <div class="mb-2"><strong>Orders in draft:</strong> <span id="draftOrderList"></span></div>
+        <div class="mb-2"><select class="form-select form-select-sm" id="draftRemoveOrder" multiple style="max-height:80px"></select><button type="button" class="btn btn-sm btn-outline-danger mt-1" onclick="removeOrdersFromDraft()">Remove Selected</button></div>
         <div class="mt-2"><button type="button" class="btn btn-success" onclick="finalizeDraft()">Finalize & Push to Tracking</button></div>
       </div>
     </div>

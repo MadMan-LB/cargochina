@@ -31,14 +31,9 @@ php backend/migrations/run.php
 
 > **Note:** If you see "could not find driver", enable the MySQL PDO extension in `php.ini` (XAMPP: uncomment `extension=pdo_mysql`).
 
-### 4. Create admin user (optional)
+### 4. Login
 
-```sql
-INSERT INTO users (email, password_hash, full_name) VALUES
-('admin@salameh.com', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'Admin');
--- Password: password
-INSERT INTO user_roles (user_id, role_id) SELECT 1, id FROM roles WHERE code = 'SuperAdmin';
-```
+Migration 006 seeds a default SuperAdmin: `admin@salameh.com` / `password`. Log in at `login.php`.
 
 ### 5. Run locally
 

@@ -2,16 +2,27 @@
 session_start();
 require 'backend/config/database.php';
 
+if (!empty($_GET['logout'])) {
+  $_SESSION = [];
+  session_destroy();
+  header('Location: login.php');
+  exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $email = trim($_POST['email'] ?? '');
   $pass = $_POST['password'] ?? '';
   if ($email && $pass) {
     $pdo = getDb();
-    $stmt = $pdo->prepare("SELECT id, password_hash FROM users WHERE email = ? AND is_active = 1");
+    $stmt = $pdo->prepare("SELECT id, password_hash, full_name FROM users WHERE email = ? AND is_active = 1");
     $stmt->execute([$email]);
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($user && password_verify($pass, $user['password_hash'])) {
       $_SESSION['user_id'] = (int) $user['id'];
+      $_SESSION['user_name'] = $user['full_name'];
+      $roleStmt = $pdo->prepare("SELECT r.code FROM roles r JOIN user_roles ur ON r.id = ur.role_id WHERE ur.user_id = ?");
+      $roleStmt->execute([$user['id']]);
+      $_SESSION['user_roles'] = array_column($roleStmt->fetchAll(PDO::FETCH_ASSOC), 'code');
       header('Location: index.php');
       exit;
     }
