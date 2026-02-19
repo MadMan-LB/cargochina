@@ -267,6 +267,18 @@ Any AI/engineer working on this system must follow these operating rules:
 ## 15) DB_CHANGELOG (keep updating)
 > Add entries as changes happen. Newest on top.
 
+- 2025-02-19 — Migrations 003–005 (Warehouse, Notifications, Consolidation)
+  - Change: warehouse_receipts, warehouse_receipt_photos, notifications, customer_confirmations, containers, shipment_drafts, shipment_draft_orders
+  - Reason: Full pipeline Stages 2–3 + notifications
+  - Rollback: DROP TABLE shipment_draft_orders, shipment_drafts, containers, customer_confirmations, notifications, warehouse_receipt_photos, warehouse_receipts
+
+- 2025-02-19 — Initial schema (Phase 1–2)
+  - Change: Created users, roles, user_roles, customers, suppliers, products, translations, orders, order_items, order_attachments, audit_log
+  - Reason: Bootstrap CLMS with master data and order management foundation
+  - Affected tables: (new) all above
+  - Migration steps: Run `php backend/migrations/run.php` after creating DB
+  - Rollback plan: DROP TABLE audit_log, order_attachments, order_items, orders, translations, products, suppliers, customers, user_roles, users, roles, _migrations
+
 - YYYY-MM-DD — (TBD)
   - Change:
   - Reason:

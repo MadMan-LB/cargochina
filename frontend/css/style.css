@@ -1,0 +1,58 @@
+/* CLMS - Salameh Cargo China Logistics */
+:root {
+  --clms-primary: #0d6efd;
+  --clms-success: #198754;
+  --clms-warning: #ffc107;
+  --clms-danger: #dc3545;
+}
+
+body {
+  min-height: 100vh;
+  background-color: #f8f9fa;
+}
+
+.navbar-brand {
+  font-weight: 600;
+}
+
+.sidebar {
+  min-height: calc(100vh - 56px);
+  background: #fff;
+  box-shadow: 1px 0 3px rgba(0, 0, 0, .08);
+}
+
+.sidebar .nav-link {
+  color: #495057;
+  padding: 0.5rem 1rem;
+  border-radius: 0.25rem;
+  margin: 0 0.5rem;
+}
+
+.sidebar .nav-link:hover {
+  background: #e9ecef;
+  color: #0d6efd;
+}
+
+.sidebar .nav-link.active {
+  background: #0d6efd;
+  color: #fff;
+}
+
+.card {
+  border: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+}
+
+.table-actions .btn {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.875rem;
+}
+
+.loading {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.toast-container {
+  z-index: 9999;
+}

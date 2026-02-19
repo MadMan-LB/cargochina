@@ -1,0 +1,6 @@
+.env
+backend/uploads/*
+!backend/uploads/.gitkeep
+vendor/
+composer.lock
+*.log
