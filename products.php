@@ -60,8 +60,8 @@ require 'includes/layout.php';
             <label class="form-label">Images</label>
             <div class="border rounded p-2 bg-light" id="productImagesDropZone">
               <input type="file" class="d-none" id="productImagesInput" multiple accept="image/*">
-              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('productImagesInput').click()">Choose files</button>
-              <span class="ms-2 text-muted small">or drag and drop</span>
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="productAddPhotoBtn" onclick="document.getElementById('productImagesInput').click()">Add Photo</button>
+              <span class="ms-2 text-muted small">camera or gallery</span>
             </div>
             <div id="productImagesPreview" class="d-flex flex-wrap gap-2 mt-2"></div>
           </div>
@@ -74,5 +74,6 @@ require 'includes/layout.php';
     </div>
   </div>
 </div>
-<?php $pageScript = 'frontend/js/products.js';
+<?php $pageScripts = ['frontend/js/photo_uploader.js'];
+$pageScript = 'frontend/js/products.js';
 require 'includes/footer.php'; ?>

@@ -10,6 +10,7 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 
 ## Customers
 - `GET /customers` — List all
+- `GET /customers/search?q=...` — Search by name/code (top 10 matches)
 - `GET /customers/{id}` — Get one
 - `POST /customers` — Create `{code, name, contacts?, addresses?, payment_terms?}`
 - `PUT /customers/{id}` — Update
@@ -17,6 +18,7 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 
 ## Suppliers
 - `GET /suppliers` — List all
+- `GET /suppliers/search?q=...` — Search by name/code/phone/store_id (top 10)
 - `GET /suppliers/{id}` — Get one
 - `POST /suppliers` — Create `{code, store_id?, name, phone?, contacts?, factory_location?, notes?, additional_ids?}` — store_id: official China store identifier
 - `POST /suppliers/{id}/payments` — Add payment `{amount, currency?, payment_type?, order_id?, notes?}`
@@ -26,6 +28,7 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 
 ## Products
 - `GET /products` — List all
+- `GET /products/search?q=...` — Search by description_cn/description_en/hs_code (top 10)
 - `GET /products/{id}` — Get one
 - `GET /products/suggest?q=...` — Suggest by description/HS code (with similarity score)
 - `POST /products` — Create `{supplier_id?, cbm, weight, packaging?, hs_code?, description_cn?, description_en?, image_paths?, force_create?}` — image_paths: array of paths from upload
@@ -48,7 +51,7 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 - `POST /orders/{id}/confirm` — AwaitingCustomerConfirmation → Confirmed
 
 ## Upload
-- `POST /upload` — Multipart form `file` — returns `{path, url}` — path for storage; url for img src
+- `POST /upload` — Multipart form `file` — returns `{data: {path, url}}` — path for storage; url for img src. Always returns JSON; errors use `{error: {message, code: "UPLOAD_FAILED"}}`. Requires `Content-Type: application/json` response.
 
 ## Notifications
 - `GET /notifications` — List for current user

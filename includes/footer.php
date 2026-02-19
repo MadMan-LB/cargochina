@@ -22,6 +22,11 @@
           });
         })();
   </script>
+  <?php if (!empty($pageScripts) && is_array($pageScripts)): ?>
+    <?php foreach ($pageScripts as $s): ?>
+      <script src="<?= htmlspecialchars($s) ?>"></script>
+    <?php endforeach; ?>
+  <?php endif; ?>
   <?php if (!empty($pageScript)): ?>
     <script src="<?= htmlspecialchars($pageScript) ?>"></script>
   <?php endif; ?>

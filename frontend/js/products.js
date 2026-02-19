@@ -26,17 +26,28 @@ function setupProductImageUpload() {
 }
 
 async function handleProductFiles(files) {
-    for (let i = 0; i < files.length; i++) {
-        if (!files[i].type.startsWith("image/")) continue;
-        try {
-            const path = await uploadFile(files[i]);
-            if (path && !productImagePaths.includes(path)) {
-                productImagePaths.push(path);
-                renderProductImagesPreview();
-            }
-        } catch (e) {
-            showToast("Upload failed: " + e.message, "danger");
-        }
+    const filesArr = Array.from(files || []).filter((f) =>
+        f.type.startsWith("image/"),
+    );
+    if (!filesArr.length) return;
+    const btn = document.getElementById("productAddPhotoBtn");
+    try {
+        setLoading(btn, true);
+        const paths = await PHOTO_UPLOADER.uploadPhotos(
+            filesArr,
+            (i, total) => {
+                if (btn) btn.textContent = `Uploading ${i}/${total}…`;
+            },
+        );
+        paths.forEach((p) => {
+            if (p && !productImagePaths.includes(p)) productImagePaths.push(p);
+        });
+        renderProductImagesPreview();
+    } catch (e) {
+        showToast("Upload failed: " + (e.message || "Unknown error"), "danger");
+    } finally {
+        setLoading(btn, false);
+        if (btn) btn.textContent = "Add Photo";
     }
 }
 

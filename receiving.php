@@ -32,14 +32,20 @@ require 'includes/layout.php';
           <div class="col-12 col-md-8 mb-2"><label class="form-label">Notes</label><input type="text" class="form-control" id="receiveNotes"></div>
         </div>
         <div class="mb-3">
-          <label class="form-label">Evidence Photos (required if variance or damage)</label>
-          <input type="file" class="form-control" id="receivePhotos" multiple accept="image/*">
-          <div id="photoPreview" class="mt-2"></div>
+          <label class="form-label">Evidence Photos <span class="text-danger">*required if variance or damage</span></label>
+          <div id="variancePhotoAlert" class="alert alert-warning py-2 d-none" role="alert">
+            <strong>Photo evidence required.</strong> Variance or damage detected — add at least one photo before recording receipt.
+          </div>
+          <input type="file" class="d-none" id="receivePhotos" multiple accept="image/*">
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="receiveAddPhotoBtn" onclick="document.getElementById('receivePhotos').click()">Add Photo</button>
+          <span class="ms-2 text-muted small">camera or gallery</span>
+          <div id="photoPreview" class="mt-2 d-flex flex-wrap gap-2"></div>
         </div>
-        <button type="button" class="btn btn-primary" onclick="submitReceive()">Record Receipt</button>
+        <button type="button" class="btn btn-primary" id="submitReceiveBtn" onclick="submitReceive()">Record Receipt</button>
       </div>
     </div>
   </div>
 </div>
-<?php $pageScript = 'frontend/js/receiving.js';
+<?php $pageScripts = ['frontend/js/photo_uploader.js'];
+$pageScript = 'frontend/js/receiving.js';
 require 'includes/footer.php'; ?>

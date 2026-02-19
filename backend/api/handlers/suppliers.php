@@ -19,6 +19,17 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
     switch ($method) {
         case 'GET':
+            if ($id === 'search') {
+                $q = trim($_GET['q'] ?? '');
+                if (strlen($q) < 1) {
+                    jsonResponse(['data' => []]);
+                }
+                $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+                $stmt = $pdo->prepare("SELECT id, code, name, phone, store_id FROM suppliers WHERE name LIKE ? OR code LIKE ? OR (phone IS NOT NULL AND phone LIKE ?) OR (store_id IS NOT NULL AND store_id LIKE ?) ORDER BY name LIMIT 10");
+                $stmt->execute([$like, $like, $like, $like]);
+                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                jsonResponse(['data' => $rows]);
+            }
             if ($id === null) {
                 $stmt = $pdo->query("SELECT * FROM suppliers ORDER BY name");
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);

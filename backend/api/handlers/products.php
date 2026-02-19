@@ -11,6 +11,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
     switch ($method) {
         case 'GET':
+            if ($id === 'search') {
+                $q = trim($input['q'] ?? $_GET['q'] ?? '');
+                if (strlen($q) < 1) {
+                    jsonResponse(['data' => []]);
+                }
+                $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+                $stmt = $pdo->prepare("SELECT id, description_cn, description_en, hs_code, cbm, weight FROM products WHERE description_cn LIKE ? OR description_en LIKE ? OR hs_code LIKE ? ORDER BY id DESC LIMIT 10");
+                $stmt->execute([$like, $like, $like]);
+                jsonResponse(['data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
+            }
             if ($id === 'suggest') {
                 $q = trim($input['q'] ?? $_GET['q'] ?? '');
                 if (strlen($q) < 2) {

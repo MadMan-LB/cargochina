@@ -2,8 +2,15 @@
 
 /**
  * CLMS API Router - REST v1
- * Routes: /api/v1/{resource} -> backend/api/handlers/{resource}.php
+ * Routes: /api/v1/{resource} -> backend/api/index.php
  */
+
+@ini_set('display_errors', '0');
+@ini_set('log_errors', '1');
+$logDir = dirname(__DIR__, 2) . '/logs';
+if (is_dir($logDir) || @mkdir($logDir, 0755, true)) {
+    @ini_set('error_log', $logDir . '/php_errors.log');
+}
 
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');

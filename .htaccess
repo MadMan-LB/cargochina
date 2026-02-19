@@ -1,7 +1,7 @@
 RewriteEngine On
 RewriteBase /cargochina/
 
-# Route API requests to backend
+# Route API requests to backend (including upload)
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^api/v1/(.*)$ backend/api/index.php?path=$1 [QSA,L]

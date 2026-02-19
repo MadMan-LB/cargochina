@@ -1,56 +1,44 @@
 let itemIndex = 0;
+let orderCustomerAc, orderSupplierAc, filterCustomerAc;
 
 document.addEventListener("DOMContentLoaded", () => {
-    loadCustomers();
-    loadSuppliers();
+    orderCustomerAc = Autocomplete.init(
+        document.getElementById("orderCustomer"),
+        {
+            resource: "customers",
+            placeholder: "Type customer name or code...",
+            onSelect: () => {},
+        },
+    );
+    orderSupplierAc = Autocomplete.init(
+        document.getElementById("orderSupplier"),
+        {
+            resource: "suppliers",
+            placeholder: "Type supplier name or code...",
+            onSelect: () => {},
+        },
+    );
+    filterCustomerAc = Autocomplete.init(
+        document.getElementById("filterCustomer"),
+        {
+            resource: "customers",
+            placeholder: "Filter by customer (type to search)",
+            onSelect: () => loadOrders(),
+        },
+    );
+    const filterInput = document.getElementById("filterCustomer");
+    if (filterInput) {
+        filterInput.addEventListener("blur", () => {
+            if (!filterInput.value.trim()) loadOrders();
+        });
+    }
     loadOrders();
 });
-
-async function loadCustomers() {
-    try {
-        const res = await api("GET", "/customers");
-        const sel = document.getElementById("orderCustomer");
-        const filter = document.getElementById("filterCustomer");
-        const opts = (res.data || [])
-            .map(
-                (c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`,
-            )
-            .join("");
-        sel.innerHTML = '<option value="">— Select —</option>' + opts;
-        filter.innerHTML =
-            '<option value="">All customers</option>' +
-            (res.data || [])
-                .map(
-                    (c) =>
-                        `<option value="${c.id}">${escapeHtml(c.name)}</option>`,
-                )
-                .join("");
-    } catch (e) {
-        showToast(e.message, "danger");
-    }
-}
-
-async function loadSuppliers() {
-    try {
-        const res = await api("GET", "/suppliers");
-        const sel = document.getElementById("orderSupplier");
-        sel.innerHTML =
-            '<option value="">— Select —</option>' +
-            (res.data || [])
-                .map(
-                    (s) =>
-                        `<option value="${s.id}">${escapeHtml(s.name)}</option>`,
-                )
-                .join("");
-    } catch (e) {
-        showToast(e.message, "danger");
-    }
-}
 
 async function loadOrders() {
     try {
         const status = document.getElementById("filterStatus").value;
-        const customerId = document.getElementById("filterCustomer").value;
+        const customerId = filterCustomerAc?.getSelectedId() || "";
         let path = "/orders?";
         if (status) path += "status=" + encodeURIComponent(status) + "&";
         if (customerId) path += "customer_id=" + encodeURIComponent(customerId);
@@ -176,8 +164,16 @@ async function editOrder(id) {
             return;
         }
         document.getElementById("orderId").value = o.id;
-        document.getElementById("orderCustomer").value = o.customer_id;
-        document.getElementById("orderSupplier").value = o.supplier_id;
+        orderCustomerAc?.setValue({
+            id: o.customer_id,
+            name: o.customer_name,
+            code: "",
+        });
+        orderSupplierAc?.setValue({
+            id: o.supplier_id,
+            name: o.supplier_name,
+            code: "",
+        });
         document.getElementById("orderExpectedDate").value =
             o.expected_ready_date;
         document.getElementById("orderModalTitle").textContent =
@@ -274,8 +270,8 @@ function collectOrderItems() {
 async function saveOrder() {
     const id = document.getElementById("orderId").value;
     const payload = {
-        customer_id: document.getElementById("orderCustomer").value,
-        supplier_id: document.getElementById("orderSupplier").value,
+        customer_id: orderCustomerAc?.getSelectedId() || "",
+        supplier_id: orderSupplierAc?.getSelectedId() || "",
         expected_ready_date: document.getElementById("orderExpectedDate").value,
         items: collectOrderItems(),
     };
@@ -294,7 +290,9 @@ async function saveOrder() {
         showToast("At least one item is required", "danger");
         return;
     }
+    const saveBtn = document.querySelector("#orderModal .btn-primary");
     try {
+        setLoading(saveBtn, true);
         if (id) {
             await api("PUT", "/orders/" + id, payload);
             showToast("Order updated");
@@ -307,7 +305,9 @@ async function saveOrder() {
         ).hide();
         loadOrders();
     } catch (e) {
-        showToast(e.message, "danger");
+        showToast(e.message || "Request failed", "danger");
+    } finally {
+        setLoading(saveBtn, false);
     }
 }
 

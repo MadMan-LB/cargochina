@@ -2,48 +2,67 @@
 
 /**
  * File upload - returns path for use in receipts/attachments
+ * Always returns JSON; errors use { "error": { "message": "...", "code": "UPLOAD_FAILED" } }
  */
 
 require_once __DIR__ . '/../helpers.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    header('Content-Type: application/json; charset=utf-8');
+
     if ($method !== 'POST') {
-        jsonError('Method not allowed', 405);
+        jsonResponse(['error' => ['message' => 'Method not allowed', 'code' => 'UPLOAD_FAILED']], 405);
     }
 
     if (empty($_FILES['file'])) {
-        jsonError('No file uploaded', 400);
+        jsonResponse(['error' => ['message' => 'No file uploaded', 'code' => 'UPLOAD_FAILED']], 400);
     }
 
-    $file = $_FILES['file'];
-    $config = require dirname(__DIR__, 2) . '/backend/config/config.php';
-    $maxSize = $config['upload_max_size'] ?? 5242880;
-    $allowed = $config['upload_allowed_extensions'] ?? ['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf'];
+    try {
+        $file = $_FILES['file'];
+        $config = require dirname(__DIR__, 3) . '/backend/config/config.php';
+        $maxSize = $config['upload_max_size'] ?? 5242880;
+        $allowed = $config['upload_allowed_extensions'] ?? ['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf'];
 
-    if ($file['error'] !== UPLOAD_ERR_OK) {
-        jsonError('Upload failed: ' . $file['error'], 400);
-    }
-    if ($file['size'] > $maxSize) {
-        jsonError('File too large', 400);
-    }
+        if ($file['error'] !== UPLOAD_ERR_OK) {
+            $errMsg = [
+                UPLOAD_ERR_INI_SIZE => 'File exceeds server limit',
+                UPLOAD_ERR_FORM_SIZE => 'File too large',
+                UPLOAD_ERR_PARTIAL => 'Upload incomplete',
+                UPLOAD_ERR_NO_FILE => 'No file uploaded',
+                UPLOAD_ERR_NO_TMP_DIR => 'Server config error',
+                UPLOAD_ERR_CANT_WRITE => 'Failed to save file',
+                UPLOAD_ERR_EXTENSION => 'Upload blocked by extension',
+            ][$file['error']] ?? 'Upload failed (code ' . $file['error'] . ')';
+            jsonResponse(['error' => ['message' => $errMsg, 'code' => 'UPLOAD_FAILED']], 400);
+        }
+        if ($file['size'] > $maxSize) {
+            jsonResponse(['error' => ['message' => 'File too large', 'code' => 'UPLOAD_FAILED']], 400);
+        }
 
-    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-    if (!in_array($ext, $allowed)) {
-        jsonError('File type not allowed', 400);
-    }
+        $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+        if (!in_array($ext, $allowed)) {
+            jsonResponse(['error' => ['message' => 'File type not allowed', 'code' => 'UPLOAD_FAILED']], 400);
+        }
 
-    $uploadDir = dirname(__DIR__, 2) . '/backend/uploads/';
-    if (!is_dir($uploadDir)) {
-        mkdir($uploadDir, 0755, true);
-    }
-    $filename = date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
-    $path = $uploadDir . $filename;
+        $uploadDir = dirname(__DIR__, 3) . '/backend/uploads/';
+        if (!is_dir($uploadDir)) {
+            mkdir($uploadDir, 0755, true);
+        }
+        $filename = date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
+        $path = $uploadDir . $filename;
 
-    if (!move_uploaded_file($file['tmp_name'], $path)) {
-        jsonError('Failed to save file', 500);
-    }
+        if (!move_uploaded_file($file['tmp_name'], $path)) {
+            jsonResponse(['error' => ['message' => 'Failed to save file', 'code' => 'UPLOAD_FAILED']], 500);
+        }
 
-    $relPath = 'uploads/' . $filename;
-    $url = '/cargochina/backend/' . $relPath;
-    jsonResponse(['data' => ['path' => $relPath, 'url' => $url]], 201);
+        $relPath = 'uploads/' . $filename;
+        $url = '/cargochina/backend/' . $relPath;
+        jsonResponse(['data' => ['path' => $relPath, 'url' => $url]], 201);
+    } catch (Throwable $e) {
+        $logDir = dirname(__DIR__, 3) . '/logs';
+        if (!is_dir($logDir)) mkdir($logDir, 0755, true);
+        error_log(date('Y-m-d H:i:s') . ' Upload error: ' . $e->getMessage() . "\n" . $e->getTraceAsString() . "\n", 3, $logDir . '/php_errors.log');
+        jsonResponse(['error' => ['message' => 'Upload failed: ' . $e->getMessage(), 'code' => 'UPLOAD_FAILED']], 500);
+    }
 };

@@ -30,9 +30,7 @@ require 'includes/layout.php';
           </select>
         </div>
         <div class="col-12 col-md-4">
-          <select class="form-select form-select-sm" id="filterCustomer" onchange="loadOrders()">
-            <option value="">All customers</option>
-          </select>
+          <input type="text" class="form-control form-control-sm" id="filterCustomer" placeholder="Filter by customer (type to search)">
         </div>
       </div>
       <div id="ordersTable" class="table-responsive">
@@ -65,8 +63,8 @@ require 'includes/layout.php';
         <form id="orderForm">
           <input type="hidden" id="orderId">
           <div class="row mb-3 form-row-responsive">
-            <div class="col-12 col-md-4 mb-2"><label class="form-label">Customer *</label><select class="form-select" id="orderCustomer" required></select></div>
-            <div class="col-12 col-md-4 mb-2"><label class="form-label">Supplier *</label><select class="form-select" id="orderSupplier" required></select></div>
+            <div class="col-12 col-md-4 mb-2"><label class="form-label">Customer *</label><input type="text" class="form-control" id="orderCustomer" placeholder="Type to search..." required></div>
+            <div class="col-12 col-md-4 mb-2"><label class="form-label">Supplier *</label><input type="text" class="form-control" id="orderSupplier" placeholder="Type to search..." required></div>
             <div class="col-12 col-md-4 mb-2"><label class="form-label">Expected Ready Date *</label><input type="date" class="form-control" id="orderExpectedDate" required></div>
           </div>
           <h6>Items</h6>
@@ -102,5 +100,6 @@ require 'includes/layout.php';
     </div>
   </div>
 </div>
-<?php $pageScript = 'frontend/js/orders.js';
+<?php $pageScripts = ['frontend/js/autocomplete.js'];
+$pageScript = 'frontend/js/orders.js';
 require 'includes/footer.php'; ?>

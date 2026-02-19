@@ -18,7 +18,12 @@ async function api(method, path, body = null) {
     const res = await fetch(API_BASE + path, opts);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-        throw new Error(data.message || res.statusText || "Request failed");
+        const msg =
+            (data.error && data.error.message) ||
+            data.message ||
+            res.statusText ||
+            "Request failed";
+        throw new Error(msg);
     }
     return data;
 }
@@ -67,18 +72,29 @@ function setLoading(el, loading) {
 async function uploadFile(file) {
     const fd = new FormData();
     fd.append("file", file);
-    const res = await fetch(
-        API_BASE.replace("/api/v1", "") + "/api/v1/upload",
-        {
-            method: "POST",
-            body: fd,
-            credentials: "same-origin",
-        },
-    );
-    const j = await res.json();
-    if (!res.ok) throw new Error(j.message || "Upload failed");
+    const res = await fetch("/cargochina/api/v1/upload", {
+        method: "POST",
+        body: fd,
+        credentials: "same-origin",
+    });
+    const text = await res.text();
+    let j = {};
+    try {
+        j = text ? JSON.parse(text) : {};
+    } catch (_) {
+        const snippet = text.substring(0, 200).replace(/</g, "&lt;");
+        throw new Error(
+            "Server returned invalid response (not JSON). " +
+                (snippet ? "Response: " + snippet : ""),
+        );
+    }
+    if (!res.ok) {
+        const msg =
+            (j.error && j.error.message) || j.message || "Upload failed";
+        throw new Error(msg);
+    }
     return (
-        j.data.path ||
-        (j.data.url ? j.data.url.replace("/cargochina/backend/", "") : null)
+        j.data?.path ||
+        (j.data?.url ? j.data.url.replace("/cargochina/backend/", "") : null)
     );
 }

@@ -1,4 +1,88 @@
-document.addEventListener("DOMContentLoaded", loadReceivableOrders);
+let receivePhotoPaths = [];
+
+document.addEventListener("DOMContentLoaded", () => {
+    loadReceivableOrders();
+    const input = document.getElementById("receivePhotos");
+    if (input) input.onchange = () => handleReceivePhotos(input.files);
+    document
+        .getElementById("actualCbm")
+        ?.addEventListener("input", updateVariancePhotoAlert);
+    document
+        .getElementById("condition")
+        ?.addEventListener("change", updateVariancePhotoAlert);
+});
+
+async function handleReceivePhotos(files) {
+    const filesArr = Array.from(files || []).filter((f) =>
+        f.type.startsWith("image/"),
+    );
+    if (!filesArr.length) return;
+    const btn = document.getElementById("receiveAddPhotoBtn");
+    const input = document.getElementById("receivePhotos");
+    try {
+        setLoading(btn, true);
+        const paths = await PHOTO_UPLOADER.uploadPhotos(
+            filesArr,
+            (i, total) => {
+                if (btn) btn.textContent = `Uploading ${i}/${total}…`;
+            },
+        );
+        paths.forEach((p) => {
+            if (p && !receivePhotoPaths.includes(p)) receivePhotoPaths.push(p);
+        });
+        renderReceivePhotoPreview();
+        updateVariancePhotoAlert();
+    } catch (e) {
+        showToast("Upload failed: " + (e.message || "Unknown error"), "danger");
+    } finally {
+        setLoading(btn, false);
+        if (btn) btn.textContent = "Add Photo";
+    }
+    if (input) input.value = "";
+}
+
+function renderReceivePhotoPreview() {
+    const container = document.getElementById("photoPreview");
+    if (!container) return;
+    PHOTO_UPLOADER.previewPhotos(
+        container,
+        receivePhotoPaths,
+        "removeReceivePhoto",
+    );
+}
+
+function removeReceivePhoto(index) {
+    receivePhotoPaths.splice(index, 1);
+    renderReceivePhotoPreview();
+    updateVariancePhotoAlert();
+}
+
+function updateVariancePhotoAlert() {
+    const alertEl = document.getElementById("variancePhotoAlert");
+    if (!alertEl) return;
+    const orderId = document.getElementById("receiveOrder").value;
+    if (!orderId) {
+        alertEl.classList.add("d-none");
+        return;
+    }
+    const opt = document.querySelector(
+        `#receiveOrder option[value="${orderId}"]`,
+    );
+    const declaredCbm = parseFloat(opt?.dataset.declaredCbm || 0);
+    const actualCbm = parseFloat(
+        document.getElementById("actualCbm")?.value || 0,
+    );
+    const condition = document.getElementById("condition")?.value || "good";
+    const variancePct =
+        declaredCbm > 0
+            ? (Math.abs(actualCbm - declaredCbm) / declaredCbm) * 100
+            : 0;
+    const varianceAbs = Math.abs(actualCbm - declaredCbm);
+    const hasVariance =
+        variancePct >= 10 || varianceAbs >= 0.1 || condition !== "good";
+    const needsPhoto = hasVariance && receivePhotoPaths.length === 0;
+    alertEl.classList.toggle("d-none", !needsPhoto);
+}
 
 async function loadReceivableOrders() {
     try {
@@ -15,9 +99,9 @@ async function loadReceivableOrders() {
                 )
                 .join("");
         sel.onchange = () => {
-            document
-                .getElementById("receiveForm")
-                .classList.toggle("d-none", !sel.value);
+            const form = document.getElementById("receiveForm");
+            form.classList.toggle("d-none", !sel.value);
+            if (sel.value) updateVariancePhotoAlert();
         };
     } catch (e) {
         showToast(e.message, "danger");
@@ -38,26 +122,7 @@ async function submitReceive() {
         parseFloat(document.getElementById("actualWeight").value) || 0;
     const condition = document.getElementById("condition").value;
     const notes = document.getElementById("receiveNotes").value;
-    const fileInput = document.getElementById("receivePhotos");
-    const photoPaths = [];
-
-    if (fileInput.files && fileInput.files.length > 0) {
-        for (let i = 0; i < fileInput.files.length; i++) {
-            const fd = new FormData();
-            fd.append("file", fileInput.files[i]);
-            try {
-                const r = await fetch(
-                    API_BASE.replace("/api/v1", "") + "/api/v1/upload",
-                    { method: "POST", body: fd },
-                );
-                const j = await r.json();
-                if (j.data && j.data.path) photoPaths.push(j.data.path);
-            } catch (e) {
-                showToast("Upload failed: " + e.message, "danger");
-                return;
-            }
-        }
-    }
+    const photoPaths = receivePhotoPaths;
 
     const opt = document.querySelector(
         `#receiveOrder option[value="${orderId}"]`,
@@ -76,10 +141,15 @@ async function submitReceive() {
             "Evidence photos required when variance or damage is present",
             "danger",
         );
+        document
+            .getElementById("variancePhotoAlert")
+            ?.classList.remove("d-none");
         return;
     }
 
+    const submitBtn = document.getElementById("submitReceiveBtn");
     try {
+        setLoading(submitBtn, true);
         const res = await api("POST", "/orders/" + orderId + "/receive", {
             actual_cartons: actualCartons,
             actual_cbm: actualCbm,
@@ -96,8 +166,11 @@ async function submitReceive() {
         loadReceivableOrders();
         document.getElementById("receiveForm").classList.add("d-none");
         document.getElementById("receiveOrder").value = "";
-        document.getElementById("receivePhotos").value = "";
+        receivePhotoPaths = [];
+        renderReceivePhotoPreview();
     } catch (e) {
-        showToast(e.message, "danger");
+        showToast(e.message || "Request failed", "danger");
+    } finally {
+        setLoading(submitBtn, false);
     }
 }
