@@ -17,6 +17,7 @@ require 'includes/layout.php';
           <thead>
             <tr>
               <th>Code</th>
+              <th>Store ID</th>
               <th>Name</th>
               <th>Phone</th>
               <th>Factory Location</th>
@@ -42,8 +43,9 @@ require 'includes/layout.php';
         <form id="supplierForm">
           <input type="hidden" id="supplierId">
           <div class="row form-row-responsive">
-            <div class="col-12 col-md-6 mb-2"><label class="form-label">Code *</label><input type="text" class="form-control" id="supplierCode" required></div>
-            <div class="col-12 col-md-6 mb-2"><label class="form-label">Name *</label><input type="text" class="form-control" id="supplierName" required></div>
+            <div class="col-12 col-md-4 mb-2"><label class="form-label">Code *</label><input type="text" class="form-control" id="supplierCode" required></div>
+            <div class="col-12 col-md-4 mb-2"><label class="form-label">Store ID</label><input type="text" class="form-control" id="supplierStoreId" placeholder="Official China store identifier"></div>
+            <div class="col-12 col-md-4 mb-2"><label class="form-label">Name *</label><input type="text" class="form-control" id="supplierName" required></div>
           </div>
           <div class="row form-row-responsive">
             <div class="col-12 col-md-6 mb-2"><label class="form-label">Phone</label>

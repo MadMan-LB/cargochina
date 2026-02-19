@@ -17,6 +17,7 @@ return [
     'shipment-drafts' => [
         'create' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'],
         'finalize' => ['LebanonAdmin', 'SuperAdmin'],
+        'push' => ['LebanonAdmin', 'SuperAdmin'],
     ],
     'users' => ['SuperAdmin'],
     'config' => ['SuperAdmin'],

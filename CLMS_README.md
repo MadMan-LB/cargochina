@@ -217,6 +217,32 @@ Container events drive operational control and customer notifications.
 - CONFIRMATION_REQUIRED: (variance-only | always-on-arrival)
 - CUSTOMER_PHOTO_VISIBILITY: (internal-only | customer-visible)
 - NOTIFICATION_CHANNELS: [dashboard, email?, whatsapp?]
+- **Phase 3 Tracking:** TRACKING_API_BASE_URL, TRACKING_API_TOKEN, TRACKING_API_PATH (/api/import/clms), TRACKING_API_TIMEOUT_SEC (15), TRACKING_API_RETRY_COUNT (3), TRACKING_API_RETRY_BACKOFF_MS (800), TRACKING_PUSH_ENABLED (0), TRACKING_PUSH_DRY_RUN (1)
+
+---
+
+## 12.1) Phase 3 — Tracking Integration Contract
+
+**Payload shape (POST to tracking API):**
+```json
+{
+  "header": { "shipment_draft_id", "container_id", "container_code", "order_ids" },
+  "items": [ { "order_id", "product_id", "item_no", "quantity", "unit", "declared_cbm", "declared_weight", "unit_price", "total_amount", "description_cn", "description_en", "image_paths" } ],
+  "documents": [ { "file_path", "type", "order_id" } ],
+  "pushed_at": "ISO8601"
+}
+```
+
+**Headers:** `Authorization: Bearer {TOKEN}`, `Idempotency-Key: clms-draft-{id}`, `Content-Type: application/json`
+
+**Decision B:** Finalize always succeeds locally. Push can fail; admin retries via Consolidation "Retry Push" or Admin → Tracking Push Log.
+
+**Operational runbook — If push fails:**
+1. Check Admin → Tracking Push Log for last_error.
+2. Verify TRACKING_API_BASE_URL and TRACKING_API_TOKEN in Admin → Configuration.
+3. If 4xx: fix payload/contract. If 5xx: retry later.
+4. Use "Retry Push" on the draft or from the push log.
+5. Logs: `logs/tracking_push.log`; DB: `tracking_push_log` table.
 
 ---
 
@@ -266,6 +292,21 @@ Any AI/engineer working on this system must follow these operating rules:
 
 ## 15) DB_CHANGELOG (keep updating)
 > Add entries as changes happen. Newest on top.
+
+- 2025-02-19 — Migrations 012–013 (Tracking integration)
+  - Change: system_config TRACKING_* keys; tracking_push_log table (idempotency, status, retries)
+  - Reason: Phase 3 — configurable tracking API, idempotent push, retries, admin tools
+  - Rollback: DELETE FROM system_config WHERE key_name LIKE 'TRACKING_%'; DROP TABLE tracking_push_log;
+
+- 2025-02-19 — Migration 011 (Notification channels)
+  - Change: system_config NOTIFICATION_CHANNELS (dashboard, email, whatsapp)
+  - Reason: Phase 2 — configurable notification channels
+  - Rollback: DELETE FROM system_config WHERE key_name='NOTIFICATION_CHANNELS';
+
+- 2025-02-19 — Migrations 009–010 (Item capture, supplier store/payments)
+  - Change: order_items + item_no, shipping_code, cartons, qty_per_carton, unit_price, total_amount, notes, image_paths; suppliers + store_id; supplier_payments, supplier_interactions; MIN_PHOTOS_PER_ITEM
+  - Reason: Phase 1 — Excel-aligned item capture, supplier store ID, payment ledger, hunting process
+  - Rollback: ALTER TABLE order_items DROP COLUMN item_no, DROP COLUMN shipping_code, ...; ALTER TABLE suppliers DROP COLUMN store_id; DROP TABLE supplier_interactions, supplier_payments; DELETE FROM system_config WHERE key_name='MIN_PHOTOS_PER_ITEM';
 
 - 2025-02-19 — Migration 008 (Suppliers contact)
   - Change: suppliers.phone VARCHAR(50) NULL, suppliers.additional_ids JSON NULL

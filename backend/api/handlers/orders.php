@@ -8,6 +8,14 @@ require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__, 2) . '/backend/services/OrderStateService.php';
 require_once dirname(__DIR__, 2) . '/backend/services/NotificationService.php';
 
+function normalizeOrderItems(array $items): array
+{
+    foreach ($items as &$it) {
+        $it['image_paths'] = $it['image_paths'] ? json_decode($it['image_paths'], true) : [];
+    }
+    return $items;
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
     $userId = getAuthUserId() ?? 1; // Dev fallback
@@ -33,10 +41,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if ($params) $stmt->execute($params);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 foreach ($rows as &$r) {
-                    $r['items'] = [];
                     $si = $pdo->prepare("SELECT * FROM order_items WHERE order_id = ?");
                     $si->execute([$r['id']]);
-                    $r['items'] = $si->fetchAll(PDO::FETCH_ASSOC);
+                    $r['items'] = normalizeOrderItems($si->fetchAll(PDO::FETCH_ASSOC));
                 }
                 jsonResponse(['data' => $rows]);
             }
@@ -46,7 +53,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if (!$row) jsonError('Order not found', 404);
             $si = $pdo->prepare("SELECT * FROM order_items WHERE order_id = ?");
             $si->execute([$id]);
-            $row['items'] = $si->fetchAll(PDO::FETCH_ASSOC);
+            $row['items'] = normalizeOrderItems($si->fetchAll(PDO::FETCH_ASSOC));
             $att = $pdo->prepare("SELECT * FROM order_attachments WHERE order_id = ?");
             $att->execute([$id]);
             $row['attachments'] = $att->fetchAll(PDO::FETCH_ASSOC);
@@ -72,15 +79,32 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $pdo->prepare("UPDATE orders SET customer_id=?, supplier_id=?, expected_ready_date=? WHERE id=?")
                     ->execute([$customerId, $supplierId, $expectedDate, $id]);
                 $pdo->prepare("DELETE FROM order_items WHERE order_id = ?")->execute([$id]);
-                $insItem = $pdo->prepare("INSERT INTO order_items (order_id, product_id, quantity, unit, declared_cbm, declared_weight, description_cn, description_en) VALUES (?,?,?,?,?,?,?,?)");
+                $insItem = $pdo->prepare("INSERT INTO order_items (order_id, product_id, item_no, shipping_code, cartons, qty_per_carton, quantity, unit, declared_cbm, declared_weight, unit_price, total_amount, notes, image_paths, description_cn, description_en) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
                 foreach ($items as $it) {
+                    $qty = (float) ($it['quantity'] ?? 0);
+                    $cartons = isset($it['cartons']) ? (int) $it['cartons'] : null;
+                    $qtyPerCtn = isset($it['qty_per_carton']) ? (float) $it['qty_per_carton'] : null;
+                    if ($cartons !== null && $qtyPerCtn !== null && $qtyPerCtn > 0) {
+                        $qty = $cartons * $qtyPerCtn;
+                    }
+                    $unitPrice = isset($it['unit_price']) ? (float) $it['unit_price'] : null;
+                    $totalAmount = isset($it['total_amount']) ? (float) $it['total_amount'] : ($unitPrice !== null && $qty > 0 ? $unitPrice * $qty : null);
+                    $imagePaths = isset($it['image_paths']) && is_array($it['image_paths']) ? json_encode($it['image_paths']) : null;
                     $insItem->execute([
                         $id,
                         !empty($it['product_id']) ? (int) $it['product_id'] : null,
-                        (float) $it['quantity'],
-                        $it['unit'],
+                        $it['item_no'] ?? null,
+                        $it['shipping_code'] ?? null,
+                        $cartons,
+                        $qtyPerCtn,
+                        $qty,
+                        $it['unit'] ?? 'pieces',
                         (float) ($it['declared_cbm'] ?? 0),
                         (float) ($it['declared_weight'] ?? 0),
+                        $unitPrice,
+                        $totalAmount,
+                        $it['notes'] ?? null,
+                        $imagePaths,
                         $it['description_cn'] ?? null,
                         $it['description_en'] ?? null
                     ]);
@@ -93,7 +117,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
                 $si = $pdo->prepare("SELECT * FROM order_items WHERE order_id = ?");
                 $si->execute([$id]);
-                $row['items'] = $si->fetchAll(PDO::FETCH_ASSOC);
+                $row['items'] = normalizeOrderItems($si->fetchAll(PDO::FETCH_ASSOC));
                 jsonResponse(['data' => $row]);
             } catch (Exception $e) {
                 $pdo->rollBack();
@@ -116,11 +140,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 foreach ($items as $it) {
                     $qty = (float) ($it['quantity'] ?? 0);
-                    $unit = $it['unit'] ?? '';
+                    $cartons = isset($it['cartons']) ? (int) $it['cartons'] : null;
+                    $qtyPerCtn = isset($it['qty_per_carton']) ? (float) $it['qty_per_carton'] : null;
+                    if ($cartons !== null && $qtyPerCtn !== null && $qtyPerCtn > 0) {
+                        $qty = $cartons * $qtyPerCtn;
+                    }
+                    $unit = $it['unit'] ?? 'pieces';
                     $cbm = (float) ($it['declared_cbm'] ?? 0);
                     $weight = (float) ($it['declared_weight'] ?? 0);
                     if ($qty <= 0 || !in_array($unit, ['cartons', 'pieces']) || $cbm < 0 || $weight < 0) {
-                        jsonError('Invalid item: quantity>0, unit in [cartons,pieces], cbm/weight>=0', 400);
+                        jsonError('Invalid item: quantity>0 (or cartons*qty_per_carton), unit in [cartons,pieces], cbm/weight>=0', 400);
                     }
                 }
                 $pdo->beginTransaction();
@@ -128,15 +157,32 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $pdo->prepare("INSERT INTO orders (customer_id, supplier_id, expected_ready_date, status, created_by) VALUES (?,?,?,'Draft',?)")
                         ->execute([$customerId, $supplierId, $expectedDate, $userId]);
                     $orderId = (int) $pdo->lastInsertId();
-                    $insItem = $pdo->prepare("INSERT INTO order_items (order_id, product_id, quantity, unit, declared_cbm, declared_weight, description_cn, description_en) VALUES (?,?,?,?,?,?,?,?)");
+                    $insItem = $pdo->prepare("INSERT INTO order_items (order_id, product_id, item_no, shipping_code, cartons, qty_per_carton, quantity, unit, declared_cbm, declared_weight, unit_price, total_amount, notes, image_paths, description_cn, description_en) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
                     foreach ($items as $it) {
+                        $qty = (float) ($it['quantity'] ?? 0);
+                        $cartons = isset($it['cartons']) ? (int) $it['cartons'] : null;
+                        $qtyPerCtn = isset($it['qty_per_carton']) ? (float) $it['qty_per_carton'] : null;
+                        if ($cartons !== null && $qtyPerCtn !== null && $qtyPerCtn > 0) {
+                            $qty = $cartons * $qtyPerCtn;
+                        }
+                        $unitPrice = isset($it['unit_price']) ? (float) $it['unit_price'] : null;
+                        $totalAmount = isset($it['total_amount']) ? (float) $it['total_amount'] : ($unitPrice !== null && $qty > 0 ? $unitPrice * $qty : null);
+                        $imagePaths = isset($it['image_paths']) && is_array($it['image_paths']) ? json_encode($it['image_paths']) : null;
                         $insItem->execute([
                             $orderId,
                             !empty($it['product_id']) ? (int) $it['product_id'] : null,
-                            (float) $it['quantity'],
-                            $it['unit'],
+                            $it['item_no'] ?? null,
+                            $it['shipping_code'] ?? null,
+                            $cartons,
+                            $qtyPerCtn,
+                            $qty,
+                            $it['unit'] ?? 'pieces',
                             (float) ($it['declared_cbm'] ?? 0),
                             (float) ($it['declared_weight'] ?? 0),
+                            $unitPrice,
+                            $totalAmount,
+                            $it['notes'] ?? null,
+                            $imagePaths,
                             $it['description_cn'] ?? null,
                             $it['description_en'] ?? null
                         ]);
@@ -150,7 +196,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $row = $stmt->fetch(PDO::FETCH_ASSOC);
                     $si = $pdo->prepare("SELECT * FROM order_items WHERE order_id = ?");
                     $si->execute([$orderId]);
-                    $row['items'] = $si->fetchAll(PDO::FETCH_ASSOC);
+                    $row['items'] = normalizeOrderItems($si->fetchAll(PDO::FETCH_ASSOC));
                     jsonResponse(['data' => $row], 201);
                 } catch (Exception $e) {
                     $pdo->rollBack();
@@ -237,14 +283,28 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     if ((int) $si->fetchColumn() === 0) {
                         jsonError('Order must have at least one item to submit', 400);
                     }
+                    $config = require dirname(__DIR__, 2) . '/backend/config/config.php';
+                    $minPhotos = (int) ($config['min_photos_per_item'] ?? 0);
+                    if ($minPhotos > 0) {
+                        $itemsWithPhotos = $pdo->prepare("SELECT id, image_paths FROM order_items WHERE order_id = ?");
+                        $itemsWithPhotos->execute([$id]);
+                        while ($row = $itemsWithPhotos->fetch(PDO::FETCH_ASSOC)) {
+                            $paths = $row['image_paths'] ? (json_decode($row['image_paths'], true) ?? []) : [];
+                            if (!is_array($paths) || count($paths) < $minPhotos) {
+                                jsonError("Each item must have at least $minPhotos photo(s). Item #{$row['id']} has insufficient photos.", 400);
+                            }
+                        }
+                    }
                     $pdo->prepare("UPDATE orders SET status='Submitted' WHERE id=?")->execute([$id]);
                     $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, user_id) VALUES ('order',?,'submit',?)")->execute([$id, $userId]);
+                    (new NotificationService($pdo))->notifyOrderSubmitted((int) $id);
                     jsonResponse(['data' => ['status' => 'Submitted']]);
                 }
                 if ($action === 'approve') {
                     OrderStateService::validateTransition($order['status'], 'Approved');
                     $pdo->prepare("UPDATE orders SET status='Approved' WHERE id=?")->execute([$id]);
                     $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, user_id) VALUES ('order',?,'approve',?)")->execute([$id, $userId]);
+                    (new NotificationService($pdo))->notifyOrderApproved((int) $id);
                     jsonResponse(['data' => ['status' => 'Approved']]);
                 }
             }

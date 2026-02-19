@@ -3,7 +3,35 @@ let currentDraftId = null;
 document.addEventListener("DOMContentLoaded", () => {
     loadContainers();
     loadShipmentDrafts();
+    loadReadyTotals();
 });
+
+async function loadReadyTotals() {
+    try {
+        const [r1, r2] = await Promise.all([
+            api("GET", "/orders?status=ReadyForConsolidation"),
+            api("GET", "/orders?status=Confirmed"),
+        ]);
+        const orders = [...(r1.data || []), ...(r2.data || [])];
+        let totalCbm = 0,
+            totalWeight = 0;
+        orders.forEach((o) => {
+            (o.items || []).forEach((it) => {
+                totalCbm += parseFloat(it.declared_cbm || 0);
+                totalWeight += parseFloat(it.declared_weight || 0);
+            });
+        });
+        document.getElementById("readyOrdersCount").textContent = orders.length;
+        document.getElementById("readyTotalCbm").textContent =
+            totalCbm.toFixed(2);
+        document.getElementById("readyTotalWeight").textContent =
+            totalWeight.toFixed(0);
+    } catch (e) {
+        document.getElementById("readyOrdersCount").textContent = "-";
+        document.getElementById("readyTotalCbm").textContent = "-";
+        document.getElementById("readyTotalWeight").textContent = "-";
+    }
+}
 
 async function loadContainers() {
     try {
@@ -28,19 +56,48 @@ async function loadShipmentDrafts() {
         const rows = res.data || [];
         document.getElementById("shipmentDraftsList").innerHTML =
             rows
-                .map(
-                    (sd) => `
+                .map((sd) => {
+                    const ps = sd.push_status || "not_pushed";
+                    const badge =
+                        ps === "success"
+                            ? "bg-success"
+                            : ps === "failed"
+                              ? "bg-danger"
+                              : ps === "dry_run"
+                                ? "bg-info"
+                                : "bg-secondary";
+                    const pushLabel =
+                        ps === "success"
+                            ? "Pushed"
+                            : ps === "failed"
+                              ? "Failed"
+                              : ps === "dry_run"
+                                ? "Dry-run"
+                                : "Not pushed";
+                    const retryBtn =
+                        sd.status === "finalized" && ps === "failed"
+                            ? `<button class="btn btn-sm btn-warning ms-1" onclick="retryPush(${sd.id})">Retry Push</button>`
+                            : "";
+                    return `
       <div class="border rounded p-2 mb-2">
         <strong>Draft #${sd.id}</strong> ${sd.status} ${sd.container_code ? "→ " + sd.container_code : ""}
+        <span class="badge ${badge} ms-1">${pushLabel}</span>${retryBtn}
         <br><small>Orders: ${(sd.order_ids || []).join(", ") || "none"}</small>
+        ${sd.push_last_error ? `<br><small class="text-danger">${escapeHtml(sd.push_last_error)}</small>` : ""}
         <button class="btn btn-sm btn-outline-primary ms-2" onclick="openDraftModal(${sd.id})">Manage</button>
       </div>
-    `,
-                )
+    `;
+                })
                 .join("") || '<p class="text-muted">No shipment drafts</p>';
     } catch (e) {
         showToast(e.message, "danger");
     }
+}
+
+function applyContainerPreset(code, maxCbm, maxWeight) {
+    document.getElementById("containerCode").value = code;
+    document.getElementById("containerMaxCbm").value = maxCbm;
+    document.getElementById("containerMaxWeight").value = maxWeight;
 }
 
 async function saveContainer() {
@@ -64,6 +121,7 @@ async function saveContainer() {
             document.getElementById("containerModal"),
         ).hide();
         loadContainers();
+        loadReadyTotals();
     } catch (e) {
         showToast(e.message, "danger");
     }
@@ -109,6 +167,12 @@ async function openDraftModal(id) {
                 .join("");
         document.getElementById("draftOrderList").textContent =
             (draftRes.data.order_ids || []).join(", ") || "none";
+        const draftCbm = draftRes.data.total_cbm ?? 0;
+        const draftWeight = draftRes.data.total_weight ?? 0;
+        document.getElementById("draftTotalCbm").textContent =
+            draftCbm.toFixed(2);
+        document.getElementById("draftTotalWeight").textContent =
+            draftWeight.toFixed(0);
         const orderIds = draftRes.data.order_ids || [];
         const allOrders = [...(ordersRes.data || []), ...(res2.data || [])];
         document.getElementById("draftRemoveOrder").innerHTML = orderIds
@@ -139,6 +203,7 @@ async function addOrdersToDraft() {
         showToast("Orders added");
         openDraftModal(currentDraftId);
         loadShipmentDrafts();
+        loadReadyTotals();
     } catch (e) {
         showToast(e.message, "danger");
     }
@@ -160,6 +225,7 @@ async function removeOrdersFromDraft() {
         showToast("Orders removed");
         openDraftModal(currentDraftId);
         loadShipmentDrafts();
+        loadReadyTotals();
     } catch (e) {
         showToast(e.message, "danger");
     }
@@ -185,6 +251,20 @@ async function assignContainerToDraft() {
     }
 }
 
+async function retryPush(draftId) {
+    try {
+        const res = await api(
+            "POST",
+            "/shipment-drafts/" + draftId + "/push",
+            {},
+        );
+        showToast(res.data?.message || "Push completed");
+        loadShipmentDrafts();
+    } catch (e) {
+        showToast(e.message, "danger");
+    }
+}
+
 async function finalizeDraft() {
     if (!confirm("Finalize and push to tracking?")) return;
     try {
@@ -198,6 +278,7 @@ async function finalizeDraft() {
             document.getElementById("draftModal"),
         ).hide();
         loadShipmentDrafts();
+        loadReadyTotals();
     } catch (e) {
         showToast(e.message, "danger");
     }

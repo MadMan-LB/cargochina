@@ -21,6 +21,8 @@ try {
         throw new Exception('suppliers missing phone or additional_ids (run migration 008)');
     }
     echo "OK: suppliers.phone, suppliers.additional_ids\n";
+    $pdo->query("SELECT 1 FROM tracking_push_log LIMIT 1");
+    echo "OK: tracking_push_log\n";
     echo "Smoke test passed.\n";
 } catch (Exception $e) {
     echo "FAIL: " . $e->getMessage() . "\n";

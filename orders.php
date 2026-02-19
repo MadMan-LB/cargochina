@@ -70,15 +70,22 @@ require 'includes/layout.php';
             <div class="col-12 col-md-4 mb-2"><label class="form-label">Expected Ready Date *</label><input type="date" class="form-control" id="orderExpectedDate" required></div>
           </div>
           <h6>Items</h6>
+          <p class="text-muted small">Min 1 photo per item required to submit. Totals computed live.</p>
           <div class="table-responsive">
             <table class="table table-sm">
               <thead>
                 <tr>
-                  <th>Product / Description</th>
-                  <th>Qty</th>
-                  <th>Unit</th>
-                  <th>Declared CBM</th>
-                  <th>Declared Weight</th>
+                  <th>Photo</th>
+                  <th>Item No</th>
+                  <th>Ship Code</th>
+                  <th>Description</th>
+                  <th>CTNS</th>
+                  <th>Qty/Ctn</th>
+                  <th>Total Qty</th>
+                  <th>Unit $</th>
+                  <th>Total $</th>
+                  <th>CBM</th>
+                  <th>GW (kg)</th>
                   <th></th>
                 </tr>
               </thead>

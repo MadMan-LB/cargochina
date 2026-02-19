@@ -25,9 +25,18 @@ $base = [
     'variance_threshold_abs_cbm' => (float) ($_ENV['VARIANCE_THRESHOLD_ABS_CBM'] ?? 0.1),
     'confirmation_required' => $_ENV['CONFIRMATION_REQUIRED'] ?? 'variance-only',
     'customer_photo_visibility' => $_ENV['CUSTOMER_PHOTO_VISIBILITY'] ?? 'internal-only',
+    'min_photos_per_item' => (int) ($_ENV['MIN_PHOTOS_PER_ITEM'] ?? 1),
     'notification_channels' => array_map('trim', explode(',', $_ENV['NOTIFICATION_CHANNELS'] ?? 'dashboard')),
     'upload_max_size' => (int) ($_ENV['UPLOAD_MAX_SIZE'] ?? 5242880),
     'upload_allowed_extensions' => ['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf'],
+    'tracking_api_base_url' => trim($_ENV['TRACKING_API_BASE_URL'] ?? ''),
+    'tracking_api_token' => trim($_ENV['TRACKING_API_TOKEN'] ?? ''),
+    'tracking_api_timeout_sec' => (int) ($_ENV['TRACKING_API_TIMEOUT_SEC'] ?? 15),
+    'tracking_api_retry_count' => (int) ($_ENV['TRACKING_API_RETRY_COUNT'] ?? 3),
+    'tracking_api_retry_backoff_ms' => (int) ($_ENV['TRACKING_API_RETRY_BACKOFF_MS'] ?? 800),
+    'tracking_push_enabled' => (int) ($_ENV['TRACKING_PUSH_ENABLED'] ?? 0),
+    'tracking_push_dry_run' => (int) ($_ENV['TRACKING_PUSH_DRY_RUN'] ?? 1),
+    'tracking_api_path' => trim($_ENV['TRACKING_API_PATH'] ?? '/api/import/clms'),
 ];
 try {
     require_once __DIR__ . '/database.php';
@@ -41,6 +50,16 @@ try {
                 elseif ($k === 'VARIANCE_THRESHOLD_ABS_CBM') $base['variance_threshold_abs_cbm'] = (float) $r['key_value'];
                 elseif ($k === 'CONFIRMATION_REQUIRED') $base['confirmation_required'] = $r['key_value'];
                 elseif ($k === 'CUSTOMER_PHOTO_VISIBILITY') $base['customer_photo_visibility'] = $r['key_value'];
+                elseif ($k === 'MIN_PHOTOS_PER_ITEM') $base['min_photos_per_item'] = (int) $r['key_value'];
+                elseif ($k === 'NOTIFICATION_CHANNELS') $base['notification_channels'] = array_map('trim', explode(',', $r['key_value'] ?? 'dashboard'));
+                elseif ($k === 'TRACKING_API_BASE_URL') $base['tracking_api_base_url'] = trim($r['key_value'] ?? '');
+                elseif ($k === 'TRACKING_API_TOKEN') $base['tracking_api_token'] = trim($r['key_value'] ?? '');
+                elseif ($k === 'TRACKING_API_TIMEOUT_SEC') $base['tracking_api_timeout_sec'] = (int) $r['key_value'];
+                elseif ($k === 'TRACKING_API_RETRY_COUNT') $base['tracking_api_retry_count'] = (int) $r['key_value'];
+                elseif ($k === 'TRACKING_API_RETRY_BACKOFF_MS') $base['tracking_api_retry_backoff_ms'] = (int) $r['key_value'];
+                elseif ($k === 'TRACKING_PUSH_ENABLED') $base['tracking_push_enabled'] = (int) $r['key_value'];
+                elseif ($k === 'TRACKING_PUSH_DRY_RUN') $base['tracking_push_dry_run'] = (int) $r['key_value'];
+                elseif ($k === 'TRACKING_API_PATH') $base['tracking_api_path'] = trim($r['key_value'] ?? '/api/import/clms');
             }
         }
     }

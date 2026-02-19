@@ -64,6 +64,7 @@ $isSuperAdmin = in_array('SuperAdmin', $userRoles);
               <ul class="dropdown-menu">
                 <li><a class="dropdown-item" href="admin_users.php">Users</a></li>
                 <li><a class="dropdown-item" href="admin_config.php">Configuration</a></li>
+                <li><a class="dropdown-item" href="admin_tracking_push.php">Tracking Push Log</a></li>
               </ul>
             </li>
           <?php endif; ?>

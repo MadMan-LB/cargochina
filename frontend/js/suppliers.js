@@ -18,6 +18,7 @@ async function loadSuppliers() {
                     return `
       <tr>
         <td>${escapeHtml(r.code)}</td>
+        <td>${escapeHtml(r.store_id || "-")}</td>
         <td>${escapeHtml(r.name)}</td>
         <td>${escapeHtml(r.phone || "-")}</td>
         <td>${escapeHtml(r.factory_location || "-")}</td>
@@ -30,7 +31,7 @@ async function loadSuppliers() {
     `;
                 })
                 .join("") ||
-            '<tr><td colspan="6" class="text-muted">No suppliers yet.</td></tr>';
+            '<tr><td colspan="7" class="text-muted">No suppliers yet.</td></tr>';
     } catch (e) {
         showToast(e.message, "danger");
     }
@@ -73,6 +74,7 @@ async function editSupplier(id) {
         const d = res.data;
         document.getElementById("supplierId").value = d.id;
         document.getElementById("supplierCode").value = d.code;
+        document.getElementById("supplierStoreId").value = d.store_id || "";
         document.getElementById("supplierName").value = d.name;
         document.getElementById("supplierPhone").value = d.phone || "";
         document.getElementById("supplierFactory").value =
@@ -100,6 +102,8 @@ async function saveSupplier() {
     const id = document.getElementById("supplierId").value;
     const payload = {
         code: document.getElementById("supplierCode").value.trim(),
+        store_id:
+            document.getElementById("supplierStoreId").value.trim() || null,
         name: document.getElementById("supplierName").value.trim(),
         phone: document.getElementById("supplierPhone").value.trim() || null,
         factory_location:

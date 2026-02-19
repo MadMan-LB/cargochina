@@ -75,6 +75,21 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
+    if ($resource === 'shipment-drafts' && $action === 'push' && !hasAnyRole($rbac['shipment-drafts']['push'] ?? [])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'shipment-drafts' && $action === 'finalize' && !hasAnyRole($rbac['shipment-drafts']['finalize'] ?? [])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'tracking-push-log' && !hasAnyRole(['LebanonAdmin', 'SuperAdmin'])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
 }
 
 $handler = require $handlerFile;

@@ -18,7 +18,9 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 ## Suppliers
 - `GET /suppliers` — List all
 - `GET /suppliers/{id}` — Get one
-- `POST /suppliers` — Create `{code, name, phone?, contacts?, factory_location?, notes?, additional_ids?}` — phone: digits/+/parentheses; additional_ids: object e.g. `{"Tax ID":"123","VAT":"CN456"}`
+- `POST /suppliers` — Create `{code, store_id?, name, phone?, contacts?, factory_location?, notes?, additional_ids?}` — store_id: official China store identifier
+- `POST /suppliers/{id}/payments` — Add payment `{amount, currency?, payment_type?, order_id?, notes?}`
+- `POST /suppliers/{id}/interactions` — Add interaction `{interaction_type?, content?}` — type: visit/quote/note
 - `PUT /suppliers/{id}` — Update
 - `DELETE /suppliers/{id}` — Delete
 
@@ -38,7 +40,7 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 ## Orders
 - `GET /orders?status=&customer_id=` — List (optional filters)
 - `GET /orders/{id}` — Get one with items and attachments
-- `POST /orders` — Create `{customer_id, supplier_id, expected_ready_date, items: [{product_id?, quantity, unit, declared_cbm, declared_weight, description_cn?, description_en?}]}`
+- `POST /orders` — Create `{customer_id, supplier_id, expected_ready_date, items}` — items: product_id?, item_no?, shipping_code?, cartons?, qty_per_carton?, quantity, unit, declared_cbm, declared_weight, unit_price?, total_amount?, notes?, image_paths?, description_cn?, description_en? — Submit requires min 1 photo per item (configurable)
 - `PUT /orders/{id}` — Update (Draft only)
 - `POST /orders/{id}/submit` — Draft → Submitted
 - `POST /orders/{id}/approve` — Submitted → Approved
@@ -57,20 +59,24 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 - `POST /containers` — Create `{code, max_cbm, max_weight}` — **SuperAdmin only**
 
 ## Shipment Drafts
-- `GET /shipment-drafts` — List all
+- `GET /shipment-drafts` — List all (includes push_status, push_last_error)
 - `GET /shipment-drafts/{id}` — Get one
 - `POST /shipment-drafts` — Create new draft
 - `POST /shipment-drafts/{id}/add-orders` — Add orders `{order_ids: []}`
 - `POST /shipment-drafts/{id}/remove-orders` — Remove orders `{order_ids: []}`
 - `POST /shipment-drafts/{id}/assign-container` — Assign `{container_id}`
-- `POST /shipment-drafts/{id}/finalize` — Finalize and push to tracking (logs to `logs/tracking_push.log`)
+- `POST /shipment-drafts/{id}/finalize` — Finalize locally; if TRACKING_PUSH_ENABLED=1, attempt push. Decision B: finalize always succeeds; push can fail and be retried. **Roles:** LebanonAdmin, SuperAdmin
+- `POST /shipment-drafts/{id}/push` — Retry push to tracking. **Roles:** LebanonAdmin, SuperAdmin
+
+## Tracking Push Log
+- `GET /tracking-push-log?entity_type=shipment_draft&entity_id=&failed_only=1` — List push attempts (last 50). **Roles:** LebanonAdmin, SuperAdmin
 
 ## Users (SuperAdmin only)
 - `GET /users` — List all users with roles
 
 ## Config (SuperAdmin only)
-- `GET /config` — Get system config (thresholds, etc.)
-- `PUT /config` — Update `{config: {VARIANCE_THRESHOLD_PERCENT?, VARIANCE_THRESHOLD_ABS_CBM?, ...}}`
+- `GET /config` — Get system config (token masked as ********)
+- `PUT /config` — Update `{config: {VARIANCE_THRESHOLD_PERCENT?, TRACKING_API_BASE_URL?, TRACKING_API_TOKEN?, TRACKING_PUSH_ENABLED?, TRACKING_PUSH_DRY_RUN?, ...}}`
 
 ## RBAC
 - **Approve orders:** ChinaAdmin, LebanonAdmin, SuperAdmin

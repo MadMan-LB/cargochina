@@ -6,6 +6,7 @@
 
 require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__, 2) . '/backend/services/TrackingPushService.php';
+require_once dirname(__DIR__, 2) . '/backend/services/NotificationService.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
@@ -16,10 +17,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if ($id === null) {
                 $stmt = $pdo->query("SELECT sd.*, c.code as container_code FROM shipment_drafts sd LEFT JOIN containers c ON sd.container_id = c.id ORDER BY sd.id DESC");
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                $svc = new TrackingPushService($pdo);
                 foreach ($rows as &$r) {
                     $so = $pdo->prepare("SELECT order_id FROM shipment_draft_orders WHERE shipment_draft_id = ?");
                     $so->execute([$r['id']]);
                     $r['order_ids'] = array_column($so->fetchAll(PDO::FETCH_ASSOC), 'order_id');
+                    $pushStatus = $svc->getPushStatus((int) $r['id']);
+                    $r['push_status'] = $pushStatus ? $pushStatus['status'] : null;
+                    $r['push_last_error'] = $pushStatus['last_error'] ?? null;
                 }
                 jsonResponse(['data' => $rows]);
             }
@@ -29,7 +34,19 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if (!$row) jsonError('Shipment draft not found', 404);
             $so = $pdo->prepare("SELECT order_id FROM shipment_draft_orders WHERE shipment_draft_id = ?");
             $so->execute([$id]);
-            $row['order_ids'] = array_column($so->fetchAll(PDO::FETCH_ASSOC), 'order_id');
+            $orderIds = array_column($so->fetchAll(PDO::FETCH_ASSOC), 'order_id');
+            $row['order_ids'] = $orderIds;
+            if (!empty($orderIds)) {
+                $ph = implode(',', array_fill(0, count($orderIds), '?'));
+                $tot = $pdo->prepare("SELECT COALESCE(SUM(declared_cbm),0), COALESCE(SUM(declared_weight),0) FROM order_items WHERE order_id IN ($ph)");
+                $tot->execute($orderIds);
+                $t = $tot->fetch(PDO::FETCH_NUM);
+                $row['total_cbm'] = (float) $t[0];
+                $row['total_weight'] = (float) $t[1];
+            } else {
+                $row['total_cbm'] = 0;
+                $row['total_weight'] = 0;
+            }
             jsonResponse(['data' => $row]);
             break;
 
@@ -120,14 +137,35 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         jsonError("Order $oid must be AssignedToContainer before finalizing", 400);
                     }
                 }
-                $svc = new TrackingPushService($pdo);
-                $result = $svc->push($id);
                 $pdo->prepare("UPDATE shipment_drafts SET status='finalized' WHERE id=?")->execute([$id]);
                 $ph = implode(',', array_fill(0, count($orderIds), '?'));
                 $pdo->prepare("UPDATE orders SET status='FinalizedAndPushedToTracking' WHERE id IN ($ph)")->execute($orderIds);
+                $config = require dirname(__DIR__, 2) . '/backend/config/config.php';
+                $pushEnabled = (int) ($config['tracking_push_enabled'] ?? 0);
+                $trackingResult = null;
+                if ($pushEnabled) {
+                    try {
+                        $svc = new TrackingPushService($pdo);
+                        $trackingResult = $svc->push($id);
+                    } catch (Throwable $e) {
+                        $trackingResult = ['success' => false, 'message' => $e->getMessage(), 'push_failed' => true];
+                    }
+                }
+                (new NotificationService($pdo))->notifyShipmentFinalized($id, count($orderIds));
                 $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('shipment_draft',?,?,?,?)")
-                    ->execute([$id, 'finalize', json_encode(['order_ids' => $orderIds, 'tracking_result' => $result]), $userId]);
-                jsonResponse(['data' => ['status' => 'finalized', 'tracking_result' => $result]]);
+                    ->execute([$id, 'finalize', json_encode(['order_ids' => $orderIds, 'tracking_result' => $trackingResult]), $userId]);
+                jsonResponse(['data' => ['status' => 'finalized', 'tracking_result' => $trackingResult]]);
+                break;
+            }
+            if ($action === 'push') {
+                $stmt = $pdo->prepare("SELECT * FROM shipment_drafts WHERE id = ?");
+                $stmt->execute([$id]);
+                $sd = $stmt->fetch(PDO::FETCH_ASSOC);
+                if (!$sd) jsonError('Shipment draft not found', 404);
+                if ($sd['status'] !== 'finalized') jsonError('Draft must be finalized before push/retry', 400);
+                $svc = new TrackingPushService($pdo);
+                $result = $svc->push($id);
+                jsonResponse(['data' => $result]);
                 break;
             }
             if ($action === 'remove-orders') {
