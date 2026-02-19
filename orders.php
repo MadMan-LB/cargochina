@@ -12,8 +12,8 @@ require 'includes/layout.php';
       <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#orderModal" onclick="openOrderForm()">+ New Order</button>
     </div>
     <div class="card-body">
-      <div class="row mb-3">
-        <div class="col-md-4">
+      <div class="row mb-3 form-row-responsive">
+        <div class="col-12 col-md-4">
           <select class="form-select form-select-sm" id="filterStatus" onchange="loadOrders()">
             <option value="">All statuses</option>
             <option value="Draft">Draft</option>
@@ -29,7 +29,7 @@ require 'includes/layout.php';
             <option value="FinalizedAndPushedToTracking">Finalized</option>
           </select>
         </div>
-        <div class="col-md-4">
+        <div class="col-12 col-md-4">
           <select class="form-select form-select-sm" id="filterCustomer" onchange="loadOrders()">
             <option value="">All customers</option>
           </select>
@@ -64,10 +64,10 @@ require 'includes/layout.php';
       <div class="modal-body">
         <form id="orderForm">
           <input type="hidden" id="orderId">
-          <div class="row mb-3">
-            <div class="col-md-4"><label class="form-label">Customer *</label><select class="form-select" id="orderCustomer" required></select></div>
-            <div class="col-md-4"><label class="form-label">Supplier *</label><select class="form-select" id="orderSupplier" required></select></div>
-            <div class="col-md-4"><label class="form-label">Expected Ready Date *</label><input type="date" class="form-control" id="orderExpectedDate" required></div>
+          <div class="row mb-3 form-row-responsive">
+            <div class="col-12 col-md-4 mb-2"><label class="form-label">Customer *</label><select class="form-select" id="orderCustomer" required></select></div>
+            <div class="col-12 col-md-4 mb-2"><label class="form-label">Supplier *</label><select class="form-select" id="orderSupplier" required></select></div>
+            <div class="col-12 col-md-4 mb-2"><label class="form-label">Expected Ready Date *</label><input type="date" class="form-control" id="orderExpectedDate" required></div>
           </div>
           <h6>Items</h6>
           <div class="table-responsive">

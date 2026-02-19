@@ -18,7 +18,7 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 ## Suppliers
 - `GET /suppliers` — List all
 - `GET /suppliers/{id}` — Get one
-- `POST /suppliers` — Create `{code, name, contacts?, factory_location?, notes?}`
+- `POST /suppliers` — Create `{code, name, phone?, contacts?, factory_location?, notes?, additional_ids?}` — phone: digits/+/parentheses; additional_ids: object e.g. `{"Tax ID":"123","VAT":"CN456"}`
 - `PUT /suppliers/{id}` — Update
 - `DELETE /suppliers/{id}` — Delete
 
@@ -26,7 +26,8 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 - `GET /products` — List all
 - `GET /products/{id}` — Get one
 - `GET /products/suggest?q=...` — Suggest by description/HS code (with similarity score)
-- `POST /products` — Create `{supplier_id?, cbm, weight, packaging?, hs_code?, description_cn?, description_en?, force_create?}` — Use `force_create: true` to bypass duplicate check
+- `POST /products` — Create `{supplier_id?, cbm, weight, packaging?, hs_code?, description_cn?, description_en?, image_paths?, force_create?}` — image_paths: array of paths from upload
+- `GET /products` — Returns `thumbnail_url` (first image) per product
 - `PUT /products/{id}` — Update
 - `DELETE /products/{id}` — Delete
 
@@ -45,7 +46,7 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 - `POST /orders/{id}/confirm` — AwaitingCustomerConfirmation → Confirmed
 
 ## Upload
-- `POST /upload` — Multipart form `file` — returns `{path}`
+- `POST /upload` — Multipart form `file` — returns `{path, url}` — path for storage; url for img src
 
 ## Notifications
 - `GET /notifications` — List for current user

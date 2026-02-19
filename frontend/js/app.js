@@ -4,6 +4,8 @@
 
 const API_BASE = "/cargochina/api/v1";
 
+const UPLOAD_BASE = "/cargochina/api/v1/upload";
+
 async function api(method, path, body = null) {
     const opts = {
         method,
@@ -49,4 +51,34 @@ function escapeHtml(s) {
     const div = document.createElement("div");
     div.textContent = s;
     return div.innerHTML;
+}
+
+function setLoading(el, loading) {
+    if (!el) return;
+    if (loading) {
+        el.classList.add("btn-loading");
+        el.disabled = true;
+    } else {
+        el.classList.remove("btn-loading");
+        el.disabled = false;
+    }
+}
+
+async function uploadFile(file) {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(
+        API_BASE.replace("/api/v1", "") + "/api/v1/upload",
+        {
+            method: "POST",
+            body: fd,
+            credentials: "same-origin",
+        },
+    );
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.message || "Upload failed");
+    return (
+        j.data.path ||
+        (j.data.url ? j.data.url.replace("/cargochina/backend/", "") : null)
+    );
 }

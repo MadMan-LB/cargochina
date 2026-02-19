@@ -43,5 +43,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         jsonError('Failed to save file', 500);
     }
 
-    jsonResponse(['data' => ['path' => 'uploads/' . $filename]], 201);
+    $relPath = 'uploads/' . $filename;
+    $url = '/cargochina/backend/' . $relPath;
+    jsonResponse(['data' => ['path' => $relPath, 'url' => $url]], 201);
 };

@@ -25,6 +25,13 @@ cp .env.example .env
 
 ### 3. Run migrations
 
+**Windows (XAMPP):**
+```batch
+run-migrations.bat
+```
+Or: `c:\xampp\php\php.exe backend/migrations/run.php`
+
+**Linux/Mac:**
 ```bash
 php backend/migrations/run.php
 ```
@@ -39,6 +46,10 @@ Migration 006 seeds a default SuperAdmin: `admin@salameh.com` / `password`. Log 
 
 - **XAMPP**: Start Apache and MySQL. Open `http://localhost/cargochina/`
 - **PHP built-in server**: `php -S localhost:8080 -t .` then open `http://localhost:8080/`
+
+### 6. Responsive testing
+
+The UI is responsive for tablets (e.g. iPad). Test on iPad or use Chrome DevTools device emulation to verify layouts, scrollable tables, and stacked forms on smaller screens.
 
 ## Project Structure
 

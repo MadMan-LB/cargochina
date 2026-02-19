@@ -267,6 +267,13 @@ Any AI/engineer working on this system must follow these operating rules:
 ## 15) DB_CHANGELOG (keep updating)
 > Add entries as changes happen. Newest on top.
 
+- 2025-02-19 — Migration 008 (Suppliers contact)
+  - Change: suppliers.phone VARCHAR(50) NULL, suppliers.additional_ids JSON NULL
+  - Reason: Responsive UI & data enhancements — supplier phone and flexible external IDs (Tax ID, VAT, etc.)
+  - Affected tables: suppliers
+  - Migration steps: Run `php backend/migrations/run.php` or `run-migrations.bat`
+  - Rollback: ALTER TABLE suppliers DROP COLUMN phone, DROP COLUMN additional_ids;
+
 - 2025-02-19 — Migration 003 fix: `condition` → `receipt_condition` (MySQL reserved word)
   - Change: Renamed column in warehouse_receipts
   - Reason: `condition` is reserved in MySQL/MariaDB

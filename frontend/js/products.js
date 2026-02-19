@@ -1,7 +1,63 @@
+let productImagePaths = [];
+
 document.addEventListener("DOMContentLoaded", () => {
     loadSuppliers();
     loadProducts();
+    setupProductImageUpload();
 });
+
+function setupProductImageUpload() {
+    const input = document.getElementById("productImagesInput");
+    const dropZone = document.getElementById("productImagesDropZone");
+    if (!input || !dropZone) return;
+
+    input.onchange = () => handleProductFiles(input.files);
+    dropZone.ondragover = (e) => {
+        e.preventDefault();
+        dropZone.classList.add("border-primary");
+    };
+    dropZone.ondragleave = () => dropZone.classList.remove("border-primary");
+    dropZone.ondrop = (e) => {
+        e.preventDefault();
+        dropZone.classList.remove("border-primary");
+        if (e.dataTransfer.files.length)
+            handleProductFiles(e.dataTransfer.files);
+    };
+}
+
+async function handleProductFiles(files) {
+    for (let i = 0; i < files.length; i++) {
+        if (!files[i].type.startsWith("image/")) continue;
+        try {
+            const path = await uploadFile(files[i]);
+            if (path && !productImagePaths.includes(path)) {
+                productImagePaths.push(path);
+                renderProductImagesPreview();
+            }
+        } catch (e) {
+            showToast("Upload failed: " + e.message, "danger");
+        }
+    }
+}
+
+function renderProductImagesPreview() {
+    const container = document.getElementById("productImagesPreview");
+    if (!container) return;
+    container.innerHTML = productImagePaths
+        .map(
+            (path, i) => `
+      <div class="position-relative d-inline-block">
+        <img src="/cargochina/backend/${path}" class="img-thumbnail img-thumbnail-sm" alt="${i}">
+        <button type="button" class="btn btn-sm btn-danger position-absolute top-0 end-0" style="padding:0.1rem 0.3rem" onclick="removeProductImage(${i})">×</button>
+      </div>`,
+        )
+        .join("");
+}
+
+function removeProductImage(index) {
+    productImagePaths.splice(index, 1);
+    renderProductImagesPreview();
+}
 
 async function loadSuppliers() {
     try {
@@ -28,6 +84,7 @@ async function loadProducts() {
                 .map(
                     (r) => `
       <tr>
+        <td>${r.thumbnail_url ? `<img src="${r.thumbnail_url}" class="img-thumbnail img-thumbnail-sm" alt="">` : "—"}</td>
         <td>${r.id}</td>
         <td>${escapeHtml(r.description_cn || "-")}</td>
         <td>${escapeHtml(r.description_en || "-")}</td>
@@ -42,7 +99,7 @@ async function loadProducts() {
     `,
                 )
                 .join("") ||
-            '<tr><td colspan="7" class="text-muted">No products yet.</td></tr>';
+            '<tr><td colspan="8" class="text-muted">No products yet.</td></tr>';
     } catch (e) {
         showToast(e.message, "danger");
     }
@@ -52,6 +109,8 @@ function openProductForm() {
     document.getElementById("productForm").reset();
     document.getElementById("productId").value = "";
     document.getElementById("productModalTitle").textContent = "Add Product";
+    productImagePaths = [];
+    renderProductImagesPreview();
 }
 
 async function editProduct(id) {
@@ -68,6 +127,8 @@ async function editProduct(id) {
         document.getElementById("productSupplier").value = d.supplier_id || "";
         document.getElementById("productModalTitle").textContent =
             "Edit Product";
+        productImagePaths = d.image_paths || [];
+        renderProductImagesPreview();
         new bootstrap.Modal(document.getElementById("productModal")).show();
     } catch (e) {
         showToast(e.message, "danger");
@@ -75,6 +136,7 @@ async function editProduct(id) {
 }
 
 async function saveProduct() {
+    const btn = document.getElementById("productSaveBtn");
     const id = document.getElementById("productId").value;
     const payload = {
         description_cn:
@@ -87,12 +149,14 @@ async function saveProduct() {
         packaging:
             document.getElementById("productPackaging").value.trim() || null,
         supplier_id: document.getElementById("productSupplier").value || null,
+        image_paths: productImagePaths,
     };
     if (payload.cbm < 0 || payload.weight < 0) {
         showToast("CBM and weight must be non-negative", "danger");
         return;
     }
     try {
+        setLoading(btn, true);
         if (id) {
             await api("PUT", "/products/" + id, payload);
             showToast("Product updated");
@@ -106,6 +170,8 @@ async function saveProduct() {
         loadProducts();
     } catch (e) {
         showToast(e.message, "danger");
+    } finally {
+        setLoading(btn, false);
     }
 }
 
