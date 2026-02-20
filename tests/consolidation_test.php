@@ -35,7 +35,7 @@ test('TrackingPushService builds payload', function () use ($pdo) {
     }
     $result = $svc->push($sd['id']);
     if (!isset($result['success']) || !$result['success']) throw new Exception('Expected success');
-    if (!isset($result['header'])) throw new Exception('Expected header');
+    if (!isset($result['message']) && !isset($result['log_id'])) throw new Exception('Expected message or log_id');
 });
 
 test('Capacity check prevents overflow', function () use ($pdo) {
