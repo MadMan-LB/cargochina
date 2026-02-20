@@ -102,6 +102,11 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
+    if ($resource === 'diagnostics' && !hasAnyRole(['SuperAdmin'])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
 }
 
 $handler = require $handlerFile;

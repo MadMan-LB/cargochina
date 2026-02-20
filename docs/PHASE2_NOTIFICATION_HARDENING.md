@@ -455,6 +455,7 @@ Before deploying Phase 2 + Production Hardening:
 5. **Notification preferences:** Defaults are seeded lazily on first GET when empty (Option B).
 6. **Item-level receiving:** When ITEM_LEVEL_RECEIVING_ENABLED=0, per-item UI is hidden on receiving page.
 7. **Rollback:** See CLMS_README DB_CHANGELOG for 015–018 rollback SQL.
+8. **Diagnostics:** Admin → Diagnostics for config health and notification delivery log (retry failed).
 
 ---
 

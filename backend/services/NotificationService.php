@@ -228,4 +228,47 @@ class NotificationService
             ['shipment_draft_id' => $shipmentDraftId]
         );
     }
+
+    /** Retry a failed delivery (safe: skips if payload_hash already succeeded) */
+    public function retryDelivery(int $logId): array
+    {
+        $row = $this->pdo->prepare("SELECT ndl.*, n.user_id, n.type, n.title, n.body FROM notification_delivery_log ndl JOIN notifications n ON ndl.notification_id = n.id WHERE ndl.id = ?");
+        $row->execute([$logId]);
+        $log = $row->fetch(PDO::FETCH_ASSOC);
+        if (!$log) return ['success' => false, 'error' => 'Log not found'];
+        if ($log['status'] === 'sent') return ['success' => false, 'error' => 'Already sent'];
+        if (!in_array($log['channel'], ['email', 'whatsapp'], true)) return ['success' => false, 'error' => 'Retry only for email/whatsapp'];
+        if ($this->alreadyDelivered((int) $log['notification_id'], $log['channel'], $log['payload_hash'] ?? '')) {
+            return ['success' => false, 'error' => 'Duplicate prevented (payload_hash already succeeded)'];
+        }
+        $nid = (int) $log['notification_id'];
+        $payloadHash = $log['payload_hash'] ?? hash('sha256', json_encode(['title' => $log['title'], 'body' => $log['body']]) . $log['user_id']);
+        $attempts = (int) $log['attempts'] + 1;
+        $err = null;
+        $extId = null;
+        if ($log['channel'] === 'email') {
+            $email = $this->pdo->query("SELECT email FROM users WHERE id=" . (int) $log['user_id'])->fetchColumn();
+            if ($email) {
+                $from = $this->config['email_from_address'] ?? 'noreply@example.com';
+                $fromName = $this->config['email_from_name'] ?? 'CLMS';
+                $sent = @mail($email, $log['title'], $log['body'] ?? '', "From: $fromName <$from>\r\nContent-Type: text/plain; charset=UTF-8");
+                $err = $sent ? null : 'mail() failed';
+            } else {
+                $err = 'No email for user';
+            }
+        } else {
+            $provider = $this->config['whatsapp_provider'] ?? 'generic';
+            $to = $provider === 'twilio' ? trim($this->config['whatsapp_twilio_to'] ?? '') : $this->pdo->query("SELECT email FROM users WHERE id=" . (int) $log['user_id'])->fetchColumn();
+            if ($to) {
+                $res = $this->sendWhatsApp($to, $log['title'] . "\n\n" . ($log['body'] ?? ''));
+                $err = $res['success'] ? null : $res['error'];
+                $extId = $res['external_id'] ?? null;
+            } else {
+                $err = 'No recipient';
+            }
+        }
+        $status = $err ? 'failed' : 'sent';
+        $this->logDelivery($nid, $log['channel'], $payloadHash, $status, $attempts, $err, $extId);
+        return ['success' => !$err, 'status' => $status, 'attempts' => $attempts];
+    }
 }

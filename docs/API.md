@@ -81,6 +81,11 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 ## Users (SuperAdmin only)
 - `GET /users` — List all users with roles
 
+## Diagnostics (SuperAdmin only)
+- `GET /diagnostics/notification-delivery-log` — List delivery log rows (filters: status, channel, date_from, date_to; limit, offset). Never returns tokens.
+- `GET /diagnostics/config-health` — Config readiness: `email_configured`, `whatsapp_configured`, `item_level_enabled`, `retry_configured`
+- `POST /diagnostics/retry-delivery/{logId}` — Retry failed email/WhatsApp delivery (skips if payload_hash already succeeded)
+
 ## Config
 - `GET /config` — Get system config (SuperAdmin only; tokens masked as ********)
 - `GET /config/receiving` — Get receiving config `{item_level_receiving_enabled}` (WarehouseStaff, SuperAdmin)
