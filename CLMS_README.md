@@ -293,6 +293,17 @@ Any AI/engineer working on this system must follow these operating rules:
 ## 15) DB_CHANGELOG (keep updating)
 > Add entries as changes happen. Newest on top.
 
+- 2025-02-19 — Migration 018 (Production Hardening config)
+  - Change: system_config WHATSAPP_PROVIDER, WHATSAPP_TWILIO_ACCOUNT_SID, WHATSAPP_TWILIO_AUTH_TOKEN, WHATSAPP_TWILIO_FROM, WHATSAPP_TWILIO_TO, NOTIFICATION_MAX_ATTEMPTS, NOTIFICATION_RETRY_SECONDS
+  - Reason: Configurable WhatsApp provider (generic|twilio); notification retry policy
+  - Rollback: DELETE FROM system_config WHERE key_name IN ('WHATSAPP_PROVIDER','WHATSAPP_TWILIO_ACCOUNT_SID','WHATSAPP_TWILIO_AUTH_TOKEN','WHATSAPP_TWILIO_FROM','WHATSAPP_TWILIO_TO','NOTIFICATION_MAX_ATTEMPTS','NOTIFICATION_RETRY_SECONDS');
+
+- 2025-02-19 — Migrations 015–017 (Phase 2 Notification Hardening)
+  - Change: warehouse_receipt_items, warehouse_receipt_item_photos; user_notification_preferences; notification_delivery_log (channel, payload_hash, status, attempts, last_error); notifications + channel; system_config EMAIL_*, WHATSAPP_*, ITEM_LEVEL_RECEIVING_ENABLED, PHOTO_EVIDENCE_PER_ITEM
+  - Reason: Item-level receiving; configurable email/WhatsApp; user preferences; delivery logging
+  - Rollback: DROP TABLE notification_delivery_log; DROP TABLE user_notification_preferences; DROP TABLE warehouse_receipt_item_photos; DROP TABLE warehouse_receipt_items; ALTER TABLE notifications DROP COLUMN channel; DELETE FROM system_config WHERE key_name IN ('EMAIL_FROM_ADDRESS','EMAIL_FROM_NAME','WHATSAPP_API_URL','WHATSAPP_API_TOKEN','ITEM_LEVEL_RECEIVING_ENABLED','PHOTO_EVIDENCE_PER_ITEM');
+  - See: docs/PHASE2_NOTIFICATION_HARDENING.md
+
 - 2025-02-19 — Migrations 012–013 (Tracking integration)
   - Change: system_config TRACKING_* keys; tracking_push_log table (idempotency, status, retries)
   - Reason: Phase 3 — configurable tracking API, idempotent push, retries, admin tools
@@ -351,6 +362,20 @@ Any AI/engineer working on this system must follow these operating rules:
 ## 16) DECISION_LOG (keep updating)
 > Capture CEO/ops decisions. Newest on top.
 
+- 2025-02-19 — Production hardening decisions
+  - Default notification preferences: Option B — lazy seed on first GET when no rows exist; deterministic, documented in docs/API.md
+  - WhatsApp provider: generic (default) or twilio; config keys WHATSAPP_TWILIO_* for Twilio; payload format differs per provider
+  - Admin config UI: all Phase 2 keys (EMAIL_*, WHATSAPP_*, ITEM_LEVEL_RECEIVING_ENABLED, PHOTO_EVIDENCE_PER_ITEM, CUSTOMER_PHOTO_VISIBILITY, VARIANCE_*, NOTIFICATION_MAX_ATTEMPTS, NOTIFICATION_RETRY_SECONDS) editable in admin_config.php
+  - Item-level receiving UX: when ITEM_LEVEL_RECEIVING_ENABLED=0, per-item section hidden via GET /config/receiving
+
+- 2025-02-19 — Phase 2 open questions resolved
+  - Q1 Variance thresholds: Use VARIANCE_THRESHOLD_PERCENT=10, VARIANCE_THRESHOLD_ABS_CBM=0.1; apply per item when item-level receiving used
+  - Q2 Photo visibility: CUSTOMER_PHOTO_VISIBILITY = internal-only | customer-visible; default internal-only
+  - Q3 WhatsApp: Implement as optional channel in Phase 2; require WHATSAPP_API_URL + token
+  - Q4 Partial shipments: Internal drafts may be partial; tracking receives only finalized full shipments (no partial push)
+  - Rationale: See docs/PHASE2_NOTIFICATION_HARDENING.md
+  - Impacted modules: receiving, config, NotificationService, consolidation
+
 - 2025-02-19 — Default variance thresholds and confirmation policy
   - Decision: VARIANCE_THRESHOLD_PERCENT=10, VARIANCE_THRESHOLD_ABS_CBM=0.1, CONFIRMATION_REQUIRED=variance-only
   - Rationale: Placeholder values until CEO locks; config editable by SuperAdmin in admin UI
@@ -369,10 +394,10 @@ Any AI/engineer working on this system must follow these operating rules:
 ---
 
 ## 17) OPEN_QUESTIONS (keep updating)
-- Q1: Variance thresholds?
-- Q2: Customer sees photos or not?
-- Q3: WhatsApp notifications in Phase 1 or later?
-- Q4: Are partial shipments allowed internally (draft-only) before finalization?
+- ~~Q1: Variance thresholds?~~ → Resolved: use config defaults; per-item when item-level
+- ~~Q2: Customer sees photos or not?~~ → Resolved: CUSTOMER_PHOTO_VISIBILITY config
+- ~~Q3: WhatsApp notifications in Phase 1 or later?~~ → Resolved: Phase 2, optional
+- ~~Q4: Are partial shipments allowed internally (draft-only) before finalization?~~ → Resolved: yes, internal only; no partial push to tracking
 
 ---
 

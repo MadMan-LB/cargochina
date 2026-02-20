@@ -23,6 +23,12 @@ try {
     echo "OK: suppliers.phone, suppliers.additional_ids\n";
     $pdo->query("SELECT 1 FROM tracking_push_log LIMIT 1");
     echo "OK: tracking_push_log\n";
+    $pdo->query("SELECT 1 FROM warehouse_receipt_items LIMIT 1");
+    echo "OK: warehouse_receipt_items\n";
+    $pdo->query("SELECT 1 FROM user_notification_preferences LIMIT 1");
+    echo "OK: user_notification_preferences\n";
+    $pdo->query("SELECT 1 FROM notification_delivery_log LIMIT 1");
+    echo "OK: notification_delivery_log\n";
     echo "Smoke test passed.\n";
 } catch (Exception $e) {
     echo "FAIL: " . $e->getMessage() . "\n";

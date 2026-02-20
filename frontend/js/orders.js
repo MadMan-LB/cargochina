@@ -333,10 +333,24 @@ async function approveOrder(id) {
 
 async function confirmOrder(id) {
     try {
+        const res = await api("GET", "/orders/" + id);
+        const o = res.data;
+        const receipt = o.receipt;
+        const showPhotos =
+            (o.customer_photo_visibility || "internal-only") ===
+            "customer-visible";
+        let msg = "Confirm acceptance of actual measures?";
+        if (receipt) {
+            msg += `\n\nActual: ${receipt.actual_cbm} CBM, ${receipt.actual_weight} kg, ${receipt.actual_cartons} cartons`;
+            if (showPhotos && receipt.photos?.length) {
+                msg += `\n(${receipt.photos.length} photo(s) attached)`;
+            }
+        }
+        if (!confirm(msg)) return;
         await api("POST", "/orders/" + id + "/confirm", {});
         showToast("Order confirmed");
         loadOrders();
     } catch (e) {
-        showToast(e.message, "danger");
+        showToast(e.message || "Request failed", "danger");
     }
 }

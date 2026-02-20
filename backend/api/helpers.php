@@ -64,3 +64,14 @@ function requireRole(array $roles): void
         jsonError('Forbidden', 403);
     }
 }
+
+/** Structured log for CLMS (order_id, receipt_id, notification_id, etc.) */
+function logClms(string $event, array $context = []): void
+{
+    $logDir = dirname(__DIR__, 2) . '/logs';
+    if (!is_dir($logDir)) {
+        @mkdir($logDir, 0755, true);
+    }
+    $line = date('Y-m-d H:i:s') . ' ' . json_encode(array_merge(['event' => $event], $context), JSON_UNESCAPED_UNICODE) . "\n";
+    @error_log($line, 3, $logDir . '/clms.log');
+}

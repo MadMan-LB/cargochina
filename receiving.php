@@ -31,6 +31,25 @@ require 'includes/layout.php';
             </select></div>
           <div class="col-12 col-md-8 mb-2"><label class="form-label">Notes</label><input type="text" class="form-control" id="receiveNotes"></div>
         </div>
+        <div class="mb-3" id="itemLevelSection">
+          <button type="button" class="btn btn-outline-secondary btn-sm mb-2" id="toggleItemLevel" aria-expanded="false" aria-controls="itemLevelTable">Record per-item actuals (optional)</button>
+          <div id="itemLevelTable" class="d-none table-responsive">
+            <table class="table table-sm">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Declared</th>
+                  <th>Actual Cartons</th>
+                  <th>Actual CBM</th>
+                  <th>Actual Weight</th>
+                  <th>Condition</th>
+                  <th>Photos</th>
+                </tr>
+              </thead>
+              <tbody id="itemLevelBody"></tbody>
+            </table>
+          </div>
+        </div>
         <div class="mb-3">
           <label class="form-label">Evidence Photos <span class="text-danger">*required if variance or damage</span></label>
           <div id="variancePhotoAlert" class="alert alert-warning py-2 d-none" role="alert">

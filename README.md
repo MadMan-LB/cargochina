@@ -82,3 +82,7 @@ See `.env.example` for:
 ## Full Specification
 
 See [CLMS_README.md](CLMS_README.md) for the complete specification, state machine, RBAC, and DB_CHANGELOG.
+
+## Phase 2 Design
+
+See [docs/PHASE2_NOTIFICATION_HARDENING.md](docs/PHASE2_NOTIFICATION_HARDENING.md) for the PR-ready design and implementation plan for item-level receiving, email/WhatsApp notifications, and open-question resolutions.

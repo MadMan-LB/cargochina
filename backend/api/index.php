@@ -77,7 +77,12 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'config' && !hasAnyRole($rbac['config'] ?? [])) {
+    if ($resource === 'config' && $id !== 'receiving' && !hasAnyRole($rbac['config'] ?? [])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'config' && $id === 'receiving' && !hasAnyRole(['WarehouseStaff', 'SuperAdmin'])) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;

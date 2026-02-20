@@ -37,6 +37,19 @@ $base = [
     'tracking_push_enabled' => (int) ($_ENV['TRACKING_PUSH_ENABLED'] ?? 0),
     'tracking_push_dry_run' => (int) ($_ENV['TRACKING_PUSH_DRY_RUN'] ?? 1),
     'tracking_api_path' => trim($_ENV['TRACKING_API_PATH'] ?? '/api/import/clms'),
+    'email_from_address' => trim($_ENV['EMAIL_FROM_ADDRESS'] ?? 'noreply@example.com'),
+    'email_from_name' => trim($_ENV['EMAIL_FROM_NAME'] ?? 'CLMS'),
+    'whatsapp_api_url' => trim($_ENV['WHATSAPP_API_URL'] ?? ''),
+    'whatsapp_api_token' => trim($_ENV['WHATSAPP_API_TOKEN'] ?? ''),
+    'whatsapp_provider' => $_ENV['WHATSAPP_PROVIDER'] ?? 'generic',
+    'whatsapp_twilio_account_sid' => trim($_ENV['WHATSAPP_TWILIO_ACCOUNT_SID'] ?? ''),
+    'whatsapp_twilio_auth_token' => trim($_ENV['WHATSAPP_TWILIO_AUTH_TOKEN'] ?? ''),
+    'whatsapp_twilio_from' => trim($_ENV['WHATSAPP_TWILIO_FROM'] ?? ''),
+    'whatsapp_twilio_to' => trim($_ENV['WHATSAPP_TWILIO_TO'] ?? ''),
+    'item_level_receiving_enabled' => (int) ($_ENV['ITEM_LEVEL_RECEIVING_ENABLED'] ?? 0),
+    'photo_evidence_per_item' => (int) ($_ENV['PHOTO_EVIDENCE_PER_ITEM'] ?? 0),
+    'notification_max_attempts' => (int) ($_ENV['NOTIFICATION_MAX_ATTEMPTS'] ?? 3),
+    'notification_retry_seconds' => (int) ($_ENV['NOTIFICATION_RETRY_SECONDS'] ?? 60),
 ];
 try {
     require_once __DIR__ . '/database.php';
@@ -60,6 +73,19 @@ try {
                 elseif ($k === 'TRACKING_PUSH_ENABLED') $base['tracking_push_enabled'] = (int) $r['key_value'];
                 elseif ($k === 'TRACKING_PUSH_DRY_RUN') $base['tracking_push_dry_run'] = (int) $r['key_value'];
                 elseif ($k === 'TRACKING_API_PATH') $base['tracking_api_path'] = trim($r['key_value'] ?? '/api/import/clms');
+                elseif ($k === 'EMAIL_FROM_ADDRESS') $base['email_from_address'] = trim($r['key_value'] ?? 'noreply@example.com');
+                elseif ($k === 'EMAIL_FROM_NAME') $base['email_from_name'] = trim($r['key_value'] ?? 'CLMS');
+                elseif ($k === 'WHATSAPP_API_URL') $base['whatsapp_api_url'] = trim($r['key_value'] ?? '');
+                elseif ($k === 'WHATSAPP_API_TOKEN') $base['whatsapp_api_token'] = trim($r['key_value'] ?? '');
+                elseif ($k === 'WHATSAPP_PROVIDER') $base['whatsapp_provider'] = $r['key_value'] ?? 'generic';
+                elseif ($k === 'WHATSAPP_TWILIO_ACCOUNT_SID') $base['whatsapp_twilio_account_sid'] = trim($r['key_value'] ?? '');
+                elseif ($k === 'WHATSAPP_TWILIO_AUTH_TOKEN') $base['whatsapp_twilio_auth_token'] = trim($r['key_value'] ?? '');
+                elseif ($k === 'WHATSAPP_TWILIO_FROM') $base['whatsapp_twilio_from'] = trim($r['key_value'] ?? '');
+                elseif ($k === 'WHATSAPP_TWILIO_TO') $base['whatsapp_twilio_to'] = trim($r['key_value'] ?? '');
+                elseif ($k === 'ITEM_LEVEL_RECEIVING_ENABLED') $base['item_level_receiving_enabled'] = (int) $r['key_value'];
+                elseif ($k === 'PHOTO_EVIDENCE_PER_ITEM') $base['photo_evidence_per_item'] = (int) $r['key_value'];
+                elseif ($k === 'NOTIFICATION_MAX_ATTEMPTS') $base['notification_max_attempts'] = (int) ($r['key_value'] ?? 3);
+                elseif ($k === 'NOTIFICATION_RETRY_SECONDS') $base['notification_retry_seconds'] = (int) ($r['key_value'] ?? 60);
             }
         }
     }

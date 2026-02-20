@@ -57,6 +57,20 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $att = $pdo->prepare("SELECT * FROM order_attachments WHERE order_id = ?");
             $att->execute([$id]);
             $row['attachments'] = $att->fetchAll(PDO::FETCH_ASSOC);
+            $wr = $pdo->prepare("SELECT * FROM warehouse_receipts WHERE order_id = ? ORDER BY received_at DESC LIMIT 1");
+            $wr->execute([$id]);
+            $receipt = $wr->fetch(PDO::FETCH_ASSOC);
+            if ($receipt) {
+                $row['receipt'] = $receipt;
+                $rip = $pdo->prepare("SELECT * FROM warehouse_receipt_photos WHERE receipt_id = ?");
+                $rip->execute([$receipt['id']]);
+                $row['receipt']['photos'] = $rip->fetchAll(PDO::FETCH_ASSOC);
+                $rii = $pdo->prepare("SELECT wri.*, oi.description_cn, oi.description_en FROM warehouse_receipt_items wri JOIN order_items oi ON wri.order_item_id = oi.id WHERE wri.receipt_id = ?");
+                $rii->execute([$receipt['id']]);
+                $row['receipt']['items'] = $rii->fetchAll(PDO::FETCH_ASSOC);
+                $config = require dirname(__DIR__, 2) . '/backend/config/config.php';
+                $row['customer_photo_visibility'] = $config['customer_photo_visibility'] ?? 'internal-only';
+            }
             jsonResponse(['data' => $row]);
             break;
 
@@ -218,20 +232,76 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $condition = $input['condition'] ?? 'good';
                 if (!in_array($condition, ['good', 'damaged', 'partial'])) $condition = 'good';
                 $photoPaths = $input['photo_paths'] ?? [];
-                $sc = $pdo->prepare("SELECT COALESCE(SUM(declared_cbm),0), COALESCE(SUM(declared_weight),0) FROM order_items WHERE order_id = ?");
-                $sc->execute([$id]);
-                $row = $sc->fetch(PDO::FETCH_NUM);
-                $declaredCbm = (float) ($row[0] ?? 0);
-                $declaredWeight = (float) ($row[1] ?? 0);
+                $itemsInput = $input['items'] ?? [];
                 $config = require dirname(__DIR__, 2) . '/backend/config/config.php';
                 $thresholdPct = $config['variance_threshold_percent'] ?? 10;
                 $thresholdAbs = $config['variance_threshold_abs_cbm'] ?? 0.1;
-                $variancePct = $declaredCbm > 0 ? abs($actualCbm - $declaredCbm) / $declaredCbm * 100 : 0;
-                $varianceAbs = abs($actualCbm - $declaredCbm);
-                $hasVariance = $variancePct >= $thresholdPct || $varianceAbs >= $thresholdAbs || $condition !== 'good';
+                $photoEvidencePerItem = (int) ($config['photo_evidence_per_item'] ?? 0);
+                $itemLevelEnabled = (int) ($config['item_level_receiving_enabled'] ?? 0);
+
+                $orderItems = $pdo->prepare("SELECT id, declared_cbm, declared_weight FROM order_items WHERE order_id = ?");
+                $orderItems->execute([$id]);
+                $orderItemsRows = $orderItems->fetchAll(PDO::FETCH_ASSOC);
+                $declaredCbm = array_sum(array_column($orderItemsRows, 'declared_cbm'));
+                $declaredWeight = array_sum(array_column($orderItemsRows, 'declared_weight'));
+
+                $hasVariance = false;
+                $itemVariances = [];
+                if (!empty($itemsInput)) {
+                    $sumCbm = 0;
+                    $sumWeight = 0;
+                    $sumCartons = 0;
+                    $errors = [];
+                    foreach ($itemsInput as $idx => $it) {
+                        $oiId = (int) ($it['order_item_id'] ?? 0);
+                        $oi = null;
+                        foreach ($orderItemsRows as $o) {
+                            if ((int) $o['id'] === $oiId) {
+                                $oi = $o;
+                                break;
+                            }
+                        }
+                        if (!$oi) {
+                            $errors["items.$idx.order_item_id"] = 'Invalid order_item_id';
+                            continue;
+                        }
+                        $aCbm = isset($it['actual_cbm']) ? (float) $it['actual_cbm'] : null;
+                        $aWeight = isset($it['actual_weight']) ? (float) $it['actual_weight'] : null;
+                        $aCartons = isset($it['actual_cartons']) ? (int) $it['actual_cartons'] : null;
+                        $itCond = $it['condition'] ?? 'good';
+                        if (!in_array($itCond, ['good', 'damaged', 'partial'])) $itCond = 'good';
+                        $itPhotos = $it['photo_paths'] ?? [];
+                        $decCbm = (float) $oi['declared_cbm'];
+                        $decWeight = (float) $oi['declared_weight'];
+                        $varPct = $decCbm > 0 ? abs(($aCbm ?? 0) - $decCbm) / $decCbm * 100 : 0;
+                        $varAbs = abs(($aCbm ?? 0) - $decCbm);
+                        $itemVar = $varPct >= $thresholdPct || $varAbs >= $thresholdAbs || $itCond !== 'good';
+                        $itemVariances[$oiId] = $itemVar;
+                        if ($itemVar) $hasVariance = true;
+                        if ($aCbm !== null) $sumCbm += $aCbm;
+                        if ($aWeight !== null) $sumWeight += $aWeight;
+                        if ($aCartons !== null) $sumCartons += $aCartons;
+                        if ($photoEvidencePerItem && $itemVar && empty($itPhotos)) {
+                            $errors["items.$idx.photo_paths"] = 'Photo evidence required for item with variance';
+                        }
+                    }
+                    if (!empty($errors)) jsonError('Validation failed', 400, $errors);
+                    $tolerance = 0.01;
+                    if (abs($sumCbm - $actualCbm) > $tolerance || abs($sumWeight - $actualWeight) > $tolerance) {
+                        jsonError('Item-level totals must match order-level actuals (CBM/weight)', 400);
+                    }
+                } else {
+                    $variancePct = $declaredCbm > 0 ? abs($actualCbm - $declaredCbm) / $declaredCbm * 100 : 0;
+                    $varianceAbs = abs($actualCbm - $declaredCbm);
+                    $hasVariance = $variancePct >= $thresholdPct || $varianceAbs >= $thresholdAbs || $condition !== 'good';
+                }
                 if ($hasVariance && empty($photoPaths)) {
                     jsonError('Evidence photos required when variance or damage is present', 400);
                 }
+                if ($itemLevelEnabled && empty($itemsInput)) {
+                    jsonError('Item-level receiving is required; provide items array', 400);
+                }
+
                 $pdo->beginTransaction();
                 try {
                     $pdo->prepare("INSERT INTO warehouse_receipts (order_id, actual_cartons, actual_cbm, actual_weight, receipt_condition, notes, received_by) VALUES (?,?,?,?,?,?,?)")
@@ -241,10 +311,28 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     foreach ($photoPaths as $path) {
                         $insPhoto->execute([$receiptId, $path]);
                     }
+                    if (!empty($itemsInput)) {
+                        $insItem = $pdo->prepare("INSERT INTO warehouse_receipt_items (receipt_id, order_item_id, actual_cartons, actual_cbm, actual_weight, receipt_condition, variance_detected, notes) VALUES (?,?,?,?,?,?,?,?)");
+                        $insItemPhoto = $pdo->prepare("INSERT INTO warehouse_receipt_item_photos (receipt_item_id, file_path) VALUES (?,?)");
+                        foreach ($itemsInput as $it) {
+                            $oiId = (int) ($it['order_item_id'] ?? 0);
+                            $aCbm = isset($it['actual_cbm']) ? (float) $it['actual_cbm'] : null;
+                            $aWeight = isset($it['actual_weight']) ? (float) $it['actual_weight'] : null;
+                            $aCartons = isset($it['actual_cartons']) ? (int) $it['actual_cartons'] : null;
+                            $itCond = in_array($it['condition'] ?? 'good', ['good', 'damaged', 'partial']) ? ($it['condition'] ?? 'good') : 'good';
+                            $varDet = $itemVariances[$oiId] ?? 0;
+                            $insItem->execute([$receiptId, $oiId, $aCartons, $aCbm, $aWeight, $itCond, $varDet ? 1 : 0, $it['notes'] ?? null]);
+                            $riId = (int) $pdo->lastInsertId();
+                            foreach ($it['photo_paths'] ?? [] as $p) {
+                                $insItemPhoto->execute([$riId, $p]);
+                            }
+                        }
+                    }
                     $newStatus = $hasVariance ? 'AwaitingCustomerConfirmation' : 'ReadyForConsolidation';
                     $pdo->prepare("UPDATE orders SET status=? WHERE id=?")->execute([$newStatus, $id]);
                     $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order',?,?,?,?)")
-                        ->execute([$id, 'receive', json_encode(['actual_cbm' => $actualCbm, 'actual_weight' => $actualWeight, 'status' => $newStatus]), $userId]);
+                        ->execute([$id, 'receive', json_encode(['actual_cbm' => $actualCbm, 'actual_weight' => $actualWeight, 'status' => $newStatus, 'receipt_id' => $receiptId]), $userId]);
+                    logClms('order_received', ['order_id' => (int) $id, 'receipt_id' => $receiptId, 'user_id' => $userId, 'item_level' => !empty($itemsInput), 'variance_detected' => $hasVariance]);
                     (new NotificationService($pdo))->notifyOrderReceived((int) $id, $userId, $hasVariance);
                     $pdo->commit();
                     jsonResponse(['data' => ['status' => $newStatus, 'receipt_id' => $receiptId, 'variance_detected' => $hasVariance]]);

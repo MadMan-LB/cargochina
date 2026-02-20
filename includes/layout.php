@@ -50,6 +50,7 @@ $isSuperAdmin = in_array('SuperAdmin', $userRoles);
             </a>
             <ul class="dropdown-menu dropdown-menu-end" id="notificationsMenu" aria-labelledby="notificationsDropdown">
               <li><a class="dropdown-item" href="notifications.php">View all</a></li>
+              <li><a class="dropdown-item" href="notification_preferences.php">Preferences</a></li>
               <li>
                 <hr class="dropdown-divider">
               </li>

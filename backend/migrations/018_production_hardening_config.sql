@@ -1,0 +1,14 @@
+-- CLMS Migration 018: Production hardening config keys
+-- WhatsApp provider (generic|twilio), Twilio credentials, notification retry
+-- Rollback: DELETE FROM system_config WHERE key_name IN ('WHATSAPP_PROVIDER','WHATSAPP_TWILIO_ACCOUNT_SID','WHATSAPP_TWILIO_AUTH_TOKEN','WHATSAPP_TWILIO_FROM','WHATSAPP_TWILIO_TO','NOTIFICATION_MAX_ATTEMPTS','NOTIFICATION_RETRY_SECONDS');
+
+INSERT IGNORE
+INTO system_config
+(key_name, key_value) VALUES
+('WHATSAPP_PROVIDER', 'generic'),
+('WHATSAPP_TWILIO_ACCOUNT_SID', ''),
+('WHATSAPP_TWILIO_AUTH_TOKEN', ''),
+('WHATSAPP_TWILIO_FROM', ''),
+('WHATSAPP_TWILIO_TO', ''),
+('NOTIFICATION_MAX_ATTEMPTS', '3'),
+('NOTIFICATION_RETRY_SECONDS', '60');

@@ -7,12 +7,25 @@
 require_once __DIR__ . '/../helpers.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
-    requireRole(['SuperAdmin']);
-
     $pdo = getDb();
+    if ($id !== 'receiving') {
+        requireRole(['SuperAdmin']);
+    }
 
     switch ($method) {
         case 'GET':
+            if ($id === 'receiving') {
+                $fileConfig = require dirname(__DIR__, 2) . '/backend/config/config.php';
+                $stmt = @$pdo->query("SELECT key_name, key_value FROM system_config WHERE key_name = 'ITEM_LEVEL_RECEIVING_ENABLED'");
+                $val = 0;
+                if ($stmt && $r = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                    $val = (int) $r['key_value'];
+                } else {
+                    $val = (int) ($fileConfig['item_level_receiving_enabled'] ?? 0);
+                }
+                jsonResponse(['data' => ['item_level_receiving_enabled' => $val]]);
+                return;
+            }
             $fileConfig = require dirname(__DIR__, 2) . '/backend/config/config.php';
             $stmt = @$pdo->query("SELECT key_name, key_value FROM system_config");
             if ($stmt) {
@@ -32,13 +45,41 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     elseif ($k === 'TRACKING_PUSH_ENABLED') $fileConfig['tracking_push_enabled'] = (int) $r['key_value'];
                     elseif ($k === 'TRACKING_PUSH_DRY_RUN') $fileConfig['tracking_push_dry_run'] = (int) $r['key_value'];
                     elseif ($k === 'TRACKING_API_PATH') $fileConfig['tracking_api_path'] = trim($r['key_value'] ?? '/api/import/clms');
+                    elseif ($k === 'EMAIL_FROM_ADDRESS') $fileConfig['email_from_address'] = trim($r['key_value'] ?? '');
+                    elseif ($k === 'EMAIL_FROM_NAME') $fileConfig['email_from_name'] = trim($r['key_value'] ?? '');
+                    elseif ($k === 'WHATSAPP_API_URL') $fileConfig['whatsapp_api_url'] = trim($r['key_value'] ?? '');
+                    elseif ($k === 'WHATSAPP_API_TOKEN') $fileConfig['whatsapp_api_token'] = trim($r['key_value'] ?? '');
+                    elseif ($k === 'WHATSAPP_PROVIDER') $fileConfig['whatsapp_provider'] = $r['key_value'] ?? 'generic';
+                    elseif ($k === 'WHATSAPP_TWILIO_ACCOUNT_SID') $fileConfig['whatsapp_twilio_account_sid'] = trim($r['key_value'] ?? '');
+                    elseif ($k === 'WHATSAPP_TWILIO_AUTH_TOKEN') $fileConfig['whatsapp_twilio_auth_token'] = trim($r['key_value'] ?? '');
+                    elseif ($k === 'WHATSAPP_TWILIO_FROM') $fileConfig['whatsapp_twilio_from'] = trim($r['key_value'] ?? '');
+                    elseif ($k === 'WHATSAPP_TWILIO_TO') $fileConfig['whatsapp_twilio_to'] = trim($r['key_value'] ?? '');
+                    elseif ($k === 'ITEM_LEVEL_RECEIVING_ENABLED') $fileConfig['item_level_receiving_enabled'] = (int) $r['key_value'];
+                    elseif ($k === 'PHOTO_EVIDENCE_PER_ITEM') $fileConfig['photo_evidence_per_item'] = (int) $r['key_value'];
+                    elseif ($k === 'NOTIFICATION_MAX_ATTEMPTS') $fileConfig['notification_max_attempts'] = (int) ($r['key_value'] ?? 3);
+                    elseif ($k === 'NOTIFICATION_RETRY_SECONDS') $fileConfig['notification_retry_seconds'] = (int) ($r['key_value'] ?? 60);
                 }
             }
+            $provider = $fileConfig['whatsapp_provider'] ?? 'generic';
+            $fileConfig['whatsapp_available'] = ($provider === 'generic' && !empty(trim($fileConfig['whatsapp_api_url'] ?? '')) && !empty(trim($fileConfig['whatsapp_api_token'] ?? ''))
+                || ($provider === 'twilio' && !empty(trim($fileConfig['whatsapp_twilio_account_sid'] ?? '')) && !empty(trim($fileConfig['whatsapp_twilio_auth_token'] ?? '')) && !empty(trim($fileConfig['whatsapp_twilio_from'] ?? '')) && !empty(trim($fileConfig['whatsapp_twilio_to'] ?? ''));
             if (!empty($fileConfig['tracking_api_token'])) {
                 $fileConfig['tracking_api_token'] = '********';
                 $fileConfig['tracking_api_token_set'] = true;
             } else {
                 $fileConfig['tracking_api_token_set'] = false;
+            }
+            if (!empty($fileConfig['whatsapp_api_token'] ?? '')) {
+                $fileConfig['whatsapp_api_token'] = '********';
+                $fileConfig['whatsapp_api_token_set'] = true;
+            } else {
+                $fileConfig['whatsapp_api_token_set'] = false;
+            }
+            if (!empty($fileConfig['whatsapp_twilio_auth_token'] ?? '')) {
+                $fileConfig['whatsapp_twilio_auth_token'] = '********';
+                $fileConfig['whatsapp_twilio_auth_token_set'] = true;
+            } else {
+                $fileConfig['whatsapp_twilio_auth_token_set'] = false;
             }
             jsonResponse(['data' => $fileConfig]);
             break;
@@ -46,11 +87,40 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         case 'PUT':
             $updates = $input['config'] ?? $input;
             if (empty($updates)) jsonError('No config to update', 400);
-            $allowed = ['VARIANCE_THRESHOLD_PERCENT', 'VARIANCE_THRESHOLD_ABS_CBM', 'CONFIRMATION_REQUIRED', 'CUSTOMER_PHOTO_VISIBILITY', 'MIN_PHOTOS_PER_ITEM', 'NOTIFICATION_CHANNELS', 'TRACKING_API_BASE_URL', 'TRACKING_API_TOKEN', 'TRACKING_API_TIMEOUT_SEC', 'TRACKING_API_RETRY_COUNT', 'TRACKING_API_RETRY_BACKOFF_MS', 'TRACKING_PUSH_ENABLED', 'TRACKING_PUSH_DRY_RUN', 'TRACKING_API_PATH'];
+            $allowed = ['VARIANCE_THRESHOLD_PERCENT', 'VARIANCE_THRESHOLD_ABS_CBM', 'CONFIRMATION_REQUIRED', 'CUSTOMER_PHOTO_VISIBILITY', 'MIN_PHOTOS_PER_ITEM', 'NOTIFICATION_CHANNELS', 'TRACKING_API_BASE_URL', 'TRACKING_API_TOKEN', 'TRACKING_API_TIMEOUT_SEC', 'TRACKING_API_RETRY_COUNT', 'TRACKING_API_RETRY_BACKOFF_MS', 'TRACKING_PUSH_ENABLED', 'TRACKING_PUSH_DRY_RUN', 'TRACKING_API_PATH', 'EMAIL_FROM_ADDRESS', 'EMAIL_FROM_NAME', 'WHATSAPP_API_URL', 'WHATSAPP_API_TOKEN', 'WHATSAPP_PROVIDER', 'WHATSAPP_TWILIO_ACCOUNT_SID', 'WHATSAPP_TWILIO_AUTH_TOKEN', 'WHATSAPP_TWILIO_FROM', 'WHATSAPP_TWILIO_TO', 'ITEM_LEVEL_RECEIVING_ENABLED', 'PHOTO_EVIDENCE_PER_ITEM', 'NOTIFICATION_MAX_ATTEMPTS', 'NOTIFICATION_RETRY_SECONDS'];
+            $maskedKeys = ['TRACKING_API_TOKEN', 'WHATSAPP_API_TOKEN', 'WHATSAPP_TWILIO_AUTH_TOKEN'];
+            $errors = [];
+            foreach (['VARIANCE_THRESHOLD_PERCENT', 'VARIANCE_THRESHOLD_ABS_CBM'] as $k) {
+                if (isset($updates[$k])) {
+                    $v = (float) $updates[$k];
+                    if ($k === 'VARIANCE_THRESHOLD_PERCENT' && ($v < 0 || $v > 100)) $errors[$k] = 'Must be 0–100';
+                    if ($k === 'VARIANCE_THRESHOLD_ABS_CBM' && $v < 0) $errors[$k] = 'Must be ≥ 0';
+                }
+            }
+            if (isset($updates['CUSTOMER_PHOTO_VISIBILITY']) && !in_array($updates['CUSTOMER_PHOTO_VISIBILITY'], ['internal-only', 'customer-visible'], true)) {
+                $errors['CUSTOMER_PHOTO_VISIBILITY'] = 'Must be internal-only or customer-visible';
+            }
+            if (isset($updates['WHATSAPP_API_URL']) && $updates['WHATSAPP_API_URL'] !== '' && !preg_match('#^https?://.+#', $updates['WHATSAPP_API_URL'])) {
+                $errors['WHATSAPP_API_URL'] = 'Must be valid HTTP(S) URL';
+            }
+            if (isset($updates['WHATSAPP_PROVIDER']) && !in_array($updates['WHATSAPP_PROVIDER'], ['generic', 'twilio'], true)) {
+                $errors['WHATSAPP_PROVIDER'] = 'Must be generic or twilio';
+            }
+            if (isset($updates['NOTIFICATION_MAX_ATTEMPTS'])) {
+                $n = (int) $updates['NOTIFICATION_MAX_ATTEMPTS'];
+                if ($n < 1 || $n > 10) $errors['NOTIFICATION_MAX_ATTEMPTS'] = 'Must be 1–10';
+            }
+            if (isset($updates['NOTIFICATION_RETRY_SECONDS'])) {
+                $n = (int) $updates['NOTIFICATION_RETRY_SECONDS'];
+                if ($n < 1 || $n > 3600) $errors['NOTIFICATION_RETRY_SECONDS'] = 'Must be 1–3600';
+            }
+            if (!empty($errors)) {
+                jsonError('Validation failed', 400, $errors);
+            }
             $stmt = $pdo->prepare("INSERT INTO system_config (key_name, key_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE key_value = VALUES(key_value)");
             foreach ($updates as $k => $v) {
                 if (in_array($k, $allowed)) {
-                    if ($k === 'TRACKING_API_TOKEN' && $v === '********') continue;
+                    if (in_array($k, $maskedKeys) && $v === '********') continue;
                     $stmt->execute([$k, (string) $v]);
                 }
             }
