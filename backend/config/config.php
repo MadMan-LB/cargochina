@@ -27,8 +27,10 @@ $base = [
     'customer_photo_visibility' => $_ENV['CUSTOMER_PHOTO_VISIBILITY'] ?? 'internal-only',
     'min_photos_per_item' => (int) ($_ENV['MIN_PHOTOS_PER_ITEM'] ?? 1),
     'notification_channels' => array_map('trim', explode(',', $_ENV['NOTIFICATION_CHANNELS'] ?? 'dashboard')),
-    'upload_max_size' => (int) ($_ENV['UPLOAD_MAX_SIZE'] ?? 5242880),
-    'upload_allowed_extensions' => ['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf'],
+    'upload_max_mb' => (float) ($_ENV['UPLOAD_MAX_MB'] ?? 8),
+    'upload_max_size' => (int) ($_ENV['UPLOAD_MAX_SIZE'] ?? (int)(($_ENV['UPLOAD_MAX_MB'] ?? 8) * 1048576)),
+    'upload_allowed_types' => array_map('trim', explode(',', $_ENV['UPLOAD_ALLOWED_TYPES'] ?? 'jpg,jpeg,png,webp')),
+    'upload_allowed_extensions' => array_map('trim', explode(',', $_ENV['UPLOAD_ALLOWED_TYPES'] ?? 'jpg,jpeg,png,webp')),
     'tracking_api_base_url' => trim($_ENV['TRACKING_API_BASE_URL'] ?? ''),
     'tracking_api_token' => trim($_ENV['TRACKING_API_TOKEN'] ?? ''),
     'tracking_api_timeout_sec' => (int) ($_ENV['TRACKING_API_TIMEOUT_SEC'] ?? 15),
@@ -86,7 +88,15 @@ try {
                 elseif ($k === 'PHOTO_EVIDENCE_PER_ITEM') $base['photo_evidence_per_item'] = (int) $r['key_value'];
                 elseif ($k === 'NOTIFICATION_MAX_ATTEMPTS') $base['notification_max_attempts'] = (int) ($r['key_value'] ?? 3);
                 elseif ($k === 'NOTIFICATION_RETRY_SECONDS') $base['notification_retry_seconds'] = (int) ($r['key_value'] ?? 60);
+                elseif ($k === 'UPLOAD_MAX_MB') $base['upload_max_mb'] = (float) $r['key_value'];
+                elseif ($k === 'UPLOAD_ALLOWED_TYPES') $base['upload_allowed_types'] = array_map('trim', explode(',', $r['key_value'] ?? ''));
             }
+        }
+        if (isset($base['upload_max_mb'])) {
+            $base['upload_max_size'] = (int) ($base['upload_max_mb'] * 1048576);
+        }
+        if (isset($base['upload_allowed_types'])) {
+            $base['upload_allowed_extensions'] = $base['upload_allowed_types'];
         }
     }
 } catch (Throwable $e) {

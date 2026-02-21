@@ -67,10 +67,10 @@ require 'includes/layout.php';
             <div class="col-12 col-md-4 mb-2"><label class="form-label">Supplier *</label><input type="text" class="form-control" id="orderSupplier" placeholder="Type to search..." required></div>
             <div class="col-12 col-md-4 mb-2"><label class="form-label">Expected Ready Date *</label><input type="date" class="form-control" id="orderExpectedDate" required></div>
           </div>
-          <h6>Items</h6>
-          <p class="text-muted small">Min 1 photo per item required to submit. Totals computed live.</p>
+          <h6 class="mb-2">Items</h6>
+          <p class="text-muted small mb-3">Min 1 photo per item required to submit. Totals computed live.</p>
           <div class="table-responsive">
-            <table class="table table-sm">
+            <table class="table table-sm table-hover">
               <thead>
                 <tr>
                   <th>Photo</th>
@@ -88,9 +88,18 @@ require 'includes/layout.php';
                 </tr>
               </thead>
               <tbody id="orderItemsBody"></tbody>
+              <tfoot>
+                <tr class="order-totals-row" id="orderTotalsRow">
+                  <td colspan="8" class="text-end">Totals:</td>
+                  <td id="orderTotalAmount">0</td>
+                  <td id="orderTotalCbm">0</td>
+                  <td id="orderTotalWeight">0</td>
+                  <td></td>
+                </tr>
+              </tfoot>
             </table>
           </div>
-          <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addOrderItem()">+ Add Item</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm mt-2" onclick="addOrderItem()">+ Add Item</button>
         </form>
       </div>
       <div class="modal-footer">

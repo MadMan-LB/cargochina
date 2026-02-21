@@ -8,14 +8,29 @@ require_once __DIR__ . '/../helpers.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
-    if ($id !== 'receiving') {
+    if ($id !== 'receiving' && $id !== 'upload') {
         requireRole(['SuperAdmin']);
     }
 
     switch ($method) {
         case 'GET':
+            if ($id === 'upload') {
+                $fileConfig = require dirname(__DIR__, 2) . '/config/config.php';
+                $stmt = @$pdo->query("SELECT key_name, key_value FROM system_config WHERE key_name IN ('UPLOAD_MAX_MB','UPLOAD_ALLOWED_TYPES')");
+                if ($stmt) {
+                    while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                        if ($r['key_name'] === 'UPLOAD_MAX_MB') $fileConfig['upload_max_mb'] = (float) $r['key_value'];
+                        elseif ($r['key_name'] === 'UPLOAD_ALLOWED_TYPES') $fileConfig['upload_allowed_types'] = array_map('trim', explode(',', $r['key_value'] ?? ''));
+                    }
+                }
+                jsonResponse(['data' => [
+                    'max_upload_mb' => (float) ($fileConfig['upload_max_mb'] ?? 8),
+                    'allowed_types' => $fileConfig['upload_allowed_types'] ?? ['jpg', 'jpeg', 'png', 'webp'],
+                ]]);
+                return;
+            }
             if ($id === 'receiving') {
-                $fileConfig = require dirname(__DIR__, 2) . '/backend/config/config.php';
+                $fileConfig = require dirname(__DIR__, 2) . '/config/config.php';
                 $stmt = @$pdo->query("SELECT key_name, key_value FROM system_config WHERE key_name = 'ITEM_LEVEL_RECEIVING_ENABLED'");
                 $val = 0;
                 if ($stmt && $r = $stmt->fetch(PDO::FETCH_ASSOC)) {
@@ -26,7 +41,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 jsonResponse(['data' => ['item_level_receiving_enabled' => $val]]);
                 return;
             }
-            $fileConfig = require dirname(__DIR__, 2) . '/backend/config/config.php';
+            $fileConfig = require dirname(__DIR__, 2) . '/config/config.php';
             $stmt = @$pdo->query("SELECT key_name, key_value FROM system_config");
             if ($stmt) {
                 while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
@@ -61,8 +76,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
             }
             $provider = $fileConfig['whatsapp_provider'] ?? 'generic';
-            $fileConfig['whatsapp_available'] = ($provider === 'generic' && !empty(trim($fileConfig['whatsapp_api_url'] ?? '')) && !empty(trim($fileConfig['whatsapp_api_token'] ?? ''))
-                || ($provider === 'twilio' && !empty(trim($fileConfig['whatsapp_twilio_account_sid'] ?? '')) && !empty(trim($fileConfig['whatsapp_twilio_auth_token'] ?? '')) && !empty(trim($fileConfig['whatsapp_twilio_from'] ?? '')) && !empty(trim($fileConfig['whatsapp_twilio_to'] ?? ''));
+            $waUrl = trim($fileConfig['whatsapp_api_url'] ?? '');
+            $waToken = trim($fileConfig['whatsapp_api_token'] ?? '');
+            $waSid = trim($fileConfig['whatsapp_twilio_account_sid'] ?? '');
+            $waAuth = trim($fileConfig['whatsapp_twilio_auth_token'] ?? '');
+            $waFrom = trim($fileConfig['whatsapp_twilio_from'] ?? '');
+            $waTo = trim($fileConfig['whatsapp_twilio_to'] ?? '');
+            $fileConfig['whatsapp_available'] = ($provider === 'generic' && $waUrl !== '' && $waToken !== '')
+                || ($provider === 'twilio' && $waSid !== '' && $waAuth !== '' && $waFrom !== '' && $waTo !== '');
             if (!empty($fileConfig['tracking_api_token'])) {
                 $fileConfig['tracking_api_token'] = '********';
                 $fileConfig['tracking_api_token_set'] = true;
@@ -87,7 +108,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         case 'PUT':
             $updates = $input['config'] ?? $input;
             if (empty($updates)) jsonError('No config to update', 400);
-            $allowed = ['VARIANCE_THRESHOLD_PERCENT', 'VARIANCE_THRESHOLD_ABS_CBM', 'CONFIRMATION_REQUIRED', 'CUSTOMER_PHOTO_VISIBILITY', 'MIN_PHOTOS_PER_ITEM', 'NOTIFICATION_CHANNELS', 'TRACKING_API_BASE_URL', 'TRACKING_API_TOKEN', 'TRACKING_API_TIMEOUT_SEC', 'TRACKING_API_RETRY_COUNT', 'TRACKING_API_RETRY_BACKOFF_MS', 'TRACKING_PUSH_ENABLED', 'TRACKING_PUSH_DRY_RUN', 'TRACKING_API_PATH', 'EMAIL_FROM_ADDRESS', 'EMAIL_FROM_NAME', 'WHATSAPP_API_URL', 'WHATSAPP_API_TOKEN', 'WHATSAPP_PROVIDER', 'WHATSAPP_TWILIO_ACCOUNT_SID', 'WHATSAPP_TWILIO_AUTH_TOKEN', 'WHATSAPP_TWILIO_FROM', 'WHATSAPP_TWILIO_TO', 'ITEM_LEVEL_RECEIVING_ENABLED', 'PHOTO_EVIDENCE_PER_ITEM', 'NOTIFICATION_MAX_ATTEMPTS', 'NOTIFICATION_RETRY_SECONDS'];
+            $allowed = ['VARIANCE_THRESHOLD_PERCENT', 'VARIANCE_THRESHOLD_ABS_CBM', 'CONFIRMATION_REQUIRED', 'CUSTOMER_PHOTO_VISIBILITY', 'MIN_PHOTOS_PER_ITEM', 'NOTIFICATION_CHANNELS', 'TRACKING_API_BASE_URL', 'TRACKING_API_TOKEN', 'TRACKING_API_TIMEOUT_SEC', 'TRACKING_API_RETRY_COUNT', 'TRACKING_API_RETRY_BACKOFF_MS', 'TRACKING_PUSH_ENABLED', 'TRACKING_PUSH_DRY_RUN', 'TRACKING_API_PATH', 'EMAIL_FROM_ADDRESS', 'EMAIL_FROM_NAME', 'WHATSAPP_API_URL', 'WHATSAPP_API_TOKEN', 'WHATSAPP_PROVIDER', 'WHATSAPP_TWILIO_ACCOUNT_SID', 'WHATSAPP_TWILIO_AUTH_TOKEN', 'WHATSAPP_TWILIO_FROM', 'WHATSAPP_TWILIO_TO', 'ITEM_LEVEL_RECEIVING_ENABLED', 'PHOTO_EVIDENCE_PER_ITEM', 'NOTIFICATION_MAX_ATTEMPTS', 'NOTIFICATION_RETRY_SECONDS', 'UPLOAD_MAX_MB', 'UPLOAD_ALLOWED_TYPES'];
             $maskedKeys = ['TRACKING_API_TOKEN', 'WHATSAPP_API_TOKEN', 'WHATSAPP_TWILIO_AUTH_TOKEN'];
             $errors = [];
             foreach (['VARIANCE_THRESHOLD_PERCENT', 'VARIANCE_THRESHOLD_ABS_CBM'] as $k) {
@@ -113,6 +134,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if (isset($updates['NOTIFICATION_RETRY_SECONDS'])) {
                 $n = (int) $updates['NOTIFICATION_RETRY_SECONDS'];
                 if ($n < 1 || $n > 3600) $errors['NOTIFICATION_RETRY_SECONDS'] = 'Must be 1–3600';
+            }
+            if (isset($updates['UPLOAD_MAX_MB'])) {
+                $m = (float) $updates['UPLOAD_MAX_MB'];
+                if ($m < 0.5 || $m > 50) $errors['UPLOAD_MAX_MB'] = 'Must be 0.5–50';
+            }
+            if (isset($updates['UPLOAD_ALLOWED_TYPES'])) {
+                $t = is_array($updates['UPLOAD_ALLOWED_TYPES']) ? $updates['UPLOAD_ALLOWED_TYPES'] : array_map('trim', explode(',', (string) $updates['UPLOAD_ALLOWED_TYPES']));
+                $allowed = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+                if (!empty(array_diff(array_map('strtolower', $t), $allowed))) $errors['UPLOAD_ALLOWED_TYPES'] = 'Only jpg,jpeg,png,webp,gif allowed';
             }
             if (!empty($errors)) {
                 jsonError('Validation failed', 400, $errors);

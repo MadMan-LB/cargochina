@@ -100,17 +100,27 @@ function addOrderItem() {
     <td><span class="item-total-amount" data-idx="${idx}">0</span></td>
     <td><input type="number" step="0.0001" class="form-control form-control-sm item-cbm" required min="0" placeholder="0" data-idx="${idx}"></td>
     <td><input type="number" step="0.0001" class="form-control form-control-sm item-weight" required min="0" placeholder="0" data-idx="${idx}"></td>
-    <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()">×</button></td>`;
+    <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove(); updateOrderTotals();">×</button></td>`;
     tbody.appendChild(row);
     row.querySelector(".item-photo-input").addEventListener("change", (e) =>
         handleItemPhoto(e, idx),
     );
-    ["item-cartons", "item-qty-per-ctn", "item-unit-price", "item-qty"].forEach(
-        (cls) => {
-            const el = row.querySelector(`.${cls}`);
-            if (el) el.addEventListener("input", () => updateItemComputed(idx));
-        },
-    );
+    [
+        "item-cartons",
+        "item-qty-per-ctn",
+        "item-unit-price",
+        "item-qty",
+        "item-cbm",
+        "item-weight",
+    ].forEach((cls) => {
+        const el = row.querySelector(`.${cls}`);
+        if (el)
+            el.addEventListener("input", () => {
+                updateItemComputed(idx);
+                updateOrderTotals();
+            });
+    });
+    updateOrderTotals();
 }
 
 async function handleItemPhoto(e, idx) {
@@ -153,6 +163,26 @@ function updateItemComputed(idx) {
     const qtyInput = tr.querySelector(".item-qty");
     if (cartons > 0 && qtyPerCtn > 0) qtyInput.value = totalQty;
     tr.querySelector(".item-total-amount").textContent = totalAmount;
+    updateOrderTotals();
+}
+
+function updateOrderTotals() {
+    let totalAmount = 0,
+        totalCbm = 0,
+        totalWeight = 0;
+    document.querySelectorAll("#orderItemsBody tr[data-idx]").forEach((tr) => {
+        totalAmount += parseFloat(
+            tr.querySelector(".item-total-amount")?.textContent || 0,
+        );
+        totalCbm += parseFloat(tr.querySelector(".item-cbm")?.value || 0);
+        totalWeight += parseFloat(tr.querySelector(".item-weight")?.value || 0);
+    });
+    const elAmount = document.getElementById("orderTotalAmount");
+    const elCbm = document.getElementById("orderTotalCbm");
+    const elWeight = document.getElementById("orderTotalWeight");
+    if (elAmount) elAmount.textContent = totalAmount.toFixed(2);
+    if (elCbm) elCbm.textContent = totalCbm.toFixed(2);
+    if (elWeight) elWeight.textContent = totalWeight.toFixed(0);
 }
 
 async function editOrder(id) {

@@ -11,9 +11,10 @@ function jsonResponse(array $data, int $status = 200): void
     exit;
 }
 
-function jsonError(string $message, int $status = 400, array $errors = []): void
+function jsonError(string $message, int $status = 400, array $errors = [], ?string $requestId = null): void
 {
-    $body = ['error' => true, 'message' => $message];
+    $requestId = $requestId ?? bin2hex(random_bytes(8));
+    $body = ['error' => true, 'message' => $message, 'request_id' => $requestId];
     if (!empty($errors)) {
         $body['errors'] = $errors;
     }

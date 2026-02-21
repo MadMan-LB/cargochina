@@ -23,7 +23,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $roleStmt = $pdo->prepare("SELECT r.code FROM roles r JOIN user_roles ur ON r.id = ur.role_id WHERE ur.user_id = ?");
       $roleStmt->execute([$user['id']]);
       $_SESSION['user_roles'] = array_column($roleStmt->fetchAll(PDO::FETCH_ASSOC), 'code');
-      header('Location: index.php');
+      $roles = $_SESSION['user_roles'];
+      if (in_array('SuperAdmin', $roles)) {
+        header('Location: /cargochina/superadmin/');
+      } elseif (in_array('WarehouseStaff', $roles) && !in_array('SuperAdmin', $roles)) {
+        header('Location: /cargochina/warehouse/');
+      } elseif (in_array('ChinaAdmin', $roles)) {
+        header('Location: /cargochina/buyers/');
+      } elseif (in_array('LebanonAdmin', $roles)) {
+        header('Location: /cargochina/admin/');
+      } else {
+        header('Location: /cargochina/warehouse/');
+      }
       exit;
     }
   }

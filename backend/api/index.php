@@ -77,7 +77,7 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'config' && $id !== 'receiving' && !hasAnyRole($rbac['config'] ?? [])) {
+    if ($resource === 'config' && $id !== 'receiving' && $id !== 'upload' && !hasAnyRole($rbac['config'] ?? [])) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
@@ -107,7 +107,29 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
+    if ($resource === 'receiving' && !hasAnyRole(['WarehouseStaff', 'SuperAdmin'])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
 }
 
-$handler = require $handlerFile;
-$handler($method, $id, $action, $input);
+try {
+    $handler = require $handlerFile;
+    $handler($method, $id, $action, $input);
+} catch (Throwable $e) {
+    $requestId = bin2hex(random_bytes(8));
+    $logDir = dirname(__DIR__, 2) . '/logs';
+    if (is_dir($logDir)) {
+        @error_log(date('Y-m-d H:i:s') . " [{$requestId}] " . $e->getMessage() . "\n" . $e->getTraceAsString() . "\n", 3, $logDir . '/php_errors.log');
+    }
+    $isDev = (($_SERVER['SERVER_NAME'] ?? '') === 'localhost' || ($_ENV['APP_ENV'] ?? '') === 'development');
+    $message = $isDev ? $e->getMessage() . ' (ref: ' . $requestId . ')' : 'An error occurred. Please try again or contact support. (ref: ' . $requestId . ')';
+    http_response_code(500);
+    echo json_encode([
+        'error' => true,
+        'message' => $message,
+        'request_id' => $requestId,
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}

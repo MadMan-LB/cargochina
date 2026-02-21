@@ -38,13 +38,14 @@ async function loadContainers() {
         const res = await api("GET", "/containers");
         const rows = res.data || [];
         document.getElementById("containersBody").innerHTML =
-            rows
-                .map(
-                    (c) =>
-                        `<tr><td>${escapeHtml(c.code)}</td><td>${c.max_cbm}</td><td>${c.max_weight}</td></tr>`,
-                )
-                .join("") ||
-            '<tr><td colspan="3" class="text-muted">No containers</td></tr>';
+            rows.length > 0
+                ? rows
+                      .map(
+                          (c) =>
+                              `<tr><td>${escapeHtml(c.code)}</td><td>${c.max_cbm}</td><td>${c.max_weight}</td></tr>`,
+                      )
+                      .join("")
+                : '<tr><td colspan="3" class="text-center py-4 text-muted"><span class="d-block mb-1">No containers yet</span><small>Click "+ Add Container" to create one</small></td></tr>';
     } catch (e) {
         showToast(e.message, "danger");
     }
@@ -88,7 +89,8 @@ async function loadShipmentDrafts() {
       </div>
     `;
                 })
-                .join("") || '<p class="text-muted">No shipment drafts</p>';
+                .join("") ||
+            '<p class="text-center py-4 text-muted mb-0"><span class="d-block mb-1">No shipment drafts</span><small>Click "+ New Draft" to create one</small></p>';
     } catch (e) {
         showToast(e.message, "danger");
     }

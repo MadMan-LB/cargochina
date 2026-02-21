@@ -8,7 +8,7 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
-require_once dirname(__DIR__, 2) . '/backend/services/NotificationService.php';
+require_once dirname(__DIR__, 2) . '/services/NotificationService.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
     requireRole(['SuperAdmin']);
@@ -58,11 +58,17 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
     if ($id === 'config-health') {
         if ($method === 'GET') {
-            $config = require dirname(__DIR__, 2) . '/backend/config/config.php';
-            $emailConfigured = !empty(trim($config['email_from_address'] ?? ''));
+            $config = require dirname(__DIR__, 2) . '/config/config.php';
+            $emailConfigured = trim($config['email_from_address'] ?? '') !== '';
             $provider = $config['whatsapp_provider'] ?? 'generic';
-            $whatsappConfigured = ($provider === 'generic' && !empty(trim($config['whatsapp_api_url'] ?? '')) && !empty(trim($config['whatsapp_api_token'] ?? ''))
-                || ($provider === 'twilio' && !empty(trim($config['whatsapp_twilio_account_sid'] ?? '')) && !empty(trim($config['whatsapp_twilio_auth_token'] ?? '')) && !empty(trim($config['whatsapp_twilio_from'] ?? '')) && !empty(trim($config['whatsapp_twilio_to'] ?? ''));
+            $waUrl = trim($config['whatsapp_api_url'] ?? '');
+            $waToken = trim($config['whatsapp_api_token'] ?? '');
+            $waSid = trim($config['whatsapp_twilio_account_sid'] ?? '');
+            $waAuth = trim($config['whatsapp_twilio_auth_token'] ?? '');
+            $waFrom = trim($config['whatsapp_twilio_from'] ?? '');
+            $waTo = trim($config['whatsapp_twilio_to'] ?? '');
+            $whatsappConfigured = ($provider === 'generic' && $waUrl !== '' && $waToken !== '')
+                || ($provider === 'twilio' && $waSid !== '' && $waAuth !== '' && $waFrom !== '' && $waTo !== '');
             $itemLevelEnabled = (int) ($config['item_level_receiving_enabled'] ?? 0);
             $retryConfigured = ((int) ($config['notification_max_attempts'] ?? 3)) >= 1 && ((int) ($config['notification_retry_seconds'] ?? 60)) >= 1;
             jsonResponse(['data' => [

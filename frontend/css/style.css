@@ -103,3 +103,38 @@ body {
     transform: rotate(360deg);
   }
 }
+
+/* Order modal - sticky header, scrollable items */
+#orderModal .modal-body .table-responsive {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+#orderModal .modal-body .table thead th {
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 1;
+  box-shadow: 0 1px 0 #dee2e6;
+  white-space: nowrap;
+  font-size: 0.8rem;
+}
+
+#orderModal .modal-body .table td {
+  vertical-align: middle;
+}
+
+#orderModal .modal-body .table .item-desc {
+  min-width: 140px;
+}
+
+#orderModal .modal-body .table .item-cbm,
+#orderModal .modal-body .table .item-weight {
+  width: 70px;
+}
+
+#orderModal .order-totals-row {
+  background: #f8f9fa;
+  font-weight: 600;
+  border-top: 2px solid #dee2e6;
+}

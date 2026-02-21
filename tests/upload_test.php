@@ -66,5 +66,17 @@ test('Upload valid image returns JSON (data or error, never HTML)', function () 
     throw new Exception('Expected data or error, got: ' . substr($out, 0, 200));
 });
 
+test('Upload oversize returns JSON error with max_upload_mb and file_size_mb', function () use ($root) {
+    $tmp = sys_get_temp_dir() . '/clms_test_' . uniqid() . '.jpg';
+    file_put_contents($tmp, str_repeat('x', 10 * 1024 * 1024));
+    $out = runUploadInSubprocess($root, ['file' => ['name' => 'big.jpg', 'type' => 'image/jpeg', 'tmp_name' => $tmp, 'error' => UPLOAD_ERR_OK, 'size' => 10 * 1024 * 1024]]);
+    @unlink($tmp);
+    $j = json_decode($out, true);
+    if (!$j || !isset($j['error'])) throw new Exception('Expected error, got: ' . substr($out, 0, 200));
+    if (!isset($j['error']['max_upload_mb']) || !isset($j['error']['file_size_mb'])) {
+        throw new Exception('Expected max_upload_mb and file_size_mb in error, got: ' . json_encode($j['error']));
+    }
+});
+
 echo "\nTotal: $passed passed, $failed failed\n";
 exit($failed > 0 ? 1 : 0);

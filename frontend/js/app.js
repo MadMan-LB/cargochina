@@ -18,12 +18,11 @@ async function api(method, path, body = null) {
     const res = await fetch(API_BASE + path, opts);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
+        const err = data.error === true ? data : data.error || {};
         const msg =
-            (data.error && data.error.message) ||
-            data.message ||
-            res.statusText ||
-            "Request failed";
-        throw new Error(msg);
+            err.message || data.message || res.statusText || "Request failed";
+        const reqId = err.request_id || data.request_id;
+        throw new Error(msg + (reqId ? ` (ref: ${reqId})` : ""));
     }
     return data;
 }
@@ -69,7 +68,13 @@ function setLoading(el, loading) {
     }
 }
 
-async function uploadFile(file) {
+async function uploadFile(file, opts = {}) {
+    if (typeof uploadFileWithProgress === "function") {
+        return uploadFileWithProgress(file, {
+            showToast,
+            ...opts,
+        });
+    }
     const fd = new FormData();
     fd.append("file", file);
     const res = await fetch("/cargochina/api/v1/upload", {
@@ -89,9 +94,10 @@ async function uploadFile(file) {
         );
     }
     if (!res.ok) {
-        const msg =
-            (j.error && j.error.message) || j.message || "Upload failed";
-        throw new Error(msg);
+        const err = j.error || {};
+        const msg = err.message || j.message || "Upload failed";
+        const reqId = err.request_id ? ` (ref: ${err.request_id})` : "";
+        throw new Error(msg + reqId);
     }
     return (
         j.data?.path ||
