@@ -3,8 +3,6 @@ $currentPage = 'orders';
 $pageTitle = 'Orders';
 require 'includes/layout.php';
 ?>
-<link rel="stylesheet" href="frontend/css/style.css">
-<div class="col-12">
   <h1 class="mb-4">Orders</h1>
   <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
@@ -50,7 +48,6 @@ require 'includes/layout.php';
       </div>
     </div>
   </div>
-</div>
 
 <div class="modal fade" id="orderModal" tabindex="-1">
   <div class="modal-dialog modal-xl">

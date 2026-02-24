@@ -3,8 +3,6 @@ $currentPage = 'dashboard';
 $pageTitle = 'Dashboard';
 require 'includes/layout.php';
 ?>
-<link rel="stylesheet" href="frontend/css/style.css">
-<div class="col-12">
   <h1 class="mb-4">CLMS Dashboard</h1>
   <p class="lead">China Logistics Management System — Salameh Cargo</p>
   <div class="row g-4 mt-2">
@@ -36,5 +34,4 @@ require 'includes/layout.php';
       </div>
     </div>
   </div>
-</div>
 <?php require 'includes/footer.php'; ?>

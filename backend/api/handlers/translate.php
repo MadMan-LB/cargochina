@@ -5,7 +5,7 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
-require_once dirname(__DIR__, 2) . '/backend/services/TranslationService.php';
+require_once dirname(__DIR__, 2) . '/services/TranslationService.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
     if ($method !== 'POST') {

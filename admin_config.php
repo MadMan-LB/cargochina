@@ -3,8 +3,6 @@ $currentPage = 'admin';
 $pageTitle = 'Configuration';
 require 'includes/layout.php';
 ?>
-<link rel="stylesheet" href="frontend/css/style.css">
-<div class="col-12">
   <h1 class="mb-4">System Configuration</h1>
   <div class="card">
     <div class="card-body">
@@ -95,6 +93,5 @@ require 'includes/layout.php';
       </form>
     </div>
   </div>
-</div>
 <?php $pageScript = 'frontend/js/admin_config.js';
 require 'includes/footer.php'; ?>

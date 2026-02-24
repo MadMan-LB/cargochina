@@ -3,8 +3,6 @@ $currentPage = 'notification_preferences';
 $pageTitle = 'Notification Preferences';
 require 'includes/layout.php';
 ?>
-<link rel="stylesheet" href="frontend/css/style.css">
-<div class="col-12">
   <h1 class="mb-4">Notification Preferences</h1>
   <p class="text-muted">Choose which channels to receive notifications for each event. Dashboard is always on.</p>
   <div class="card">
@@ -25,6 +23,5 @@ require 'includes/layout.php';
       <button type="button" class="btn btn-primary" id="savePrefsBtn" onclick="saveNotificationPreferences()">Save</button>
     </div>
   </div>
-</div>
 <?php $pageScript = 'frontend/js/notification_preferences.js';
 require 'includes/footer.php'; ?>

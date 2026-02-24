@@ -3,8 +3,6 @@ $currentPage = 'admin';
 $pageTitle = 'Diagnostics';
 require 'includes/layout.php';
 ?>
-<link rel="stylesheet" href="frontend/css/style.css">
-<div class="col-12">
   <h1 class="mb-4">Diagnostics</h1>
 
   <div class="card mb-4">
@@ -64,6 +62,5 @@ require 'includes/layout.php';
       </div>
     </div>
   </div>
-</div>
 <?php $pageScript = 'frontend/js/admin_diagnostics.js';
 require 'includes/footer.php'; ?>

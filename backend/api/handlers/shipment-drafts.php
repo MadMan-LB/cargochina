@@ -5,8 +5,8 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
-require_once dirname(__DIR__, 2) . '/backend/services/TrackingPushService.php';
-require_once dirname(__DIR__, 2) . '/backend/services/NotificationService.php';
+require_once dirname(__DIR__, 2) . '/services/TrackingPushService.php';
+require_once dirname(__DIR__, 2) . '/services/NotificationService.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
@@ -140,7 +140,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $pdo->prepare("UPDATE shipment_drafts SET status='finalized' WHERE id=?")->execute([$id]);
                 $ph = implode(',', array_fill(0, count($orderIds), '?'));
                 $pdo->prepare("UPDATE orders SET status='FinalizedAndPushedToTracking' WHERE id IN ($ph)")->execute($orderIds);
-                $config = require dirname(__DIR__, 2) . '/backend/config/config.php';
+                $config = require dirname(__DIR__, 2) . '/config/config.php';
                 $pushEnabled = (int) ($config['tracking_push_enabled'] ?? 0);
                 $trackingResult = null;
                 if ($pushEnabled) {

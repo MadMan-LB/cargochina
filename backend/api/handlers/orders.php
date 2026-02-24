@@ -5,8 +5,8 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
-require_once dirname(__DIR__, 2) . '/backend/services/OrderStateService.php';
-require_once dirname(__DIR__, 2) . '/backend/services/NotificationService.php';
+require_once dirname(__DIR__, 2) . '/services/OrderStateService.php';
+require_once dirname(__DIR__, 2) . '/services/NotificationService.php';
 
 function normalizeOrderItems(array $items): array
 {
@@ -68,7 +68,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $rii = $pdo->prepare("SELECT wri.*, oi.description_cn, oi.description_en FROM warehouse_receipt_items wri JOIN order_items oi ON wri.order_item_id = oi.id WHERE wri.receipt_id = ?");
                 $rii->execute([$receipt['id']]);
                 $row['receipt']['items'] = $rii->fetchAll(PDO::FETCH_ASSOC);
-                $config = require dirname(__DIR__, 2) . '/backend/config/config.php';
+                $config = require dirname(__DIR__, 2) . '/config/config.php';
                 $row['customer_photo_visibility'] = $config['customer_photo_visibility'] ?? 'internal-only';
             }
             jsonResponse(['data' => $row]);
@@ -233,7 +233,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if (!in_array($condition, ['good', 'damaged', 'partial'])) $condition = 'good';
                 $photoPaths = $input['photo_paths'] ?? [];
                 $itemsInput = $input['items'] ?? [];
-                $config = require dirname(__DIR__, 2) . '/backend/config/config.php';
+                $config = require dirname(__DIR__, 2) . '/config/config.php';
                 $thresholdPct = $config['variance_threshold_percent'] ?? 10;
                 $thresholdAbs = $config['variance_threshold_abs_cbm'] ?? 0.1;
                 $photoEvidencePerItem = (int) ($config['photo_evidence_per_item'] ?? 0);
@@ -371,7 +371,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     if ((int) $si->fetchColumn() === 0) {
                         jsonError('Order must have at least one item to submit', 400);
                     }
-                    $config = require dirname(__DIR__, 2) . '/backend/config/config.php';
+                    $config = require dirname(__DIR__, 2) . '/config/config.php';
                     $minPhotos = (int) ($config['min_photos_per_item'] ?? 0);
                     if ($minPhotos > 0) {
                         $itemsWithPhotos = $pdo->prepare("SELECT id, image_paths FROM order_items WHERE order_id = ?");

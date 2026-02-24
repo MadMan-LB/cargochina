@@ -3,8 +3,6 @@ $currentPage = 'admin';
 $pageTitle = 'User Management';
 require 'includes/layout.php';
 ?>
-<link rel="stylesheet" href="frontend/css/style.css">
-<div class="col-12">
   <h1 class="mb-4">User Management</h1>
   <div class="card">
     <div class="card-body">
@@ -22,6 +20,5 @@ require 'includes/layout.php';
       </table>
     </div>
   </div>
-</div>
 <?php $pageScript = 'frontend/js/admin_users.js';
 require 'includes/footer.php'; ?>

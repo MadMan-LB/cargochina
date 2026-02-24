@@ -3,8 +3,6 @@ $currentPage = 'receiving';
 $pageTitle = 'Warehouse Receiving';
 require 'includes/layout.php';
 ?>
-<link rel="stylesheet" href="frontend/css/style.css">
-<div class="col-12">
   <h1 class="mb-4">Warehouse Receiving</h1>
   <div class="card">
     <div class="card-header">Receive Order</div>
@@ -64,7 +62,6 @@ require 'includes/layout.php';
       </div>
     </div>
   </div>
-</div>
 <?php $pageScripts = ['frontend/js/photo_uploader.js'];
 $pageScript = 'frontend/js/receiving.js';
 require 'includes/footer.php'; ?>

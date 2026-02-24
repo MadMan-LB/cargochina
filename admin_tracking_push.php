@@ -3,8 +3,6 @@ $currentPage = 'admin';
 $pageTitle = 'Tracking Push Log';
 require 'includes/layout.php';
 ?>
-<link rel="stylesheet" href="frontend/css/style.css">
-<div class="col-12">
   <h1 class="mb-4">Tracking Push Log</h1>
   <div class="card mb-3">
     <div class="card-body py-2">
@@ -32,7 +30,6 @@ require 'includes/layout.php';
       </div>
     </div>
   </div>
-</div>
 <div class="modal fade" id="errorModal" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content">
