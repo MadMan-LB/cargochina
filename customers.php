@@ -5,17 +5,22 @@ require 'includes/layout.php';
 ?>
 <h1 class="mb-4">Customers</h1>
 <div class="card">
-  <div class="card-header d-flex justify-content-between align-items-center">
-    <span>Customer List</span>
-    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#customerModal" onclick="openCustomerForm()">+ Add Customer</button>
+  <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2 py-3">
+    <span class="fw-semibold">Customer List</span>
+    <div class="d-flex gap-2 align-items-center">
+      <input type="text" class="form-control form-control-sm" id="customerSearch" placeholder="Search by name, code, or phone..." style="min-width:220px">
+      <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#customerModal" onclick="openCustomerForm()">+ Add Customer</button>
+    </div>
   </div>
-  <div class="card-body">
+  <div class="card-body py-3">
     <div id="customersTable" class="table-responsive">
-      <table class="table table-hover">
+      <table class="table table-hover mb-0">
         <thead>
           <tr>
             <th>Code</th>
             <th>Name</th>
+            <th>Phone</th>
+            <th>Address</th>
             <th>Payment Terms</th>
             <th>Actions</th>
           </tr>
@@ -27,7 +32,7 @@ require 'includes/layout.php';
 </div>
 
 <div class="modal fade" id="customerModal" tabindex="-1">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="customerModalTitle">Add Customer</h5>
@@ -36,9 +41,28 @@ require 'includes/layout.php';
       <div class="modal-body">
         <form id="customerForm">
           <input type="hidden" id="customerId">
-          <div class="mb-2"><label class="form-label">Code *</label><input type="text" class="form-control" id="customerCode" required></div>
-          <div class="mb-2"><label class="form-label">Name *</label><input type="text" class="form-control" id="customerName" required></div>
-          <div class="mb-2"><label class="form-label">Payment Terms</label><input type="text" class="form-control" id="customerPaymentTerms"></div>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">Code *</label>
+              <input type="text" class="form-control" id="customerCode" required placeholder="e.g. CUST001">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Name *</label>
+              <input type="text" class="form-control" id="customerName" required placeholder="Full name">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Phone</label>
+              <input type="text" class="form-control" id="customerPhone" placeholder="Phone number">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Payment Terms</label>
+              <input type="text" class="form-control" id="customerPaymentTerms" placeholder="e.g. 30 days, T/T">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Address</label>
+              <textarea class="form-control" id="customerAddress" rows="2" placeholder="Full address"></textarea>
+            </div>
+          </div>
         </form>
       </div>
       <div class="modal-footer">
@@ -48,6 +72,7 @@ require 'includes/layout.php';
     </div>
   </div>
 </div>
+
 <!-- Deposit Modal -->
 <div class="modal fade" id="depositModal" tabindex="-1">
   <div class="modal-dialog">
@@ -108,5 +133,35 @@ require 'includes/layout.php';
     </div>
   </div>
 </div>
-<?php $pageScript = 'frontend/js/customers.js';
+
+<!-- Orders & Shipments Modal -->
+<div class="modal fade" id="ordersModal" tabindex="-1">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Orders & Shipments — <span id="ordersCustomerName"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="text" class="form-control form-control-sm mb-3" id="ordersFilter" placeholder="Filter by status or ID..." style="max-width:280px">
+        <div class="table-responsive">
+          <table class="table table-sm table-hover">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Supplier</th>
+                <th>Expected Ready</th>
+                <th>Status</th>
+                <th>CBM</th>
+                <th>Weight</th>
+              </tr>
+            </thead>
+            <tbody id="ordersModalBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<?php $pageScript = '/cargochina/frontend/js/customers.js';
 require 'includes/footer.php'; ?>

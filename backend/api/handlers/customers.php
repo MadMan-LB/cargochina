@@ -17,13 +17,44 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     jsonResponse(['data' => []]);
                 }
                 $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
-                $stmt = $pdo->prepare("SELECT id, code, name FROM customers WHERE name LIKE ? OR code LIKE ? ORDER BY name LIMIT 10");
-                $stmt->execute([$like, $like]);
+                $cols = ['id', 'code', 'name'];
+                $hasPhone = false;
+                try {
+                    $chk = $pdo->query("SHOW COLUMNS FROM customers LIKE 'phone'");
+                    $hasPhone = $chk && $chk->rowCount() > 0;
+                } catch (Throwable $e) {
+                }
+                if ($hasPhone) $cols[] = 'phone';
+                $sel = implode(', ', $cols);
+                $stmt = $pdo->prepare("SELECT $sel FROM customers WHERE name LIKE ? OR code LIKE ? " . ($hasPhone ? "OR phone LIKE ? " : "") . "ORDER BY name LIMIT 20");
+                $params = [$like, $like];
+                if ($hasPhone) $params[] = $like;
+                $stmt->execute($params);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 jsonResponse(['data' => $rows]);
             }
             if ($id === null) {
-                $stmt = $pdo->query("SELECT * FROM customers ORDER BY name");
+                $q = trim($_GET['q'] ?? '');
+                $sql = "SELECT * FROM customers";
+                $params = [];
+                if (strlen($q) >= 1) {
+                    $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+                    $hasPhone = false;
+                    try {
+                        $chk = $pdo->query("SHOW COLUMNS FROM customers LIKE 'phone'");
+                        $hasPhone = $chk && $chk->rowCount() > 0;
+                    } catch (Throwable $e) {
+                    }
+                    $sql .= " WHERE name LIKE ? OR code LIKE ?";
+                    $params = [$like, $like];
+                    if ($hasPhone) {
+                        $sql .= " OR phone LIKE ?";
+                        $params[] = $like;
+                    }
+                }
+                $sql .= " ORDER BY name";
+                $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
+                if ($params) $stmt->execute($params);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 foreach ($rows as &$r) {
                     $r['contacts'] = $r['contacts'] ? json_decode($r['contacts'], true) : [];
@@ -84,9 +115,32 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $contacts = isset($input['contacts']) ? json_encode($input['contacts']) : null;
             $addresses = isset($input['addresses']) ? json_encode($input['addresses']) : null;
             $paymentTerms = $input['payment_terms'] ?? null;
+            $phone = !empty($input['phone']) ? trim($input['phone']) : null;
+            $address = !empty($input['address']) ? trim($input['address']) : null;
+            $hasPhone = false;
+            $hasAddress = false;
             try {
-                $stmt = $pdo->prepare("INSERT INTO customers (code, name, contacts, addresses, payment_terms) VALUES (?, ?, ?, ?, ?)");
-                $stmt->execute([$code, $name, $contacts, $addresses, $paymentTerms]);
+                $chk = $pdo->query("SHOW COLUMNS FROM customers WHERE Field IN ('phone','address')");
+                $colsExist = $chk ? array_column($chk->fetchAll(PDO::FETCH_ASSOC), 'Field') : [];
+                $hasPhone = in_array('phone', $colsExist, true);
+                $hasAddress = in_array('address', $colsExist, true);
+            } catch (Throwable $e) {
+            }
+            $cols = ['code', 'name', 'contacts', 'addresses', 'payment_terms'];
+            $vals = [$code, $name, $contacts, $addresses, $paymentTerms];
+            if ($hasPhone) {
+                $cols[] = 'phone';
+                $vals[] = $phone;
+            }
+            if ($hasAddress) {
+                $cols[] = 'address';
+                $vals[] = $address;
+            }
+            $ph = implode(',', array_fill(0, count($vals), '?'));
+            $colStr = implode(', ', $cols);
+            try {
+                $stmt = $pdo->prepare("INSERT INTO customers ($colStr) VALUES ($ph)");
+                $stmt->execute($vals);
                 $newId = (int) $pdo->lastInsertId();
                 $stmt = $pdo->prepare("SELECT * FROM customers WHERE id = ?");
                 $stmt->execute([$newId]);
@@ -118,8 +172,30 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $contacts = isset($input['contacts']) ? json_encode($input['contacts']) : null;
             $addresses = isset($input['addresses']) ? json_encode($input['addresses']) : null;
             $paymentTerms = $input['payment_terms'] ?? null;
-            $pdo->prepare("UPDATE customers SET code=?, name=?, contacts=?, addresses=?, payment_terms=? WHERE id=?")
-                ->execute([$code, $name, $contacts, $addresses, $paymentTerms, $id]);
+            $phone = isset($input['phone']) ? trim($input['phone']) : null;
+            $address = isset($input['address']) ? trim($input['address']) : null;
+            $hasPhone = false;
+            $hasAddress = false;
+            try {
+                $chk = $pdo->query("SHOW COLUMNS FROM customers WHERE Field IN ('phone','address')");
+                while ($r = $chk->fetch(PDO::FETCH_ASSOC)) {
+                    if ($r['Field'] === 'phone') $hasPhone = true;
+                    if ($r['Field'] === 'address') $hasAddress = true;
+                }
+            } catch (Throwable $e) {
+            }
+            $sets = ['code=?', 'name=?', 'contacts=?', 'addresses=?', 'payment_terms=?'];
+            $vals = [$code, $name, $contacts, $addresses, $paymentTerms];
+            if ($hasPhone) {
+                $sets[] = 'phone=?';
+                $vals[] = $phone;
+            }
+            if ($hasAddress) {
+                $sets[] = 'address=?';
+                $vals[] = $address;
+            }
+            $vals[] = $id;
+            $pdo->prepare("UPDATE customers SET " . implode(', ', $sets) . " WHERE id=?")->execute($vals);
             $stmt = $pdo->prepare("SELECT * FROM customers WHERE id = ?");
             $stmt->execute([$id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);

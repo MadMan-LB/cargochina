@@ -28,10 +28,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $orderId = $_GET['order_id'] ?? null;
         $dateFrom = $_GET['date_from'] ?? null;
         $dateTo = $_GET['date_to'] ?? null;
+        $shippingCode = trim($_GET['shipping_code'] ?? '');
 
         $placeholders = implode(',', array_fill(0, count($statuses), '?'));
         $sql = "SELECT o.id, o.customer_id, o.supplier_id, o.expected_ready_date, o.status, o.created_at,
-            c.name as customer_name, s.name as supplier_name
+            c.name as customer_name, s.name as supplier_name, s.phone as supplier_phone
             FROM orders o
             JOIN customers c ON o.customer_id = c.id
             JOIN suppliers s ON o.supplier_id = s.id
@@ -57,13 +58,17 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $sql .= " AND o.expected_ready_date <= ?";
             $params[] = $dateTo;
         }
+        if ($shippingCode !== '') {
+            $sql .= " AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND oi.shipping_code LIKE ?)";
+            $params[] = '%' . $shippingCode . '%';
+        }
         $sql .= " ORDER BY o.expected_ready_date ASC, o.id ASC LIMIT 200";
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         foreach ($rows as &$r) {
-            $items = $pdo->prepare("SELECT id, declared_cbm, declared_weight, description_cn, description_en FROM order_items WHERE order_id = ?");
+            $items = $pdo->prepare("SELECT oi.id, oi.shipping_code, oi.cartons, oi.qty_per_carton, oi.declared_cbm, oi.declared_weight, oi.item_length, oi.item_width, oi.item_height, oi.description_cn, oi.description_en, p.hs_code FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?");
             $items->execute([$r['id']]);
             $r['items'] = $items->fetchAll(PDO::FETCH_ASSOC);
             $r['declared_cbm'] = array_sum(array_column($r['items'], 'declared_cbm'));

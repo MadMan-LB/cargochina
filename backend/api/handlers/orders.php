@@ -25,6 +25,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if ($id === null) {
                 $status = $_GET['status'] ?? null;
                 $customerId = $_GET['customer_id'] ?? null;
+                $supplierId = $_GET['supplier_id'] ?? null;
+                $dateFrom = $_GET['date_from'] ?? null;
+                $dateTo = $_GET['date_to'] ?? null;
+                $shippingCode = trim($_GET['shipping_code'] ?? '');
                 $sql = "SELECT o.*, c.name as customer_name, s.name as supplier_name FROM orders o
                     JOIN customers c ON o.customer_id = c.id JOIN suppliers s ON o.supplier_id = s.id WHERE 1=1";
                 $params = [];
@@ -36,7 +40,23 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $sql .= " AND o.customer_id = ?";
                     $params[] = $customerId;
                 }
-                $sql .= " ORDER BY o.created_at DESC";
+                if ($supplierId) {
+                    $sql .= " AND o.supplier_id = ?";
+                    $params[] = $supplierId;
+                }
+                if ($dateFrom) {
+                    $sql .= " AND o.expected_ready_date >= ?";
+                    $params[] = $dateFrom;
+                }
+                if ($dateTo) {
+                    $sql .= " AND o.expected_ready_date <= ?";
+                    $params[] = $dateTo;
+                }
+                if ($shippingCode !== '') {
+                    $sql .= " AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND oi.shipping_code LIKE ?)";
+                    $params[] = '%' . $shippingCode . '%';
+                }
+                $sql .= " ORDER BY o.expected_ready_date ASC, o.created_at DESC";
                 $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
                 if ($params) $stmt->execute($params);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -93,7 +113,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $pdo->prepare("UPDATE orders SET customer_id=?, supplier_id=?, expected_ready_date=? WHERE id=?")
                     ->execute([$customerId, $supplierId, $expectedDate, $id]);
                 $pdo->prepare("DELETE FROM order_items WHERE order_id = ?")->execute([$id]);
-                $insItem = $pdo->prepare("INSERT INTO order_items (order_id, product_id, item_no, shipping_code, cartons, qty_per_carton, quantity, unit, declared_cbm, declared_weight, unit_price, total_amount, notes, image_paths, description_cn, description_en) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+                $insItem = $pdo->prepare("INSERT INTO order_items (order_id, product_id, item_no, shipping_code, cartons, qty_per_carton, quantity, unit, declared_cbm, declared_weight, item_length, item_width, item_height, unit_price, total_amount, notes, image_paths, description_cn, description_en) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
                 foreach ($items as $it) {
                     $qty = (float) ($it['quantity'] ?? 0);
                     $cartons = isset($it['cartons']) ? (int) $it['cartons'] : null;
@@ -101,6 +121,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     if ($cartons !== null && $qtyPerCtn !== null && $qtyPerCtn > 0) {
                         $qty = $cartons * $qtyPerCtn;
                     }
+                    $l = isset($it['item_length']) ? (float) $it['item_length'] : null;
+                    $w = isset($it['item_width']) ? (float) $it['item_width'] : null;
+                    $h = isset($it['item_height']) ? (float) $it['item_height'] : null;
                     $unitPrice = isset($it['unit_price']) ? (float) $it['unit_price'] : null;
                     $totalAmount = isset($it['total_amount']) ? (float) $it['total_amount'] : ($unitPrice !== null && $qty > 0 ? $unitPrice * $qty : null);
                     $imagePaths = isset($it['image_paths']) && is_array($it['image_paths']) ? json_encode($it['image_paths']) : null;
@@ -115,6 +138,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         $it['unit'] ?? 'pieces',
                         (float) ($it['declared_cbm'] ?? 0),
                         (float) ($it['declared_weight'] ?? 0),
+                        $l,
+                        $w,
+                        $h,
                         $unitPrice,
                         $totalAmount,
                         $it['notes'] ?? null,

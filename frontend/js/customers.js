@@ -1,35 +1,60 @@
-document.addEventListener("DOMContentLoaded", loadCustomers);
+let searchTimeout = null;
+
+document.addEventListener("DOMContentLoaded", () => {
+    loadCustomers();
+    const searchInput = document.getElementById("customerSearch");
+    if (searchInput) {
+        searchInput.addEventListener("input", () => {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(loadCustomers, 250);
+        });
+    }
+});
+
+function esc(s) {
+    if (s == null || s === undefined) return "";
+    const d = document.createElement("div");
+    d.textContent = String(s);
+    return d.innerHTML;
+}
 
 async function loadCustomers() {
+    const tbody = document.querySelector("#customersTable tbody");
+    if (!tbody) return;
     try {
-        const res = await api("GET", "/customers");
+        const q =
+            document.getElementById("customerSearch")?.value?.trim() || "";
+        const path = q ? "/customers?q=" + encodeURIComponent(q) : "/customers";
+        const res = await api("GET", path);
         const rows = res.data || [];
-        const tbody = document.querySelector("#customersTable tbody");
         tbody.innerHTML =
             rows
                 .map(
                     (r) => `
       <tr>
-        <td>${escapeHtml(r.code)}</td>
-        <td>${escapeHtml(r.name)}</td>
-        <td>${escapeHtml(r.payment_terms || "-")}</td>
+        <td>${esc(r.code)}</td>
+        <td>${esc(r.name)}</td>
+        <td>${esc(r.phone || "-")}</td>
+        <td class="text-truncate" style="max-width:180px" title="${esc(r.address || "")}">${esc((r.address || "-").substring(0, 50))}${(r.address || "").length > 50 ? "…" : ""}</td>
+        <td>${esc(r.payment_terms || "-")}</td>
         <td class="table-actions">
-          <button class="btn btn-sm btn-outline-primary" onclick="editCustomer(${r.id})">Edit</button>
-          <button class="btn btn-sm btn-outline-success" onclick="openDepositModal(${r.id}, '${escapeHtml(r.name).replace(/'/g, "\\'")}')">Deposit</button>
-          <button class="btn btn-sm btn-outline-info" onclick="showBalance(${r.id}, '${escapeHtml(r.name).replace(/'/g, "\\'")}')">Balance</button>
-          <button class="btn btn-sm btn-outline-danger" onclick="deleteCustomer(${r.id}, '${escapeHtml(r.name)}')">Del</button>
+          <button type="button" class="btn btn-sm btn-outline-primary" onclick="editCustomer(${r.id})">Edit</button>
+          <button type="button" class="btn btn-sm btn-outline-info" onclick="showOrders(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Orders</button>
+          <button type="button" class="btn btn-sm btn-outline-success" onclick="openDepositModal(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Deposit</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="showBalance(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Balance</button>
+          <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteCustomer(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Del</button>
         </td>
       </tr>
     `,
                 )
                 .join("") ||
-            '<tr><td colspan="4" class="text-muted">No customers yet. Add one to get started.</td></tr>';
+            '<tr><td colspan="6" class="text-muted py-4">No customers found. Add one or search differently.</td></tr>';
     } catch (e) {
         showToast(e.message, "danger");
     }
 }
 
-function openCustomerForm(id) {
+function openCustomerForm() {
     document.getElementById("customerForm").reset();
     document.getElementById("customerId").value = "";
     document.getElementById("customerModalTitle").textContent = "Add Customer";
@@ -40,8 +65,10 @@ async function editCustomer(id) {
         const res = await api("GET", "/customers/" + id);
         const d = res.data;
         document.getElementById("customerId").value = d.id;
-        document.getElementById("customerCode").value = d.code;
-        document.getElementById("customerName").value = d.name;
+        document.getElementById("customerCode").value = d.code || "";
+        document.getElementById("customerName").value = d.name || "";
+        document.getElementById("customerPhone").value = d.phone || "";
+        document.getElementById("customerAddress").value = d.address || "";
         document.getElementById("customerPaymentTerms").value =
             d.payment_terms || "";
         document.getElementById("customerModalTitle").textContent =
@@ -57,6 +84,9 @@ async function saveCustomer() {
     const payload = {
         code: document.getElementById("customerCode").value.trim(),
         name: document.getElementById("customerName").value.trim(),
+        phone: document.getElementById("customerPhone").value.trim() || null,
+        address:
+            document.getElementById("customerAddress").value.trim() || null,
         payment_terms:
             document.getElementById("customerPaymentTerms").value.trim() ||
             null,
@@ -114,6 +144,7 @@ async function submitDeposit() {
         bootstrap.Modal.getInstance(
             document.getElementById("depositModal"),
         ).hide();
+        loadCustomers();
     } catch (e) {
         showToast(e.message, "danger");
     } finally {
@@ -128,7 +159,7 @@ async function showBalance(customerId, name) {
             api("GET", "/customers/" + customerId + "/deposits"),
             api("GET", "/customers/" + customerId + "/balance"),
         ]);
-        const deposits = depRes.data?.deposits || [];
+        const deposits = depRes.data?.deposits || depRes.data || [];
         const balance = balRes.data || {};
         let balHtml = "";
         Object.entries(balance).forEach(([cur, total]) => {
@@ -136,16 +167,17 @@ async function showBalance(customerId, name) {
         });
         document.getElementById("balSummary").innerHTML =
             balHtml || '<span class="text-muted">No deposits</span>';
-        document.getElementById("balHistoryBody").innerHTML = deposits.length
-            ? deposits
+        const depList = Array.isArray(deposits) ? deposits : [];
+        document.getElementById("balHistoryBody").innerHTML = depList.length
+            ? depList
                   .map(
                       (d) => `<tr>
-                <td>${d.created_at}</td>
+                <td>${d.created_at || "-"}</td>
                 <td>${d.amount}</td>
                 <td>${d.currency}</td>
-                <td>${escapeHtml(d.payment_method || "-")}</td>
-                <td>${escapeHtml(d.reference_no || "-")}</td>
-                <td>${escapeHtml(d.notes || "-")}</td>
+                <td>${esc(d.payment_method || "-")}</td>
+                <td>${esc(d.reference_no || "-")}</td>
+                <td>${esc(d.notes || "-")}</td>
               </tr>`,
                   )
                   .join("")
@@ -154,6 +186,80 @@ async function showBalance(customerId, name) {
     } catch (e) {
         showToast(e.message, "danger");
     }
+}
+
+let ordersCache = { customerId: null, data: [] };
+
+async function showOrders(customerId, name) {
+    document.getElementById("ordersCustomerName").textContent = name;
+    document.getElementById("ordersFilter").value = "";
+    document.getElementById("ordersFilter").oninput = () =>
+        renderOrders(ordersCache.data);
+    try {
+        const res = await api("GET", "/orders?customer_id=" + customerId);
+        const orders = res.data || [];
+        ordersCache = { customerId, data: orders };
+        renderOrders(orders);
+        new bootstrap.Modal(document.getElementById("ordersModal")).show();
+    } catch (e) {
+        showToast(e.message, "danger");
+    }
+}
+
+function renderOrders(orders) {
+    const filter =
+        document.getElementById("ordersFilter")?.value?.toLowerCase() || "";
+    const filtered = orders.filter((o) => {
+        if (!filter) return true;
+        return (
+            String(o.id).includes(filter) ||
+            (o.status || "").toLowerCase().includes(filter) ||
+            (o.supplier_name || "").toLowerCase().includes(filter)
+        );
+    });
+    const tbody = document.getElementById("ordersModalBody");
+    if (!tbody) return;
+    let totalCbm = 0,
+        totalWeight = 0;
+    filtered.forEach((o) => {
+        (o.items || []).forEach((it) => {
+            totalCbm += parseFloat(it.declared_cbm || 0);
+            totalWeight += parseFloat(it.declared_weight || 0);
+        });
+    });
+    tbody.innerHTML =
+        filtered.length > 0
+            ? filtered
+                  .map((o) => {
+                      const oCbm = (o.items || []).reduce(
+                          (s, i) => s + (parseFloat(i.declared_cbm) || 0),
+                          0,
+                      );
+                      const oWt = (o.items || []).reduce(
+                          (s, i) => s + (parseFloat(i.declared_weight) || 0),
+                          0,
+                      );
+                      const statusClass =
+                          o.status === "FinalizedAndPushedToTracking"
+                              ? "bg-success"
+                              : o.status === "Approved" ||
+                                  o.status === "Confirmed"
+                                ? "bg-info"
+                                : o.status === "Draft" ||
+                                    o.status === "Submitted"
+                                  ? "bg-warning text-dark"
+                                  : "bg-secondary";
+                      return `<tr>
+                <td>${o.id}</td>
+                <td>${esc(o.supplier_name || "-")}</td>
+                <td>${o.expected_ready_date || "-"}</td>
+                <td><span class="badge ${statusClass}">${esc(o.status || "-")}</span></td>
+                <td>${oCbm.toFixed(2)}</td>
+                <td>${oWt.toFixed(0)} kg</td>
+              </tr>`;
+                  })
+                  .join("")
+            : '<tr><td colspan="6" class="text-muted py-4">No orders for this customer.</td></tr>';
 }
 
 async function deleteCustomer(id, name) {

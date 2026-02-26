@@ -4,7 +4,34 @@ document.addEventListener("DOMContentLoaded", () => {
     loadSuppliers();
     loadProducts();
     setupProductImageUpload();
+    setupProductDimensionInputs();
 });
+
+function setupProductDimensionInputs() {
+    const cbmEl = document.getElementById("productCbm");
+    const lEl = document.getElementById("productLength");
+    const wEl = document.getElementById("productWidth");
+    const hEl = document.getElementById("productHeight");
+    if (!cbmEl || !lEl || !wEl || !hEl) return;
+
+    const calcCbmFromLwh = () => {
+        const l = parseFloat(lEl.value) || 0;
+        const w = parseFloat(wEl.value) || 0;
+        const h = parseFloat(hEl.value) || 0;
+        if (l > 0 && w > 0 && h > 0) {
+            cbmEl.value = ((l * w * h) / 1000000).toFixed(4);
+        }
+    };
+    [lEl, wEl, hEl].forEach((el) =>
+        el.addEventListener("input", calcCbmFromLwh),
+    );
+
+    cbmEl.addEventListener("input", () => {
+        if (parseFloat(cbmEl.value) > 0) {
+            lEl.value = wEl.value = hEl.value = "";
+        }
+    });
+}
 
 function setupProductImageUpload() {
     const input = document.getElementById("productImagesInput");
@@ -131,7 +158,10 @@ async function editProduct(id) {
         document.getElementById("productId").value = d.id;
         document.getElementById("productDescCn").value = d.description_cn || "";
         document.getElementById("productDescEn").value = d.description_en || "";
-        document.getElementById("productCbm").value = d.cbm;
+        document.getElementById("productCbm").value = d.cbm ?? "";
+        document.getElementById("productLength").value = d.length_cm ?? "";
+        document.getElementById("productWidth").value = d.width_cm ?? "";
+        document.getElementById("productHeight").value = d.height_cm ?? "";
         document.getElementById("productWeight").value = d.weight;
         document.getElementById("productHsCode").value = d.hs_code || "";
         document.getElementById("productPackaging").value = d.packaging || "";
@@ -149,12 +179,23 @@ async function editProduct(id) {
 async function saveProduct() {
     const btn = document.getElementById("productSaveBtn");
     const id = document.getElementById("productId").value;
+    const cbmRaw = document.getElementById("productCbm").value;
+    const l = parseFloat(document.getElementById("productLength").value) || 0;
+    const w = parseFloat(document.getElementById("productWidth").value) || 0;
+    const h = parseFloat(document.getElementById("productHeight").value) || 0;
+    const cbm =
+        parseFloat(cbmRaw) ||
+        (l > 0 && w > 0 && h > 0 ? (l * w * h) / 1000000 : 0);
+
     const payload = {
         description_cn:
             document.getElementById("productDescCn").value.trim() || null,
         description_en:
             document.getElementById("productDescEn").value.trim() || null,
-        cbm: parseFloat(document.getElementById("productCbm").value) || 0,
+        cbm,
+        length_cm: l > 0 ? l : null,
+        width_cm: w > 0 ? w : null,
+        height_cm: h > 0 ? h : null,
         weight: parseFloat(document.getElementById("productWeight").value) || 0,
         hs_code: document.getElementById("productHsCode").value.trim() || null,
         packaging:
@@ -162,8 +203,15 @@ async function saveProduct() {
         supplier_id: document.getElementById("productSupplier").value || null,
         image_paths: productImagePaths,
     };
-    if (payload.cbm < 0 || payload.weight < 0) {
-        showToast("CBM and weight must be non-negative", "danger");
+    if (payload.cbm <= 0) {
+        showToast(
+            "Enter CBM directly or L/H/W (cm) to calculate CBM",
+            "danger",
+        );
+        return;
+    }
+    if (payload.weight < 0) {
+        showToast("Weight must be non-negative", "danger");
         return;
     }
     try {

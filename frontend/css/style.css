@@ -329,6 +329,10 @@ body {
   font-size: 0.8rem;
 }
 
+.table-actions .btn+.btn {
+  margin-left: 0.25rem;
+}
+
 .table-responsive {
   border-radius: var(--radius);
   overflow: hidden;
@@ -564,4 +568,56 @@ body {
 
 body.d-flex {
   display: block !important;
+}
+
+/* ── Warehouse calendar ──────────────────────────────────── */
+.warehouse-calendar {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  font-size: 0.8rem;
+}
+
+.warehouse-calendar .cal-day-header {
+  padding: 6px;
+  text-align: center;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.warehouse-calendar .cal-day {
+  min-height: 80px;
+  padding: 6px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  background: var(--card-bg);
+}
+
+.warehouse-calendar .cal-day.other-month {
+  background: #f1f5f9;
+  color: var(--text-secondary);
+}
+
+.warehouse-calendar .cal-day-num {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.warehouse-calendar .cal-order {
+  font-size: 0.7rem;
+  padding: 2px 4px;
+  margin-bottom: 2px;
+  background: #dbeafe;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.warehouse-record-card {
+  transition: box-shadow 0.15s;
+}
+
+.warehouse-record-card:hover {
+  box-shadow: var(--shadow-lg);
 }

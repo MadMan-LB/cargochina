@@ -9,14 +9,14 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 - `POST /auth/logout` — Destroys session. **Public.**
 
 ## Customers
-- `GET /customers` — List all
-- `GET /customers/search?q=...` — Search by name/code (top 10 matches)
+- `GET /customers` — List all (supports `?q=` for search by name, code, phone)
+- `GET /customers/search?q=...` — Search by name/code/phone (top 20 matches)
 - `GET /customers/{id}` — Get one
 - `GET /customers/{id}/deposits` — Get customer with deposits list
 - `GET /customers/{id}/balance` — Get balance per currency `{USD: X, RMB: Y}`
-- `POST /customers` — Create `{code, name, contacts?, addresses?, payment_terms?}`
+- `POST /customers` — Create `{code, name, phone?, address?, contacts?, addresses?, payment_terms?}`
 - `POST /customers/{id}/deposits` — Record deposit `{amount, currency (USD|RMB), payment_method?, reference_no?, notes?}`
-- `PUT /customers/{id}` — Update
+- `PUT /customers/{id}` — Update (phone, address supported)
 - `DELETE /customers/{id}` — Delete
 
 ## Suppliers

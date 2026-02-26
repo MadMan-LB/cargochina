@@ -69,9 +69,18 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         case 'POST':
             $forceCreate = !empty($input['force_create']);
             $cbm = (float) ($input['cbm'] ?? 0);
+            $lengthCm = isset($input['length_cm']) ? (float) $input['length_cm'] : null;
+            $widthCm = isset($input['width_cm']) ? (float) $input['width_cm'] : null;
+            $heightCm = isset($input['height_cm']) ? (float) $input['height_cm'] : null;
+            if ($lengthCm > 0 && $widthCm > 0 && $heightCm > 0) {
+                $cbm = $lengthCm * $widthCm * $heightCm / 1000000;
+            }
+            if ($cbm <= 0) {
+                jsonError('Provide CBM directly or L/H/W (cm) to calculate CBM', 400);
+            }
             $weight = (float) ($input['weight'] ?? 0);
-            if ($cbm < 0 || $weight < 0) {
-                jsonError('CBM and weight must be non-negative', 400);
+            if ($weight < 0) {
+                jsonError('Weight must be non-negative', 400);
             }
             $supplierId = !empty($input['supplier_id']) ? (int) $input['supplier_id'] : null;
             $packaging = $input['packaging'] ?? null;
@@ -95,8 +104,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     }
                 }
             }
-            $stmt = $pdo->prepare("INSERT INTO products (supplier_id, cbm, weight, packaging, hs_code, description_cn, description_en, image_paths) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->execute([$supplierId, $cbm, $weight, $packaging, $hsCode, $descriptionCn, $descriptionEn, $imagePaths]);
+            $stmt = $pdo->prepare("INSERT INTO products (supplier_id, cbm, weight, length_cm, width_cm, height_cm, packaging, hs_code, description_cn, description_en, image_paths) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$supplierId, $cbm, $weight, $lengthCm, $widthCm, $heightCm, $packaging, $hsCode, $descriptionCn, $descriptionEn, $imagePaths]);
             $newId = (int) $pdo->lastInsertId();
             $stmt = $pdo->prepare("SELECT p.*, s.name as supplier_name FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id WHERE p.id = ?");
             $stmt->execute([$newId]);
@@ -114,9 +123,18 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 jsonError('Product not found', 404);
             }
             $cbm = (float) ($input['cbm'] ?? 0);
+            $lengthCm = isset($input['length_cm']) ? (float) $input['length_cm'] : null;
+            $widthCm = isset($input['width_cm']) ? (float) $input['width_cm'] : null;
+            $heightCm = isset($input['height_cm']) ? (float) $input['height_cm'] : null;
+            if ($lengthCm > 0 && $widthCm > 0 && $heightCm > 0) {
+                $cbm = $lengthCm * $widthCm * $heightCm / 1000000;
+            }
+            if ($cbm <= 0) {
+                jsonError('Provide CBM directly or L/H/W (cm) to calculate CBM', 400);
+            }
             $weight = (float) ($input['weight'] ?? 0);
-            if ($cbm < 0 || $weight < 0) {
-                jsonError('CBM and weight must be non-negative', 400);
+            if ($weight < 0) {
+                jsonError('Weight must be non-negative', 400);
             }
             $supplierId = isset($input['supplier_id']) ? ($input['supplier_id'] ? (int) $input['supplier_id'] : null) : null;
             $packaging = $input['packaging'] ?? null;
@@ -124,8 +142,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $descriptionCn = $input['description_cn'] ?? null;
             $descriptionEn = $input['description_en'] ?? null;
             $imagePaths = isset($input['image_paths']) ? json_encode($input['image_paths']) : null;
-            $pdo->prepare("UPDATE products SET supplier_id=?, cbm=?, weight=?, packaging=?, hs_code=?, description_cn=?, description_en=?, image_paths=? WHERE id=?")
-                ->execute([$supplierId, $cbm, $weight, $packaging, $hsCode, $descriptionCn, $descriptionEn, $imagePaths, $id]);
+            $pdo->prepare("UPDATE products SET supplier_id=?, cbm=?, weight=?, length_cm=?, width_cm=?, height_cm=?, packaging=?, hs_code=?, description_cn=?, description_en=?, image_paths=? WHERE id=?")
+                ->execute([$supplierId, $cbm, $weight, $lengthCm, $widthCm, $heightCm, $packaging, $hsCode, $descriptionCn, $descriptionEn, $imagePaths, $id]);
             $stmt = $pdo->prepare("SELECT p.*, s.name as supplier_name FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id WHERE p.id = ?");
             $stmt->execute([$id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);

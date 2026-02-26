@@ -3,32 +3,32 @@ $currentPage = 'products';
 $pageTitle = 'Products';
 require 'includes/layout.php';
 ?>
-  <h1 class="mb-4">Products</h1>
-  <div class="card">
-    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-      <span>Product List</span>
-      <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#productModal" onclick="openProductForm()">+ Add Product</button>
-    </div>
-    <div class="card-body">
-      <div id="productsTable" class="table-responsive">
-        <table class="table table-hover">
-          <thead>
-            <tr>
-              <th>Thumbnail</th>
-              <th>ID</th>
-              <th>Description (CN)</th>
-              <th>Description (EN)</th>
-              <th>CBM</th>
-              <th>Weight</th>
-              <th>HS Code</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
+<h1 class="mb-4">Products</h1>
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <span>Product List</span>
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#productModal" onclick="openProductForm()">+ Add Product</button>
+  </div>
+  <div class="card-body">
+    <div id="productsTable" class="table-responsive">
+      <table class="table table-hover">
+        <thead>
+          <tr>
+            <th>Thumbnail</th>
+            <th>ID</th>
+            <th>Description (CN)</th>
+            <th>Description (EN)</th>
+            <th>CBM</th>
+            <th>Weight</th>
+            <th>HS Code</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
     </div>
   </div>
+</div>
 
 <div class="modal fade" id="productModal" tabindex="-1">
   <div class="modal-dialog modal-lg">
@@ -45,8 +45,22 @@ require 'includes/layout.php';
             <div class="col-12 col-md-6 mb-2"><label class="form-label">Description (EN)</label><input type="text" class="form-control" id="productDescEn"></div>
           </div>
           <div class="row form-row-responsive">
-            <div class="col-12 col-md-4 mb-2"><label class="form-label">CBM *</label><input type="number" step="0.0001" class="form-control" id="productCbm" required></div>
+            <div class="col-12 col-md-4 mb-2">
+              <label class="form-label">CBM</label>
+              <input type="number" step="0.0001" class="form-control" id="productCbm" placeholder="Direct entry or from L×W×H" title="Enter CBM directly, or use L/H/W below">
+            </div>
+            <div class="col-12 col-md-4 mb-2">
+              <label class="form-label">L / W / H (cm)</label>
+              <div class="input-group input-group-sm">
+                <input type="number" step="0.01" class="form-control" id="productLength" placeholder="L" title="Length cm">
+                <input type="number" step="0.01" class="form-control" id="productWidth" placeholder="W" title="Width cm">
+                <input type="number" step="0.01" class="form-control" id="productHeight" placeholder="H" title="Height cm">
+              </div>
+              <small class="text-muted">Optional: auto-calculates CBM when all three filled</small>
+            </div>
             <div class="col-12 col-md-4 mb-2"><label class="form-label">Weight *</label><input type="number" step="0.0001" class="form-control" id="productWeight" required></div>
+          </div>
+          <div class="row form-row-responsive">
             <div class="col-12 col-md-4 mb-2"><label class="form-label">HS Code</label><input type="text" class="form-control" id="productHsCode"></div>
           </div>
           <div class="mb-2"><label class="form-label">Packaging</label><input type="text" class="form-control" id="productPackaging"></div>

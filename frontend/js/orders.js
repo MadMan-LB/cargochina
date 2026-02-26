@@ -100,7 +100,8 @@ function addOrderItem() {
     <td><input type="number" step="0.0001" class="form-control form-control-sm item-qty" min="0" placeholder="0" data-idx="${idx}" title="Total qty (auto from CTNS×Qty/Ctn or enter for pieces)"></td>
     <td><input type="number" step="0.01" class="form-control form-control-sm item-unit-price" placeholder="0" data-idx="${idx}"></td>
     <td><span class="item-total-amount" data-idx="${idx}">0</span></td>
-    <td><input type="number" step="0.0001" class="form-control form-control-sm item-cbm" min="0" placeholder="CBM" data-idx="${idx}" style="width:80px" title="CBM per unit (enter directly)"></td>
+    <td><input type="number" step="0.0001" class="form-control form-control-sm item-cbm" min="0" placeholder="CBM" data-idx="${idx}" style="width:70px" title="CBM or use L×W×H below">
+        <div class="d-flex gap-1 mt-1"><input type="number" step="0.01" class="form-control form-control-sm item-l" placeholder="L" style="width:45px" title="Length cm"><input type="number" step="0.01" class="form-control form-control-sm item-w" placeholder="W" style="width:45px"><input type="number" step="0.01" class="form-control form-control-sm item-h" placeholder="H" style="width:45px"></div></td>
     <td><span class="item-total-cbm" data-idx="${idx}">0</span></td>
     <td><input type="number" step="0.0001" class="form-control form-control-sm item-weight" min="0" placeholder="0" data-idx="${idx}" style="width:70px" title="Weight per piece (kg)"></td>
     <td><span class="item-total-gw" data-idx="${idx}">0</span></td>
@@ -123,6 +124,32 @@ function addOrderItem() {
                 updateItemComputed(idx);
                 updateOrderTotals();
             });
+    });
+    ["item-l", "item-w", "item-h"].forEach((cls) => {
+        const el = row.querySelector(`.${cls}`);
+        if (el) {
+            el.addEventListener("input", () => {
+                const l = parseFloat(row.querySelector(".item-l")?.value) || 0;
+                const w = parseFloat(row.querySelector(".item-w")?.value) || 0;
+                const h = parseFloat(row.querySelector(".item-h")?.value) || 0;
+                if (l > 0 && w > 0 && h > 0) {
+                    row.querySelector(".item-cbm").value = (
+                        (l * w * h) /
+                        1000000
+                    ).toFixed(4);
+                }
+                updateItemComputed(idx);
+                updateOrderTotals();
+            });
+        }
+    });
+    row.querySelector(".item-cbm")?.addEventListener("input", () => {
+        if (parseFloat(row.querySelector(".item-cbm")?.value || 0) > 0) {
+            row.querySelector(".item-l").value =
+                row.querySelector(".item-w").value =
+                row.querySelector(".item-h").value =
+                    "";
+        }
     });
     updateOrderTotals();
 }
@@ -168,7 +195,13 @@ function updateItemComputed(idx) {
     if (cartons > 0 && qtyPerCtn > 0) qtyInput.value = totalQty;
     tr.querySelector(".item-total-amount").textContent = totalAmount;
 
-    const cbmPerUnit = parseFloat(tr.querySelector(".item-cbm")?.value || 0);
+    let cbmPerUnit = parseFloat(tr.querySelector(".item-cbm")?.value || 0);
+    const l = parseFloat(tr.querySelector(".item-l")?.value) || 0;
+    const w = parseFloat(tr.querySelector(".item-w")?.value) || 0;
+    const h = parseFloat(tr.querySelector(".item-h")?.value) || 0;
+    if (cbmPerUnit <= 0 && l > 0 && w > 0 && h > 0) {
+        cbmPerUnit = (l * w * h) / 1000000;
+    }
     const totalCbm =
         cbmPerUnit * (cartons > 0 ? cartons : totalQty > 0 ? totalQty : 1);
     tr.querySelector(".item-total-cbm").textContent = totalCbm.toFixed(4);
@@ -258,6 +291,9 @@ async function editOrder(id) {
                 denom > 0
                     ? ((it.declared_cbm || 0) / denom).toFixed(4)
                     : (it.declared_cbm ?? "");
+            last.querySelector(".item-l").value = it.item_length ?? "";
+            last.querySelector(".item-w").value = it.item_width ?? "";
+            last.querySelector(".item-h").value = it.item_height ?? "";
             last.querySelector(".item-weight").value = it.declared_weight ?? "";
             updateItemComputed(last.dataset.idx);
             (it.image_paths || []).forEach((path) => {
@@ -291,6 +327,11 @@ function collectOrderItems() {
         if (qty <= 0) return;
         const unit = cartons > 0 ? "cartons" : "pieces";
         const cbmPc = parseFloat(tr.querySelector(".item-cbm")?.value || 0);
+        const l = parseFloat(tr.querySelector(".item-l")?.value) || 0;
+        const w = parseFloat(tr.querySelector(".item-w")?.value) || 0;
+        const h = parseFloat(tr.querySelector(".item-h")?.value) || 0;
+        const cbmFromLwh = l > 0 && w > 0 && h > 0 ? (l * w * h) / 1000000 : 0;
+        const effectiveCbmPc = cbmPc > 0 ? cbmPc : cbmFromLwh;
         const weightPc = parseFloat(
             tr.querySelector(".item-weight")?.value || 0,
         );
@@ -313,6 +354,10 @@ function collectOrderItems() {
         const imagePaths = Array.from(photoDivs)
             .map((d) => d.dataset.path)
             .filter(Boolean);
+        if (cbmPc <= 0 && cbmFromLwh <= 0) {
+            showToast("Each item needs CBM or L/W/H (cm)", "danger");
+            return null;
+        }
         items.push({
             product_id: productId || null,
             item_no: itemNo || null,
@@ -323,6 +368,9 @@ function collectOrderItems() {
             unit,
             declared_cbm: totalCbm,
             declared_weight: totalGw,
+            item_length: l > 0 ? l : null,
+            item_width: w > 0 ? w : null,
+            item_height: h > 0 ? h : null,
             unit_price: unitPrice || null,
             total_amount: qty > 0 && unitPrice > 0 ? qty * unitPrice : null,
             image_paths: imagePaths.length ? imagePaths : null,
@@ -335,12 +383,14 @@ function collectOrderItems() {
 
 async function saveOrder() {
     const id = document.getElementById("orderId").value;
+    const items = collectOrderItems();
+    if (!items) return;
     const payload = {
         customer_id: orderCustomerAc?.getSelectedId() || "",
         supplier_id: orderSupplierAc?.getSelectedId() || "",
         expected_ready_date: document.getElementById("orderExpectedDate").value,
         currency: document.getElementById("orderCurrency")?.value || "USD",
-        items: collectOrderItems(),
+        items,
     };
     if (
         !payload.customer_id ||
