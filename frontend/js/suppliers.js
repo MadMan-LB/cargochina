@@ -25,7 +25,9 @@ async function loadSuppliers() {
         <td><small class="text-muted">${escapeHtml(addIdsStr)}</small></td>
         <td class="table-actions">
           <button class="btn btn-sm btn-outline-primary" onclick="editSupplier(${r.id})">Edit</button>
-          <button class="btn btn-sm btn-outline-danger" onclick="deleteSupplier(${r.id}, '${escapeHtml(r.name).replace(/'/g, "\\'")}')">Delete</button>
+          <button class="btn btn-sm btn-outline-success" onclick="openPaymentModal(${r.id}, '${escapeHtml(r.name).replace(/'/g, "\\'")}')">Pay</button>
+          <button class="btn btn-sm btn-outline-info" onclick="showPayHistory(${r.id}, '${escapeHtml(r.name).replace(/'/g, "\\'")}')">History</button>
+          <button class="btn btn-sm btn-outline-danger" onclick="deleteSupplier(${r.id}, '${escapeHtml(r.name).replace(/'/g, "\\'")}')">Del</button>
         </td>
       </tr>
     `;
@@ -132,6 +134,112 @@ async function saveSupplier() {
         showToast(e.message, "danger");
     } finally {
         setLoading(btn, false);
+    }
+}
+
+function openPaymentModal(supplierId, name) {
+    document.getElementById("paymentSupplierId").value = supplierId;
+    document.getElementById("paymentSupplierName").textContent = name;
+    document.getElementById("payInvoiceAmount").value = "";
+    document.getElementById("payAmount").value = "";
+    document.getElementById("payOrderId").value = "";
+    document.getElementById("payNotes").value = "";
+    document.getElementById("payMarkedFull").checked = false;
+    document.getElementById("payDiscountInfo").classList.add("d-none");
+    new bootstrap.Modal(document.getElementById("paymentModal")).show();
+}
+
+document
+    .getElementById("payInvoiceAmount")
+    ?.addEventListener("input", updateDiscountPreview);
+document
+    .getElementById("payAmount")
+    ?.addEventListener("input", updateDiscountPreview);
+function updateDiscountPreview() {
+    const inv = parseFloat(
+        document.getElementById("payInvoiceAmount")?.value || 0,
+    );
+    const paid = parseFloat(document.getElementById("payAmount")?.value || 0);
+    const info = document.getElementById("payDiscountInfo");
+    if (inv > 0 && paid > 0 && inv > paid) {
+        const disc = inv - paid;
+        const pct = ((disc / inv) * 100).toFixed(1);
+        info.textContent = `Discount: ${disc.toFixed(2)} (${pct}%)`;
+        info.classList.remove("d-none");
+    } else {
+        info.classList.add("d-none");
+    }
+}
+
+async function submitPayment() {
+    const supplierId = document.getElementById("paymentSupplierId").value;
+    const amount = parseFloat(document.getElementById("payAmount").value || 0);
+    if (amount <= 0) {
+        showToast("Amount must be positive", "danger");
+        return;
+    }
+    const payload = {
+        amount,
+        invoice_amount:
+            parseFloat(document.getElementById("payInvoiceAmount").value) ||
+            null,
+        currency: document.getElementById("payCurrency").value,
+        order_id: document.getElementById("payOrderId").value || null,
+        marked_full_payment: document.getElementById("payMarkedFull").checked,
+        payment_type: document.getElementById("payMarkedFull").checked
+            ? "full"
+            : "partial",
+        notes: document.getElementById("payNotes").value || null,
+    };
+    const btn = document.getElementById("paySubmitBtn");
+    try {
+        setLoading(btn, true);
+        await api("POST", "/suppliers/" + supplierId + "/payments", payload);
+        showToast("Payment recorded");
+        bootstrap.Modal.getInstance(
+            document.getElementById("paymentModal"),
+        ).hide();
+    } catch (e) {
+        showToast(e.message, "danger");
+    } finally {
+        setLoading(btn, false);
+    }
+}
+
+async function showPayHistory(supplierId, name) {
+    document.getElementById("histSupplierName").textContent = name;
+    try {
+        const [detailRes, balRes] = await Promise.all([
+            api("GET", "/suppliers/" + supplierId),
+            api("GET", "/suppliers/" + supplierId + "/balance"),
+        ]);
+        const payments = detailRes.data?.payments || [];
+        const balance = balRes.data || {};
+        let balHtml = "";
+        Object.entries(balance).forEach(([cur, b]) => {
+            balHtml += `<span class="badge bg-secondary me-2">${cur}: Paid ${b.total_paid.toFixed(2)} / Invoiced ${b.total_invoiced.toFixed(2)} | Discount ${b.total_discount.toFixed(2)} | Outstanding ${b.outstanding.toFixed(2)}</span>`;
+        });
+        document.getElementById("balanceSummary").innerHTML =
+            balHtml || '<span class="text-muted">No payments yet</span>';
+        document.getElementById("payHistoryBody").innerHTML = payments.length
+            ? payments
+                  .map(
+                      (p) => `<tr>
+                <td>${p.created_at}</td>
+                <td>${p.invoice_amount ?? "-"}</td>
+                <td>${p.amount}</td>
+                <td>${p.discount_amount > 0 ? p.discount_amount : "-"}${p.marked_full_payment ? ' <span class="badge bg-success">Full</span>' : ""}</td>
+                <td>${p.currency}</td>
+                <td>${p.payment_type}</td>
+                <td>${p.order_id ? "#" + p.order_id : "-"}</td>
+                <td>${escapeHtml(p.notes || "-")}</td>
+              </tr>`,
+                  )
+                  .join("")
+            : '<tr><td colspan="8" class="text-muted">No payments</td></tr>';
+        new bootstrap.Modal(document.getElementById("payHistoryModal")).show();
+    } catch (e) {
+        showToast(e.message, "danger");
     }
 }
 

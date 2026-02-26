@@ -67,16 +67,41 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if (!$stmt->fetch()) jsonError('Supplier not found', 404);
                 $amount = (float) ($input['amount'] ?? 0);
                 $currency = trim($input['currency'] ?? 'USD');
+                if (!in_array($currency, ['USD', 'RMB'], true)) jsonError('Currency must be USD or RMB', 400);
                 $paymentType = in_array($input['payment_type'] ?? '', ['partial', 'full']) ? $input['payment_type'] : 'partial';
                 $notes = $input['notes'] ?? null;
                 $orderId = !empty($input['order_id']) ? (int) $input['order_id'] : null;
                 if ($amount <= 0) jsonError('Amount must be positive', 400);
-                $pdo->prepare("INSERT INTO supplier_payments (supplier_id, order_id, amount, currency, payment_type, notes) VALUES (?,?,?,?,?,?)")
-                    ->execute([$id, $orderId, $amount, $currency, $paymentType, $notes]);
+                $invoiceAmount = isset($input['invoice_amount']) ? (float) $input['invoice_amount'] : null;
+                $markedFull = !empty($input['marked_full_payment']) ? 1 : 0;
+                $discountAmount = ($invoiceAmount !== null && $invoiceAmount > $amount) ? round($invoiceAmount - $amount, 4) : 0;
+                $markedBy = $markedFull ? $userId : null;
+                $userId = getAuthUserId() ?? 1;
+                $pdo->prepare("INSERT INTO supplier_payments (supplier_id, order_id, amount, invoice_amount, discount_amount, marked_full_payment, marked_by, currency, payment_type, notes) VALUES (?,?,?,?,?,?,?,?,?,?)")
+                    ->execute([$id, $orderId, $amount, $invoiceAmount, $discountAmount, $markedFull, $markedBy, $currency, $paymentType, $notes]);
                 $newId = (int) $pdo->lastInsertId();
+                logClms('supplier_payment', ['supplier_id' => (int)$id, 'payment_id' => $newId, 'amount' => $amount, 'invoice_amount' => $invoiceAmount, 'discount' => $discountAmount, 'marked_full' => $markedFull]);
                 $row = $pdo->prepare("SELECT * FROM supplier_payments WHERE id = ?");
                 $row->execute([$newId]);
                 jsonResponse(['data' => $row->fetch(PDO::FETCH_ASSOC)], 201);
+            }
+            if ($id && $action === 'balance') {
+                $stmt = $pdo->prepare("SELECT id FROM suppliers WHERE id = ?");
+                $stmt->execute([$id]);
+                if (!$stmt->fetch()) jsonError('Supplier not found', 404);
+                $stmt = $pdo->prepare("SELECT currency, SUM(amount) as total_paid, SUM(COALESCE(invoice_amount,amount)) as total_invoiced, SUM(COALESCE(discount_amount,0)) as total_discount FROM supplier_payments WHERE supplier_id = ? GROUP BY currency");
+                $stmt->execute([$id]);
+                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                $balance = [];
+                foreach ($rows as $r) {
+                    $balance[$r['currency']] = [
+                        'total_paid' => (float)$r['total_paid'],
+                        'total_invoiced' => (float)$r['total_invoiced'],
+                        'total_discount' => (float)$r['total_discount'],
+                        'outstanding' => round((float)$r['total_invoiced'] - (float)$r['total_paid'], 4),
+                    ];
+                }
+                jsonResponse(['data' => $balance]);
             }
             if ($id && $action === 'interactions') {
                 $stmt = $pdo->prepare("SELECT id FROM suppliers WHERE id = ?");

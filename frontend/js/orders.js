@@ -32,6 +32,8 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!filterInput.value.trim()) loadOrders();
         });
     }
+    const curSel = document.getElementById("orderCurrency");
+    if (curSel) curSel.addEventListener("change", updateOrderTotals);
     loadOrders();
 });
 
@@ -98,8 +100,10 @@ function addOrderItem() {
     <td><input type="number" step="0.0001" class="form-control form-control-sm item-qty" min="0" placeholder="0" data-idx="${idx}" title="Total qty (auto from CTNS×Qty/Ctn or enter for pieces)"></td>
     <td><input type="number" step="0.01" class="form-control form-control-sm item-unit-price" placeholder="0" data-idx="${idx}"></td>
     <td><span class="item-total-amount" data-idx="${idx}">0</span></td>
-    <td><input type="number" step="0.0001" class="form-control form-control-sm item-cbm" required min="0" placeholder="0" data-idx="${idx}"></td>
-    <td><input type="number" step="0.0001" class="form-control form-control-sm item-weight" required min="0" placeholder="0" data-idx="${idx}"></td>
+    <td><input type="number" step="0.0001" class="form-control form-control-sm item-cbm" min="0" placeholder="CBM" data-idx="${idx}" style="width:80px" title="CBM per unit (enter directly)"></td>
+    <td><span class="item-total-cbm" data-idx="${idx}">0</span></td>
+    <td><input type="number" step="0.0001" class="form-control form-control-sm item-weight" min="0" placeholder="0" data-idx="${idx}" style="width:70px" title="Weight per piece (kg)"></td>
+    <td><span class="item-total-gw" data-idx="${idx}">0</span></td>
     <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove(); updateOrderTotals();">×</button></td>`;
     tbody.appendChild(row);
     row.querySelector(".item-photo-input").addEventListener("change", (e) =>
@@ -163,6 +167,16 @@ function updateItemComputed(idx) {
     const qtyInput = tr.querySelector(".item-qty");
     if (cartons > 0 && qtyPerCtn > 0) qtyInput.value = totalQty;
     tr.querySelector(".item-total-amount").textContent = totalAmount;
+
+    const cbmPerUnit = parseFloat(tr.querySelector(".item-cbm")?.value || 0);
+    const totalCbm =
+        cbmPerUnit * (cartons > 0 ? cartons : totalQty > 0 ? totalQty : 1);
+    tr.querySelector(".item-total-cbm").textContent = totalCbm.toFixed(4);
+
+    const weightPc = parseFloat(tr.querySelector(".item-weight")?.value || 0);
+    const totalGw = weightPc * (totalQty > 0 ? totalQty : 0);
+    tr.querySelector(".item-total-gw").textContent = totalGw.toFixed(0);
+
     updateOrderTotals();
 }
 
@@ -174,14 +188,20 @@ function updateOrderTotals() {
         totalAmount += parseFloat(
             tr.querySelector(".item-total-amount")?.textContent || 0,
         );
-        totalCbm += parseFloat(tr.querySelector(".item-cbm")?.value || 0);
-        totalWeight += parseFloat(tr.querySelector(".item-weight")?.value || 0);
+        totalCbm += parseFloat(
+            tr.querySelector(".item-total-cbm")?.textContent || 0,
+        );
+        totalWeight += parseFloat(
+            tr.querySelector(".item-total-gw")?.textContent || 0,
+        );
     });
+    const cur = document.getElementById("orderCurrency")?.value || "USD";
+    const sym = cur === "RMB" ? "¥" : "$";
     const elAmount = document.getElementById("orderTotalAmount");
     const elCbm = document.getElementById("orderTotalCbm");
     const elWeight = document.getElementById("orderTotalWeight");
-    if (elAmount) elAmount.textContent = totalAmount.toFixed(2);
-    if (elCbm) elCbm.textContent = totalCbm.toFixed(2);
+    if (elAmount) elAmount.textContent = sym + totalAmount.toFixed(2);
+    if (elCbm) elCbm.textContent = totalCbm.toFixed(4);
     if (elWeight) elWeight.textContent = totalWeight.toFixed(0);
 }
 
@@ -206,6 +226,7 @@ async function editOrder(id) {
         });
         document.getElementById("orderExpectedDate").value =
             o.expected_ready_date;
+        document.getElementById("orderCurrency").value = o.currency || "USD";
         document.getElementById("orderModalTitle").textContent =
             "Edit Order #" + o.id;
         const tbody = document.getElementById("orderItemsBody");
@@ -227,7 +248,16 @@ async function editOrder(id) {
                 it.qty_per_carton ?? "";
             last.querySelector(".item-qty").value = it.quantity ?? "";
             last.querySelector(".item-unit-price").value = it.unit_price ?? "";
-            last.querySelector(".item-cbm").value = it.declared_cbm ?? "";
+            const denom =
+                (it.cartons || 0) > 0
+                    ? it.cartons
+                    : (it.quantity || 0) > 0
+                      ? it.quantity
+                      : 1;
+            last.querySelector(".item-cbm").value =
+                denom > 0
+                    ? ((it.declared_cbm || 0) / denom).toFixed(4)
+                    : (it.declared_cbm ?? "");
             last.querySelector(".item-weight").value = it.declared_weight ?? "";
             updateItemComputed(last.dataset.idx);
             (it.image_paths || []).forEach((path) => {
@@ -260,8 +290,16 @@ function collectOrderItems() {
             cartons > 0 && qtyPerCtn > 0 ? cartons * qtyPerCtn : qtyInput;
         if (qty <= 0) return;
         const unit = cartons > 0 ? "cartons" : "pieces";
-        const cbm = parseFloat(tr.querySelector(".item-cbm")?.value || 0);
-        const weight = parseFloat(tr.querySelector(".item-weight")?.value || 0);
+        const cbmPc = parseFloat(tr.querySelector(".item-cbm")?.value || 0);
+        const weightPc = parseFloat(
+            tr.querySelector(".item-weight")?.value || 0,
+        );
+        const totalCbm = parseFloat(
+            tr.querySelector(".item-total-cbm")?.textContent || 0,
+        );
+        const totalGw = parseFloat(
+            tr.querySelector(".item-total-gw")?.textContent || 0,
+        );
         const desc = tr.querySelector(".item-desc")?.value?.trim();
         const productId = tr.querySelector(".item-product-id")?.value;
         const itemNo = tr.querySelector(".item-item-no")?.value?.trim();
@@ -275,24 +313,22 @@ function collectOrderItems() {
         const imagePaths = Array.from(photoDivs)
             .map((d) => d.dataset.path)
             .filter(Boolean);
-        if (cbm >= 0 && weight >= 0) {
-            items.push({
-                product_id: productId || null,
-                item_no: itemNo || null,
-                shipping_code: shippingCode || null,
-                cartons: cartons || null,
-                qty_per_carton: qtyPerCtn || null,
-                quantity: qty,
-                unit,
-                declared_cbm: cbm,
-                declared_weight: weight,
-                unit_price: unitPrice || null,
-                total_amount: qty > 0 && unitPrice > 0 ? qty * unitPrice : null,
-                image_paths: imagePaths.length ? imagePaths : null,
-                description_cn: desc || null,
-                description_en: desc || null,
-            });
-        }
+        items.push({
+            product_id: productId || null,
+            item_no: itemNo || null,
+            shipping_code: shippingCode || null,
+            cartons: cartons || null,
+            qty_per_carton: qtyPerCtn || null,
+            quantity: qty,
+            unit,
+            declared_cbm: totalCbm,
+            declared_weight: totalGw,
+            unit_price: unitPrice || null,
+            total_amount: qty > 0 && unitPrice > 0 ? qty * unitPrice : null,
+            image_paths: imagePaths.length ? imagePaths : null,
+            description_cn: desc || null,
+            description_en: desc || null,
+        });
     });
     return items;
 }
@@ -303,6 +339,7 @@ async function saveOrder() {
         customer_id: orderCustomerAc?.getSelectedId() || "",
         supplier_id: orderSupplierAc?.getSelectedId() || "",
         expected_ready_date: document.getElementById("orderExpectedDate").value,
+        currency: document.getElementById("orderCurrency")?.value || "USD",
         items: collectOrderItems(),
     };
     if (

@@ -1,10 +1,29 @@
 let currentDraftId = null;
+let eligibleOrders = [];
+let draftOrders = [];
+
+function esc(s) {
+    if (s == null || s === undefined) return "";
+    const d = document.createElement("div");
+    d.textContent = String(s);
+    return d.innerHTML;
+}
 
 document.addEventListener("DOMContentLoaded", () => {
-    loadContainers();
-    loadShipmentDrafts();
-    loadReadyTotals();
+    try {
+        loadContainers();
+        loadShipmentDrafts();
+        loadReadyTotals();
+    } catch (e) {
+        console.error("Consolidation init:", e);
+        if (typeof showToast === "function")
+            showToast(e.message || "Load error", "danger");
+    }
 });
+
+function el(id) {
+    return document.getElementById(id);
+}
 
 async function loadReadyTotals() {
     try {
@@ -21,28 +40,34 @@ async function loadReadyTotals() {
                 totalWeight += parseFloat(it.declared_weight || 0);
             });
         });
-        document.getElementById("readyOrdersCount").textContent = orders.length;
-        document.getElementById("readyTotalCbm").textContent =
-            totalCbm.toFixed(2);
-        document.getElementById("readyTotalWeight").textContent =
-            totalWeight.toFixed(0);
+        const rc = el("readyOrdersCount"),
+            rcbm = el("readyTotalCbm"),
+            rw = el("readyTotalWeight");
+        if (rc) rc.textContent = orders.length;
+        if (rcbm) rcbm.textContent = totalCbm.toFixed(2);
+        if (rw) rw.textContent = totalWeight.toFixed(0);
     } catch (e) {
-        document.getElementById("readyOrdersCount").textContent = "-";
-        document.getElementById("readyTotalCbm").textContent = "-";
-        document.getElementById("readyTotalWeight").textContent = "-";
+        const rc = el("readyOrdersCount"),
+            rcbm = el("readyTotalCbm"),
+            rw = el("readyTotalWeight");
+        if (rc) rc.textContent = "-";
+        if (rcbm) rcbm.textContent = "-";
+        if (rw) rw.textContent = "-";
     }
 }
 
 async function loadContainers() {
+    const tbody = el("containersBody");
+    if (!tbody) return;
     try {
         const res = await api("GET", "/containers");
         const rows = res.data || [];
-        document.getElementById("containersBody").innerHTML =
+        tbody.innerHTML =
             rows.length > 0
                 ? rows
                       .map(
                           (c) =>
-                              `<tr><td>${escapeHtml(c.code)}</td><td>${c.max_cbm}</td><td>${c.max_weight}</td></tr>`,
+                              `<tr><td>${esc(c.code)}</td><td>${c.max_cbm}</td><td>${c.max_weight}</td></tr>`,
                       )
                       .join("")
                 : '<tr><td colspan="3" class="text-center py-4 text-muted"><span class="d-block mb-1">No containers yet</span><small>Click "+ Add Container" to create one</small></td></tr>';
@@ -52,10 +77,12 @@ async function loadContainers() {
 }
 
 async function loadShipmentDrafts() {
+    const list = el("shipmentDraftsList");
+    if (!list) return;
     try {
         const res = await api("GET", "/shipment-drafts");
-        const rows = res.data || [];
-        document.getElementById("shipmentDraftsList").innerHTML =
+        const rows = Array.isArray(res.data) ? res.data : [];
+        let html =
             rows
                 .map((sd) => {
                     const ps = sd.push_status || "not_pushed";
@@ -77,22 +104,36 @@ async function loadShipmentDrafts() {
                                 : "Not pushed";
                     const retryBtn =
                         sd.status === "finalized" && ps === "failed"
-                            ? `<button class="btn btn-sm btn-warning ms-1" onclick="retryPush(${sd.id})">Retry Push</button>`
+                            ? `<button type="button" class="btn btn-sm btn-warning ms-1" onclick="retryPush(${sd.id})">Retry Push</button>`
+                            : "";
+                    const deleteBtn =
+                        sd.status !== "finalized"
+                            ? `<button type="button" class="btn btn-sm btn-danger" onclick="openDeleteConfirmModal(${sd.id})" title="Delete this draft">Delete</button>`
                             : "";
                     return `
-      <div class="border rounded p-2 mb-2">
-        <strong>Draft #${sd.id}</strong> ${sd.status} ${sd.container_code ? "→ " + sd.container_code : ""}
-        <span class="badge ${badge} ms-1">${pushLabel}</span>${retryBtn}
-        <br><small>Orders: ${(sd.order_ids || []).join(", ") || "none"}</small>
-        ${sd.push_last_error ? `<br><small class="text-danger">${escapeHtml(sd.push_last_error)}</small>` : ""}
-        <button class="btn btn-sm btn-outline-primary ms-2" onclick="openDraftModal(${sd.id})">Manage</button>
+      <div class="consolidation-draft-item border rounded p-3 mb-3 d-flex flex-wrap align-items-center gap-2">
+        <div class="flex-grow-1">
+          <strong>Draft #${sd.id}</strong> <span class="text-muted">${sd.status}</span>
+          ${sd.container_code ? `<span class="text-muted">→ ${esc(sd.container_code)}</span>` : ""}
+          <span class="badge ${badge} ms-1">${pushLabel}</span>
+          <br><small class="text-muted">Orders: ${(sd.order_ids || []).join(", ") || "none"}</small>
+          ${sd.push_last_error ? `<br><small class="text-danger">${esc(sd.push_last_error)}</small>` : ""}
+        </div>
+        <div class="d-flex gap-1 flex-shrink-0">
+          ${deleteBtn}
+          ${retryBtn}
+          <button type="button" class="btn btn-sm btn-outline-primary" onclick="openDraftModal(${sd.id})">Manage</button>
+        </div>
       </div>
     `;
                 })
                 .join("") ||
             '<p class="text-center py-4 text-muted mb-0"><span class="d-block mb-1">No shipment drafts</span><small>Click "+ New Draft" to create one</small></p>';
+        list.innerHTML = html;
     } catch (e) {
-        showToast(e.message, "danger");
+        showToast(e.message || "Failed to load drafts", "danger");
+        list.innerHTML =
+            '<p class="text-center py-4 text-muted mb-0">Failed to load. <a href="javascript:void(0)" onclick="loadShipmentDrafts()">Retry</a></p>';
     }
 }
 
@@ -139,68 +180,143 @@ async function createShipmentDraft() {
     }
 }
 
+function orderCbm(o) {
+    return (o.items || []).reduce(
+        (s, i) => s + (parseFloat(i.declared_cbm) || 0),
+        0,
+    );
+}
+function orderWeight(o) {
+    return (o.items || []).reduce(
+        (s, i) => s + (parseFloat(i.declared_weight) || 0),
+        0,
+    );
+}
+
 async function openDraftModal(id) {
     currentDraftId = id;
     document.getElementById("draftModalId").textContent = "#" + id;
+    const deleteBtn = document.getElementById("draftDeleteBtn");
+    if (deleteBtn) deleteBtn.style.display = "";
     try {
-        const [draftRes, ordersRes, containersRes] = await Promise.all([
+        const [draftRes, ordersRes, res2, containersRes] = await Promise.all([
             api("GET", "/shipment-drafts/" + id),
             api("GET", "/orders?status=ReadyForConsolidation"),
+            api("GET", "/orders?status=Confirmed"),
             api("GET", "/containers"),
         ]);
-        const res2 = await api("GET", "/orders?status=Confirmed");
-        const eligible = [
+        const draftOrderIds = draftRes.data.order_ids || [];
+        const allEligibleRaw = [
             ...(ordersRes.data || []),
             ...(res2.data || []),
-        ].filter((o) => !(draftRes.data.order_ids || []).includes(o.id));
-        document.getElementById("draftAddOrder").innerHTML = eligible
-            .map(
-                (o) =>
-                    `<option value="${o.id}">#${o.id} ${escapeHtml(o.customer_name)}</option>`,
-            )
-            .join("");
-        document.getElementById("draftContainer").innerHTML =
-            '<option value="">— Select —</option>' +
-            (containersRes.data || [])
+        ];
+        const seen = new Set();
+        eligibleOrders = allEligibleRaw.filter((o) => {
+            if (seen.has(o.id) || draftOrderIds.includes(o.id)) return false;
+            seen.add(o.id);
+            return true;
+        });
+        draftOrders = [];
+        for (const oid of draftOrderIds) {
+            try {
+                const r = await api("GET", "/orders/" + oid);
+                if (r.data) draftOrders.push(r.data);
+            } catch (_) {}
+        }
+
+        const addBody = el("draftAddOrderBody");
+        const removeBody = el("draftRemoveOrderBody");
+        const containerSel = el("draftContainer");
+        if (!addBody || !removeBody || !containerSel) return;
+
+        addBody.innerHTML =
+            eligibleOrders
+                .map(
+                    (o) =>
+                        `<tr><td><input type="checkbox" class="form-check-input draft-add-order-cb" value="${o.id}"></td><td>#${o.id} ${esc(o.customer_name)}</td><td>${orderCbm(o).toFixed(2)}</td><td>${orderWeight(o).toFixed(0)}</td></tr>`,
+                )
+                .join("") ||
+            "<tr><td colspan='4' class='text-muted text-center py-2'>No orders to add</td></tr>";
+
+        removeBody.innerHTML =
+            draftOrders
+                .map(
+                    (o) =>
+                        `<tr><td><input type="checkbox" class="form-check-input draft-remove-order-cb" value="${o.id}"></td><td>#${o.id} ${esc(o.customer_name)}</td><td>${orderCbm(o).toFixed(2)}</td><td>${orderWeight(o).toFixed(0)}</td></tr>`,
+                )
+                .join("") ||
+            "<tr><td colspan='4' class='text-muted text-center py-2'>No orders in draft</td></tr>";
+
+        const addAll = el("draftAddSelectAll");
+        const removeAll = el("draftRemoveSelectAll");
+        if (addAll) addAll.checked = false;
+        if (removeAll) removeAll.checked = false;
+
+        const containers = containersRes.data || [];
+        containerSel.innerHTML =
+            '<option value="">— Select container —</option>' +
+            containers
                 .map(
                     (c) =>
-                        `<option value="${c.id}">${escapeHtml(c.code)} (${c.max_cbm} CBM)</option>`,
+                        `<option value="${c.id}" ${draftRes.data.container_id == c.id ? "selected" : ""}>${esc(c.code)} (${c.max_cbm} CBM, ${c.max_weight} kg)</option>`,
                 )
                 .join("");
-        document.getElementById("draftOrderList").textContent =
-            (draftRes.data.order_ids || []).join(", ") || "none";
+
         const draftCbm = draftRes.data.total_cbm ?? 0;
         const draftWeight = draftRes.data.total_weight ?? 0;
-        document.getElementById("draftTotalCbm").textContent =
-            draftCbm.toFixed(2);
-        document.getElementById("draftTotalWeight").textContent =
-            draftWeight.toFixed(0);
-        const orderIds = draftRes.data.order_ids || [];
-        const allOrders = [...(ordersRes.data || []), ...(res2.data || [])];
-        document.getElementById("draftRemoveOrder").innerHTML = orderIds
-            .map((oid) => {
-                const o = allOrders.find((x) => x.id == oid);
-                return `<option value="${oid}">#${oid} ${escapeHtml(o ? o.customer_name : "")}</option>`;
-            })
-            .join("");
+        const tcbm = el("draftTotalCbm");
+        const twt = el("draftTotalWeight");
+        const hintEl = el("draftCapacityHint");
+        if (tcbm) tcbm.textContent = draftCbm.toFixed(2);
+        if (twt) twt.textContent = draftWeight.toFixed(0);
+
+        const containerId = draftRes.data.container_id;
+        const containerData = containers?.find((c) => c.id == containerId);
+        let hint = "";
+        if (containerData) {
+            const okCbm = draftCbm <= containerData.max_cbm;
+            const okWt = draftWeight <= containerData.max_weight;
+            hint =
+                okCbm && okWt
+                    ? `<span class="text-success">Within capacity</span>`
+                    : `<span class="text-danger">Exceeds capacity</span>`;
+        }
+        if (hintEl) hintEl.innerHTML = hint;
+
         new bootstrap.Modal(document.getElementById("draftModal")).show();
     } catch (e) {
         showToast(e.message, "danger");
     }
 }
 
+function toggleAddSelectAll() {
+    const checked = document.getElementById("draftAddSelectAll").checked;
+    document
+        .querySelectorAll(".draft-add-order-cb")
+        .forEach((cb) => (cb.checked = checked));
+}
+function toggleRemoveSelectAll() {
+    const checked = document.getElementById("draftRemoveSelectAll").checked;
+    document
+        .querySelectorAll(".draft-remove-order-cb")
+        .forEach((cb) => (cb.checked = checked));
+}
+
 async function addOrdersToDraft() {
-    const sel = document.getElementById("draftAddOrder");
-    const orderIds = Array.from(sel.selectedOptions).map((o) => o.value);
-    if (!orderIds.length) {
-        showToast("Select orders", "danger");
+    const ids = Array.from(
+        document.querySelectorAll(".draft-add-order-cb:checked"),
+    ).map((cb) => cb.value);
+    if (!ids.length) {
+        showToast("Select orders to add", "danger");
         return;
     }
     try {
         await api(
             "POST",
             "/shipment-drafts/" + currentDraftId + "/add-orders",
-            { order_ids: orderIds },
+            {
+                order_ids: ids,
+            },
         );
         showToast("Orders added");
         openDraftModal(currentDraftId);
@@ -212,9 +328,10 @@ async function addOrdersToDraft() {
 }
 
 async function removeOrdersFromDraft() {
-    const sel = document.getElementById("draftRemoveOrder");
-    const orderIds = Array.from(sel.selectedOptions).map((o) => o.value);
-    if (!orderIds.length) {
+    const ids = Array.from(
+        document.querySelectorAll(".draft-remove-order-cb:checked"),
+    ).map((cb) => cb.value);
+    if (!ids.length) {
         showToast("Select orders to remove", "danger");
         return;
     }
@@ -222,7 +339,9 @@ async function removeOrdersFromDraft() {
         await api(
             "POST",
             "/shipment-drafts/" + currentDraftId + "/remove-orders",
-            { order_ids: orderIds },
+            {
+                order_ids: ids,
+            },
         );
         showToast("Orders removed");
         openDraftModal(currentDraftId);
@@ -236,14 +355,16 @@ async function removeOrdersFromDraft() {
 async function assignContainerToDraft() {
     const containerId = document.getElementById("draftContainer").value;
     if (!containerId) {
-        showToast("Select container", "danger");
+        showToast("Select a container", "danger");
         return;
     }
     try {
         await api(
             "POST",
             "/shipment-drafts/" + currentDraftId + "/assign-container",
-            { container_id: parseInt(containerId) },
+            {
+                container_id: parseInt(containerId),
+            },
         );
         showToast("Container assigned");
         openDraftModal(currentDraftId);
@@ -267,9 +388,15 @@ async function retryPush(draftId) {
     }
 }
 
+function openFinalizeConfirm() {
+    bootstrap.Modal.getInstance(document.getElementById("draftModal")).hide();
+    new bootstrap.Modal(document.getElementById("finalizeConfirmModal")).show();
+}
+
 async function finalizeDraft() {
-    if (!confirm("Finalize and push to tracking?")) return;
+    const btn = document.getElementById("finalizeConfirmBtn");
     try {
+        setLoading(btn, true);
         await api(
             "POST",
             "/shipment-drafts/" + currentDraftId + "/finalize",
@@ -277,11 +404,48 @@ async function finalizeDraft() {
         );
         showToast("Finalized and pushed to tracking");
         bootstrap.Modal.getInstance(
-            document.getElementById("draftModal"),
+            document.getElementById("finalizeConfirmModal"),
         ).hide();
         loadShipmentDrafts();
         loadReadyTotals();
     } catch (e) {
         showToast(e.message, "danger");
+    } finally {
+        setLoading(btn, false);
+    }
+}
+
+function deleteCurrentDraft() {
+    if (!currentDraftId) return;
+    openDeleteConfirmModal(currentDraftId);
+}
+
+function openDeleteConfirmModal(id) {
+    const modal = document.getElementById("deleteDraftConfirmModal");
+    const btn = document.getElementById("deleteDraftConfirmBtn");
+    if (btn) btn.onclick = () => doDeleteDraft(id);
+    new bootstrap.Modal(modal).show();
+}
+
+async function doDeleteDraft(id) {
+    const btn = document.getElementById("deleteDraftConfirmBtn");
+    try {
+        setLoading(btn, true);
+        await api("DELETE", "/shipment-drafts/" + id);
+        showToast("Draft deleted");
+        bootstrap.Modal.getInstance(
+            document.getElementById("deleteDraftConfirmModal"),
+        ).hide();
+        const dm = document.getElementById("draftModal");
+        if (dm) {
+            const inst = bootstrap.Modal.getInstance(dm);
+            if (inst) inst.hide();
+        }
+        loadShipmentDrafts();
+        loadReadyTotals();
+    } catch (e) {
+        showToast(e.message, "danger");
+    } finally {
+        setLoading(btn, false);
     }
 }

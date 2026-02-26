@@ -39,9 +39,43 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             $row['contacts'] = $row['contacts'] ? json_decode($row['contacts'], true) : [];
             $row['addresses'] = $row['addresses'] ? json_decode($row['addresses'], true) : [];
+            if ($action === 'deposits') {
+                $stmt2 = $pdo->prepare("SELECT * FROM customer_deposits WHERE customer_id = ? ORDER BY created_at DESC");
+                $stmt2->execute([$id]);
+                $row['deposits'] = $stmt2->fetchAll(PDO::FETCH_ASSOC);
+                jsonResponse(['data' => $row]);
+            }
+            if ($action === 'balance') {
+                $stmt2 = $pdo->prepare("SELECT currency, SUM(amount) as total FROM customer_deposits WHERE customer_id = ? GROUP BY currency");
+                $stmt2->execute([$id]);
+                $bals = $stmt2->fetchAll(PDO::FETCH_ASSOC);
+                $balance = [];
+                foreach ($bals as $b) $balance[$b['currency']] = (float) $b['total'];
+                jsonResponse(['data' => $balance]);
+            }
             jsonResponse(['data' => $row]);
 
         case 'POST':
+            if ($id && $action === 'deposits') {
+                $stmt = $pdo->prepare("SELECT id FROM customers WHERE id = ?");
+                $stmt->execute([$id]);
+                if (!$stmt->fetch()) jsonError('Customer not found', 404);
+                $amount = (float) ($input['amount'] ?? 0);
+                if ($amount <= 0) jsonError('Amount must be positive', 400);
+                $currency = trim($input['currency'] ?? 'USD');
+                if (!in_array($currency, ['USD', 'RMB'], true)) jsonError('Currency must be USD or RMB', 400);
+                $paymentMethod = $input['payment_method'] ?? null;
+                $referenceNo = $input['reference_no'] ?? null;
+                $notes = $input['notes'] ?? null;
+                $userId = getAuthUserId() ?? 1;
+                $pdo->prepare("INSERT INTO customer_deposits (customer_id, amount, currency, payment_method, reference_no, notes, created_by) VALUES (?,?,?,?,?,?,?)")
+                    ->execute([$id, $amount, $currency, $paymentMethod, $referenceNo, $notes, $userId]);
+                $newId = (int) $pdo->lastInsertId();
+                logClms('customer_deposit', ['customer_id' => (int)$id, 'deposit_id' => $newId, 'amount' => $amount, 'currency' => $currency]);
+                $stmt = $pdo->prepare("SELECT * FROM customer_deposits WHERE id = ?");
+                $stmt->execute([$newId]);
+                jsonResponse(['data' => $stmt->fetch(PDO::FETCH_ASSOC)], 201);
+            }
             $code = trim($input['code'] ?? '');
             $name = trim($input['name'] ?? '');
             if (!$code || !$name) {

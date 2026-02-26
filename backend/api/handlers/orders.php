@@ -144,9 +144,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $customerId = (int) ($input['customer_id'] ?? 0);
                 $supplierId = (int) ($input['supplier_id'] ?? 0);
                 $expectedReady = $input['expected_ready_date'] ?? '';
+                $currency = trim($input['currency'] ?? 'USD');
                 $items = $input['items'] ?? [];
                 if (!$customerId || !$supplierId || !$expectedReady) {
                     jsonError('Missing required: customer_id, supplier_id, expected_ready_date', 400);
+                }
+                if (!in_array($currency, ['USD', 'RMB'], true)) {
+                    jsonError('Currency must be USD or RMB', 400);
                 }
                 $expectedDate = date('Y-m-d', strtotime($expectedReady));
                 if ($expectedDate === '1970-01-01' || !$expectedDate) {
@@ -168,10 +172,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 $pdo->beginTransaction();
                 try {
-                    $pdo->prepare("INSERT INTO orders (customer_id, supplier_id, expected_ready_date, status, created_by) VALUES (?,?,?,'Draft',?)")
-                        ->execute([$customerId, $supplierId, $expectedDate, $userId]);
+                    $pdo->prepare("INSERT INTO orders (customer_id, supplier_id, expected_ready_date, currency, status, created_by) VALUES (?,?,?,?,'Draft',?)")
+                        ->execute([$customerId, $supplierId, $expectedDate, $currency, $userId]);
                     $orderId = (int) $pdo->lastInsertId();
-                    $insItem = $pdo->prepare("INSERT INTO order_items (order_id, product_id, item_no, shipping_code, cartons, qty_per_carton, quantity, unit, declared_cbm, declared_weight, unit_price, total_amount, notes, image_paths, description_cn, description_en) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+                    $insItem = $pdo->prepare("INSERT INTO order_items (order_id, product_id, item_no, shipping_code, cartons, qty_per_carton, quantity, unit, declared_cbm, declared_weight, item_length, item_width, item_height, unit_price, total_amount, notes, image_paths, description_cn, description_en) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
                     foreach ($items as $it) {
                         $qty = (float) ($it['quantity'] ?? 0);
                         $cartons = isset($it['cartons']) ? (int) $it['cartons'] : null;
@@ -193,6 +197,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                             $it['unit'] ?? 'pieces',
                             (float) ($it['declared_cbm'] ?? 0),
                             (float) ($it['declared_weight'] ?? 0),
+                            isset($it['item_length']) ? (float) $it['item_length'] : null,
+                            isset($it['item_width']) ? (float) $it['item_width'] : null,
+                            isset($it['item_height']) ? (float) $it['item_height'] : null,
                             $unitPrice,
                             $totalAmount,
                             $it['notes'] ?? null,

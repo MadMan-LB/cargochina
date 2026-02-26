@@ -3,51 +3,51 @@ $currentPage = 'orders';
 $pageTitle = 'Orders';
 require 'includes/layout.php';
 ?>
-  <h1 class="mb-4">Orders</h1>
-  <div class="card mb-4">
-    <div class="card-header d-flex justify-content-between align-items-center">
-      <span>Order List</span>
-      <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#orderModal" onclick="openOrderForm()">+ New Order</button>
+<h1 class="mb-4">Orders</h1>
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>Order List</span>
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#orderModal" onclick="openOrderForm()">+ New Order</button>
+  </div>
+  <div class="card-body">
+    <div class="row mb-3 form-row-responsive">
+      <div class="col-12 col-md-4">
+        <select class="form-select form-select-sm" id="filterStatus" onchange="loadOrders()">
+          <option value="">All statuses</option>
+          <option value="Draft">Draft</option>
+          <option value="Submitted">Submitted</option>
+          <option value="Approved">Approved</option>
+          <option value="InTransitToWarehouse">In Transit</option>
+          <option value="ReceivedAtWarehouse">Received</option>
+          <option value="AwaitingCustomerConfirmation">Awaiting Confirmation</option>
+          <option value="Confirmed">Confirmed</option>
+          <option value="ReadyForConsolidation">Ready for Consolidation</option>
+          <option value="ConsolidatedIntoShipmentDraft">In Shipment Draft</option>
+          <option value="AssignedToContainer">Assigned to Container</option>
+          <option value="FinalizedAndPushedToTracking">Finalized</option>
+        </select>
+      </div>
+      <div class="col-12 col-md-4">
+        <input type="text" class="form-control form-control-sm" id="filterCustomer" placeholder="Filter by customer (type to search)">
+      </div>
     </div>
-    <div class="card-body">
-      <div class="row mb-3 form-row-responsive">
-        <div class="col-12 col-md-4">
-          <select class="form-select form-select-sm" id="filterStatus" onchange="loadOrders()">
-            <option value="">All statuses</option>
-            <option value="Draft">Draft</option>
-            <option value="Submitted">Submitted</option>
-            <option value="Approved">Approved</option>
-            <option value="InTransitToWarehouse">In Transit</option>
-            <option value="ReceivedAtWarehouse">Received</option>
-            <option value="AwaitingCustomerConfirmation">Awaiting Confirmation</option>
-            <option value="Confirmed">Confirmed</option>
-            <option value="ReadyForConsolidation">Ready for Consolidation</option>
-            <option value="ConsolidatedIntoShipmentDraft">In Shipment Draft</option>
-            <option value="AssignedToContainer">Assigned to Container</option>
-            <option value="FinalizedAndPushedToTracking">Finalized</option>
-          </select>
-        </div>
-        <div class="col-12 col-md-4">
-          <input type="text" class="form-control form-control-sm" id="filterCustomer" placeholder="Filter by customer (type to search)">
-        </div>
-      </div>
-      <div id="ordersTable" class="table-responsive">
-        <table class="table table-hover">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Customer</th>
-              <th>Supplier</th>
-              <th>Expected Ready</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
+    <div id="ordersTable" class="table-responsive">
+      <table class="table table-hover">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Customer</th>
+            <th>Supplier</th>
+            <th>Expected Ready</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
     </div>
   </div>
+</div>
 
 <div class="modal fade" id="orderModal" tabindex="-1">
   <div class="modal-dialog modal-xl">
@@ -62,7 +62,11 @@ require 'includes/layout.php';
           <div class="row mb-3 form-row-responsive">
             <div class="col-12 col-md-4 mb-2"><label class="form-label">Customer *</label><input type="text" class="form-control" id="orderCustomer" placeholder="Type to search..." required></div>
             <div class="col-12 col-md-4 mb-2"><label class="form-label">Supplier *</label><input type="text" class="form-control" id="orderSupplier" placeholder="Type to search..." required></div>
-            <div class="col-12 col-md-4 mb-2"><label class="form-label">Expected Ready Date *</label><input type="date" class="form-control" id="orderExpectedDate" required></div>
+            <div class="col-12 col-md-2 mb-2"><label class="form-label">Expected Ready *</label><input type="date" class="form-control" id="orderExpectedDate" required></div>
+            <div class="col-12 col-md-2 mb-2"><label class="form-label">Currency *</label><select class="form-select" id="orderCurrency">
+                <option value="USD">USD</option>
+                <option value="RMB">RMB</option>
+              </select></div>
           </div>
           <h6 class="mb-2">Items</h6>
           <p class="text-muted small mb-3">Min 1 photo per item required to submit. Totals computed live.</p>
@@ -80,7 +84,9 @@ require 'includes/layout.php';
                   <th>Unit $</th>
                   <th>Total $</th>
                   <th>CBM</th>
-                  <th>GW (kg)</th>
+                  <th>Total CBM</th>
+                  <th>Wt(kg)</th>
+                  <th>Total GW</th>
                   <th></th>
                 </tr>
               </thead>
@@ -89,7 +95,9 @@ require 'includes/layout.php';
                 <tr class="order-totals-row" id="orderTotalsRow">
                   <td colspan="8" class="text-end">Totals:</td>
                   <td id="orderTotalAmount">0</td>
+                  <td></td>
                   <td id="orderTotalCbm">0</td>
+                  <td></td>
                   <td id="orderTotalWeight">0</td>
                   <td></td>
                 </tr>

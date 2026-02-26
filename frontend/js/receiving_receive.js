@@ -70,10 +70,53 @@ async function loadOrder() {
         (s, i) => s + (parseFloat(i.declared_weight) || 0),
         0,
     );
+    let custInfoHtml = "";
+    try {
+        const custRes = await api("GET", "/customers/" + o.customer_id);
+        const c = custRes.data;
+        const contacts = c.contacts || [];
+        const addresses = c.addresses || [];
+        if (contacts.length) {
+            custInfoHtml +=
+                '<p class="mb-1 small text-muted"><strong>Contacts:</strong> ' +
+                contacts
+                    .map((ct) =>
+                        escapeHtml(
+                            (ct.name || "") +
+                                (ct.phone ? " " + ct.phone : "") +
+                                (ct.email ? " " + ct.email : ""),
+                        ),
+                    )
+                    .join(", ") +
+                "</p>";
+        }
+        if (addresses.length) {
+            custInfoHtml +=
+                '<p class="mb-1 small text-muted"><strong>Addresses:</strong> ' +
+                addresses
+                    .map((a) =>
+                        escapeHtml(
+                            typeof a === "string"
+                                ? a
+                                : a.address || a.city || JSON.stringify(a),
+                        ),
+                    )
+                    .join("; ") +
+                "</p>";
+        }
+        if (c.payment_terms) {
+            custInfoHtml +=
+                '<p class="mb-1 small text-muted"><strong>Payment terms:</strong> ' +
+                escapeHtml(c.payment_terms) +
+                "</p>";
+        }
+    } catch (e) {}
+    const curSymbol = o.currency === "RMB" ? "¥" : "$";
     document.getElementById("orderOverviewBody").innerHTML = `
       <p class="mb-1"><strong>Customer:</strong> ${escapeHtml(o.customer_name)}</p>
+      ${custInfoHtml}
       <p class="mb-1"><strong>Supplier:</strong> ${escapeHtml(o.supplier_name)}</p>
-      <p class="mb-1"><strong>Expected ready:</strong> ${escapeHtml(o.expected_ready_date)}</p>
+      <p class="mb-1"><strong>Expected ready:</strong> ${escapeHtml(o.expected_ready_date)} | <strong>Currency:</strong> ${escapeHtml(o.currency || "USD")}</p>
       <p class="mb-0"><strong>Items:</strong> ${(o.items || []).length} — Declared: ${declaredCbm.toFixed(2)} CBM / ${declaredWeight.toFixed(0)} kg</p>
     `;
     receiveOrderItems = o.items || [];

@@ -15,7 +15,9 @@ async function loadCustomers() {
         <td>${escapeHtml(r.payment_terms || "-")}</td>
         <td class="table-actions">
           <button class="btn btn-sm btn-outline-primary" onclick="editCustomer(${r.id})">Edit</button>
-          <button class="btn btn-sm btn-outline-danger" onclick="deleteCustomer(${r.id}, '${escapeHtml(r.name)}')">Delete</button>
+          <button class="btn btn-sm btn-outline-success" onclick="openDepositModal(${r.id}, '${escapeHtml(r.name).replace(/'/g, "\\'")}')">Deposit</button>
+          <button class="btn btn-sm btn-outline-info" onclick="showBalance(${r.id}, '${escapeHtml(r.name).replace(/'/g, "\\'")}')">Balance</button>
+          <button class="btn btn-sm btn-outline-danger" onclick="deleteCustomer(${r.id}, '${escapeHtml(r.name)}')">Del</button>
         </td>
       </tr>
     `,
@@ -75,6 +77,80 @@ async function saveCustomer() {
             document.getElementById("customerModal"),
         ).hide();
         loadCustomers();
+    } catch (e) {
+        showToast(e.message, "danger");
+    }
+}
+
+function openDepositModal(customerId, name) {
+    document.getElementById("depCustomerId").value = customerId;
+    document.getElementById("depCustomerName").textContent = name;
+    document.getElementById("depAmount").value = "";
+    document.getElementById("depMethod").value = "";
+    document.getElementById("depReference").value = "";
+    document.getElementById("depNotes").value = "";
+    new bootstrap.Modal(document.getElementById("depositModal")).show();
+}
+
+async function submitDeposit() {
+    const customerId = document.getElementById("depCustomerId").value;
+    const amount = parseFloat(document.getElementById("depAmount").value || 0);
+    if (amount <= 0) {
+        showToast("Amount must be positive", "danger");
+        return;
+    }
+    const payload = {
+        amount,
+        currency: document.getElementById("depCurrency").value,
+        payment_method: document.getElementById("depMethod").value || null,
+        reference_no: document.getElementById("depReference").value || null,
+        notes: document.getElementById("depNotes").value || null,
+    };
+    const btn = document.getElementById("depSubmitBtn");
+    try {
+        setLoading(btn, true);
+        await api("POST", "/customers/" + customerId + "/deposits", payload);
+        showToast("Deposit recorded");
+        bootstrap.Modal.getInstance(
+            document.getElementById("depositModal"),
+        ).hide();
+    } catch (e) {
+        showToast(e.message, "danger");
+    } finally {
+        setLoading(btn, false);
+    }
+}
+
+async function showBalance(customerId, name) {
+    document.getElementById("balCustomerName").textContent = name;
+    try {
+        const [depRes, balRes] = await Promise.all([
+            api("GET", "/customers/" + customerId + "/deposits"),
+            api("GET", "/customers/" + customerId + "/balance"),
+        ]);
+        const deposits = depRes.data?.deposits || [];
+        const balance = balRes.data || {};
+        let balHtml = "";
+        Object.entries(balance).forEach(([cur, total]) => {
+            balHtml += `<span class="badge bg-primary me-2">${cur}: ${total.toFixed(2)}</span>`;
+        });
+        document.getElementById("balSummary").innerHTML =
+            balHtml || '<span class="text-muted">No deposits</span>';
+        document.getElementById("balHistoryBody").innerHTML = deposits.length
+            ? deposits
+                  .map(
+                      (d) => `<tr>
+                <td>${d.created_at}</td>
+                <td>${d.amount}</td>
+                <td>${d.currency}</td>
+                <td>${escapeHtml(d.payment_method || "-")}</td>
+                <td>${escapeHtml(d.reference_no || "-")}</td>
+                <td>${escapeHtml(d.notes || "-")}</td>
+              </tr>`,
+                  )
+                  .join("")
+            : '<tr><td colspan="6" class="text-muted">No deposits yet</td></tr>';
+        new bootstrap.Modal(document.getElementById("balanceModal")).show();
     } catch (e) {
         showToast(e.message, "danger");
     }

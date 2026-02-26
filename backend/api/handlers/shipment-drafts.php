@@ -13,6 +13,31 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $userId = getAuthUserId() ?? 1;
 
     switch ($method) {
+        case 'DELETE':
+            if ($id === null) jsonError('Draft ID required', 400);
+            $stmt = $pdo->prepare("SELECT * FROM shipment_drafts WHERE id = ?");
+            $stmt->execute([$id]);
+            $sd = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$sd) jsonError('Shipment draft not found', 404);
+            if ($sd['status'] === 'finalized') jsonError('Cannot delete finalized draft', 400);
+            $so = $pdo->prepare("SELECT order_id FROM shipment_draft_orders WHERE shipment_draft_id = ?");
+            $so->execute([$id]);
+            $orderIds = array_column($so->fetchAll(PDO::FETCH_ASSOC), 'order_id');
+            $pdo->beginTransaction();
+            try {
+                $pdo->prepare("DELETE FROM shipment_draft_orders WHERE shipment_draft_id = ?")->execute([$id]);
+                $pdo->prepare("DELETE FROM shipment_drafts WHERE id = ?")->execute([$id]);
+                foreach ($orderIds as $oid) {
+                    $pdo->prepare("UPDATE orders SET status='ReadyForConsolidation' WHERE id = ? AND status IN ('ConsolidatedIntoShipmentDraft','AssignedToContainer')")->execute([$oid]);
+                }
+                $pdo->commit();
+                jsonResponse(['data' => ['deleted' => true]]);
+            } catch (Exception $e) {
+                $pdo->rollBack();
+                throw $e;
+            }
+            break;
+
         case 'GET':
             if ($id === null) {
                 $stmt = $pdo->query("SELECT sd.*, c.code as container_code FROM shipment_drafts sd LEFT JOIN containers c ON sd.container_id = c.id ORDER BY sd.id DESC");
@@ -174,7 +199,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $del = $pdo->prepare("DELETE FROM shipment_draft_orders WHERE shipment_draft_id = ? AND order_id = ?");
                 foreach ($orderIds as $oid) {
                     $del->execute([$id, $oid]);
-                    $pdo->prepare("UPDATE orders SET status='ReadyForConsolidation' WHERE id = ? AND status = 'ConsolidatedIntoShipmentDraft'")->execute([$oid]);
+                    $pdo->prepare("UPDATE orders SET status='ReadyForConsolidation' WHERE id = ? AND status IN ('ConsolidatedIntoShipmentDraft','AssignedToContainer')")->execute([$oid]);
                 }
                 $stmt = $pdo->prepare("SELECT * FROM shipment_drafts WHERE id = ?");
                 $stmt->execute([$id]);

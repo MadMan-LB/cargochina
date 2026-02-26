@@ -12,7 +12,10 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 - `GET /customers` — List all
 - `GET /customers/search?q=...` — Search by name/code (top 10 matches)
 - `GET /customers/{id}` — Get one
+- `GET /customers/{id}/deposits` — Get customer with deposits list
+- `GET /customers/{id}/balance` — Get balance per currency `{USD: X, RMB: Y}`
 - `POST /customers` — Create `{code, name, contacts?, addresses?, payment_terms?}`
+- `POST /customers/{id}/deposits` — Record deposit `{amount, currency (USD|RMB), payment_method?, reference_no?, notes?}`
 - `PUT /customers/{id}` — Update
 - `DELETE /customers/{id}` — Delete
 
@@ -21,7 +24,8 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 - `GET /suppliers/search?q=...` — Search by name/code/phone/store_id (top 10)
 - `GET /suppliers/{id}` — Get one
 - `POST /suppliers` — Create `{code, store_id?, name, phone?, contacts?, factory_location?, notes?, additional_ids?}` — store_id: official China store identifier
-- `POST /suppliers/{id}/payments` — Add payment `{amount, currency?, payment_type?, order_id?, notes?}`
+- `POST /suppliers/{id}/payments` — Add payment `{amount, currency (USD|RMB), invoice_amount?, marked_full_payment?, payment_type?, order_id?, notes?}` — discount auto-calculated when invoice_amount > amount
+- `GET /suppliers/{id}/balance` — Balance summary per currency (total_paid, total_invoiced, total_discount, outstanding)
 - `POST /suppliers/{id}/interactions` — Add interaction `{interaction_type?, content?}` — type: visit/quote/note
 - `PUT /suppliers/{id}` — Update
 - `DELETE /suppliers/{id}` — Delete
@@ -43,7 +47,7 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 ## Orders
 - `GET /orders?status=&customer_id=` — List (optional filters)
 - `GET /orders/{id}` — Get one with items, attachments, receipt (when present), receipt.items, receipt.photos, customer_photo_visibility
-- `POST /orders` — Create `{customer_id, supplier_id, expected_ready_date, items}` — items: product_id?, item_no?, shipping_code?, cartons?, qty_per_carton?, quantity, unit, declared_cbm, declared_weight, unit_price?, total_amount?, notes?, image_paths?, description_cn?, description_en? — Submit requires min 1 photo per item (configurable)
+- `POST /orders` — Create `{customer_id, supplier_id, expected_ready_date, currency (USD|RMB), items}` — items: product_id?, item_no?, shipping_code?, cartons?, qty_per_carton?, quantity, unit, declared_cbm, declared_weight, item_length?, item_width?, item_height?, unit_price?, total_amount?, notes?, image_paths?, description_cn?, description_en? — Submit requires min 1 photo per item (configurable). CBM auto-calculated from L*W*H/1000000 on client.
 - `PUT /orders/{id}` — Update (Draft only)
 - `POST /orders/{id}/submit` — Draft → Submitted
 - `POST /orders/{id}/approve` — Submitted → Approved
