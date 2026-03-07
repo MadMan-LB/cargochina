@@ -3,6 +3,7 @@
  */
 
 const API_BASE = "/cargochina/api/v1";
+if (typeof window !== "undefined") window.API_BASE = API_BASE;
 
 const UPLOAD_BASE = "/cargochina/api/v1/upload";
 

@@ -1,11 +1,116 @@
 let productImagePaths = [];
+let productDescEntries = [];
+let productSupplierAutocomplete = null;
 
 document.addEventListener("DOMContentLoaded", () => {
-    loadSuppliers();
     loadProducts();
     setupProductImageUpload();
     setupProductDimensionInputs();
+    setupProductDescription();
+    setupProductSupplierAutocomplete();
+    setupProductPricing();
 });
+
+function setupProductPricing() {
+    const unitPriceEl = document.getElementById("productUnitPrice");
+    const piecesEl = document.getElementById("productPiecesPerCarton");
+    const totalEl = document.getElementById("productCartonTotal");
+    if (!unitPriceEl || !piecesEl) return;
+    const updateTotal = () => {
+        const price = parseFloat(unitPriceEl.value) || 0;
+        const pieces = parseInt(piecesEl.value, 10) || 0;
+        if (totalEl)
+            totalEl.textContent =
+                price > 0 && pieces > 0 ? (price * pieces).toFixed(2) : "—";
+    };
+    unitPriceEl.addEventListener("input", updateTotal);
+    piecesEl.addEventListener("input", updateTotal);
+}
+
+function setupProductDescription() {
+    const containerEl = document.getElementById("productDescFields");
+    const addBtn = document.getElementById("productDescAddBtn");
+    if (!containerEl || !addBtn) return;
+
+    const addDescField = (text = "", translated = "") => {
+        const id = Date.now() + Math.random();
+        productDescEntries.push({ id, text, translated });
+        renderDescFields();
+    };
+
+    const renderDescFields = () => {
+        containerEl.innerHTML = productDescEntries
+            .map(
+                (e, i) => `
+          <div class="d-flex align-items-center gap-2 mb-1" data-desc-idx="${i}">
+            <input type="text" class="form-control form-control-sm flex-grow-1 product-desc-input" placeholder="Chinese or English" value="${escapeHtml(e.text)}" data-idx="${i}">
+            <span class="product-desc-translated text-muted small" style="min-width:120px">${e.translated ? escapeHtml(e.translated) : ""}</span>
+            <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeProductDescEntry(${i})">×</button>
+          </div>
+        `,
+            )
+            .join("");
+        containerEl.querySelectorAll(".product-desc-input").forEach((inp) => {
+            inp.addEventListener("blur", async function () {
+                const idx = parseInt(this.dataset.idx, 10);
+                const text = this.value.trim();
+                if (!text) return;
+                const entry = productDescEntries[idx];
+                if (!entry) return;
+                entry.text = text;
+                const isChinese = /[\u4e00-\u9fff]/.test(text);
+                if (isChinese) {
+                    try {
+                        const res = await api("POST", "/translate", {
+                            text,
+                            source_lang: "zh",
+                            target_lang: "en",
+                        });
+                        entry.translated =
+                            (res.data && res.data.translated) || text;
+                    } catch (err) {
+                        entry.translated = text;
+                    }
+                } else {
+                    entry.translated = text;
+                }
+                const span = this.closest("[data-desc-idx]").querySelector(
+                    ".product-desc-translated",
+                );
+                if (span) span.textContent = entry.translated || "";
+            });
+        });
+    };
+
+    addBtn.addEventListener("click", () => addDescField());
+    window.removeProductDescEntry = (i) => {
+        productDescEntries.splice(i, 1);
+        if (productDescEntries.length === 0) addDescField();
+        else renderDescFields();
+    };
+    window.renderProductDescEntries = () => {
+        if (productDescEntries.length === 0) addDescField();
+        else renderDescFields();
+    };
+    addDescField();
+}
+
+function setupProductSupplierAutocomplete() {
+    const inputEl = document.getElementById("productSupplier");
+    const hiddenEl = document.getElementById("productSupplierId");
+    if (!inputEl || !hiddenEl) return;
+    if (typeof Autocomplete === "undefined") return;
+    productSupplierAutocomplete = Autocomplete.init(inputEl, {
+        resource: "suppliers",
+        placeholder: "Type to search supplier...",
+        onSelect: (item) => {
+            hiddenEl.value = item.id;
+        },
+    });
+    inputEl.addEventListener("input", () => {
+        if (!inputEl.value.trim()) hiddenEl.value = "";
+    });
+}
 
 function setupProductDimensionInputs() {
     const cbmEl = document.getElementById("productCbm");
@@ -97,19 +202,14 @@ function removeProductImage(index) {
     renderProductImagesPreview();
 }
 
-async function loadSuppliers() {
-    try {
-        const res = await api("GET", "/suppliers");
-        const sel = document.getElementById("productSupplier");
-        sel.innerHTML =
-            '<option value="">— None —</option>' +
-            (res.data || [])
-                .map(
-                    (s) =>
-                        `<option value="${s.id}">${escapeHtml(s.name)}</option>`,
-                )
-                .join("");
-    } catch (e) {}
+function mergedDescription(row) {
+    const entries = row.description_entries;
+    if (entries && entries.length > 0) {
+        return entries
+            .map((e) => e.description_translated || e.description_text)
+            .join(" | ");
+    }
+    return row.description_en || row.description_cn || "-";
 }
 
 async function loadProducts() {
@@ -124,10 +224,11 @@ async function loadProducts() {
       <tr>
         <td>${r.thumbnail_url ? `<img src="${r.thumbnail_url}" class="img-thumbnail img-thumbnail-sm" alt="">` : "—"}</td>
         <td>${r.id}</td>
-        <td>${escapeHtml(r.description_cn || "-")}</td>
-        <td>${escapeHtml(r.description_en || "-")}</td>
+        <td class="text-truncate" style="max-width:200px" title="${escapeHtml(mergedDescription(r))}">${escapeHtml(mergedDescription(r))}</td>
         <td>${r.cbm}</td>
         <td>${r.weight}</td>
+        <td>${r.pieces_per_carton ?? "—"}</td>
+        <td>${r.unit_price != null ? parseFloat(r.unit_price).toFixed(2) : "—"}</td>
         <td>${escapeHtml(r.hs_code || "-")}</td>
         <td class="table-actions">
           <button class="btn btn-sm btn-outline-primary" onclick="editProduct(${r.id})">Edit</button>
@@ -137,7 +238,7 @@ async function loadProducts() {
     `,
                 )
                 .join("") ||
-            '<tr><td colspan="8" class="text-muted">No products yet.</td></tr>';
+            '<tr><td colspan="9" class="text-muted">No products yet.</td></tr>';
     } catch (e) {
         showToast(e.message, "danger");
     }
@@ -146,9 +247,14 @@ async function loadProducts() {
 function openProductForm() {
     document.getElementById("productForm").reset();
     document.getElementById("productId").value = "";
+    document.getElementById("productSupplierId").value = "";
     document.getElementById("productModalTitle").textContent = "Add Product";
     productImagePaths = [];
+    productDescEntries = [];
     renderProductImagesPreview();
+    if (window.renderProductDescEntries) window.renderProductDescEntries();
+    if (productSupplierAutocomplete && productSupplierAutocomplete.setValue)
+        productSupplierAutocomplete.setValue(null);
 }
 
 async function editProduct(id) {
@@ -156,8 +262,35 @@ async function editProduct(id) {
         const res = await api("GET", "/products/" + id);
         const d = res.data;
         document.getElementById("productId").value = d.id;
-        document.getElementById("productDescCn").value = d.description_cn || "";
-        document.getElementById("productDescEn").value = d.description_en || "";
+        productDescEntries = (d.description_entries || []).map((e) => ({
+            id: Date.now() + Math.random(),
+            text: e.description_text || e.description_cn || "",
+            translated: e.description_translated || e.description_en || "",
+        }));
+        if (
+            productDescEntries.length === 0 &&
+            (d.description_cn || d.description_en)
+        ) {
+            productDescEntries = [
+                {
+                    id: Date.now(),
+                    text: d.description_cn || d.description_en,
+                    translated: d.description_en || d.description_cn,
+                },
+            ];
+        }
+        if (
+            productDescEntries.length === 0 &&
+            (d.description_cn || d.description_en)
+        ) {
+            productDescEntries = [
+                {
+                    text: d.description_cn || d.description_en,
+                    translated: d.description_en || d.description_cn,
+                },
+            ];
+        }
+        if (window.renderProductDescEntries) window.renderProductDescEntries();
         document.getElementById("productCbm").value = d.cbm ?? "";
         document.getElementById("productLength").value = d.length_cm ?? "";
         document.getElementById("productWidth").value = d.width_cm ?? "";
@@ -165,7 +298,24 @@ async function editProduct(id) {
         document.getElementById("productWeight").value = d.weight;
         document.getElementById("productHsCode").value = d.hs_code || "";
         document.getElementById("productPackaging").value = d.packaging || "";
-        document.getElementById("productSupplier").value = d.supplier_id || "";
+        document.getElementById("productPiecesPerCarton").value =
+            d.pieces_per_carton ?? "";
+        document.getElementById("productUnitPrice").value = d.unit_price ?? "";
+        document.getElementById("productSupplierId").value =
+            d.supplier_id || "";
+        if (
+            productSupplierAutocomplete &&
+            productSupplierAutocomplete.setValue
+        ) {
+            productSupplierAutocomplete.setValue(
+                d.supplier_id && d.supplier_name
+                    ? { id: d.supplier_id, name: d.supplier_name }
+                    : null,
+            );
+        } else {
+            document.getElementById("productSupplier").value =
+                d.supplier_name || "";
+        }
         document.getElementById("productModalTitle").textContent =
             "Edit Product";
         productImagePaths = d.image_paths || [];
@@ -187,11 +337,15 @@ async function saveProduct() {
         parseFloat(cbmRaw) ||
         (l > 0 && w > 0 && h > 0 ? (l * w * h) / 1000000 : 0);
 
+    const descriptionEntries = productDescEntries
+        .map((e) => ({
+            description_text: (e.text || "").trim(),
+            description_translated: (e.translated || "").trim(),
+        }))
+        .filter((e) => e.description_text);
+
     const payload = {
-        description_cn:
-            document.getElementById("productDescCn").value.trim() || null,
-        description_en:
-            document.getElementById("productDescEn").value.trim() || null,
+        description_entries: descriptionEntries,
         cbm,
         length_cm: l > 0 ? l : null,
         width_cm: w > 0 ? w : null,
@@ -200,7 +354,17 @@ async function saveProduct() {
         hs_code: document.getElementById("productHsCode").value.trim() || null,
         packaging:
             document.getElementById("productPackaging").value.trim() || null,
-        supplier_id: document.getElementById("productSupplier").value || null,
+        supplier_id: document.getElementById("productSupplierId").value || null,
+        pieces_per_carton: document.getElementById("productPiecesPerCarton")
+            .value
+            ? parseInt(
+                  document.getElementById("productPiecesPerCarton").value,
+                  10,
+              )
+            : null,
+        unit_price: document.getElementById("productUnitPrice").value
+            ? parseFloat(document.getElementById("productUnitPrice").value)
+            : null,
         image_paths: productImagePaths,
     };
     if (payload.cbm <= 0) {

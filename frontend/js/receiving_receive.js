@@ -231,10 +231,28 @@ function updateVarianceAlert() {
 
 document
     .getElementById("actualCbm")
-    ?.addEventListener("input", updateVarianceAlert);
+    ?.addEventListener("input", () => {
+        if (parseFloat(document.getElementById("actualCbm")?.value || 0) > 0) {
+            document.getElementById("actualLength").value = "";
+            document.getElementById("actualWidth").value = "";
+            document.getElementById("actualHeight").value = "";
+        }
+        updateVarianceAlert();
+    });
 document
     .getElementById("condition")
     ?.addEventListener("change", updateVarianceAlert);
+["actualLength", "actualWidth", "actualHeight"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("input", () => {
+        const l = parseFloat(document.getElementById("actualLength")?.value) || 0;
+        const w = parseFloat(document.getElementById("actualWidth")?.value) || 0;
+        const h = parseFloat(document.getElementById("actualHeight")?.value) || 0;
+        if (l > 0 && w > 0 && h > 0) {
+            document.getElementById("actualCbm").value = (l * w * h / 1000000).toFixed(4);
+        }
+        updateVarianceAlert();
+    });
+});
 
 document.getElementById("receiveAddPhotoBtn").onclick = () =>
     document.getElementById("receivePhotos").click();
@@ -284,12 +302,19 @@ document.getElementById("submitReceiveBtn").onclick = async () => {
     const actualCartons = parseInt(
         document.getElementById("actualCartons").value || 0,
     );
-    const actualCbm = parseFloat(
-        document.getElementById("actualCbm").value || 0,
-    );
+    const cbmRaw = document.getElementById("actualCbm").value;
+    const l = parseFloat(document.getElementById("actualLength")?.value) || 0;
+    const w = parseFloat(document.getElementById("actualWidth")?.value) || 0;
+    const h = parseFloat(document.getElementById("actualHeight")?.value) || 0;
+    const actualCbm =
+        parseFloat(cbmRaw) || (l > 0 && w > 0 && h > 0 ? l * w * h / 1000000 : 0);
     const actualWeight = parseFloat(
         document.getElementById("actualWeight").value || 0,
     );
+    if (actualCbm <= 0) {
+        showToast("Enter Actual CBM directly or L/H/W (cm) to calculate", "danger");
+        return;
+    }
     const condition = document.getElementById("condition").value;
     const notes = document.getElementById("receiveNotes").value;
     const variancePct =

@@ -25,12 +25,21 @@ function showSkeleton(id, show) {
 
 async function loadQueue() {
     const orderId = document.getElementById("filterOrderId")?.value?.trim();
+    const customerId = document.getElementById("filterCustomer")?.value;
+    const supplierId = document.getElementById("filterSupplier")?.value;
     const dateFrom = document.getElementById("filterDateFrom")?.value;
     const dateTo = document.getElementById("filterDateTo")?.value;
+    const shippingCode = document
+        .getElementById("filterShippingCode")
+        ?.value?.trim();
     let path = "/receiving/queue?status=Approved&status=InTransitToWarehouse";
     if (orderId) path += "&order_id=" + encodeURIComponent(orderId);
+    if (customerId) path += "&customer_id=" + encodeURIComponent(customerId);
+    if (supplierId) path += "&supplier_id=" + encodeURIComponent(supplierId);
     if (dateFrom) path += "&date_from=" + encodeURIComponent(dateFrom);
     if (dateTo) path += "&date_to=" + encodeURIComponent(dateTo);
+    if (shippingCode)
+        path += "&shipping_code=" + encodeURIComponent(shippingCode);
 
     showSkeleton("queueSkeleton", true);
     document.getElementById("queueTable")?.classList.add("d-none");
@@ -119,7 +128,124 @@ async function loadHistory() {
     }
 }
 
+async function exportQueueCsv() {
+    const orderId = document.getElementById("filterOrderId")?.value?.trim();
+    const customerId = document.getElementById("filterCustomer")?.value;
+    const supplierId = document.getElementById("filterSupplier")?.value;
+    const dateFrom = document.getElementById("filterDateFrom")?.value;
+    const dateTo = document.getElementById("filterDateTo")?.value;
+    const shippingCode = document
+        .getElementById("filterShippingCode")
+        ?.value?.trim();
+    let path = "/receiving/queue?status=Approved&status=InTransitToWarehouse";
+    if (orderId) path += "&order_id=" + encodeURIComponent(orderId);
+    if (customerId) path += "&customer_id=" + encodeURIComponent(customerId);
+    if (supplierId) path += "&supplier_id=" + encodeURIComponent(supplierId);
+    if (dateFrom) path += "&date_from=" + encodeURIComponent(dateFrom);
+    if (dateTo) path += "&date_to=" + encodeURIComponent(dateTo);
+    if (shippingCode)
+        path += "&shipping_code=" + encodeURIComponent(shippingCode);
+    try {
+        const res = await api(path);
+        const rows = res.data || [];
+        const headers = [
+            "Order ID",
+            "Customer",
+            "Supplier",
+            "Expected Ready",
+            "Status",
+            "Shipping Codes",
+            "Total Cartons",
+            "Declared CBM",
+            "Declared Weight (kg)",
+            "Items Summary",
+        ];
+        const lines = [headers.join(",")];
+        rows.forEach((o) => {
+            const items = o.items || [];
+            const shippingCodes = [
+                ...new Set(items.map((i) => i.shipping_code).filter(Boolean)),
+            ].join("; ");
+            const totalCartons = items.reduce(
+                (s, i) => s + (parseInt(i.cartons) || 0),
+                0,
+            );
+            const itemsSummary = items
+                .map(
+                    (i) =>
+                        `${i.shipping_code || "-"} ${i.cartons || 0}ctn HS:${i.hs_code || "-"}`,
+                )
+                .join("; ");
+            lines.push(
+                [
+                    o.id,
+                    '"' + (o.customer_name || "").replace(/"/g, '""') + '"',
+                    '"' + (o.supplier_name || "").replace(/"/g, '""') + '"',
+                    o.expected_ready_date || "",
+                    o.status || "",
+                    '"' + (shippingCodes || "").replace(/"/g, '""') + '"',
+                    totalCartons,
+                    parseFloat(o.declared_cbm || 0).toFixed(4),
+                    parseFloat(o.declared_weight || 0).toFixed(2),
+                    '"' + (itemsSummary || "").replace(/"/g, '""') + '"',
+                ].join(","),
+            );
+        });
+        const csv = lines.join("\n");
+        const blob = new Blob(["\ufeff" + csv], {
+            type: "text/csv;charset=utf-8",
+        });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download =
+            "receiving_queue_" + new Date().toISOString().slice(0, 10) + ".csv";
+        a.click();
+        URL.revokeObjectURL(a.href);
+        if (typeof showToast === "function")
+            showToast("Exported " + rows.length + " orders");
+    } catch (e) {
+        if (typeof showToast === "function") showToast(e.message, "danger");
+        else alert(e.message);
+    }
+}
+
+async function loadFilterOptions() {
+    try {
+        const [custRes, supRes] = await Promise.all([
+            fetch(API + "/customers", { credentials: "same-origin" }).then(
+                (r) => r.json(),
+            ),
+            fetch(API + "/suppliers", { credentials: "same-origin" }).then(
+                (r) => r.json(),
+            ),
+        ]);
+        const custSel = document.getElementById("filterCustomer");
+        const supSel = document.getElementById("filterSupplier");
+        if (custSel && custRes.data) {
+            custSel.innerHTML =
+                '<option value="">— All —</option>' +
+                custRes.data
+                    .map(
+                        (c) =>
+                            `<option value="${c.id}">${escapeHtml(c.name)}</option>`,
+                    )
+                    .join("");
+        }
+        if (supSel && supRes.data) {
+            supSel.innerHTML =
+                '<option value="">— All —</option>' +
+                supRes.data
+                    .map(
+                        (s) =>
+                            `<option value="${s.id}">${escapeHtml(s.name)}</option>`,
+                    )
+                    .join("");
+        }
+    } catch (_) {}
+}
+
 document.addEventListener("DOMContentLoaded", () => {
+    loadFilterOptions();
     loadQueue();
     document
         .querySelector('[data-bs-toggle="tab"][href="#history-tab"]')

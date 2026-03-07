@@ -2,11 +2,17 @@ document.addEventListener("DOMContentLoaded", loadSuppliers);
 
 let additionalIdIndex = 0;
 
+function isBuyer() {
+    const card = document.querySelector(".card[data-is-buyer]");
+    return card?.dataset?.isBuyer === "1";
+}
+
 async function loadSuppliers() {
     try {
         const res = await api("GET", "/suppliers");
         const rows = res.data || [];
         const tbody = document.querySelector("#suppliersTable tbody");
+        const buyer = isBuyer();
         tbody.innerHTML =
             rows
                 .map((r) => {
@@ -15,6 +21,14 @@ async function loadSuppliers() {
                         Object.entries(addIds)
                             .map(([k, v]) => `${k}: ${v}`)
                             .join("; ") || "-";
+                    const nameEsc = escapeHtml(r.name).replace(/'/g, "\\'");
+                    let actions = `<button class="btn btn-sm btn-outline-secondary" onclick="openVisitModal(${r.id}, '${nameEsc}')">Log visit</button>`;
+                    if (buyer) {
+                        actions += ` <button class="btn btn-sm btn-outline-primary" onclick="editSupplier(${r.id})">Edit</button>
+          <button class="btn btn-sm btn-outline-success" onclick="openPaymentModal(${r.id}, '${nameEsc}')">Pay</button>
+          <button class="btn btn-sm btn-outline-info" onclick="showPayHistory(${r.id}, '${nameEsc}')">History</button>
+          <button class="btn btn-sm btn-outline-danger" onclick="deleteSupplier(${r.id}, '${nameEsc}')">Del</button>`;
+                    }
                     return `
       <tr>
         <td>${escapeHtml(r.code)}</td>
@@ -23,12 +37,7 @@ async function loadSuppliers() {
         <td>${escapeHtml(r.phone || "-")}</td>
         <td>${escapeHtml(r.factory_location || "-")}</td>
         <td><small class="text-muted">${escapeHtml(addIdsStr)}</small></td>
-        <td class="table-actions">
-          <button class="btn btn-sm btn-outline-primary" onclick="editSupplier(${r.id})">Edit</button>
-          <button class="btn btn-sm btn-outline-success" onclick="openPaymentModal(${r.id}, '${escapeHtml(r.name).replace(/'/g, "\\'")}')">Pay</button>
-          <button class="btn btn-sm btn-outline-info" onclick="showPayHistory(${r.id}, '${escapeHtml(r.name).replace(/'/g, "\\'")}')">History</button>
-          <button class="btn btn-sm btn-outline-danger" onclick="deleteSupplier(${r.id}, '${escapeHtml(r.name).replace(/'/g, "\\'")}')">Del</button>
-        </td>
+        <td class="table-actions">${actions}</td>
       </tr>
     `;
                 })
@@ -36,6 +45,63 @@ async function loadSuppliers() {
             '<tr><td colspan="7" class="text-muted">No suppliers yet.</td></tr>';
     } catch (e) {
         showToast(e.message, "danger");
+    }
+}
+
+async function openVisitModal(supplierId, name) {
+    document.getElementById("visitSupplierId").value = supplierId;
+    document.getElementById("visitSupplierName").textContent = name;
+    document.getElementById("visitType").value = "visit";
+    document.getElementById("visitContent").value = "";
+    try {
+        const res = await api("GET", "/suppliers/" + supplierId);
+        const ints = res.data?.interactions || [];
+        const html =
+            ints.length > 0
+                ? ints
+                      .slice(0, 10)
+                      .map((i) => {
+                          const c =
+                              typeof i.content === "string"
+                                  ? i.content
+                                  : i.content && typeof i.content === "object"
+                                    ? JSON.stringify(i.content)
+                                    : "";
+                          return `<div class="mb-1"><span class="badge bg-light text-dark">${escapeHtml(i.interaction_type)}</span> ${escapeHtml((i.created_at || "").slice(0, 16))} — ${escapeHtml(c.slice(0, 80))}${c.length > 80 ? "…" : ""} <small>by ${escapeHtml(i.created_by_name || "—")}</small></div>`;
+                      })
+                      .join("")
+                : "<em>No visits logged yet.</em>";
+        document.getElementById("visitHistory").innerHTML = html;
+    } catch (_) {
+        document.getElementById("visitHistory").innerHTML =
+            "<em>Could not load history.</em>";
+    }
+    new bootstrap.Modal(document.getElementById("visitModal")).show();
+}
+
+async function submitVisit() {
+    const supplierId = document.getElementById("visitSupplierId").value;
+    const type = document.getElementById("visitType").value;
+    const content = document.getElementById("visitContent").value.trim();
+    if (!content) {
+        showToast("Please enter notes", "warning");
+        return;
+    }
+    const btn = document.getElementById("visitSubmitBtn");
+    try {
+        setLoading(btn, true);
+        await api("POST", "/suppliers/" + supplierId + "/interactions", {
+            interaction_type: type,
+            content,
+        });
+        showToast("Visit logged");
+        bootstrap.Modal.getInstance(
+            document.getElementById("visitModal"),
+        ).hide();
+    } catch (e) {
+        showToast(e.message, "danger");
+    } finally {
+        setLoading(btn, false);
     }
 }
 

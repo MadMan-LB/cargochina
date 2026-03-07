@@ -14,12 +14,91 @@ document.addEventListener("DOMContentLoaded", () => {
         loadContainers();
         loadShipmentDrafts();
         loadReadyTotals();
+        const docInput = document.getElementById("draftDocInput");
+        if (docInput)
+            docInput.onchange = () => handleDraftDocUpload(docInput.files);
     } catch (e) {
         console.error("Consolidation init:", e);
         if (typeof showToast === "function")
             showToast(e.message || "Load error", "danger");
     }
 });
+
+function renderDraftDocuments(docs) {
+    const list = document.getElementById("draftDocumentsList");
+    if (!list) return;
+    list.innerHTML =
+        docs.length > 0
+            ? docs
+                  .map(
+                      (d) =>
+                          `<div class="d-flex align-items-center gap-2 mb-1"><a href="/cargochina/backend/${esc(d.file_path)}" target="_blank" class="small">${esc(d.doc_type)}</a><button type="button" class="btn btn-link btn-sm p-0 text-danger" onclick="removeDraftDoc(${d.id})">×</button></div>`,
+                  )
+                  .join("")
+            : '<span class="text-muted">No documents</span>';
+}
+
+async function saveDraftCarrierRefs() {
+    if (!currentDraftId) return;
+    try {
+        await api("PUT", "/shipment-drafts/" + currentDraftId, {
+            container_number:
+                document.getElementById("draftContainerNumber").value.trim() ||
+                null,
+            booking_number:
+                document.getElementById("draftBookingNumber").value.trim() ||
+                null,
+            tracking_url:
+                document.getElementById("draftTrackingUrl").value.trim() ||
+                null,
+        });
+        showToast("Carrier refs saved");
+    } catch (e) {
+        showToast(e.message, "danger");
+    }
+}
+
+async function handleDraftDocUpload(files) {
+    if (!currentDraftId || !files?.length) return;
+    const docType = document.getElementById("draftDocType").value;
+    for (const file of files) {
+        try {
+            const path = await uploadFile(file);
+            if (path) {
+                await api(
+                    "POST",
+                    "/shipment-drafts/" + currentDraftId + "/documents",
+                    { file_path: path, doc_type: docType },
+                );
+                const r = await api(
+                    "GET",
+                    "/shipment-drafts/" + currentDraftId,
+                );
+                renderDraftDocuments(r.data.documents || []);
+                showToast("Document added");
+            }
+        } catch (e) {
+            showToast(e.message, "danger");
+        }
+    }
+    document.getElementById("draftDocInput").value = "";
+}
+
+async function removeDraftDoc(docId) {
+    if (!currentDraftId) return;
+    try {
+        await api(
+            "POST",
+            "/shipment-drafts/" + currentDraftId + "/remove-document",
+            { document_id: docId },
+        );
+        const r = await api("GET", "/shipment-drafts/" + currentDraftId);
+        renderDraftDocuments(r.data.documents || []);
+        showToast("Document removed");
+    } catch (e) {
+        showToast(e.message, "danger");
+    }
+}
 
 function el(id) {
     return document.getElementById(id);
@@ -269,6 +348,11 @@ async function openDraftModal(id) {
         const hintEl = el("draftCapacityHint");
         if (tcbm) tcbm.textContent = draftCbm.toFixed(2);
         if (twt) twt.textContent = draftWeight.toFixed(0);
+
+        el("draftContainerNumber").value = draftRes.data.container_number || "";
+        el("draftBookingNumber").value = draftRes.data.booking_number || "";
+        el("draftTrackingUrl").value = draftRes.data.tracking_url || "";
+        renderDraftDocuments(draftRes.data.documents || []);
 
         const containerId = draftRes.data.container_id;
         const containerData = containers?.find((c) => c.id == containerId);

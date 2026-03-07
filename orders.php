@@ -1,13 +1,20 @@
 <?php
+require_once 'includes/auth_check.php';
+require_once 'includes/page_guard.php';
+requireRoleForPage(['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin']);
 $currentPage = 'orders';
 $pageTitle = 'Orders';
 require 'includes/layout.php';
 ?>
 <h1 class="mb-4">Orders</h1>
 <div class="card mb-4">
-  <div class="card-header d-flex justify-content-between align-items-center">
+  <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <span>Order List</span>
-    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#orderModal" onclick="openOrderForm()">+ New Order</button>
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-success btn-sm d-none" id="bulkApproveBtn" onclick="bulkApproveOrders()" title="Approve selected submitted orders">Bulk Approve</button>
+      <button class="btn btn-outline-secondary btn-sm" onclick="exportOrdersCsv()" title="Export current list to CSV">Export CSV</button>
+      <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#orderModal" onclick="openOrderForm()">+ New Order</button>
+    </div>
   </div>
   <div class="card-body">
     <div class="row mb-3 form-row-responsive">
@@ -35,6 +42,7 @@ require 'includes/layout.php';
       <table class="table table-hover">
         <thead>
           <tr>
+            <th class="text-center" style="width:2.5rem"><input type="checkbox" class="form-check-input" id="orderSelectAll" title="Select all submitted"></th>
             <th>ID</th>
             <th>Customer</th>
             <th>Supplier</th>
@@ -60,15 +68,31 @@ require 'includes/layout.php';
         <form id="orderForm">
           <input type="hidden" id="orderId">
           <div class="row mb-3 form-row-responsive">
-            <div class="col-12 col-md-4 mb-2"><label class="form-label">Customer *</label><input type="text" class="form-control" id="orderCustomer" placeholder="Type to search..." required></div>
-            <div class="col-12 col-md-4 mb-2"><label class="form-label">Supplier *</label><input type="text" class="form-control" id="orderSupplier" placeholder="Type to search..." required></div>
+            <div class="col-12 col-md-4 mb-2">
+              <label class="form-label">Customer *</label>
+              <input type="text" class="form-control" id="orderCustomer" placeholder="Type to search..." required>
+              <div class="mt-1 small" id="recentCustomers"></div>
+            </div>
+            <div class="col-12 col-md-4 mb-2">
+              <label class="form-label">Supplier *</label>
+              <input type="text" class="form-control" id="orderSupplier" placeholder="Type to search..." required>
+              <div class="mt-1 small" id="recentSuppliers"></div>
+            </div>
             <div class="col-12 col-md-2 mb-2"><label class="form-label">Expected Ready *</label><input type="date" class="form-control" id="orderExpectedDate" required></div>
             <div class="col-12 col-md-2 mb-2"><label class="form-label">Currency *</label><select class="form-select" id="orderCurrency">
                 <option value="USD">USD</option>
                 <option value="RMB">RMB</option>
               </select></div>
           </div>
-          <h6 class="mb-2">Items</h6>
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="mb-0">Items</h6>
+            <div class="d-flex gap-2">
+              <select class="form-select form-select-sm" id="orderTemplateSelect" style="width:auto" onchange="loadOrderTemplate(this.value)">
+                <option value="">Load template...</option>
+              </select>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="saveOrderAsTemplate()" title="Save current items as template">Save as template</button>
+            </div>
+          </div>
           <p class="text-muted small mb-3">Min 1 photo per item required to submit. Totals computed live.</p>
           <div class="table-responsive">
             <table class="table table-sm table-hover">

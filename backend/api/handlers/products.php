@@ -6,6 +6,16 @@
 
 require_once __DIR__ . '/../helpers.php';
 
+function hasProductDescEntries(PDO $pdo): bool
+{
+    try {
+        $pdo->query("SELECT 1 FROM product_description_entries LIMIT 1");
+        return true;
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
 
@@ -64,6 +74,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             $row['image_paths'] = $row['image_paths'] ? json_decode($row['image_paths'], true) : [];
             $row['thumbnail_url'] = !empty($row['image_paths'][0]) ? '/cargochina/backend/' . $row['image_paths'][0] : null;
+            if (hasProductDescEntries($pdo)) {
+                $stmt2 = $pdo->prepare("SELECT description_text, description_translated, sort_order FROM product_description_entries WHERE product_id = ? ORDER BY sort_order, id");
+                $stmt2->execute([$id]);
+                $row['description_entries'] = $stmt2->fetchAll(PDO::FETCH_ASSOC);
+            } else {
+                $row['description_entries'] = [];
+            }
+            if (!isset($row['pieces_per_carton'])) $row['pieces_per_carton'] = null;
+            if (!isset($row['unit_price'])) $row['unit_price'] = null;
             jsonResponse(['data' => $row]);
 
         case 'POST':
@@ -85,8 +104,24 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $supplierId = !empty($input['supplier_id']) ? (int) $input['supplier_id'] : null;
             $packaging = $input['packaging'] ?? null;
             $hsCode = $input['hs_code'] ?? null;
+            $piecesPerCarton = isset($input['pieces_per_carton']) ? (int) $input['pieces_per_carton'] : null;
+            $unitPrice = isset($input['unit_price']) ? (float) $input['unit_price'] : null;
+            $descriptionEntries = $input['description_entries'] ?? null;
             $descriptionCn = $input['description_cn'] ?? null;
             $descriptionEn = $input['description_en'] ?? null;
+            if (is_array($descriptionEntries) && count($descriptionEntries) > 0) {
+                $cnParts = [];
+                $enParts = [];
+                foreach ($descriptionEntries as $e) {
+                    $text = trim($e['description_text'] ?? $e['text'] ?? '');
+                    if ($text === '') continue;
+                    $translated = trim($e['description_translated'] ?? $e['translated'] ?? '');
+                    $cnParts[] = $text;
+                    $enParts[] = $translated ?: $text;
+                }
+                $descriptionCn = implode(' | ', $cnParts) ?: null;
+                $descriptionEn = implode(' | ', $enParts) ?: null;
+            }
             $imagePaths = isset($input['image_paths']) ? json_encode($input['image_paths']) : null;
             if (!$forceCreate && ($descriptionCn || $descriptionEn || $hsCode)) {
                 $search = trim($descriptionCn ?: $descriptionEn ?: $hsCode ?: '');
@@ -104,13 +139,50 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     }
                 }
             }
-            $stmt = $pdo->prepare("INSERT INTO products (supplier_id, cbm, weight, length_cm, width_cm, height_cm, packaging, hs_code, description_cn, description_en, image_paths) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->execute([$supplierId, $cbm, $weight, $lengthCm, $widthCm, $heightCm, $packaging, $hsCode, $descriptionCn, $descriptionEn, $imagePaths]);
+            $hasPpc = false;
+            $hasUp = false;
+            try {
+                $chk = $pdo->query("SHOW COLUMNS FROM products WHERE Field IN ('pieces_per_carton','unit_price')");
+                $cols = $chk ? array_column($chk->fetchAll(PDO::FETCH_ASSOC), 'Field') : [];
+                $hasPpc = in_array('pieces_per_carton', $cols, true);
+                $hasUp = in_array('unit_price', $cols, true);
+            } catch (Throwable $e) {
+            }
+            $cols = ['supplier_id', 'cbm', 'weight', 'length_cm', 'width_cm', 'height_cm', 'packaging', 'hs_code', 'description_cn', 'description_en', 'image_paths'];
+            $vals = [$supplierId, $cbm, $weight, $lengthCm, $widthCm, $heightCm, $packaging, $hsCode, $descriptionCn, $descriptionEn, $imagePaths];
+            if ($hasPpc) {
+                $cols[] = 'pieces_per_carton';
+                $vals[] = $piecesPerCarton;
+            }
+            if ($hasUp) {
+                $cols[] = 'unit_price';
+                $vals[] = $unitPrice;
+            }
+            $ph = implode(',', array_fill(0, count($vals), '?'));
+            $colStr = implode(', ', $cols);
+            $stmt = $pdo->prepare("INSERT INTO products ($colStr) VALUES ($ph)");
+            $stmt->execute($vals);
             $newId = (int) $pdo->lastInsertId();
+            if (hasProductDescEntries($pdo) && is_array($descriptionEntries) && count($descriptionEntries) > 0) {
+                $ins = $pdo->prepare("INSERT INTO product_description_entries (product_id, description_text, description_translated, sort_order) VALUES (?, ?, ?, ?)");
+                foreach ($descriptionEntries as $i => $e) {
+                    $text = trim($e['description_text'] ?? $e['text'] ?? '');
+                    if ($text === '') continue;
+                    $translated = trim($e['description_translated'] ?? $e['translated'] ?? '');
+                    $ins->execute([$newId, $text, $translated ?: null, $i]);
+                }
+            }
             $stmt = $pdo->prepare("SELECT p.*, s.name as supplier_name FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id WHERE p.id = ?");
             $stmt->execute([$newId]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             $row['image_paths'] = $row['image_paths'] ? json_decode($row['image_paths'], true) : [];
+            if (hasProductDescEntries($pdo)) {
+                $stmt2 = $pdo->prepare("SELECT description_text, description_translated, sort_order FROM product_description_entries WHERE product_id = ? ORDER BY sort_order, id");
+                $stmt2->execute([$newId]);
+                $row['description_entries'] = $stmt2->fetchAll(PDO::FETCH_ASSOC);
+            } else {
+                $row['description_entries'] = [];
+            }
             jsonResponse(['data' => $row], 201);
 
         case 'PUT':
@@ -139,15 +211,69 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $supplierId = isset($input['supplier_id']) ? ($input['supplier_id'] ? (int) $input['supplier_id'] : null) : null;
             $packaging = $input['packaging'] ?? null;
             $hsCode = $input['hs_code'] ?? null;
+            $piecesPerCarton = isset($input['pieces_per_carton']) ? (int) $input['pieces_per_carton'] : null;
+            $unitPrice = isset($input['unit_price']) ? (float) $input['unit_price'] : null;
+            $descriptionEntries = $input['description_entries'] ?? null;
             $descriptionCn = $input['description_cn'] ?? null;
             $descriptionEn = $input['description_en'] ?? null;
+            if (is_array($descriptionEntries) && count($descriptionEntries) > 0) {
+                $cnParts = [];
+                $enParts = [];
+                foreach ($descriptionEntries as $e) {
+                    $text = trim($e['description_text'] ?? $e['text'] ?? '');
+                    if ($text === '') continue;
+                    $translated = trim($e['description_translated'] ?? $e['translated'] ?? '');
+                    $cnParts[] = $text;
+                    $enParts[] = $translated ?: $text;
+                }
+                $descriptionCn = implode(' | ', $cnParts) ?: null;
+                $descriptionEn = implode(' | ', $enParts) ?: null;
+            }
             $imagePaths = isset($input['image_paths']) ? json_encode($input['image_paths']) : null;
-            $pdo->prepare("UPDATE products SET supplier_id=?, cbm=?, weight=?, length_cm=?, width_cm=?, height_cm=?, packaging=?, hs_code=?, description_cn=?, description_en=?, image_paths=? WHERE id=?")
-                ->execute([$supplierId, $cbm, $weight, $lengthCm, $widthCm, $heightCm, $packaging, $hsCode, $descriptionCn, $descriptionEn, $imagePaths, $id]);
+            $hasPpc = false;
+            $hasUp = false;
+            try {
+                $chk = $pdo->query("SHOW COLUMNS FROM products WHERE Field IN ('pieces_per_carton','unit_price')");
+                $cols = $chk ? array_column($chk->fetchAll(PDO::FETCH_ASSOC), 'Field') : [];
+                $hasPpc = in_array('pieces_per_carton', $cols, true);
+                $hasUp = in_array('unit_price', $cols, true);
+            } catch (Throwable $e) {
+            }
+            $sets = ['supplier_id=?', 'cbm=?', 'weight=?', 'length_cm=?', 'width_cm=?', 'height_cm=?', 'packaging=?', 'hs_code=?', 'description_cn=?', 'description_en=?', 'image_paths=?'];
+            $vals = [$supplierId, $cbm, $weight, $lengthCm, $widthCm, $heightCm, $packaging, $hsCode, $descriptionCn, $descriptionEn, $imagePaths];
+            if ($hasPpc) {
+                $sets[] = 'pieces_per_carton=?';
+                $vals[] = $piecesPerCarton;
+            }
+            if ($hasUp) {
+                $sets[] = 'unit_price=?';
+                $vals[] = $unitPrice;
+            }
+            $vals[] = $id;
+            $pdo->prepare("UPDATE products SET " . implode(', ', $sets) . " WHERE id=?")->execute($vals);
+            if (hasProductDescEntries($pdo) && is_array($descriptionEntries)) {
+                $pdo->prepare("DELETE FROM product_description_entries WHERE product_id = ?")->execute([$id]);
+                if (count($descriptionEntries) > 0) {
+                    $ins = $pdo->prepare("INSERT INTO product_description_entries (product_id, description_text, description_translated, sort_order) VALUES (?, ?, ?, ?)");
+                    foreach ($descriptionEntries as $i => $e) {
+                        $text = trim($e['description_text'] ?? $e['text'] ?? '');
+                        if ($text === '') continue;
+                        $translated = trim($e['description_translated'] ?? $e['translated'] ?? '');
+                        $ins->execute([$id, $text, $translated ?: null, $i]);
+                    }
+                }
+            }
             $stmt = $pdo->prepare("SELECT p.*, s.name as supplier_name FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id WHERE p.id = ?");
             $stmt->execute([$id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             $row['image_paths'] = $row['image_paths'] ? json_decode($row['image_paths'], true) : [];
+            if (hasProductDescEntries($pdo)) {
+                $stmt2 = $pdo->prepare("SELECT description_text, description_translated, sort_order FROM product_description_entries WHERE product_id = ? ORDER BY sort_order, id");
+                $stmt2->execute([$id]);
+                $row['description_entries'] = $stmt2->fetchAll(PDO::FETCH_ASSOC);
+            } else {
+                $row['description_entries'] = [];
+            }
             jsonResponse(['data' => $row]);
 
         case 'DELETE':

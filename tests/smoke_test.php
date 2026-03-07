@@ -29,6 +29,19 @@ try {
     echo "OK: user_notification_preferences\n";
     $pdo->query("SELECT 1 FROM notification_delivery_log LIMIT 1");
     echo "OK: notification_delivery_log\n";
+    // Migration 026
+    $pdo->query("SELECT 1 FROM product_description_entries LIMIT 1");
+    echo "OK: product_description_entries\n";
+    $cols = $pdo->query("SHOW COLUMNS FROM products WHERE Field IN ('pieces_per_carton','unit_price')")->fetchAll(PDO::FETCH_COLUMN);
+    if (count($cols) !== 2) {
+        throw new Exception('products missing pieces_per_carton or unit_price (run migration 026)');
+    }
+    echo "OK: products.pieces_per_carton, products.unit_price\n";
+    $cols = $pdo->query("SHOW COLUMNS FROM customers WHERE Field = 'payment_links'")->fetchAll(PDO::FETCH_COLUMN);
+    if (count($cols) !== 1) {
+        throw new Exception('customers missing payment_links (run migration 026)');
+    }
+    echo "OK: customers.payment_links\n";
     echo "Smoke test passed.\n";
 } catch (Exception $e) {
     echo "FAIL: " . $e->getMessage() . "\n";

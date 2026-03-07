@@ -4,6 +4,9 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 
 **Authentication:** Session-based. Login via `POST /auth/login`. All endpoints except `auth` require an active session.
 
+## Audit Log (SuperAdmin, ChinaAdmin)
+- `GET /audit-log?entity_type=&entity_id=&user_id=&date_from=&date_to=&limit=&offset=` — List audit entries with filters.
+
 ## Authentication
 - `POST /auth/login` — `{email, password}` — Returns `{user_id, name, roles}`. **Public.**
 - `POST /auth/logout` — Destroys session. **Public.**
@@ -14,7 +17,7 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 - `GET /customers/{id}` — Get one
 - `GET /customers/{id}/deposits` — Get customer with deposits list
 - `GET /customers/{id}/balance` — Get balance per currency `{USD: X, RMB: Y}`
-- `POST /customers` — Create `{code, name, phone?, address?, contacts?, addresses?, payment_terms?}`
+- `POST /customers` — Create `{code, name, phone?, address?, contacts?, addresses?, payment_terms?, payment_links?}` — payment_links: `[{name, value}]` e.g. weeecha, xxx xx xxxx xx
 - `POST /customers/{id}/deposits` — Record deposit `{amount, currency (USD|RMB), payment_method?, reference_no?, notes?}`
 - `PUT /customers/{id}` — Update (phone, address supported)
 - `DELETE /customers/{id}` — Delete
@@ -35,7 +38,7 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 - `GET /products/search?q=...` — Search by description_cn/description_en/hs_code (top 10)
 - `GET /products/{id}` — Get one
 - `GET /products/suggest?q=...` — Suggest by description/HS code (with similarity score)
-- `POST /products` — Create `{supplier_id?, cbm, weight, packaging?, hs_code?, description_cn?, description_en?, image_paths?, force_create?}` — image_paths: array of paths from upload
+- `POST /products` — Create `{supplier_id?, cbm, weight, packaging?, hs_code?, description_entries?, pieces_per_carton?, unit_price?, image_paths?, force_create?}` — description_entries: `[{description_text, description_translated}]`; image_paths: array of paths from upload
 - `GET /products` — Returns `thumbnail_url` (first image) per product
 - `PUT /products/{id}` — Update
 - `DELETE /products/{id}` — Delete
@@ -54,6 +57,11 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 - `POST /orders/{id}/receive` — Record receipt `{actual_cartons, actual_cbm, actual_weight, condition, notes?, photo_paths?, items?}` — items: `[{order_item_id, actual_cartons?, actual_cbm?, actual_weight?, condition?, photo_paths?}]` for item-level receiving. Sum of items must match order-level. Evidence photos required when variance or damage.
 - `POST /orders/{id}/confirm` — AwaitingCustomerConfirmation → Confirmed
 
+## Order Templates
+- `GET /order-templates` — List all templates (id, name, created_at)
+- `GET /order-templates/{id}` — Get template with items
+- `POST /order-templates` — Create `{name, items[]}` — items: item_no?, shipping_code?, product_id?, description_cn?, description_en?, cartons?, qty_per_carton?, quantity?, unit?, declared_cbm?, declared_weight?, item_length?, item_width?, item_height?, unit_price?, total_amount?, notes?
+
 ## Upload
 - `POST /upload` — Multipart form `file` — returns `{data: {path, url}}` — path for storage; url for img src. Always returns JSON; errors use `{error: {message, code: "UPLOAD_FAILED"}}`. Requires `Content-Type: application/json` response.
 
@@ -64,6 +72,11 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 ## Notification Preferences (all authenticated)
 - `GET /notification-preferences` — List current user's channel toggles per event
 - `PUT /notification-preferences` — Update `{preferences: [{channel, event_type, enabled}]}` — channels: dashboard, email, whatsapp; event_types: order_submitted, order_approved, order_received, variance_confirmation, shipment_finalized
+
+## Shipment Drafts (extended)
+- `PUT /shipment-drafts/{id}` — Update carrier refs `{container_number?, booking_number?, tracking_url?}`
+- `POST /shipment-drafts/{id}/documents` — Add document `{file_path, doc_type}` — doc_type: bol, booking_confirmation, invoice, other
+- `POST /shipment-drafts/{id}/remove-document` — Remove `{document_id}`
 
 ## Containers
 - `GET /containers` — List all — **SuperAdmin only**

@@ -1,13 +1,18 @@
 <?php
+require_once 'includes/auth_check.php';
+require_once 'includes/page_guard.php';
+requireRoleForPage(['ChinaAdmin', 'ChinaEmployee', 'FieldStaff', 'SuperAdmin']);
 $currentPage = 'suppliers';
 $pageTitle = 'Suppliers';
 require 'includes/layout.php';
 ?>
 <h1 class="mb-4">Suppliers</h1>
-<div class="card">
+<div class="card" data-is-buyer="<?= $isBuyer ? '1' : '0' ?>">
   <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <span>Supplier List</span>
-    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#supplierModal" onclick="openSupplierForm()">+ Add Supplier</button>
+    <?php if ($isBuyer): ?>
+      <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#supplierModal" onclick="openSupplierForm()">+ Add Supplier</button>
+    <?php endif; ?>
   </div>
   <div class="card-body">
     <div id="suppliersTable" class="table-responsive">
@@ -96,6 +101,40 @@ require 'includes/layout.php';
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
         <button type="button" class="btn btn-primary" id="paySubmitBtn" onclick="submitPayment()">Record Payment</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Log Visit / Interactions Modal -->
+<div class="modal fade" id="visitModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Log visit — <span id="visitSupplierName"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="visitSupplierId">
+        <div class="mb-3">
+          <label class="form-label">Type</label>
+          <select class="form-select" id="visitType">
+            <option value="visit">Visit</option>
+            <option value="quote">Quote</option>
+            <option value="note">Note</option>
+          </select>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Notes / content</label>
+          <textarea class="form-control" id="visitContent" rows="3" placeholder="What did you observe? Products, quality, availability..."></textarea>
+        </div>
+        <hr>
+        <h6 class="mb-2">Recent visits</h6>
+        <div id="visitHistory" class="small text-muted"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="visitSubmitBtn" onclick="submitVisit()">Log visit</button>
       </div>
     </div>
   </div>

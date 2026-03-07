@@ -7,6 +7,8 @@ $userName = $_SESSION['user_name'] ?? 'User';
 $isSuperAdmin = in_array('SuperAdmin', $userRoles);
 $isAdmin = in_array('LebanonAdmin', $userRoles) || in_array('ChinaAdmin', $userRoles) || $isSuperAdmin;
 $isWarehouse = in_array('WarehouseStaff', $userRoles) || $isSuperAdmin;
+$isBuyer = in_array('ChinaAdmin', $userRoles) || in_array('ChinaEmployee', $userRoles) || $isSuperAdmin;
+$isFieldStaff = in_array('FieldStaff', $userRoles) || $isSuperAdmin;
 $basePath = '/cargochina';
 $breadcrumbs = $breadcrumbs ?? [];
 ?>
@@ -39,12 +41,14 @@ $breadcrumbs = $breadcrumbs ?? [];
         </svg>
         Dashboard
       </a>
-      <a class="sidebar-link <?= $currentPage === 'orders' ? 'active' : '' ?>" href="<?= $basePath ?>/orders.php">
-        <svg class="sidebar-icon" viewBox="0 0 24 24">
-          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm4 18H6V4h7v5h5v11z" />
-        </svg>
-        Orders
-      </a>
+      <?php if ($isBuyer): ?>
+        <a class="sidebar-link <?= $currentPage === 'orders' ? 'active' : '' ?>" href="<?= $basePath ?>/orders.php">
+          <svg class="sidebar-icon" viewBox="0 0 24 24">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm4 18H6V4h7v5h5v11z" />
+          </svg>
+          Orders
+        </a>
+      <?php endif; ?>
       <?php if ($isWarehouse): ?>
         <a class="sidebar-link <?= $currentPage === 'receiving' ? 'active' : '' ?>" href="<?= $basePath ?>/receiving.php">
           <svg class="sidebar-icon" viewBox="0 0 24 24">
@@ -54,6 +58,12 @@ $breadcrumbs = $breadcrumbs ?? [];
         </a>
       <?php endif; ?>
       <?php if ($isAdmin): ?>
+        <a class="sidebar-link <?= $currentPage === 'pipeline' ? 'active' : '' ?>" href="<?= $basePath ?>/pipeline.php">
+          <svg class="sidebar-icon" viewBox="0 0 24 24">
+            <path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z" />
+          </svg>
+          Pipeline
+        </a>
         <a class="sidebar-link <?= $currentPage === 'consolidation' ? 'active' : '' ?>" href="<?= $basePath ?>/consolidation.php">
           <svg class="sidebar-icon" viewBox="0 0 24 24">
             <path d="M20 2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9h-4v4h-2v-4H9v4H7v-4H3V9h4V5h2v4h4V5h2v4h4v2z" />
@@ -63,24 +73,28 @@ $breadcrumbs = $breadcrumbs ?? [];
       <?php endif; ?>
 
       <div class="sidebar-section-label">Data</div>
-      <a class="sidebar-link <?= $currentPage === 'customers' ? 'active' : '' ?>" href="<?= $basePath ?>/customers.php">
-        <svg class="sidebar-icon" viewBox="0 0 24 24">
-          <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
-        </svg>
-        Customers
-      </a>
-      <a class="sidebar-link <?= $currentPage === 'suppliers' ? 'active' : '' ?>" href="<?= $basePath ?>/suppliers.php">
-        <svg class="sidebar-icon" viewBox="0 0 24 24">
-          <path d="M20 8h-3V4H3c-1.1 0-2 .9-2 2v11h2c0 1.66 1.34 3 3 3s3-1.34 3-3h6c0 1.66 1.34 3 3 3s3-1.34 3-3h2v-5l-3-4zM6 18.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm13.5-9l1.96 2.5H17V9.5h2.5zm-1.5 9c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z" />
-        </svg>
-        Suppliers
-      </a>
-      <a class="sidebar-link <?= $currentPage === 'products' ? 'active' : '' ?>" href="<?= $basePath ?>/products.php">
-        <svg class="sidebar-icon" viewBox="0 0 24 24">
-          <path d="M12 2l-5.5 9h11L12 2zm0 3.84L13.93 9h-3.87L12 5.84zM17.5 13c-2.49 0-4.5 2.01-4.5 4.5s2.01 4.5 4.5 4.5 4.5-2.01 4.5-4.5-2.01-4.5-4.5-4.5zm0 7a2.5 2.5 0 010-5 2.5 2.5 0 010 5zM3 21.5h8v-8H3v8zm2-6h4v4H5v-4z" />
-        </svg>
-        Products
-      </a>
+      <?php if ($isBuyer || $isFieldStaff): ?>
+        <a class="sidebar-link <?= $currentPage === 'suppliers' ? 'active' : '' ?>" href="<?= $basePath ?>/suppliers.php">
+          <svg class="sidebar-icon" viewBox="0 0 24 24">
+            <path d="M20 8h-3V4H3c-1.1 0-2 .9-2 2v11h2c0 1.66 1.34 3 3 3s3-1.34 3-3h6c0 1.66 1.34 3 3 3s3-1.34 3-3h2v-5l-3-4zM6 18.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm13.5-9l1.96 2.5H17V9.5h2.5zm-1.5 9c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z" />
+          </svg>
+          Suppliers
+        </a>
+      <?php endif; ?>
+      <?php if ($isBuyer): ?>
+        <a class="sidebar-link <?= $currentPage === 'customers' ? 'active' : '' ?>" href="<?= $basePath ?>/customers.php">
+          <svg class="sidebar-icon" viewBox="0 0 24 24">
+            <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
+          </svg>
+          Customers
+        </a>
+        <a class="sidebar-link <?= $currentPage === 'products' ? 'active' : '' ?>" href="<?= $basePath ?>/products.php">
+          <svg class="sidebar-icon" viewBox="0 0 24 24">
+            <path d="M12 2l-5.5 9h11L12 2zm0 3.84L13.93 9h-3.87L12 5.84zM17.5 13c-2.49 0-4.5 2.01-4.5 4.5s2.01 4.5 4.5 4.5 4.5-2.01 4.5-4.5-2.01-4.5-4.5-4.5zm0 7a2.5 2.5 0 010-5 2.5 2.5 0 010 5zM3 21.5h8v-8H3v8zm2-6h4v4H5v-4z" />
+          </svg>
+          Products
+        </a>
+      <?php endif; ?>
 
       <div class="sidebar-section-label">Notifications</div>
       <a class="sidebar-link <?= $currentPage === 'notifications' ? 'active' : '' ?>" href="<?= $basePath ?>/notifications.php">
@@ -98,7 +112,7 @@ $breadcrumbs = $breadcrumbs ?? [];
 
       <?php if ($isSuperAdmin): ?>
         <div class="sidebar-section-label">Administration</div>
-        <a class="sidebar-link <?= $currentPage === 'admin' || $currentPage === 'admin_config' ? 'active' : '' ?>" href="<?= $basePath ?>/admin_config.php">
+        <a class="sidebar-link <?= $currentPage === 'admin_config' ? 'active' : '' ?>" href="<?= $basePath ?>/admin_config.php">
           <svg class="sidebar-icon" viewBox="0 0 24 24">
             <path d="M17 11c.34 0 .67.04 1 .09V6.27L10.5 3 3 6.27v4.91c0 4.54 3.2 8.79 7.5 9.82.55-.13 1.08-.32 1.6-.55-.69-.98-1.1-2.17-1.1-3.45 0-3.31 2.69-6 6-6z" />
             <path d="M17 13c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm0 1.38c.62 0 1.12.51 1.12 1.12s-.51 1.12-1.12 1.12-1.12-.51-1.12-1.12.5-1.12 1.12-1.12zm0 5.37c-.93 0-1.74-.46-2.24-1.17.05-.72 1.51-1.08 2.24-1.08s2.19.36 2.24 1.08c-.5.71-1.31 1.17-2.24 1.17z" />
@@ -122,6 +136,12 @@ $breadcrumbs = $breadcrumbs ?? [];
             <path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM5 15h14v2H5zm0-4h14v2H5zm0-4h14v2H5z" />
           </svg>
           Tracking Push Log
+        </a>
+        <a class="sidebar-link <?= $currentPage === 'admin_audit' ? 'active' : '' ?>" href="<?= $basePath ?>/admin_audit_log.php">
+          <svg class="sidebar-icon" viewBox="0 0 24 24">
+            <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" />
+          </svg>
+          Audit Log
         </a>
       <?php endif; ?>
     </nav>

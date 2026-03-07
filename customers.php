@@ -1,4 +1,7 @@
 <?php
+require_once 'includes/auth_check.php';
+require_once 'includes/page_guard.php';
+requireRoleForPage(['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin']);
 $currentPage = 'customers';
 $pageTitle = 'Customers';
 require 'includes/layout.php';
@@ -57,6 +60,12 @@ require 'includes/layout.php';
             <div class="col-md-6">
               <label class="form-label">Payment Terms</label>
               <input type="text" class="form-control" id="customerPaymentTerms" placeholder="e.g. 30 days, T/T">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Payment Links & Descriptions</label>
+              <small class="text-muted d-block mb-1">e.g. weeecha, xxx xx xxxx xx — add name and value for each payment method</small>
+              <div id="customerPaymentLinksContainer"></div>
+              <button type="button" class="btn btn-outline-secondary btn-sm mt-1" onclick="addCustomerPaymentLink()">+ Add payment link</button>
             </div>
             <div class="col-12">
               <label class="form-label">Address</label>

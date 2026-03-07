@@ -59,6 +59,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 foreach ($rows as &$r) {
                     $r['contacts'] = $r['contacts'] ? json_decode($r['contacts'], true) : [];
                     $r['addresses'] = $r['addresses'] ? json_decode($r['addresses'], true) : [];
+                    $r['payment_links'] = isset($r['payment_links']) && $r['payment_links'] ? json_decode($r['payment_links'], true) : [];
                 }
                 jsonResponse(['data' => $rows]);
             }
@@ -70,6 +71,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             $row['contacts'] = $row['contacts'] ? json_decode($row['contacts'], true) : [];
             $row['addresses'] = $row['addresses'] ? json_decode($row['addresses'], true) : [];
+            $row['payment_links'] = isset($row['payment_links']) && $row['payment_links'] ? json_decode($row['payment_links'], true) : [];
             if ($action === 'deposits') {
                 $stmt2 = $pdo->prepare("SELECT * FROM customer_deposits WHERE customer_id = ? ORDER BY created_at DESC");
                 $stmt2->execute([$id]);
@@ -115,6 +117,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $contacts = isset($input['contacts']) ? json_encode($input['contacts']) : null;
             $addresses = isset($input['addresses']) ? json_encode($input['addresses']) : null;
             $paymentTerms = $input['payment_terms'] ?? null;
+            $paymentLinks = isset($input['payment_links']) && is_array($input['payment_links'])
+                ? json_encode(array_values(array_map(function ($p) {
+                    return ['name' => trim($p['name'] ?? ''), 'value' => trim($p['value'] ?? '')];
+                }, array_filter($input['payment_links'], function ($p) {
+                    return !empty(trim($p['name'] ?? ''));
+                }))))
+                : null;
             $phone = !empty($input['phone']) ? trim($input['phone']) : null;
             $address = !empty($input['address']) ? trim($input['address']) : null;
             $hasPhone = false;
@@ -128,6 +137,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             $cols = ['code', 'name', 'contacts', 'addresses', 'payment_terms'];
             $vals = [$code, $name, $contacts, $addresses, $paymentTerms];
+            $hasPaymentLinks = false;
+            try {
+                $chk = $pdo->query("SHOW COLUMNS FROM customers LIKE 'payment_links'");
+                $hasPaymentLinks = $chk && $chk->rowCount() > 0;
+            } catch (Throwable $e) {
+            }
+            if ($hasPaymentLinks) {
+                $cols[] = 'payment_links';
+                $vals[] = $paymentLinks;
+            }
             if ($hasPhone) {
                 $cols[] = 'phone';
                 $vals[] = $phone;
@@ -147,6 +166,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
                 $row['contacts'] = $row['contacts'] ? json_decode($row['contacts'], true) : [];
                 $row['addresses'] = $row['addresses'] ? json_decode($row['addresses'], true) : [];
+                $row['payment_links'] = isset($row['payment_links']) && $row['payment_links'] ? json_decode($row['payment_links'], true) : [];
                 jsonResponse(['data' => $row], 201);
             } catch (PDOException $e) {
                 if ($e->getCode() == 23000) {
@@ -172,6 +192,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $contacts = isset($input['contacts']) ? json_encode($input['contacts']) : null;
             $addresses = isset($input['addresses']) ? json_encode($input['addresses']) : null;
             $paymentTerms = $input['payment_terms'] ?? null;
+            $paymentLinks = isset($input['payment_links']) && is_array($input['payment_links'])
+                ? json_encode(array_values(array_map(function ($p) {
+                    return ['name' => trim($p['name'] ?? ''), 'value' => trim($p['value'] ?? '')];
+                }, array_filter($input['payment_links'], function ($p) {
+                    return !empty(trim($p['name'] ?? ''));
+                }))))
+                : null;
             $phone = isset($input['phone']) ? trim($input['phone']) : null;
             $address = isset($input['address']) ? trim($input['address']) : null;
             $hasPhone = false;
@@ -186,6 +213,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             $sets = ['code=?', 'name=?', 'contacts=?', 'addresses=?', 'payment_terms=?'];
             $vals = [$code, $name, $contacts, $addresses, $paymentTerms];
+            $hasPaymentLinks = false;
+            try {
+                $chk = $pdo->query("SHOW COLUMNS FROM customers LIKE 'payment_links'");
+                $hasPaymentLinks = $chk && $chk->rowCount() > 0;
+            } catch (Throwable $e) {
+            }
+            if ($hasPaymentLinks) {
+                $sets[] = 'payment_links=?';
+                $vals[] = $paymentLinks;
+            }
             if ($hasPhone) {
                 $sets[] = 'phone=?';
                 $vals[] = $phone;
@@ -201,6 +238,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             $row['contacts'] = $row['contacts'] ? json_decode($row['contacts'], true) : [];
             $row['addresses'] = $row['addresses'] ? json_decode($row['addresses'], true) : [];
+            $row['payment_links'] = isset($row['payment_links']) && $row['payment_links'] ? json_decode($row['payment_links'], true) : [];
             jsonResponse(['data' => $row]);
 
         case 'DELETE':

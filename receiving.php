@@ -1,4 +1,7 @@
 <?php
+require_once 'includes/auth_check.php';
+require_once 'includes/page_guard.php';
+requireRoleForPage(['WarehouseStaff', 'SuperAdmin']);
 $currentPage = 'receiving';
 $pageTitle = 'Warehouse Receiving';
 require 'includes/layout.php';
@@ -35,6 +38,9 @@ require 'includes/layout.php';
       </div>
       <div class="col-12 col-md-6 col-lg-2">
         <button type="button" class="btn btn-primary btn-sm w-100" onclick="applyFilters()">Apply</button>
+      </div>
+      <div class="col-12 col-md-6 col-lg-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm w-100" onclick="exportReceivingCsv()" title="Export queue to CSV">Export CSV</button>
       </div>
     </div>
   </div>

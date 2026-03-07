@@ -72,6 +72,44 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $row['total_cbm'] = 0;
                 $row['total_weight'] = 0;
             }
+            $docs = $pdo->prepare("SELECT id, file_path, doc_type, created_at FROM shipment_draft_documents WHERE shipment_draft_id = ? ORDER BY created_at");
+            $docs->execute([$id]);
+            $row['documents'] = $docs->fetchAll(PDO::FETCH_ASSOC);
+            jsonResponse(['data' => $row]);
+            break;
+
+        case 'PUT':
+            if ($id === null) jsonError('Draft ID required', 400);
+            $stmt = $pdo->prepare("SELECT id FROM shipment_drafts WHERE id = ?");
+            $stmt->execute([$id]);
+            if (!$stmt->fetch()) jsonError('Shipment draft not found', 404);
+            $updates = [];
+            $params = [];
+            if (array_key_exists('container_number', $input)) {
+                $updates[] = 'container_number = ?';
+                $params[] = trim($input['container_number'] ?? '') ?: null;
+            }
+            if (array_key_exists('booking_number', $input)) {
+                $updates[] = 'booking_number = ?';
+                $params[] = trim($input['booking_number'] ?? '') ?: null;
+            }
+            if (array_key_exists('tracking_url', $input)) {
+                $updates[] = 'tracking_url = ?';
+                $params[] = trim($input['tracking_url'] ?? '') ?: null;
+            }
+            if (!empty($updates)) {
+                $params[] = $id;
+                $pdo->prepare("UPDATE shipment_drafts SET " . implode(', ', $updates) . " WHERE id = ?")->execute($params);
+            }
+            $stmt = $pdo->prepare("SELECT sd.*, c.code as container_code FROM shipment_drafts sd LEFT JOIN containers c ON sd.container_id = c.id WHERE sd.id = ?");
+            $stmt->execute([$id]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $so = $pdo->prepare("SELECT order_id FROM shipment_draft_orders WHERE shipment_draft_id = ?");
+            $so->execute([$id]);
+            $row['order_ids'] = array_column($so->fetchAll(PDO::FETCH_ASSOC), 'order_id');
+            $docs = $pdo->prepare("SELECT id, file_path, doc_type, created_at FROM shipment_draft_documents WHERE shipment_draft_id = ? ORDER BY created_at");
+            $docs->execute([$id]);
+            $row['documents'] = $docs->fetchAll(PDO::FETCH_ASSOC);
             jsonResponse(['data' => $row]);
             break;
 
@@ -191,6 +229,30 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $svc = new TrackingPushService($pdo);
                 $result = $svc->push($id);
                 jsonResponse(['data' => $result]);
+                break;
+            }
+            if ($action === 'documents') {
+                $stmt = $pdo->prepare("SELECT id FROM shipment_drafts WHERE id = ?");
+                $stmt->execute([$id]);
+                if (!$stmt->fetch()) jsonError('Shipment draft not found', 404);
+                $filePath = trim($input['file_path'] ?? '');
+                $docType = in_array($input['doc_type'] ?? '', ['bol', 'booking_confirmation', 'invoice', 'other']) ? $input['doc_type'] : 'other';
+                if (!$filePath) jsonError('file_path required', 400);
+                $pdo->prepare("INSERT INTO shipment_draft_documents (shipment_draft_id, file_path, doc_type) VALUES (?,?,?)")->execute([$id, $filePath, $docType]);
+                $newId = (int) $pdo->lastInsertId();
+                $row = $pdo->prepare("SELECT id, file_path, doc_type, created_at FROM shipment_draft_documents WHERE id = ?");
+                $row->execute([$newId]);
+                jsonResponse(['data' => $row->fetch(PDO::FETCH_ASSOC)], 201);
+                break;
+            }
+            if ($action === 'remove-document') {
+                $docId = (int) ($input['document_id'] ?? 0);
+                if (!$docId) jsonError('document_id required', 400);
+                $stmt = $pdo->prepare("SELECT id FROM shipment_draft_documents WHERE id = ? AND shipment_draft_id = ?");
+                $stmt->execute([$docId, $id]);
+                if (!$stmt->fetch()) jsonError('Document not found', 404);
+                $pdo->prepare("DELETE FROM shipment_draft_documents WHERE id = ?")->execute([$docId]);
+                jsonResponse(['data' => ['deleted' => true]]);
                 break;
             }
             if ($action === 'remove-orders') {

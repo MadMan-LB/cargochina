@@ -1,4 +1,7 @@
 <?php
+require_once 'includes/auth_check.php';
+require_once 'includes/page_guard.php';
+requireRoleForPage(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin']);
 $currentPage = 'consolidation';
 $pageTitle = 'Consolidation';
 require 'includes/layout.php';
@@ -161,6 +164,33 @@ require 'includes/layout.php';
                                 <span><span id="draftTotalWeight">0</span> kg</span>
                                 <span class="text-muted small" id="draftCapacityHint"></span>
                             </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="row g-3 mt-2">
+                    <div class="col-12">
+                        <label class="form-label"><strong>Carrier refs</strong></label>
+                        <div class="row g-2">
+                            <div class="col-md-4"><input type="text" class="form-control form-control-sm" id="draftContainerNumber" placeholder="Container #"></div>
+                            <div class="col-md-4"><input type="text" class="form-control form-control-sm" id="draftBookingNumber" placeholder="Booking #"></div>
+                            <div class="col-md-4"><input type="url" class="form-control form-control-sm" id="draftTrackingUrl" placeholder="Tracking URL"></div>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-primary mt-2" onclick="saveDraftCarrierRefs()">Save refs</button>
+                    </div>
+                </div>
+                <div class="row g-3 mt-2">
+                    <div class="col-12">
+                        <label class="form-label"><strong>Documents</strong> <small class="text-muted">(BOL, booking confirmation, invoices)</small></label>
+                        <div id="draftDocumentsList" class="mb-2 small"></div>
+                        <div class="d-flex gap-2 align-items-center">
+                            <input type="file" class="form-control form-control-sm d-none" id="draftDocInput" accept="image/*,.pdf,.png,.jpg,.jpeg,.webp">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('draftDocInput').click()">+ Add document</button>
+                            <select class="form-select form-select-sm" id="draftDocType" style="max-width:180px">
+                                <option value="bol">BOL</option>
+                                <option value="booking_confirmation">Booking confirmation</option>
+                                <option value="invoice">Invoice</option>
+                                <option value="other">Other</option>
+                            </select>
                         </div>
                     </div>
                 </div>

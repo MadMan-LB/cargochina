@@ -1,35 +1,38 @@
 <?php
-$currentPage = 'admin';
+require_once 'includes/auth_check.php';
+require_once 'includes/page_guard.php';
+requireRoleForPage(['LebanonAdmin', 'SuperAdmin']);
+$currentPage = 'admin_tracking';
 $pageTitle = 'Tracking Push Log';
 require 'includes/layout.php';
 ?>
-  <h1 class="mb-4">Tracking Push Log</h1>
-  <div class="card mb-3">
-    <div class="card-body py-2">
-      <label class="form-check-label me-2"><input type="checkbox" id="filterFailed" onchange="loadPushLog()"> Failed only</label>
+<h1 class="mb-4">Tracking Push Log</h1>
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <label class="form-check-label me-2"><input type="checkbox" id="filterFailed" onchange="loadPushLog()"> Failed only</label>
+  </div>
+</div>
+<div class="card">
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Draft</th>
+            <th>Status</th>
+            <th>Response</th>
+            <th>Attempts</th>
+            <th>Error</th>
+            <th>Updated</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="pushLogBody"></tbody>
+      </table>
     </div>
   </div>
-  <div class="card">
-    <div class="card-body">
-      <div class="table-responsive">
-        <table class="table table-sm">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Draft</th>
-              <th>Status</th>
-              <th>Response</th>
-              <th>Attempts</th>
-              <th>Error</th>
-              <th>Updated</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody id="pushLogBody"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
+</div>
 <div class="modal fade" id="errorModal" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content">

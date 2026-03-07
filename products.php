@@ -1,4 +1,7 @@
 <?php
+require_once 'includes/auth_check.php';
+require_once 'includes/page_guard.php';
+requireRoleForPage(['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin']);
 $currentPage = 'products';
 $pageTitle = 'Products';
 require 'includes/layout.php';
@@ -16,10 +19,11 @@ require 'includes/layout.php';
           <tr>
             <th>Thumbnail</th>
             <th>ID</th>
-            <th>Description (CN)</th>
-            <th>Description (EN)</th>
+            <th>Description</th>
             <th>CBM</th>
             <th>Weight</th>
+            <th>Pcs/Carton</th>
+            <th>Unit Price</th>
             <th>HS Code</th>
             <th>Actions</th>
           </tr>
@@ -40,9 +44,11 @@ require 'includes/layout.php';
       <div class="modal-body">
         <form id="productForm">
           <input type="hidden" id="productId">
-          <div class="row form-row-responsive">
-            <div class="col-12 col-md-6 mb-2"><label class="form-label">Description (CN)</label><input type="text" class="form-control" id="productDescCn"></div>
-            <div class="col-12 col-md-6 mb-2"><label class="form-label">Description (EN)</label><input type="text" class="form-control" id="productDescEn"></div>
+          <div class="mb-2">
+            <label class="form-label">Description</label>
+            <small class="text-muted d-block mb-1">Type in Chinese or English — auto-translates Chinese to English. Press + to add another field.</small>
+            <div id="productDescFields" class="mb-1"></div>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="productDescAddBtn" title="Add another description field">+</button>
           </div>
           <div class="row form-row-responsive">
             <div class="col-12 col-md-4 mb-2">
@@ -62,11 +68,15 @@ require 'includes/layout.php';
           </div>
           <div class="row form-row-responsive">
             <div class="col-12 col-md-4 mb-2"><label class="form-label">HS Code</label><input type="text" class="form-control" id="productHsCode"></div>
+            <div class="col-12 col-md-4 mb-2"><label class="form-label">Pieces per carton</label><input type="number" min="1" class="form-control" id="productPiecesPerCarton" placeholder="e.g. 24"></div>
+            <div class="col-12 col-md-4 mb-2"><label class="form-label">Unit price (per piece)</label><input type="number" step="0.0001" class="form-control" id="productUnitPrice" placeholder="e.g. 0.50"><small class="text-muted">Carton total: <span id="productCartonTotal">—</span></small></div>
           </div>
           <div class="mb-2"><label class="form-label">Packaging</label><input type="text" class="form-control" id="productPackaging"></div>
-          <div class="mb-2"><label class="form-label">Supplier</label><select class="form-select" id="productSupplier">
-              <option value="">— None —</option>
-            </select></div>
+          <div class="mb-2">
+            <label class="form-label">Supplier</label>
+            <input type="text" class="form-control" id="productSupplier" placeholder="Type to search supplier..." autocomplete="off">
+            <input type="hidden" id="productSupplierId">
+          </div>
           <div class="mb-2">
             <label class="form-label">Images</label>
             <div class="border rounded p-2 bg-light" id="productImagesDropZone">
@@ -85,6 +95,6 @@ require 'includes/layout.php';
     </div>
   </div>
 </div>
-<?php $pageScripts = ['frontend/js/photo_uploader.js'];
+<?php $pageScripts = ['frontend/js/photo_uploader.js', 'frontend/js/autocomplete.js'];
 $pageScript = 'frontend/js/products.js';
 require 'includes/footer.php'; ?>

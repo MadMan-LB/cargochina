@@ -16,7 +16,7 @@ require __DIR__ . '/../includes/area_layout.php';
       <div class="card-body">
         <h5 class="card-title">Receiving Queue</h5>
         <p class="card-text">Process orders awaiting receipt at the warehouse.</p>
-        <a href="<?= $areaBase ?>/receiving/queue.php" class="btn btn-primary">Go to Queue</a>
+        <a href="<?= $areaBase ?>/receiving/" class="btn btn-primary">Go to Queue</a>
       </div>
     </div>
   </div>
@@ -25,7 +25,7 @@ require __DIR__ . '/../includes/area_layout.php';
       <div class="card-body">
         <h5 class="card-title">Receiving History</h5>
         <p class="card-text">View past receiving records.</p>
-        <a href="<?= $areaBase ?>/receiving/history.php" class="btn btn-outline-primary">View History</a>
+        <a href="<?= $areaBase ?>/receiving/" class="btn btn-outline-primary">View History</a>
       </div>
     </div>
   </div>

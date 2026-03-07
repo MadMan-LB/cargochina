@@ -3,6 +3,11 @@
  * Usage: Autocomplete.init(inputEl, { resource, renderItem, onSelect })
  */
 
+const API_BASE =
+    typeof window !== "undefined" && window.API_BASE
+        ? window.API_BASE
+        : "/cargochina/api/v1";
+
 const Autocomplete = {
     debounceMs: 250,
     minChars: 1,
@@ -40,7 +45,7 @@ const Autocomplete = {
             dropdown.className =
                 "autocomplete-dropdown list-group position-absolute";
             dropdown.style.cssText =
-                "max-height:200px;overflow-y:auto;z-index:1050;min-width:100%";
+                "max-height:200px;overflow-y:auto;z-index:1060;min-width:100%";
             items.forEach((item, i) => {
                 const el = document.createElement("button");
                 el.type = "button";

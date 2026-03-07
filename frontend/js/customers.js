@@ -54,10 +54,51 @@ async function loadCustomers() {
     }
 }
 
+let customerPaymentLinks = [];
+
+function addCustomerPaymentLink(name = "", value = "") {
+    const id = Date.now();
+    customerPaymentLinks.push({ id, name, value });
+    renderCustomerPaymentLinks();
+}
+
+function removeCustomerPaymentLink(id) {
+    customerPaymentLinks = customerPaymentLinks.filter((p) => p.id !== id);
+    renderCustomerPaymentLinks();
+}
+
+function renderCustomerPaymentLinks() {
+    const container = document.getElementById("customerPaymentLinksContainer");
+    if (!container) return;
+    container.innerHTML = customerPaymentLinks
+        .map(
+            (p) => `
+      <div class="d-flex gap-2 mb-2 align-items-center">
+        <input type="text" class="form-control form-control-sm" placeholder="Name (e.g. weeecha)" value="${esc(p.name)}" onchange="updatePaymentLinkName(${p.id}, this.value)">
+        <input type="text" class="form-control form-control-sm flex-grow-1" placeholder="Value (e.g. xxx xx xxxx xx)" value="${esc(p.value)}" onchange="updatePaymentLinkValue(${p.id}, this.value)">
+        <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeCustomerPaymentLink(${p.id})">×</button>
+      </div>
+    `,
+        )
+        .join("");
+}
+
+function updatePaymentLinkName(id, v) {
+    const p = customerPaymentLinks.find((x) => x.id === id);
+    if (p) p.name = v;
+}
+
+function updatePaymentLinkValue(id, v) {
+    const p = customerPaymentLinks.find((x) => x.id === id);
+    if (p) p.value = v;
+}
+
 function openCustomerForm() {
     document.getElementById("customerForm").reset();
     document.getElementById("customerId").value = "";
     document.getElementById("customerModalTitle").textContent = "Add Customer";
+    customerPaymentLinks = [];
+    renderCustomerPaymentLinks();
 }
 
 async function editCustomer(id) {
@@ -71,6 +112,12 @@ async function editCustomer(id) {
         document.getElementById("customerAddress").value = d.address || "";
         document.getElementById("customerPaymentTerms").value =
             d.payment_terms || "";
+        customerPaymentLinks = (d.payment_links || []).map((p, i) => ({
+            id: Date.now() + i,
+            name: p.name || "",
+            value: p.value || "",
+        }));
+        renderCustomerPaymentLinks();
         document.getElementById("customerModalTitle").textContent =
             "Edit Customer";
         new bootstrap.Modal(document.getElementById("customerModal")).show();
@@ -90,6 +137,12 @@ async function saveCustomer() {
         payment_terms:
             document.getElementById("customerPaymentTerms").value.trim() ||
             null,
+        payment_links: customerPaymentLinks
+            .filter((p) => (p.name || "").trim())
+            .map((p) => ({
+                name: (p.name || "").trim(),
+                value: (p.value || "").trim(),
+            })),
     };
     if (!payload.code || !payload.name) {
         showToast("Code and Name are required", "danger");
