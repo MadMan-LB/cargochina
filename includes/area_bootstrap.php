@@ -25,7 +25,7 @@ $userRoles = $_SESSION['user_roles'] ?? [];
 
 $areaRoles = [
     'warehouse' => ['WarehouseStaff', 'SuperAdmin'],
-    'buyers' => ['ChinaAdmin', 'SuperAdmin'],
+    'buyers' => ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'],
     'admin' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'],
     'superadmin' => ['SuperAdmin'],
 ];

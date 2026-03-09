@@ -52,7 +52,7 @@ async function loadAuditLog(reset = true) {
                 }
             }
             tr.innerHTML = `
-        <td><small>${escapeHtml((r.created_at || "").replace(" ", " ")}</small></td>
+        <td><small>${escapeHtml((r.created_at || "").replace(" ", " "))}</small></td>
         <td>${escapeHtml(r.user_name || "—")} ${r.user_id ? `(#${r.user_id})` : ""}</td>
         <td>${entityLink}</td>
         <td><span class="badge bg-secondary">${escapeHtml(r.action)}</span></td>

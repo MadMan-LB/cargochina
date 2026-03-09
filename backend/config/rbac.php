@@ -13,7 +13,10 @@ return [
         'receive' => ['WarehouseStaff', 'SuperAdmin'],
         'confirm' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'],
     ],
-    'containers' => ['SuperAdmin'],
+    'containers' => [
+        'read' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'],
+        'write' => ['SuperAdmin'],
+    ],
     'shipment-drafts' => [
         'create' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'],
         'finalize' => ['LebanonAdmin', 'SuperAdmin'],

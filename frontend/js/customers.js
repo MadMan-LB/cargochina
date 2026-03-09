@@ -56,16 +56,19 @@ async function loadCustomers() {
 
 let customerPaymentLinks = [];
 
-function addCustomerPaymentLink(name = "", value = "") {
+window.addCustomerPaymentLink = function addCustomerPaymentLink(
+    name = "",
+    value = "",
+) {
     const id = Date.now();
     customerPaymentLinks.push({ id, name, value });
     renderCustomerPaymentLinks();
-}
+};
 
-function removeCustomerPaymentLink(id) {
+window.removeCustomerPaymentLink = function removeCustomerPaymentLink(id) {
     customerPaymentLinks = customerPaymentLinks.filter((p) => p.id !== id);
     renderCustomerPaymentLinks();
-}
+};
 
 function renderCustomerPaymentLinks() {
     const container = document.getElementById("customerPaymentLinksContainer");
@@ -83,15 +86,15 @@ function renderCustomerPaymentLinks() {
         .join("");
 }
 
-function updatePaymentLinkName(id, v) {
+window.updatePaymentLinkName = function updatePaymentLinkName(id, v) {
     const p = customerPaymentLinks.find((x) => x.id === id);
     if (p) p.name = v;
-}
+};
 
-function updatePaymentLinkValue(id, v) {
+window.updatePaymentLinkValue = function updatePaymentLinkValue(id, v) {
     const p = customerPaymentLinks.find((x) => x.id === id);
     if (p) p.value = v;
-}
+};
 
 function openCustomerForm() {
     document.getElementById("customerForm").reset();

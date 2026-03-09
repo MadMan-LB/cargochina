@@ -9,6 +9,7 @@ require_once dirname(__DIR__, 2) . '/services/TrackingPushService.php';
 require_once dirname(__DIR__, 2) . '/services/NotificationService.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    requireRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin']);
     $pdo = getDb();
     $userId = getAuthUserId() ?? 1;
 

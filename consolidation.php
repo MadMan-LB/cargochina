@@ -2,10 +2,12 @@
 require_once 'includes/auth_check.php';
 require_once 'includes/page_guard.php';
 requireRoleForPage(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin']);
+$canManageContainers = in_array('SuperAdmin', $_SESSION['user_roles'] ?? [], true);
 $currentPage = 'consolidation';
 $pageTitle = 'Consolidation';
 require 'includes/layout.php';
 ?>
+<div id="consolidationPage" data-can-create-container="<?= $canManageContainers ? '1' : '0' ?>">
 <h1 class="mb-4">Consolidation</h1>
 <div class="card mb-4">
     <div class="card-body py-3 px-4">
@@ -18,8 +20,10 @@ require 'includes/layout.php';
         <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center py-3">
                 <span class="fw-semibold">Containers</span>
+                <?php if ($canManageContainers): ?>
                 <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal"
                     data-bs-target="#containerModal">+ Add Container</button>
+                <?php endif; ?>
             </div>
             <div class="card-body py-3">
                 <table class="table table-sm mb-0">
@@ -49,6 +53,7 @@ require 'includes/layout.php';
     </div>
 </div>
 
+<?php if ($canManageContainers): ?>
 <div class="modal fade" id="containerModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -81,6 +86,7 @@ require 'includes/layout.php';
         </div>
     </div>
 </div>
+<?php endif; ?>
 
 <div class="modal fade" id="draftModal" tabindex="-1">
     <div class="modal-dialog modal-xl">
@@ -241,5 +247,9 @@ require 'includes/layout.php';
         </div>
     </div>
 </div>
-<?php $pageScript = '/cargochina/frontend/js/consolidation.js';
+<?php if (!$canManageContainers): ?>
+    <p class="text-muted small mt-3 mb-0">Container creation is limited to SuperAdmin. Consolidation users can still assign existing containers.</p>
+<?php endif; ?>
+</div>
+<?php $pageScript = '/cargochina/frontend/js/consolidation.js?v=' . filemtime(__DIR__ . '/frontend/js/consolidation.js');
 require 'includes/footer.php'; ?>

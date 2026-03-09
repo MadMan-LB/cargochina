@@ -3,7 +3,7 @@
  * Usage: Autocomplete.init(inputEl, { resource, renderItem, onSelect })
  */
 
-const API_BASE =
+const AUTOCOMPLETE_API_BASE =
     typeof window !== "undefined" && window.API_BASE
         ? window.API_BASE
         : "/cargochina/api/v1";
@@ -43,9 +43,9 @@ const Autocomplete = {
             if (items.length === 0) return;
             dropdown = document.createElement("div");
             dropdown.className =
-                "autocomplete-dropdown list-group position-absolute";
+                "autocomplete-dropdown list-group position-fixed";
             dropdown.style.cssText =
-                "max-height:200px;overflow-y:auto;z-index:1060;min-width:100%";
+                "max-height:200px;overflow-y:auto;z-index:9999;min-width:200px;box-shadow:0 4px 12px rgba(0,0,0,0.15);background:#fff";
             items.forEach((item, i) => {
                 const el = document.createElement("button");
                 el.type = "button";
@@ -53,11 +53,17 @@ const Autocomplete = {
                     "list-group-item list-group-item-action text-start";
                 el.textContent = renderItem(item);
                 el.dataset.index = String(i);
-                el.addEventListener("click", () => selectItem(i));
+                el.addEventListener("mousedown", (e) => {
+                    e.preventDefault();
+                    selectItem(i);
+                });
                 dropdown.appendChild(el);
             });
-            inputEl.parentNode.style.position = "relative";
-            inputEl.parentNode.appendChild(dropdown);
+            document.body.appendChild(dropdown);
+            const rect = inputEl.getBoundingClientRect();
+            dropdown.style.left = rect.left + "px";
+            dropdown.style.top = rect.bottom + 2 + "px";
+            dropdown.style.width = Math.max(rect.width, 200) + "px";
             selectedIndex = 0;
             highlight(0);
         };
@@ -81,15 +87,17 @@ const Autocomplete = {
             hide();
         };
 
+        const searchPath = opts.searchPath || "/search";
         const fetchSearch = async (q) => {
             if (abortController) abortController.abort();
             abortController = new AbortController();
             try {
                 const res = await fetch(
-                    API_BASE +
+                    AUTOCOMPLETE_API_BASE +
                         "/" +
                         resource +
-                        "/search?q=" +
+                        searchPath +
+                        "?q=" +
                         encodeURIComponent(q),
                     {
                         credentials: "same-origin",

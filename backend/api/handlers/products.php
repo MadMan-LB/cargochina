@@ -21,6 +21,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
     switch ($method) {
         case 'GET':
+            if ($id === 'hs-codes') {
+                $q = trim($_GET['q'] ?? '');
+                $like = strlen($q) >= 1 ? '%' . preg_replace('/\s+/', '%', $q) . '%' : '%';
+                $stmt = $pdo->prepare("SELECT DISTINCT hs_code FROM products WHERE hs_code IS NOT NULL AND hs_code != '' AND hs_code LIKE ? ORDER BY hs_code LIMIT 15");
+                $stmt->execute([$like]);
+                $rows = array_map(fn($r) => ['id' => $r['hs_code'], 'hs_code' => $r['hs_code']], $stmt->fetchAll(PDO::FETCH_ASSOC));
+                jsonResponse(['data' => $rows]);
+            }
             if ($id === 'search') {
                 $q = trim($input['q'] ?? $_GET['q'] ?? '');
                 if (strlen($q) < 1) {

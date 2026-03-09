@@ -9,7 +9,7 @@ if (in_array('SuperAdmin', $roles)) {
     $homeUrl = '/cargochina/superadmin/';
 } elseif (in_array('WarehouseStaff', $roles) && !in_array('SuperAdmin', $roles)) {
     $homeUrl = '/cargochina/warehouse/';
-} elseif (in_array('ChinaAdmin', $roles)) {
+} elseif (in_array('ChinaAdmin', $roles) || in_array('ChinaEmployee', $roles)) {
     $homeUrl = '/cargochina/buyers/';
 } elseif (in_array('LebanonAdmin', $roles)) {
     $homeUrl = '/cargochina/admin/';

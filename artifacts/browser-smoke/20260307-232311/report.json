@@ -1,0 +1,208 @@
+{
+  "run_id": "20260307-232311",
+  "artifacts_dir": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-232311",
+  "results": [
+    {
+      "name": "S1 Login page loads",
+      "status": "PASS",
+      "details": "Login page rendered",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-232311\\s1-login-page-loads.png",
+      "issues": []
+    },
+    {
+      "name": "S2 Login works",
+      "status": "PASS",
+      "details": "Logged in to http://localhost/cargochina/superadmin/",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-232311\\s2-login-works.png",
+      "issues": []
+    },
+    {
+      "name": "S3 Dashboard loads",
+      "status": "PASS",
+      "details": "Dashboard stats visible",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-232311\\s3-dashboard-loads.png",
+      "issues": []
+    },
+    {
+      "name": "S4 Suppliers page and add flow",
+      "status": "PASS",
+      "details": "Created supplier Autotest Supplier 918622",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-232311\\s4-suppliers-page-and-add-flow.png",
+      "issues": []
+    },
+    {
+      "name": "C1-C4 Customers page and payment link flow",
+      "status": "PASS",
+      "details": "Created customer Autotest Customer 918624 with payment link and edit verified",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-232311\\c1-c4-customers-page-and-payment-link-flow.png",
+      "issues": []
+    },
+    {
+      "name": "P1-P9 Products page core flow",
+      "status": "PASS",
+      "details": "Created product with translated text '???? 918627'",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-232311\\p1-p9-products-page-core-flow.png",
+      "issues": []
+    },
+    {
+      "name": "Orders page modal smoke",
+      "status": "FAIL",
+      "details": "TimeoutError: Locator.wait_for: Timeout 10000ms exceeded.\nCall log:\n  - waiting for locator(\".autocomplete-dropdown button\").filter(has_text=\"Autotest Customer 918624\").first to be visible\n",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-232311\\orders-page-modal-smoke-failed.png",
+      "issues": [
+        {
+          "step": "Orders page modal smoke",
+          "kind": "http_500",
+          "severity": "high",
+          "message": "GET http://localhost/cargochina/api/v1/order-templates",
+          "url": "http://localhost/cargochina/api/v1/order-templates"
+        },
+        {
+          "step": "Orders page modal smoke",
+          "kind": "console_error",
+          "severity": "high",
+          "message": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+          "url": "http://localhost/cargochina/orders.php"
+        }
+      ]
+    },
+    {
+      "name": "S5 Pipeline page and stage link",
+      "status": "PASS",
+      "details": "Pipeline draft card navigation works",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-232311\\s5-pipeline-page-and-stage-link.png",
+      "issues": []
+    },
+    {
+      "name": "Receiving page loads",
+      "status": "PASS",
+      "details": "Loaded receiving.php",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-232311\\receiving-page-loads.png",
+      "issues": []
+    },
+    {
+      "name": "Consolidation page loads",
+      "status": "PASS",
+      "details": "Loaded consolidation.php",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-232311\\consolidation-page-loads.png",
+      "issues": []
+    },
+    {
+      "name": "Notifications page loads",
+      "status": "PASS",
+      "details": "Loaded notifications.php",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-232311\\notifications-page-loads.png",
+      "issues": []
+    },
+    {
+      "name": "Notification preferences page loads",
+      "status": "PASS",
+      "details": "Loaded notification_preferences.php",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-232311\\notification-preferences-page-loads.png",
+      "issues": []
+    },
+    {
+      "name": "Admin config page loads",
+      "status": "PASS",
+      "details": "Loaded admin_config.php",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-232311\\admin-config-page-loads.png",
+      "issues": []
+    },
+    {
+      "name": "Admin users page loads",
+      "status": "PASS",
+      "details": "Loaded admin_users.php",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-232311\\admin-users-page-loads.png",
+      "issues": []
+    },
+    {
+      "name": "Admin diagnostics page loads",
+      "status": "PASS",
+      "details": "Loaded admin_diagnostics.php",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-232311\\admin-diagnostics-page-loads.png",
+      "issues": []
+    },
+    {
+      "name": "Admin tracking push page loads",
+      "status": "PASS",
+      "details": "Loaded admin_tracking_push.php",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-232311\\admin-tracking-push-page-loads.png",
+      "issues": []
+    },
+    {
+      "name": "Admin audit log page loads",
+      "status": "FAIL",
+      "details": "Loaded admin_audit_log.php",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-232311\\admin-audit-log-page-loads.png",
+      "issues": [
+        {
+          "step": "Admin audit log page loads",
+          "kind": "pageerror",
+          "severity": "high",
+          "message": "missing ) after argument list",
+          "url": "http://localhost/cargochina/admin_audit_log.php"
+        }
+      ]
+    },
+    {
+      "name": "Cleanup product",
+      "status": "PASS",
+      "details": "Deleted test product",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-232311\\cleanup-product.png",
+      "issues": []
+    },
+    {
+      "name": "Cleanup customer",
+      "status": "PASS",
+      "details": "Deleted test customer",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-232311\\cleanup-customer.png",
+      "issues": []
+    },
+    {
+      "name": "Cleanup supplier",
+      "status": "PASS",
+      "details": "Deleted test supplier",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-232311\\cleanup-supplier.png",
+      "issues": []
+    }
+  ],
+  "events": [
+    {
+      "step": "S1 Login page loads",
+      "kind": "console_verbose",
+      "severity": "low",
+      "message": "[DOM] Input elements should have autocomplete attributes (suggested: \"current-password\"): (More info: https://goo.gl/9p2vKq) %o",
+      "url": "http://localhost/cargochina/login.php"
+    },
+    {
+      "step": "Orders page modal smoke",
+      "kind": "http_500",
+      "severity": "high",
+      "message": "GET http://localhost/cargochina/api/v1/order-templates",
+      "url": "http://localhost/cargochina/api/v1/order-templates"
+    },
+    {
+      "step": "Orders page modal smoke",
+      "kind": "console_error",
+      "severity": "high",
+      "message": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+      "url": "http://localhost/cargochina/orders.php"
+    },
+    {
+      "step": "Admin config page loads",
+      "kind": "console_verbose",
+      "severity": "low",
+      "message": "[DOM] Multiple forms should be contained in their own form elements; break up complex forms into ones that represent a single action: (More info: https://goo.gl/9p2vKq) %o",
+      "url": "http://localhost/cargochina/admin_config.php"
+    },
+    {
+      "step": "Admin audit log page loads",
+      "kind": "pageerror",
+      "severity": "high",
+      "message": "missing ) after argument list",
+      "url": "http://localhost/cargochina/admin_audit_log.php"
+    }
+  ],
+  "pass_count": 18,
+  "fail_count": 2
+}

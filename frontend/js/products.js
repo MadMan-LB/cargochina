@@ -8,6 +8,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setupProductDimensionInputs();
     setupProductDescription();
     setupProductSupplierAutocomplete();
+    setupProductHsCodeAutocomplete();
     setupProductPricing();
 });
 
@@ -82,7 +83,7 @@ function setupProductDescription() {
         });
     };
 
-    addBtn.addEventListener("click", () => addDescField());
+    window.addProductDescField = () => addDescField();
     window.removeProductDescEntry = (i) => {
         productDescEntries.splice(i, 1);
         if (productDescEntries.length === 0) addDescField();
@@ -109,6 +110,21 @@ function setupProductSupplierAutocomplete() {
     });
     inputEl.addEventListener("input", () => {
         if (!inputEl.value.trim()) hiddenEl.value = "";
+    });
+}
+
+function setupProductHsCodeAutocomplete() {
+    const inputEl = document.getElementById("productHsCode");
+    if (!inputEl) return;
+    if (typeof Autocomplete === "undefined") return;
+    Autocomplete.init(inputEl, {
+        resource: "products",
+        searchPath: "/hs-codes",
+        placeholder: "Type to search HS codes...",
+        renderItem: (item) => item.hs_code || item.id || "",
+        onSelect: (item) => {
+            inputEl.value = item.hs_code || item.id || "";
+        },
     });
 }
 

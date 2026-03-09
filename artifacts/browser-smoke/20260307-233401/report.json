@@ -1,0 +1,164 @@
+{
+  "run_id": "20260307-233401",
+  "artifacts_dir": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-233401",
+  "results": [
+    {
+      "name": "S1 Login page loads",
+      "status": "PASS",
+      "details": "Login page rendered",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-233401\\s1-login-page-loads.png",
+      "issues": []
+    },
+    {
+      "name": "S2 Login works",
+      "status": "PASS",
+      "details": "Logged in to http://localhost/cargochina/superadmin/",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-233401\\s2-login-works.png",
+      "issues": []
+    },
+    {
+      "name": "S3 Dashboard loads",
+      "status": "PASS",
+      "details": "Dashboard stats visible",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-233401\\s3-dashboard-loads.png",
+      "issues": []
+    },
+    {
+      "name": "S4 Suppliers page and add flow",
+      "status": "PASS",
+      "details": "Created supplier Autotest Supplier 919247",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-233401\\s4-suppliers-page-and-add-flow.png",
+      "issues": []
+    },
+    {
+      "name": "C1-C4 Customers page and payment link flow",
+      "status": "PASS",
+      "details": "Created customer Autotest Customer 919249 with payment link and edit verified",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-233401\\c1-c4-customers-page-and-payment-link-flow.png",
+      "issues": []
+    },
+    {
+      "name": "P1-P9 Products page core flow",
+      "status": "PASS",
+      "details": "Created product with translated text '???? 919252'",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-233401\\p1-p9-products-page-core-flow.png",
+      "issues": []
+    },
+    {
+      "name": "Orders page modal smoke",
+      "status": "PASS",
+      "details": "Order modal opened with template dropdown and working autocompletes",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-233401\\orders-page-modal-smoke.png",
+      "issues": []
+    },
+    {
+      "name": "S5 Pipeline page and stage link",
+      "status": "PASS",
+      "details": "Pipeline draft card navigation works",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-233401\\s5-pipeline-page-and-stage-link.png",
+      "issues": []
+    },
+    {
+      "name": "Receiving page loads",
+      "status": "PASS",
+      "details": "Loaded receiving.php",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-233401\\receiving-page-loads.png",
+      "issues": []
+    },
+    {
+      "name": "Consolidation page loads",
+      "status": "PASS",
+      "details": "Loaded consolidation.php",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-233401\\consolidation-page-loads.png",
+      "issues": []
+    },
+    {
+      "name": "Notifications page loads",
+      "status": "PASS",
+      "details": "Loaded notifications.php",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-233401\\notifications-page-loads.png",
+      "issues": []
+    },
+    {
+      "name": "Notification preferences page loads",
+      "status": "PASS",
+      "details": "Loaded notification_preferences.php",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-233401\\notification-preferences-page-loads.png",
+      "issues": []
+    },
+    {
+      "name": "Admin config page loads",
+      "status": "PASS",
+      "details": "Loaded admin_config.php",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-233401\\admin-config-page-loads.png",
+      "issues": []
+    },
+    {
+      "name": "Admin users page loads",
+      "status": "PASS",
+      "details": "Loaded admin_users.php",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-233401\\admin-users-page-loads.png",
+      "issues": []
+    },
+    {
+      "name": "Admin diagnostics page loads",
+      "status": "PASS",
+      "details": "Loaded admin_diagnostics.php",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-233401\\admin-diagnostics-page-loads.png",
+      "issues": []
+    },
+    {
+      "name": "Admin tracking push page loads",
+      "status": "PASS",
+      "details": "Loaded admin_tracking_push.php",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-233401\\admin-tracking-push-page-loads.png",
+      "issues": []
+    },
+    {
+      "name": "Admin audit log page loads",
+      "status": "PASS",
+      "details": "Loaded admin_audit_log.php",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-233401\\admin-audit-log-page-loads.png",
+      "issues": []
+    },
+    {
+      "name": "Cleanup product",
+      "status": "PASS",
+      "details": "Deleted test product",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-233401\\cleanup-product.png",
+      "issues": []
+    },
+    {
+      "name": "Cleanup customer",
+      "status": "PASS",
+      "details": "Deleted test customer",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-233401\\cleanup-customer.png",
+      "issues": []
+    },
+    {
+      "name": "Cleanup supplier",
+      "status": "PASS",
+      "details": "Deleted test supplier",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-233401\\cleanup-supplier.png",
+      "issues": []
+    }
+  ],
+  "events": [
+    {
+      "step": "S1 Login page loads",
+      "kind": "console_verbose",
+      "severity": "low",
+      "message": "[DOM] Input elements should have autocomplete attributes (suggested: \"current-password\"): (More info: https://goo.gl/9p2vKq) %o",
+      "url": "http://localhost/cargochina/login.php"
+    },
+    {
+      "step": "Admin config page loads",
+      "kind": "console_verbose",
+      "severity": "low",
+      "message": "[DOM] Multiple forms should be contained in their own form elements; break up complex forms into ones that represent a single action: (More info: https://goo.gl/9p2vKq) %o",
+      "url": "http://localhost/cargochina/admin_config.php"
+    }
+  ],
+  "pass_count": 20,
+  "fail_count": 0
+}

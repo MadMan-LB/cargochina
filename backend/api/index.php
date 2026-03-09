@@ -57,10 +57,15 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Unauthorized']);
         exit;
     }
-    if ($resource === 'containers' && !hasAnyRole($rbac['containers'] ?? [])) {
-        http_response_code(403);
-        echo json_encode(['error' => true, 'message' => 'Forbidden']);
-        exit;
+    if ($resource === 'containers') {
+        $containerRoles = $method === 'GET'
+            ? ($rbac['containers']['read'] ?? [])
+            : ($rbac['containers']['write'] ?? []);
+        if (!hasAnyRole($containerRoles)) {
+            http_response_code(403);
+            echo json_encode(['error' => true, 'message' => 'Forbidden']);
+            exit;
+        }
     }
     if ($resource === 'orders' && $action === 'approve' && !hasAnyRole($rbac['orders']['approve'] ?? [])) {
         http_response_code(403);

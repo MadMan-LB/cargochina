@@ -28,7 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: /cargochina/superadmin/');
       } elseif (in_array('WarehouseStaff', $roles) && !in_array('SuperAdmin', $roles)) {
         header('Location: /cargochina/warehouse/');
-      } elseif (in_array('ChinaAdmin', $roles)) {
+      } elseif (in_array('ChinaAdmin', $roles) || in_array('ChinaEmployee', $roles)) {
         header('Location: /cargochina/buyers/');
       } elseif (in_array('LebanonAdmin', $roles)) {
         header('Location: /cargochina/admin/');
@@ -60,8 +60,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <h4 class="card-title mb-4">CLMS Login</h4>
             <?php if (!empty($error)): ?><div class="alert alert-danger"><?= htmlspecialchars($error) ?></div><?php endif; ?>
             <form method="post">
-              <div class="mb-3"><label class="form-label">Email</label><input type="email" name="email" class="form-control" required></div>
-              <div class="mb-3"><label class="form-label">Password</label><input type="password" name="password" class="form-control" required></div>
+              <div class="mb-3"><label class="form-label" for="loginEmail">Email</label><input type="email" id="loginEmail" name="email" class="form-control" autocomplete="email" required></div>
+              <div class="mb-3"><label class="form-label" for="loginPassword">Password</label><input type="password" id="loginPassword" name="password" class="form-control" autocomplete="current-password" required></div>
               <button type="submit" class="btn btn-primary w-100">Login</button>
             </form>
           </div>

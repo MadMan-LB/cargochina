@@ -48,7 +48,7 @@ require 'includes/layout.php';
             <label class="form-label">Description</label>
             <small class="text-muted d-block mb-1">Type in Chinese or English — auto-translates Chinese to English. Press + to add another field.</small>
             <div id="productDescFields" class="mb-1"></div>
-            <button type="button" class="btn btn-outline-secondary btn-sm" id="productDescAddBtn" title="Add another description field">+</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="productDescAddBtn" title="Add another description field" onclick="addProductDescField&&addProductDescField()">+</button>
           </div>
           <div class="row form-row-responsive">
             <div class="col-12 col-md-4 mb-2">

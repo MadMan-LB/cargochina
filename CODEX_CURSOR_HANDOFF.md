@@ -144,6 +144,7 @@ This file was initially written by Codex as a shared collaboration and continuit
 - Record what has been implemented versus what is still pending so this file remains a usable project memory.
 - Keep this file as the persistent memory between Codex and Cursor during the long development cycle.
 - When browser QA eventually happens, append findings here instead of creating a parallel memory document.
+- **Browser testing protocol:** Codex uses `docs/CODEX_BROWSER_TESTING.md` to run browser tests and report findings; Cursor fixes issues. See that file for the checklist, bug report template, and fix log.
 
 ## 13. Cursor Notes Section
 ### Cursor Notes

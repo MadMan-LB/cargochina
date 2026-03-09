@@ -10,20 +10,22 @@ require 'includes/layout.php';
 <p class="text-muted">Manage profiles, roles, and department assignments for ~40 employees.</p>
 <div class="card">
   <div class="card-body">
-    <table class="table table-hover">
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Email</th>
-          <th>Name</th>
-          <th>Roles</th>
-          <th>Departments</th>
-          <th>Active</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody id="usersBody"></tbody>
-    </table>
+    <div class="table-responsive">
+      <table class="table table-hover">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Email</th>
+            <th>Name</th>
+            <th>Roles</th>
+            <th>Departments</th>
+            <th>Active</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="usersBody"></tbody>
+      </table>
+    </div>
   </div>
 </div>
 

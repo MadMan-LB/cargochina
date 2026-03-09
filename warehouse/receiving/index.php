@@ -21,12 +21,14 @@ require __DIR__ . '/../../includes/area_layout.php';
       <div class="card-body py-2">
         <div class="row g-2 align-items-end">
           <div class="col-auto"><label class="form-label small mb-0">Order ID</label><input type="number" class="form-control form-control-sm" id="filterOrderId" placeholder="ID" style="width:80px"></div>
-          <div class="col-auto"><label class="form-label small mb-0">Customer</label><select class="form-select form-select-sm" id="filterCustomer" style="width:140px">
-              <option value="">— All —</option>
-            </select></div>
-          <div class="col-auto"><label class="form-label small mb-0">Supplier</label><select class="form-select form-select-sm" id="filterSupplier" style="width:140px">
-              <option value="">— All —</option>
-            </select></div>
+          <div class="col-auto"><label class="form-label small mb-0">Customer</label>
+            <input type="text" class="form-control form-control-sm" id="filterCustomer" placeholder="Type to search..." autocomplete="off" style="width:140px">
+            <input type="hidden" id="filterCustomerId">
+          </div>
+          <div class="col-auto"><label class="form-label small mb-0">Supplier</label>
+            <input type="text" class="form-control form-control-sm" id="filterSupplier" placeholder="Type to search..." autocomplete="off" style="width:140px">
+            <input type="hidden" id="filterSupplierId">
+          </div>
           <div class="col-auto"><label class="form-label small mb-0">Date from</label><input type="date" class="form-control form-control-sm" id="filterDateFrom"></div>
           <div class="col-auto"><label class="form-label small mb-0">Date to</label><input type="date" class="form-control form-control-sm" id="filterDateTo"></div>
           <div class="col-auto"><label class="form-label small mb-0">Ship code</label><input type="text" class="form-control form-control-sm" id="filterShippingCode" placeholder="Agent code" style="width:100px"></div>
@@ -96,5 +98,6 @@ require __DIR__ . '/../../includes/area_layout.php';
     </div>
   </div>
 </div>
-<?php $pageScript = '/cargochina/frontend/js/receiving_index.js';
+<?php $pageScripts = ['/cargochina/frontend/js/autocomplete.js'];
+$pageScript = '/cargochina/frontend/js/receiving_index.js';
 require __DIR__ . '/../../includes/area_footer.php'; ?>

@@ -16,7 +16,10 @@ function getRecent(key) {
 function saveRecent(key, item, max = RECENT_MAX) {
     if (!item?.id) return;
     const list = getRecent(key);
-    const entry = { id: item.id, name: item.name || item.code || `#${item.id}` };
+    const entry = {
+        id: item.id,
+        name: item.name || item.code || `#${item.id}`,
+    };
     const filtered = list.filter((x) => Number(x.id) !== Number(item.id));
     const updated = [entry, ...filtered].slice(0, max);
     try {
@@ -38,14 +41,16 @@ function renderRecentChips() {
                   )
                   .join("")
             : "";
-        custEl.querySelectorAll(".recent-chip[data-type=customer]").forEach(
-            (btn) =>
-                (btn.onclick = () =>
-                    selectRecentCustomer(
-                        Number(btn.dataset.id),
-                        btn.dataset.name || "",
-                    )),
-        );
+        custEl
+            .querySelectorAll(".recent-chip[data-type=customer]")
+            .forEach(
+                (btn) =>
+                    (btn.onclick = () =>
+                        selectRecentCustomer(
+                            Number(btn.dataset.id),
+                            btn.dataset.name || "",
+                        )),
+            );
     }
     if (suppEl) {
         const recent = getRecent(RECENT_KEY_SUPPLIERS);
@@ -58,14 +63,16 @@ function renderRecentChips() {
                   )
                   .join("")
             : "";
-        suppEl.querySelectorAll(".recent-chip[data-type=supplier]").forEach(
-            (btn) =>
-                (btn.onclick = () =>
-                    selectRecentSupplier(
-                        Number(btn.dataset.id),
-                        btn.dataset.name || "",
-                    )),
-        );
+        suppEl
+            .querySelectorAll(".recent-chip[data-type=supplier]")
+            .forEach(
+                (btn) =>
+                    (btn.onclick = () =>
+                        selectRecentSupplier(
+                            Number(btn.dataset.id),
+                            btn.dataset.name || "",
+                        )),
+            );
     }
 }
 
@@ -130,7 +137,9 @@ async function loadOrders() {
         const res = await api("GET", path);
         const rows = res.data || [];
         const tbody = document.querySelector("#ordersTable tbody");
-        const submittedCount = rows.filter((r) => r.status === "Submitted").length;
+        const submittedCount = rows.filter(
+            (r) => r.status === "Submitted",
+        ).length;
         const bulkBtn = document.getElementById("bulkApproveBtn");
         if (bulkBtn) bulkBtn.classList.toggle("d-none", submittedCount === 0);
 
@@ -139,16 +148,17 @@ async function loadOrders() {
             selectAll.checked = false;
             selectAll.onclick = () => {
                 const checked = selectAll.checked;
-                tbody.querySelectorAll(".order-bulk-cb").forEach((cb) => (cb.checked = checked));
+                tbody
+                    .querySelectorAll(".order-bulk-cb")
+                    .forEach((cb) => (cb.checked = checked));
             };
         }
 
         tbody.innerHTML =
             rows
-                .map(
-                    (r) => {
-                        const canBulk = r.status === "Submitted";
-                        return `
+                .map((r) => {
+                    const canBulk = r.status === "Submitted";
+                    return `
       <tr data-order-id="${r.id}" data-status="${escapeHtml(r.status)}">
         <td class="text-center">${canBulk ? `<input type="checkbox" class="form-check-input order-bulk-cb" data-order-id="${r.id}">` : ""}</td>
         <td>${r.id}</td>
@@ -165,8 +175,7 @@ async function loadOrders() {
         </td>
       </tr>
     `;
-                    },
-                )
+                })
                 .join("") ||
             '<tr><td colspan="7" class="text-muted">No orders yet.</td></tr>';
     } catch (e) {
@@ -280,12 +289,7 @@ async function loadOrderTemplate(id) {
             const qty =
                 it.quantity ??
                 (cartons > 0 && qtyPerCtn > 0 ? cartons * qtyPerCtn : 0);
-            const denom =
-                cartons > 0
-                    ? qtyPerCtn > 0
-                        ? cartons * qtyPerCtn
-                        : cartons
-                    : qty || 1;
+            const denom = cartons > 0 ? cartons : (qty || 0) > 0 ? qty : 1;
             const cbmPerUnit =
                 denom > 0 && it.declared_cbm
                     ? (parseFloat(it.declared_cbm) / denom).toFixed(4)
@@ -304,8 +308,7 @@ async function loadOrderTemplate(id) {
             last.querySelector(".item-l").value = it.item_length ?? "";
             last.querySelector(".item-w").value = it.item_width ?? "";
             last.querySelector(".item-h").value = it.item_height ?? "";
-            last.querySelector(".item-weight").value =
-                it.declared_weight ?? "";
+            last.querySelector(".item-weight").value = it.declared_weight ?? "";
             updateItemComputed(last.dataset.idx);
         }
         updateOrderTotals();
@@ -319,14 +322,24 @@ async function loadOrderTemplate(id) {
 function collectItemsForTemplate() {
     const items = [];
     document.querySelectorAll("#orderItemsBody tr").forEach((tr) => {
-        const cartons = parseInt(tr.querySelector(".item-cartons")?.value || 0, 10);
-        const qtyPerCtn = parseFloat(tr.querySelector(".item-qty-per-ctn")?.value || 0);
+        const cartons = parseInt(
+            tr.querySelector(".item-cartons")?.value || 0,
+            10,
+        );
+        const qtyPerCtn = parseFloat(
+            tr.querySelector(".item-qty-per-ctn")?.value || 0,
+        );
         const qtyInput = parseFloat(tr.querySelector(".item-qty")?.value || 0);
-        const qty = cartons > 0 && qtyPerCtn > 0 ? cartons * qtyPerCtn : qtyInput;
+        const qty =
+            cartons > 0 && qtyPerCtn > 0 ? cartons * qtyPerCtn : qtyInput;
         if (qty <= 0 && cartons <= 0) return;
         const unit = cartons > 0 ? "cartons" : "pieces";
-        const totalCbm = parseFloat(tr.querySelector(".item-total-cbm")?.textContent || 0);
-        const totalGw = parseFloat(tr.querySelector(".item-total-gw")?.textContent || 0);
+        const totalCbm = parseFloat(
+            tr.querySelector(".item-total-cbm")?.textContent || 0,
+        );
+        const totalGw = parseFloat(
+            tr.querySelector(".item-total-gw")?.textContent || 0,
+        );
         const desc = tr.querySelector(".item-desc")?.value?.trim();
         const productId = tr.querySelector(".item-product-id")?.value;
         const l = parseFloat(tr.querySelector(".item-l")?.value) || 0;
@@ -335,7 +348,8 @@ function collectItemsForTemplate() {
         items.push({
             product_id: productId || null,
             item_no: tr.querySelector(".item-item-no")?.value?.trim() || null,
-            shipping_code: tr.querySelector(".item-shipping-code")?.value?.trim() || null,
+            shipping_code:
+                tr.querySelector(".item-shipping-code")?.value?.trim() || null,
             cartons: cartons || null,
             qty_per_carton: qtyPerCtn || null,
             quantity: qty,
@@ -345,8 +359,16 @@ function collectItemsForTemplate() {
             item_length: l > 0 ? l : null,
             item_width: w > 0 ? w : null,
             item_height: h > 0 ? h : null,
-            unit_price: parseFloat(tr.querySelector(".item-unit-price")?.value || 0) || null,
-            total_amount: qty > 0 ? parseFloat(tr.querySelector(".item-total-amount")?.textContent || 0) : null,
+            unit_price:
+                parseFloat(tr.querySelector(".item-unit-price")?.value || 0) ||
+                null,
+            total_amount:
+                qty > 0
+                    ? parseFloat(
+                          tr.querySelector(".item-total-amount")?.textContent ||
+                              0,
+                      )
+                    : null,
             description_cn: desc || null,
             description_en: desc || null,
         });
@@ -411,8 +433,8 @@ function addOrderItem() {
     <td><input type="number" step="0.0001" class="form-control form-control-sm item-qty" min="0" placeholder="0" data-idx="${idx}" title="Total qty (auto from CTNS×Qty/Ctn or enter for pieces)"></td>
     <td><input type="number" step="0.01" class="form-control form-control-sm item-unit-price" placeholder="0" data-idx="${idx}"></td>
     <td><span class="item-total-amount" data-idx="${idx}">0</span></td>
-    <td><input type="number" step="0.0001" class="form-control form-control-sm item-cbm" min="0" placeholder="CBM" data-idx="${idx}" style="width:70px" title="CBM or use L×W×H below">
-        <div class="d-flex gap-1 mt-1"><input type="number" step="0.01" class="form-control form-control-sm item-l" placeholder="L" style="width:45px" title="Length cm"><input type="number" step="0.01" class="form-control form-control-sm item-w" placeholder="W" style="width:45px"><input type="number" step="0.01" class="form-control form-control-sm item-h" placeholder="H" style="width:45px"></div></td>
+    <td><input type="number" step="0.000001" class="form-control form-control-sm item-cbm" min="0" placeholder="CBM" data-idx="${idx}" style="width:70px" title="CBM = L×W×H÷1000000 (cm)">
+        <div class="d-flex gap-1 mt-1"><input type="number" step="0.01" class="form-control form-control-sm item-l" placeholder="L" style="width:45px" title="L cm"><input type="number" step="0.01" class="form-control form-control-sm item-w" placeholder="W" style="width:45px" title="W cm"><input type="number" step="0.01" class="form-control form-control-sm item-h" placeholder="H" style="width:45px" title="H cm — CBM=L×W×H÷1000000"></div></td>
     <td><span class="item-total-cbm" data-idx="${idx}">0</span></td>
     <td><input type="number" step="0.0001" class="form-control form-control-sm item-weight" min="0" placeholder="0" data-idx="${idx}" style="width:70px" title="Weight per piece (kg)"></td>
     <td><span class="item-total-gw" data-idx="${idx}">0</span></td>
@@ -444,10 +466,8 @@ function addOrderItem() {
                 const w = parseFloat(row.querySelector(".item-w")?.value) || 0;
                 const h = parseFloat(row.querySelector(".item-h")?.value) || 0;
                 if (l > 0 && w > 0 && h > 0) {
-                    row.querySelector(".item-cbm").value = (
-                        (l * w * h) /
-                        1000000
-                    ).toFixed(4);
+                    const cbm = (l * w * h) / 1000000;
+                    row.querySelector(".item-cbm").value = cbm.toFixed(6);
                 }
                 updateItemComputed(idx);
                 updateOrderTotals();
@@ -515,7 +535,7 @@ function updateItemComputed(idx) {
     }
     const totalCbm =
         cbmPerUnit * (cartons > 0 ? cartons : totalQty > 0 ? totalQty : 1);
-    tr.querySelector(".item-total-cbm").textContent = totalCbm.toFixed(4);
+    tr.querySelector(".item-total-cbm").textContent = totalCbm.toFixed(6);
 
     const weightPc = parseFloat(tr.querySelector(".item-weight")?.value || 0);
     const totalGw = weightPc * (totalQty > 0 ? totalQty : 0);
@@ -545,7 +565,7 @@ function updateOrderTotals() {
     const elCbm = document.getElementById("orderTotalCbm");
     const elWeight = document.getElementById("orderTotalWeight");
     if (elAmount) elAmount.textContent = sym + totalAmount.toFixed(2);
-    if (elCbm) elCbm.textContent = totalCbm.toFixed(4);
+    if (elCbm) elCbm.textContent = totalCbm.toFixed(6);
     if (elWeight) elWeight.textContent = totalWeight.toFixed(0);
 }
 

@@ -25,8 +25,8 @@ function showSkeleton(id, show) {
 
 async function loadQueue() {
     const orderId = document.getElementById("filterOrderId")?.value?.trim();
-    const customerId = document.getElementById("filterCustomer")?.value;
-    const supplierId = document.getElementById("filterSupplier")?.value;
+    const customerId = document.getElementById("filterCustomerId")?.value;
+    const supplierId = document.getElementById("filterSupplierId")?.value;
     const dateFrom = document.getElementById("filterDateFrom")?.value;
     const dateTo = document.getElementById("filterDateTo")?.value;
     const shippingCode = document
@@ -130,8 +130,8 @@ async function loadHistory() {
 
 async function exportQueueCsv() {
     const orderId = document.getElementById("filterOrderId")?.value?.trim();
-    const customerId = document.getElementById("filterCustomer")?.value;
-    const supplierId = document.getElementById("filterSupplier")?.value;
+    const customerId = document.getElementById("filterCustomerId")?.value;
+    const supplierId = document.getElementById("filterSupplierId")?.value;
     const dateFrom = document.getElementById("filterDateFrom")?.value;
     const dateTo = document.getElementById("filterDateTo")?.value;
     const shippingCode = document
@@ -209,43 +209,40 @@ async function exportQueueCsv() {
     }
 }
 
-async function loadFilterOptions() {
-    try {
-        const [custRes, supRes] = await Promise.all([
-            fetch(API + "/customers", { credentials: "same-origin" }).then(
-                (r) => r.json(),
-            ),
-            fetch(API + "/suppliers", { credentials: "same-origin" }).then(
-                (r) => r.json(),
-            ),
-        ]);
-        const custSel = document.getElementById("filterCustomer");
-        const supSel = document.getElementById("filterSupplier");
-        if (custSel && custRes.data) {
-            custSel.innerHTML =
-                '<option value="">— All —</option>' +
-                custRes.data
-                    .map(
-                        (c) =>
-                            `<option value="${c.id}">${escapeHtml(c.name)}</option>`,
-                    )
-                    .join("");
-        }
-        if (supSel && supRes.data) {
-            supSel.innerHTML =
-                '<option value="">— All —</option>' +
-                supRes.data
-                    .map(
-                        (s) =>
-                            `<option value="${s.id}">${escapeHtml(s.name)}</option>`,
-                    )
-                    .join("");
-        }
-    } catch (_) {}
+function setupFilterAutocomplete() {
+    const supInput = document.getElementById("filterSupplier");
+    const supId = document.getElementById("filterSupplierId");
+    const custInput = document.getElementById("filterCustomer");
+    const custId = document.getElementById("filterCustomerId");
+    if (!supInput || !custInput || typeof Autocomplete === "undefined") return;
+    Autocomplete.init(supInput, {
+        resource: "suppliers",
+        placeholder: "Type to search supplier...",
+        onSelect: (item) => {
+            if (supId) supId.value = item.id;
+        },
+    });
+    supInput.addEventListener("input", () => {
+        if (!supInput.value.trim() && supId) supId.value = "";
+    });
+    Autocomplete.init(custInput, {
+        resource: "customers",
+        placeholder: "Type to search customer...",
+        renderItem: (c) =>
+            `${c.name || ""} — ${c.code || ""}`
+                .replace(/^ — | — $/g, "")
+                .trim() || `#${c.id}`,
+        onSelect: (item) => {
+            if (custId) custId.value = item.id;
+        },
+    });
+    custInput.addEventListener("input", () => {
+        if (!custInput.value.trim() && custId) custId.value = "";
+    });
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-    loadFilterOptions();
+    setupFilterAutocomplete();
     loadQueue();
     document
         .querySelector('[data-bs-toggle="tab"][href="#history-tab"]')

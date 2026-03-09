@@ -2,6 +2,13 @@ let currentDraftId = null;
 let eligibleOrders = [];
 let draftOrders = [];
 
+function canCreateContainers() {
+    return (
+        document.getElementById("consolidationPage")?.dataset
+            ?.canCreateContainer === "1"
+    );
+}
+
 function esc(s) {
     if (s == null || s === undefined) return "";
     const d = document.createElement("div");
@@ -141,6 +148,9 @@ async function loadContainers() {
     try {
         const res = await api("GET", "/containers");
         const rows = res.data || [];
+        const emptyHint = canCreateContainers()
+            ? '<small>Click "+ Add Container" to create one</small>'
+            : "<small>No containers are available yet</small>";
         tbody.innerHTML =
             rows.length > 0
                 ? rows
@@ -149,7 +159,7 @@ async function loadContainers() {
                               `<tr><td>${esc(c.code)}</td><td>${c.max_cbm}</td><td>${c.max_weight}</td></tr>`,
                       )
                       .join("")
-                : '<tr><td colspan="3" class="text-center py-4 text-muted"><span class="d-block mb-1">No containers yet</span><small>Click "+ Add Container" to create one</small></td></tr>';
+                : `<tr><td colspan="3" class="text-center py-4 text-muted"><span class="d-block mb-1">No containers yet</span>${emptyHint}</td></tr>`;
     } catch (e) {
         showToast(e.message, "danger");
     }
@@ -223,6 +233,10 @@ function applyContainerPreset(code, maxCbm, maxWeight) {
 }
 
 async function saveContainer() {
+    if (!canCreateContainers()) {
+        showToast("Only SuperAdmin can create containers", "danger");
+        return;
+    }
     const code = document.getElementById("containerCode").value.trim();
     const maxCbm = parseFloat(document.getElementById("containerMaxCbm").value);
     const maxWeight = parseFloat(

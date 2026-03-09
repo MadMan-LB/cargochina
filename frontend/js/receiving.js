@@ -6,7 +6,7 @@ let calMonth = new Date().getMonth();
 let calYear = new Date().getFullYear();
 
 document.addEventListener("DOMContentLoaded", () => {
-    loadFilterOptions();
+    setupFilterAutocomplete();
     loadReceivingConfig();
     applyFilters();
     const input = document.getElementById("receivePhotos");
@@ -167,41 +167,43 @@ function updateVariancePhotoAlert() {
     alertEl.classList.toggle("d-none", !needsPhoto);
 }
 
-async function loadFilterOptions() {
-    try {
-        const [suppRes, custRes] = await Promise.all([
-            api("GET", "/suppliers"),
-            api("GET", "/customers"),
-        ]);
-        const suppliers = suppRes.data || [];
-        const customers = custRes.data || [];
-        const supSel = document.getElementById("filterSupplier");
-        const custSel = document.getElementById("filterCustomer");
-        if (supSel)
-            supSel.innerHTML =
-                '<option value="">— All —</option>' +
-                suppliers
-                    .map(
-                        (s) =>
-                            `<option value="${s.id}">${escapeHtml(s.name)}</option>`,
-                    )
-                    .join("");
-        if (custSel)
-            custSel.innerHTML =
-                '<option value="">— All —</option>' +
-                customers
-                    .map(
-                        (c) =>
-                            `<option value="${c.id}">${escapeHtml(c.name)}</option>`,
-                    )
-                    .join("");
-    } catch (e) {}
+function setupFilterAutocomplete() {
+    const supInput = document.getElementById("filterSupplier");
+    const supId = document.getElementById("filterSupplierId");
+    const custInput = document.getElementById("filterCustomer");
+    const custId = document.getElementById("filterCustomerId");
+    if (!supInput || !custInput) return;
+    if (typeof Autocomplete === "undefined") return;
+    Autocomplete.init(supInput, {
+        resource: "suppliers",
+        placeholder: "Type to search supplier...",
+        onSelect: (item) => {
+            if (supId) supId.value = item.id;
+        },
+    });
+    supInput.addEventListener("input", () => {
+        if (!supInput.value.trim() && supId) supId.value = "";
+    });
+    Autocomplete.init(custInput, {
+        resource: "customers",
+        placeholder: "Type to search customer...",
+        renderItem: (c) =>
+            `${c.name || ""} — ${c.code || ""}`
+                .replace(/^ — | — $/g, "")
+                .trim() || `#${c.id}`,
+        onSelect: (item) => {
+            if (custId) custId.value = item.id;
+        },
+    });
+    custInput.addEventListener("input", () => {
+        if (!custInput.value.trim() && custId) custId.value = "";
+    });
 }
 
 function getFilterParams() {
     const params = new URLSearchParams();
-    const s = document.getElementById("filterSupplier")?.value;
-    const c = document.getElementById("filterCustomer")?.value;
+    const s = document.getElementById("filterSupplierId")?.value;
+    const c = document.getElementById("filterCustomerId")?.value;
     const df = document.getElementById("filterDateFrom")?.value;
     const dt = document.getElementById("filterDateTo")?.value;
     const sc = document.getElementById("filterShippingCode")?.value?.trim();

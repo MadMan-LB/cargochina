@@ -1,0 +1,187 @@
+{
+  "run_id": "20260307-231224",
+  "artifacts_dir": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-231224",
+  "results": [
+    {
+      "name": "S1 Login page loads",
+      "status": "PASS",
+      "details": "Login page rendered",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-231224\\s1-login-page-loads.png",
+      "issues": []
+    },
+    {
+      "name": "S2 Login works",
+      "status": "PASS",
+      "details": "Logged in and landed on http://localhost/cargochina/superadmin/",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-231224\\s2-login-works.png",
+      "issues": []
+    },
+    {
+      "name": "Dashboard root page loads",
+      "status": "PASS",
+      "details": "Loaded root dashboard with stats cards",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-231224\\dashboard-root-page-loads.png",
+      "issues": []
+    },
+    {
+      "name": "Suppliers page and add supplier flow",
+      "status": "PASS",
+      "details": "Created supplier Autotest Supplier 917949",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-231224\\suppliers-page-and-add-supplier-flow.png",
+      "issues": []
+    },
+    {
+      "name": "Customers page and payment link flow",
+      "status": "PASS",
+      "details": "Created and edited customer Autotest Customer 917951 with payment link",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-231224\\customers-page-and-payment-link-flow.png",
+      "issues": []
+    },
+    {
+      "name": "Products page modal, translation, pricing, supplier autocomplete, save/edit",
+      "status": "FAIL",
+      "details": "TimeoutError: Locator.wait_for: Timeout 10000ms exceeded.\nCall log:\n  - waiting for locator(\".autocomplete-dropdown button\").filter(has_text=\"Autotest Supplier 917949\").first to be visible\n",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-231224\\products-page-modal-translation-pricing-supplier-autocomplete-save-edit-failed.png",
+      "issues": [
+        {
+          "step": "Products page modal, translation, pricing, supplier autocomplete, save/edit",
+          "kind": "pageerror",
+          "severity": "high",
+          "url": "http://localhost/cargochina/products.php",
+          "message": "Identifier 'API_BASE' has already been declared"
+        }
+      ]
+    },
+    {
+      "name": "Orders page modal and autocomplete smoke",
+      "status": "FAIL",
+      "details": "TimeoutError: Locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"a.sidebar-link[href$='/orders.php']\").first\n    - locator resolved to <a class=\"sidebar-link \" href=\"/cargochina/orders.php\">\u2026</a>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n      - waiting 100ms\n    57 \u00d7 waiting for element to be visible, enabled and stable\n       - element is visible, enabled and stable\n       - scrolling into view if needed\n       - done scrolling\n       - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n     - retrying click action\n       - waiting 500ms\n",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-231224\\orders-page-modal-and-autocomplete-smoke-failed.png",
+      "issues": []
+    },
+    {
+      "name": "Pipeline page card navigation",
+      "status": "FAIL",
+      "details": "TimeoutError: Locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"a.sidebar-link[href$='/pipeline.php']\").first\n    - locator resolved to <a class=\"sidebar-link \" href=\"/cargochina/pipeline.php\">\u2026</a>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n      - waiting 100ms\n    57 \u00d7 waiting for element to be visible, enabled and stable\n       - element is visible, enabled and stable\n       - scrolling into view if needed\n       - done scrolling\n       - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n     - retrying click action\n       - waiting 500ms\n",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-231224\\pipeline-page-card-navigation-failed.png",
+      "issues": []
+    },
+    {
+      "name": "Receiving page loads",
+      "status": "FAIL",
+      "details": "TimeoutError: Locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"a.sidebar-link[href$='/receiving.php']\").first\n    - locator resolved to <a class=\"sidebar-link \" href=\"/cargochina/receiving.php\">\u2026</a>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n      - waiting 100ms\n    57 \u00d7 waiting for element to be visible, enabled and stable\n       - element is visible, enabled and stable\n       - scrolling into view if needed\n       - done scrolling\n       - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n     - retrying click action\n       - waiting 500ms\n    - waiting for element to be visible, enabled and stable\n",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-231224\\receiving-page-loads-failed.png",
+      "issues": []
+    },
+    {
+      "name": "Consolidation page loads",
+      "status": "FAIL",
+      "details": "TimeoutError: Locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"a.sidebar-link[href$='/consolidation.php']\").first\n    - locator resolved to <a class=\"sidebar-link \" href=\"/cargochina/consolidation.php\">\u2026</a>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n      - waiting 100ms\n    57 \u00d7 waiting for element to be visible, enabled and stable\n       - element is visible, enabled and stable\n       - scrolling into view if needed\n       - done scrolling\n       - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n     - retrying click action\n       - waiting 500ms\n",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-231224\\consolidation-page-loads-failed.png",
+      "issues": []
+    },
+    {
+      "name": "Notifications page loads",
+      "status": "FAIL",
+      "details": "TimeoutError: Locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"a.sidebar-link[href$='/notifications.php']\").first\n    - locator resolved to <a class=\"sidebar-link \" href=\"/cargochina/notifications.php\">\u2026</a>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n      - waiting 100ms\n    57 \u00d7 waiting for element to be visible, enabled and stable\n       - element is visible, enabled and stable\n       - scrolling into view if needed\n       - done scrolling\n       - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n     - retrying click action\n       - waiting 500ms\n",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-231224\\notifications-page-loads-failed.png",
+      "issues": []
+    },
+    {
+      "name": "Notification preferences page loads",
+      "status": "FAIL",
+      "details": "TimeoutError: Locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"a.sidebar-link[href$='/notification_preferences.php']\").first\n    - locator resolved to <a class=\"sidebar-link \" href=\"/cargochina/notification_preferences.php\">\u2026</a>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n      - waiting 100ms\n    57 \u00d7 waiting for element to be visible, enabled and stable\n       - element is visible, enabled and stable\n       - scrolling into view if needed\n       - done scrolling\n       - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n     - retrying click action\n       - waiting 500ms\n",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-231224\\notification-preferences-page-loads-failed.png",
+      "issues": []
+    },
+    {
+      "name": "Admin config page loads",
+      "status": "FAIL",
+      "details": "TimeoutError: Locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"a.sidebar-link[href$='/admin_config.php']\").first\n    - locator resolved to <a class=\"sidebar-link \" href=\"/cargochina/admin_config.php\">\u2026</a>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n      - waiting 100ms\n    57 \u00d7 waiting for element to be visible, enabled and stable\n       - element is visible, enabled and stable\n       - scrolling into view if needed\n       - done scrolling\n       - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n     - retrying click action\n       - waiting 500ms\n",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-231224\\admin-config-page-loads-failed.png",
+      "issues": []
+    },
+    {
+      "name": "Admin users page loads",
+      "status": "FAIL",
+      "details": "TimeoutError: Locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"a.sidebar-link[href$='/admin_users.php']\").first\n    - locator resolved to <a class=\"sidebar-link \" href=\"/cargochina/admin_users.php\">\u2026</a>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n      - waiting 100ms\n    57 \u00d7 waiting for element to be visible, enabled and stable\n       - element is visible, enabled and stable\n       - scrolling into view if needed\n       - done scrolling\n       - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n     - retrying click action\n       - waiting 500ms\n",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-231224\\admin-users-page-loads-failed.png",
+      "issues": []
+    },
+    {
+      "name": "Admin diagnostics page loads",
+      "status": "FAIL",
+      "details": "TimeoutError: Locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"a.sidebar-link[href$='/admin_diagnostics.php']\").first\n    - locator resolved to <a class=\"sidebar-link \" href=\"/cargochina/admin_diagnostics.php\">\u2026</a>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n      - waiting 100ms\n    57 \u00d7 waiting for element to be visible, enabled and stable\n       - element is visible, enabled and stable\n       - scrolling into view if needed\n       - done scrolling\n       - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n     - retrying click action\n       - waiting 500ms\n",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-231224\\admin-diagnostics-page-loads-failed.png",
+      "issues": []
+    },
+    {
+      "name": "Admin tracking push page loads",
+      "status": "FAIL",
+      "details": "TimeoutError: Locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"a.sidebar-link[href$='/admin_tracking_push.php']\").first\n    - locator resolved to <a class=\"sidebar-link \" href=\"/cargochina/admin_tracking_push.php\">\u2026</a>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n      - waiting 100ms\n    57 \u00d7 waiting for element to be visible, enabled and stable\n       - element is visible, enabled and stable\n       - scrolling into view if needed\n       - done scrolling\n       - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n     - retrying click action\n       - waiting 500ms\n",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-231224\\admin-tracking-push-page-loads-failed.png",
+      "issues": []
+    },
+    {
+      "name": "Admin audit log page loads",
+      "status": "FAIL",
+      "details": "TimeoutError: Locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"a.sidebar-link[href$='/admin_audit_log.php']\").first\n    - locator resolved to <a class=\"sidebar-link \" href=\"/cargochina/admin_audit_log.php\">\u2026</a>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n      - waiting 100ms\n    56 \u00d7 waiting for element to be visible, enabled and stable\n       - element is visible, enabled and stable\n       - scrolling into view if needed\n       - done scrolling\n       - <div tabindex=\"-1\" role=\"dialog\" id=\"productModal\" aria-modal=\"true\" class=\"modal fade show\">\u2026</div> from <div id=\"mainContent\" class=\"clms-main\">\u2026</div> subtree intercepts pointer events\n     - retrying click action\n       - waiting 500ms\n",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-231224\\admin-audit-log-page-loads-failed.png",
+      "issues": []
+    },
+    {
+      "name": "Cleanup product",
+      "status": "FAIL",
+      "details": "No product row found to delete",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-231224\\cleanup-product.png",
+      "issues": [
+        {
+          "step": "Cleanup product",
+          "kind": "pageerror",
+          "severity": "high",
+          "url": "http://localhost/cargochina/products.php",
+          "message": "Identifier 'API_BASE' has already been declared"
+        }
+      ]
+    },
+    {
+      "name": "Cleanup customer",
+      "status": "PASS",
+      "details": "Deleted test customer",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-231224\\cleanup-customer.png",
+      "issues": []
+    },
+    {
+      "name": "Cleanup supplier",
+      "status": "PASS",
+      "details": "Deleted test supplier",
+      "screenshot": "C:\\xampp\\htdocs\\cargochina\\artifacts\\browser-smoke\\20260307-231224\\cleanup-supplier.png",
+      "issues": []
+    }
+  ],
+  "events": [
+    {
+      "step": "S1 Login page loads",
+      "kind": "console_verbose",
+      "severity": "low",
+      "url": "http://localhost/cargochina/login.php",
+      "message": "[DOM] Input elements should have autocomplete attributes (suggested: \"current-password\"): (More info: https://goo.gl/9p2vKq) %o"
+    },
+    {
+      "step": "Products page modal, translation, pricing, supplier autocomplete, save/edit",
+      "kind": "pageerror",
+      "severity": "high",
+      "url": "http://localhost/cargochina/products.php",
+      "message": "Identifier 'API_BASE' has already been declared"
+    },
+    {
+      "step": "Cleanup product",
+      "kind": "pageerror",
+      "severity": "high",
+      "url": "http://localhost/cargochina/products.php",
+      "message": "Identifier 'API_BASE' has already been declared"
+    }
+  ],
+  "pass_count": 7,
+  "fail_count": 13
+}

@@ -14,15 +14,13 @@ require 'includes/layout.php';
     <div class="row g-2 align-items-end flex-wrap">
       <div class="col-12 col-md-6 col-lg-2">
         <label class="form-label small mb-0">Supplier</label>
-        <select class="form-select form-select-sm" id="filterSupplier">
-          <option value="">— All —</option>
-        </select>
+        <input type="text" class="form-control form-control-sm" id="filterSupplier" placeholder="Type to search..." autocomplete="off">
+        <input type="hidden" id="filterSupplierId">
       </div>
       <div class="col-12 col-md-6 col-lg-2">
         <label class="form-label small mb-0">Customer</label>
-        <select class="form-select form-select-sm" id="filterCustomer">
-          <option value="">— All —</option>
-        </select>
+        <input type="text" class="form-control form-control-sm" id="filterCustomer" placeholder="Type to search..." autocomplete="off">
+        <input type="hidden" id="filterCustomerId">
       </div>
       <div class="col-12 col-md-6 col-lg-2">
         <label class="form-label small mb-0">Date from</label>
@@ -159,6 +157,6 @@ require 'includes/layout.php';
     </div>
   </div>
 </div>
-<?php $pageScripts = ['frontend/js/photo_uploader.js'];
+<?php $pageScripts = ['frontend/js/photo_uploader.js', 'frontend/js/autocomplete.js'];
 $pageScript = 'frontend/js/receiving.js';
 require 'includes/footer.php'; ?>
