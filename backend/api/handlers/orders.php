@@ -16,18 +16,103 @@ function normalizeOrderItems(array $items): array
     return $items;
 }
 
+function fetchOrderItems(PDO $pdo, int $orderId): array
+{
+    $chk = @$pdo->query("SHOW COLUMNS FROM order_items LIKE 'supplier_id'");
+    $hasSupplier = $chk && $chk->rowCount() > 0;
+    $sql = $hasSupplier
+        ? "SELECT oi.*, s.name as supplier_name FROM order_items oi LEFT JOIN suppliers s ON oi.supplier_id = s.id WHERE oi.order_id = ?"
+        : "SELECT oi.* FROM order_items oi WHERE oi.order_id = ?";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$orderId]);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/** Sync order item data back to product when user corrects info in the order form */
+function syncProductFromOrderItem(PDO $pdo, array $it): void
+{
+    $productId = !empty($it['product_id']) ? (int) $it['product_id'] : null;
+    if (!$productId) return;
+    $qty = (float) ($it['quantity'] ?? 0);
+    if ($qty <= 0) $qty = 1;
+    $cbmTotal = (float) ($it['declared_cbm'] ?? 0);
+    $weightTotal = (float) ($it['declared_weight'] ?? 0);
+    $sets = [];
+    $vals = [];
+    if (isset($it['description_cn'])) {
+        $sets[] = 'description_cn=?';
+        $vals[] = $it['description_cn'] ?: null;
+    }
+    if (isset($it['description_en'])) {
+        $sets[] = 'description_en=?';
+        $vals[] = $it['description_en'] ?: null;
+    }
+    if (isset($it['unit_price'])) {
+        $sets[] = 'unit_price=?';
+        $vals[] = $it['unit_price'] !== null && $it['unit_price'] !== '' ? (float) $it['unit_price'] : null;
+    }
+    if ($weightTotal > 0) {
+        $sets[] = 'weight=?';
+        $vals[] = $weightTotal / $qty;
+    }
+    if ($cbmTotal > 0) {
+        $sets[] = 'cbm=?';
+        $vals[] = $cbmTotal / $qty;
+    }
+    if (isset($it['item_length']) && $it['item_length'] !== null && $it['item_length'] !== '') {
+        $sets[] = 'length_cm=?';
+        $vals[] = (float) $it['item_length'];
+    }
+    if (isset($it['item_width']) && $it['item_width'] !== null && $it['item_width'] !== '') {
+        $sets[] = 'width_cm=?';
+        $vals[] = (float) $it['item_width'];
+    }
+    if (isset($it['item_height']) && $it['item_height'] !== null && $it['item_height'] !== '') {
+        $sets[] = 'height_cm=?';
+        $vals[] = (float) $it['item_height'];
+    }
+    if (isset($it['qty_per_carton']) && $it['qty_per_carton'] !== null && $it['qty_per_carton'] !== '') {
+        try {
+            $chk = $pdo->query("SHOW COLUMNS FROM products LIKE 'pieces_per_carton'");
+            if ($chk && $chk->rowCount() > 0) {
+                $sets[] = 'pieces_per_carton=?';
+                $vals[] = (int) $it['qty_per_carton'];
+            }
+        } catch (Throwable $e) {
+        }
+    }
+    if (empty($sets)) return;
+    $vals[] = $productId;
+    $pdo->prepare("UPDATE products SET " . implode(', ', $sets) . " WHERE id=?")->execute($vals);
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
     $userId = getAuthUserId() ?? 1; // Dev fallback
 
     switch ($method) {
         case 'GET':
+            if ($id && $action === 'export') {
+                $suppCols = 's.name as supplier_name, s.phone as supplier_phone, s.factory_location as supplier_factory';
+                $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'address'");
+                if ($chk && $chk->rowCount() > 0) $suppCols .= ', s.address as supplier_address';
+                $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'fax'");
+                if ($chk && $chk->rowCount() > 0) $suppCols .= ', s.fax as supplier_fax';
+                $stmt = $pdo->prepare("SELECT o.*, c.name as customer_name, $suppCols FROM orders o JOIN customers c ON o.customer_id = c.id JOIN suppliers s ON o.supplier_id = s.id WHERE o.id = ?");
+                $stmt->execute([$id]);
+                $order = $stmt->fetch(PDO::FETCH_ASSOC);
+                if (!$order) jsonError('Order not found', 404);
+                $items = normalizeOrderItems(fetchOrderItems($pdo, (int) $id));
+                require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
+                (new OrderExcelService())->exportOrder($order, $items);
+            }
             if ($id === null) {
                 $status = $_GET['status'] ?? null;
                 $customerId = $_GET['customer_id'] ?? null;
                 $supplierId = $_GET['supplier_id'] ?? null;
                 $dateFrom = $_GET['date_from'] ?? null;
                 $dateTo = $_GET['date_to'] ?? null;
+                $orderId = $_GET['order_id'] ?? null;
                 $shippingCode = trim($_GET['shipping_code'] ?? '');
                 $sql = "SELECT o.*, c.name as customer_name, s.name as supplier_name FROM orders o
                     JOIN customers c ON o.customer_id = c.id JOIN suppliers s ON o.supplier_id = s.id WHERE 1=1";
@@ -52,6 +137,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $sql .= " AND o.expected_ready_date <= ?";
                     $params[] = $dateTo;
                 }
+                if ($orderId) {
+                    $sql .= " AND o.id = ?";
+                    $params[] = (int) $orderId;
+                }
                 if ($shippingCode !== '') {
                     $sql .= " AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND oi.shipping_code LIKE ?)";
                     $params[] = '%' . $shippingCode . '%';
@@ -61,9 +150,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if ($params) $stmt->execute($params);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 foreach ($rows as &$r) {
-                    $si = $pdo->prepare("SELECT * FROM order_items WHERE order_id = ?");
-                    $si->execute([$r['id']]);
-                    $r['items'] = normalizeOrderItems($si->fetchAll(PDO::FETCH_ASSOC));
+                    $r['items'] = normalizeOrderItems(fetchOrderItems($pdo, (int) $r['id']));
                 }
                 jsonResponse(['data' => $rows]);
             }
@@ -71,9 +158,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $stmt->execute([$id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$row) jsonError('Order not found', 404);
-            $si = $pdo->prepare("SELECT * FROM order_items WHERE order_id = ?");
-            $si->execute([$id]);
-            $row['items'] = normalizeOrderItems($si->fetchAll(PDO::FETCH_ASSOC));
+            $row['items'] = normalizeOrderItems(fetchOrderItems($pdo, (int) $id));
             $att = $pdo->prepare("SELECT * FROM order_attachments WHERE order_id = ?");
             $att->execute([$id]);
             $row['attachments'] = $att->fetchAll(PDO::FETCH_ASSOC);
@@ -113,7 +198,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $pdo->prepare("UPDATE orders SET customer_id=?, supplier_id=?, expected_ready_date=? WHERE id=?")
                     ->execute([$customerId, $supplierId, $expectedDate, $id]);
                 $pdo->prepare("DELETE FROM order_items WHERE order_id = ?")->execute([$id]);
-                $insItem = $pdo->prepare("INSERT INTO order_items (order_id, product_id, item_no, shipping_code, cartons, qty_per_carton, quantity, unit, declared_cbm, declared_weight, item_length, item_width, item_height, unit_price, total_amount, notes, image_paths, description_cn, description_en) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+                $hasItemSupplier = $pdo->query("SHOW COLUMNS FROM order_items LIKE 'supplier_id'")->rowCount() > 0;
+                $insCols = "order_id, product_id, item_no, shipping_code, cartons, qty_per_carton, quantity, unit, declared_cbm, declared_weight, item_length, item_width, item_height, unit_price, total_amount, notes, image_paths, description_cn, description_en";
+                $insVals = "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?";
+                if ($hasItemSupplier) {
+                    $insCols .= ", supplier_id";
+                    $insVals .= ",?";
+                }
+                $insItem = $pdo->prepare("INSERT INTO order_items ($insCols) VALUES ($insVals)");
                 foreach ($items as $it) {
                     $qty = (float) ($it['quantity'] ?? 0);
                     $cartons = isset($it['cartons']) ? (int) $it['cartons'] : null;
@@ -127,7 +219,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $unitPrice = isset($it['unit_price']) ? (float) $it['unit_price'] : null;
                     $totalAmount = isset($it['total_amount']) ? (float) $it['total_amount'] : ($unitPrice !== null && $qty > 0 ? $unitPrice * $qty : null);
                     $imagePaths = isset($it['image_paths']) && is_array($it['image_paths']) ? json_encode($it['image_paths']) : null;
-                    $insItem->execute([
+                    $itemSupplierId = !empty($it['supplier_id']) ? (int) $it['supplier_id'] : $supplierId;
+                    $params = [
                         $id,
                         !empty($it['product_id']) ? (int) $it['product_id'] : null,
                         $it['item_no'] ?? null,
@@ -147,7 +240,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         $imagePaths,
                         $it['description_cn'] ?? null,
                         $it['description_en'] ?? null
-                    ]);
+                    ];
+                    if ($hasItemSupplier) {
+                        $params[] = $itemSupplierId ?: null;
+                    }
+                    $insItem->execute($params);
+                    syncProductFromOrderItem($pdo, $it);
                 }
                 $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order',?,?,?,?)")
                     ->execute([$id, 'update', json_encode($input), $userId]);
@@ -155,9 +253,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt = $pdo->prepare("SELECT o.*, c.name as customer_name, s.name as supplier_name FROM orders o JOIN customers c ON o.customer_id = c.id JOIN suppliers s ON o.supplier_id = s.id WHERE o.id = ?");
                 $stmt->execute([$id]);
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
-                $si = $pdo->prepare("SELECT * FROM order_items WHERE order_id = ?");
-                $si->execute([$id]);
-                $row['items'] = normalizeOrderItems($si->fetchAll(PDO::FETCH_ASSOC));
+                $row['items'] = normalizeOrderItems(fetchOrderItems($pdo, (int) $id));
                 jsonResponse(['data' => $row]);
             } catch (Exception $e) {
                 $pdo->rollBack();
@@ -201,7 +297,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $pdo->prepare("INSERT INTO orders (customer_id, supplier_id, expected_ready_date, currency, status, created_by) VALUES (?,?,?,?,'Draft',?)")
                         ->execute([$customerId, $supplierId, $expectedDate, $currency, $userId]);
                     $orderId = (int) $pdo->lastInsertId();
-                    $insItem = $pdo->prepare("INSERT INTO order_items (order_id, product_id, item_no, shipping_code, cartons, qty_per_carton, quantity, unit, declared_cbm, declared_weight, item_length, item_width, item_height, unit_price, total_amount, notes, image_paths, description_cn, description_en) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+                    $hasItemSupplier = $pdo->query("SHOW COLUMNS FROM order_items LIKE 'supplier_id'")->rowCount() > 0;
+                    $insCols = "order_id, product_id, item_no, shipping_code, cartons, qty_per_carton, quantity, unit, declared_cbm, declared_weight, item_length, item_width, item_height, unit_price, total_amount, notes, image_paths, description_cn, description_en";
+                    $insVals = "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?";
+                    if ($hasItemSupplier) {
+                        $insCols .= ", supplier_id";
+                        $insVals .= ",?";
+                    }
+                    $insItem = $pdo->prepare("INSERT INTO order_items ($insCols) VALUES ($insVals)");
                     foreach ($items as $it) {
                         $qty = (float) ($it['quantity'] ?? 0);
                         $cartons = isset($it['cartons']) ? (int) $it['cartons'] : null;
@@ -212,7 +315,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         $unitPrice = isset($it['unit_price']) ? (float) $it['unit_price'] : null;
                         $totalAmount = isset($it['total_amount']) ? (float) $it['total_amount'] : ($unitPrice !== null && $qty > 0 ? $unitPrice * $qty : null);
                         $imagePaths = isset($it['image_paths']) && is_array($it['image_paths']) ? json_encode($it['image_paths']) : null;
-                        $insItem->execute([
+                        $itemSupplierId = !empty($it['supplier_id']) ? (int) $it['supplier_id'] : $supplierId;
+                        $params = [
                             $orderId,
                             !empty($it['product_id']) ? (int) $it['product_id'] : null,
                             $it['item_no'] ?? null,
@@ -232,7 +336,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                             $imagePaths,
                             $it['description_cn'] ?? null,
                             $it['description_en'] ?? null
-                        ]);
+                        ];
+                        if ($hasItemSupplier) {
+                            $params[] = $itemSupplierId ?: null;
+                        }
+                        $insItem->execute($params);
+                        syncProductFromOrderItem($pdo, $it);
                     }
                     $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order',?,?,?,?)")
                         ->execute([$orderId, 'create', json_encode(['status' => 'Draft']), $userId]);
@@ -241,9 +350,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $stmt = $pdo->prepare("SELECT o.*, c.name as customer_name, s.name as supplier_name FROM orders o JOIN customers c ON o.customer_id = c.id JOIN suppliers s ON o.supplier_id = s.id WHERE o.id = ?");
                     $stmt->execute([$orderId]);
                     $row = $stmt->fetch(PDO::FETCH_ASSOC);
-                    $si = $pdo->prepare("SELECT * FROM order_items WHERE order_id = ?");
-                    $si->execute([$orderId]);
-                    $row['items'] = normalizeOrderItems($si->fetchAll(PDO::FETCH_ASSOC));
+                    $row['items'] = normalizeOrderItems(fetchOrderItems($pdo, $orderId));
                     jsonResponse(['data' => $row], 201);
                 } catch (Exception $e) {
                     $pdo->rollBack();
@@ -362,11 +469,17 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         }
                     }
                     $newStatus = $hasVariance ? 'AwaitingCustomerConfirmation' : 'ReadyForConsolidation';
-                    $pdo->prepare("UPDATE orders SET status=? WHERE id=?")->execute([$newStatus, $id]);
+                    $confirmToken = null;
+                    if ($hasVariance) {
+                        $confirmToken = bin2hex(random_bytes(24));
+                        $pdo->prepare("UPDATE orders SET status=?, confirmation_token=? WHERE id=?")->execute([$newStatus, $confirmToken, $id]);
+                    } else {
+                        $pdo->prepare("UPDATE orders SET status=? WHERE id=?")->execute([$newStatus, $id]);
+                    }
                     $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order',?,?,?,?)")
                         ->execute([$id, 'receive', json_encode(['actual_cbm' => $actualCbm, 'actual_weight' => $actualWeight, 'status' => $newStatus, 'receipt_id' => $receiptId]), $userId]);
                     logClms('order_received', ['order_id' => (int) $id, 'receipt_id' => $receiptId, 'user_id' => $userId, 'item_level' => !empty($itemsInput), 'variance_detected' => $hasVariance]);
-                    (new NotificationService($pdo))->notifyOrderReceived((int) $id, $userId, $hasVariance);
+                    (new NotificationService($pdo))->notifyOrderReceived((int) $id, $userId, $hasVariance, $confirmToken);
                     $pdo->commit();
                     jsonResponse(['data' => ['status' => $newStatus, 'receipt_id' => $receiptId, 'variance_detected' => $hasVariance]]);
                 } catch (Exception $e) {
@@ -375,6 +488,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
             }
             if ($id && $action === 'confirm') {
+                $token = $input['token'] ?? null;
                 $stmt = $pdo->prepare("SELECT * FROM orders WHERE id = ?");
                 $stmt->execute([$id]);
                 $order = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -382,7 +496,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if ($order['status'] !== 'AwaitingCustomerConfirmation') {
                     jsonError('Order is not awaiting customer confirmation', 400);
                 }
-                $pdo->prepare("UPDATE orders SET status='Confirmed' WHERE id=?")->execute([$id]);
+                // Allow staff session-based confirm OR token-based public confirm
+                if ($token && !hash_equals((string)($order['confirmation_token'] ?? ''), $token)) {
+                    jsonError('Invalid or expired confirmation token', 403);
+                }
+                $pdo->prepare("UPDATE orders SET status='Confirmed', confirmation_token=NULL WHERE id=?")->execute([$id]);
                 $wr = $pdo->prepare("SELECT * FROM warehouse_receipts WHERE order_id = ? ORDER BY received_at DESC LIMIT 1");
                 $wr->execute([$id]);
                 $receipt = $wr->fetch(PDO::FETCH_ASSOC);

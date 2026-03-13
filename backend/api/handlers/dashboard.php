@@ -85,5 +85,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         }
     }
 
+    // Stale order counts — orders stuck in confirmation/approval beyond configured threshold
+    $threshold = (int) ($pdo->query("SELECT key_value FROM system_config WHERE key_name='STALE_ORDER_THRESHOLD_DAYS' LIMIT 1")->fetchColumn() ?: 3);
+    $staleConfirm = $pdo->prepare("SELECT COUNT(*) FROM orders o JOIN warehouse_receipts wr ON wr.order_id = o.id WHERE o.status = 'AwaitingCustomerConfirmation' AND wr.received_at < DATE_SUB(NOW(), INTERVAL ? DAY)");
+    $staleConfirm->execute([$threshold]);
+    $stats['stale_awaiting_confirmation'] = (int) $staleConfirm->fetchColumn();
+
+    $staleApproved = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE status IN ('Approved','InTransitToWarehouse') AND expected_ready_date < DATE_SUB(CURDATE(), INTERVAL ? DAY)");
+    $staleApproved->execute([$threshold]);
+    $stats['stale_overdue'] = (int) $staleApproved->fetchColumn();
+    $stats['stale_threshold_days'] = $threshold;
+
     jsonResponse(['data' => $stats]);
 };

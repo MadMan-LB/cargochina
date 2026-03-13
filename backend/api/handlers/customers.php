@@ -89,6 +89,59 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             jsonResponse(['data' => $row]);
 
         case 'POST':
+            if ($id === 'import') {
+                $csv = trim($input['csv'] ?? $input['data'] ?? '');
+                if (!$csv) jsonError('No CSV data provided', 400);
+                $lines = preg_split('/\r\n|\r|\n/', $csv);
+                $header = array_map('trim', str_getcsv(array_shift($lines) ?? ''));
+                $codeIdx = array_search('code', array_map('strtolower', $header)) !== false ? array_search('code', array_map('strtolower', $header)) : 0;
+                $nameIdx = array_search('name', array_map('strtolower', $header)) !== false ? array_search('name', array_map('strtolower', $header)) : 1;
+                $phoneIdx = array_search('phone', array_map('strtolower', $header)) !== false ? array_search('phone', array_map('strtolower', $header)) : null;
+                $addressIdx = array_search('address', array_map('strtolower', $header)) !== false ? array_search('address', array_map('strtolower', $header)) : null;
+                $termsIdx = array_search('payment_terms', array_map('strtolower', $header)) !== false ? array_search('payment_terms', array_map('strtolower', $header)) : null;
+                $created = 0;
+                $skipped = 0;
+                $errors = [];
+                $hasPhone = (bool) @$pdo->query("SHOW COLUMNS FROM customers LIKE 'phone'")->rowCount();
+                $hasAddress = (bool) @$pdo->query("SHOW COLUMNS FROM customers LIKE 'address'")->rowCount();
+                $hasPaymentLinks = (bool) @$pdo->query("SHOW COLUMNS FROM customers LIKE 'payment_links'")->rowCount();
+                foreach ($lines as $i => $line) {
+                    $row = str_getcsv($line);
+                    if (count($row) < 2) continue;
+                    $code = trim($row[$codeIdx] ?? $row[0] ?? '');
+                    $name = trim($row[$nameIdx] ?? $row[1] ?? '');
+                    if (!$code || !$name) {
+                        $skipped++;
+                        continue;
+                    }
+                    $phone = $phoneIdx !== null && isset($row[$phoneIdx]) ? trim($row[$phoneIdx]) : null;
+                    $address = $addressIdx !== null && isset($row[$addressIdx]) ? trim($row[$addressIdx]) : null;
+                    $paymentTerms = $termsIdx !== null && isset($row[$termsIdx]) ? trim($row[$termsIdx]) : null;
+                    try {
+                        $cols = ['code', 'name', 'contacts', 'addresses', 'payment_terms'];
+                        $vals = [$code, $name, null, null, $paymentTerms];
+                        if ($hasPaymentLinks) {
+                            $cols[] = 'payment_links';
+                            $vals[] = null;
+                        }
+                        if ($hasPhone) {
+                            $cols[] = 'phone';
+                            $vals[] = $phone;
+                        }
+                        if ($hasAddress) {
+                            $cols[] = 'address';
+                            $vals[] = $address;
+                        }
+                        $ph = implode(',', array_fill(0, count($vals), '?'));
+                        $pdo->prepare("INSERT INTO customers (" . implode(',', $cols) . ") VALUES ($ph)")->execute($vals);
+                        $created++;
+                    } catch (PDOException $e) {
+                        if ($e->getCode() == 23000) $skipped++;
+                        else $errors[] = "Row " . ($i + 2) . ": " . $e->getMessage();
+                    }
+                }
+                jsonResponse(['data' => ['created' => $created, 'skipped' => $skipped, 'errors' => $errors]]);
+            }
             if ($id && $action === 'deposits') {
                 $stmt = $pdo->prepare("SELECT id FROM customers WHERE id = ?");
                 $stmt->execute([$id]);

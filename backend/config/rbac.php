@@ -7,11 +7,11 @@
  */
 
 return [
-    'public' => ['auth'],
+    'public' => ['auth', 'confirm'],
     'orders' => [
         'approve' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'],
         'receive' => ['WarehouseStaff', 'SuperAdmin'],
-        'confirm' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'],
+        'confirm' => ['ChinaAdmin', 'LebanonAdmin', 'WarehouseStaff', 'SuperAdmin'],
     ],
     'containers' => [
         'read' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'],

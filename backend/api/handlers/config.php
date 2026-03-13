@@ -30,6 +30,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 return;
             }
             if ($id === 'receiving') {
+                setCacheHeaders(30);
                 $fileConfig = require dirname(__DIR__, 2) . '/config/config.php';
                 $stmt = @$pdo->query("SELECT key_name, key_value FROM system_config WHERE key_name = 'ITEM_LEVEL_RECEIVING_ENABLED'");
                 $val = 0;
@@ -108,7 +109,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         case 'PUT':
             $updates = $input['config'] ?? $input;
             if (empty($updates)) jsonError('No config to update', 400);
-            $allowed = ['VARIANCE_THRESHOLD_PERCENT', 'VARIANCE_THRESHOLD_ABS_CBM', 'CONFIRMATION_REQUIRED', 'CUSTOMER_PHOTO_VISIBILITY', 'MIN_PHOTOS_PER_ITEM', 'NOTIFICATION_CHANNELS', 'TRACKING_API_BASE_URL', 'TRACKING_API_TOKEN', 'TRACKING_API_TIMEOUT_SEC', 'TRACKING_API_RETRY_COUNT', 'TRACKING_API_RETRY_BACKOFF_MS', 'TRACKING_PUSH_ENABLED', 'TRACKING_PUSH_DRY_RUN', 'TRACKING_API_PATH', 'EMAIL_FROM_ADDRESS', 'EMAIL_FROM_NAME', 'WHATSAPP_API_URL', 'WHATSAPP_API_TOKEN', 'WHATSAPP_PROVIDER', 'WHATSAPP_TWILIO_ACCOUNT_SID', 'WHATSAPP_TWILIO_AUTH_TOKEN', 'WHATSAPP_TWILIO_FROM', 'WHATSAPP_TWILIO_TO', 'ITEM_LEVEL_RECEIVING_ENABLED', 'PHOTO_EVIDENCE_PER_ITEM', 'NOTIFICATION_MAX_ATTEMPTS', 'NOTIFICATION_RETRY_SECONDS', 'UPLOAD_MAX_MB', 'UPLOAD_ALLOWED_TYPES'];
+            $allowed = ['VARIANCE_THRESHOLD_PERCENT', 'VARIANCE_THRESHOLD_ABS_CBM', 'CONFIRMATION_REQUIRED', 'CUSTOMER_PHOTO_VISIBILITY', 'MIN_PHOTOS_PER_ITEM', 'NOTIFICATION_CHANNELS', 'TRACKING_API_BASE_URL', 'TRACKING_API_TOKEN', 'TRACKING_API_TIMEOUT_SEC', 'TRACKING_API_RETRY_COUNT', 'TRACKING_API_RETRY_BACKOFF_MS', 'TRACKING_PUSH_ENABLED', 'TRACKING_PUSH_DRY_RUN', 'TRACKING_API_PATH', 'EMAIL_FROM_ADDRESS', 'EMAIL_FROM_NAME', 'WHATSAPP_API_URL', 'WHATSAPP_API_TOKEN', 'WHATSAPP_PROVIDER', 'WHATSAPP_TWILIO_ACCOUNT_SID', 'WHATSAPP_TWILIO_AUTH_TOKEN', 'WHATSAPP_TWILIO_FROM', 'WHATSAPP_TWILIO_TO', 'ITEM_LEVEL_RECEIVING_ENABLED', 'PHOTO_EVIDENCE_PER_ITEM', 'NOTIFICATION_MAX_ATTEMPTS', 'NOTIFICATION_RETRY_SECONDS', 'UPLOAD_MAX_MB', 'UPLOAD_ALLOWED_TYPES', 'STALE_ORDER_THRESHOLD_DAYS', 'STALE_ORDER_NOTIFY_ADMIN', 'APP_URL'];
             $maskedKeys = ['TRACKING_API_TOKEN', 'WHATSAPP_API_TOKEN', 'WHATSAPP_TWILIO_AUTH_TOKEN'];
             $errors = [];
             foreach (['VARIANCE_THRESHOLD_PERCENT', 'VARIANCE_THRESHOLD_ABS_CBM'] as $k) {
@@ -148,11 +149,18 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 jsonError('Validation failed', 400, $errors);
             }
             $stmt = $pdo->prepare("INSERT INTO system_config (key_name, key_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE key_value = VALUES(key_value)");
+            $changed = [];
             foreach ($updates as $k => $v) {
                 if (in_array($k, $allowed)) {
                     if (in_array($k, $maskedKeys) && $v === '********') continue;
                     $stmt->execute([$k, (string) $v]);
+                    $changed[$k] = in_array($k, $maskedKeys) ? '********' : (string) $v;
                 }
+            }
+            if (!empty($changed)) {
+                $uid = getAuthUserId() ?? 0;
+                $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('system_config', 0, 'update', ?, ?)")
+                    ->execute([json_encode($changed), $uid]);
             }
             $stmt = $pdo->query("SELECT key_name, key_value FROM system_config");
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);

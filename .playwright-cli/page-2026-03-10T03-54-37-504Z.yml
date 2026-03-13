@@ -1,0 +1,5 @@
+- generic [ref=e3]:
+  - generic [ref=e4]: ⚠️
+  - heading "Unable to Load" [level=2] [ref=e5]
+  - paragraph [ref=e6]: No confirmation token provided. Please use the link from your notification.
+  - paragraph [ref=e7]: If you believe this is an error, please contact Salameh Cargo directly.

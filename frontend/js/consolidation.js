@@ -2,6 +2,41 @@ let currentDraftId = null;
 let eligibleOrders = [];
 let draftOrders = [];
 
+function renderCapacityBars(cbm, weight, container, hintEl) {
+    if (!hintEl) return;
+    if (!container) {
+        hintEl.innerHTML =
+            '<span class="text-muted small">Assign a container to see capacity</span>';
+        return;
+    }
+    const maxCbm = parseFloat(container.max_cbm) || 1;
+    const maxWt = parseFloat(container.max_weight) || 1;
+    const cbmPct = Math.min(100, (cbm / maxCbm) * 100);
+    const wtPct = Math.min(100, (weight / maxWt) * 100);
+    const cbmColor =
+        cbmPct >= 100 ? "#dc2626" : cbmPct >= 85 ? "#d97706" : "#16a34a";
+    const wtColor =
+        wtPct >= 100 ? "#dc2626" : wtPct >= 85 ? "#d97706" : "#16a34a";
+    hintEl.innerHTML = `
+      <div class="mt-2">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <small class="text-muted fw-semibold">CBM Fill</small>
+          <small style="color:${cbmColor};font-weight:600">${cbm.toFixed(2)} / ${maxCbm} m³ (${cbmPct.toFixed(0)}%)</small>
+        </div>
+        <div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;">
+          <div style="height:100%;width:${cbmPct}%;background:${cbmColor};border-radius:4px;transition:width .4s;"></div>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mb-1 mt-2">
+          <small class="text-muted fw-semibold">Weight Fill</small>
+          <small style="color:${wtColor};font-weight:600">${weight.toFixed(0)} / ${maxWt} kg (${wtPct.toFixed(0)}%)</small>
+        </div>
+        <div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;">
+          <div style="height:100%;width:${wtPct}%;background:${wtColor};border-radius:4px;transition:width .4s;"></div>
+        </div>
+        ${cbmPct >= 100 || wtPct >= 100 ? '<div class="text-danger small fw-semibold mt-1">⚠ Capacity exceeded</div>' : cbmPct >= 85 || wtPct >= 85 ? '<div class="text-warning small fw-semibold mt-1">Almost full</div>' : '<div class="text-success small fw-semibold mt-1">✓ Within capacity</div>'}
+      </div>`;
+}
+
 function canCreateContainers() {
     return (
         document.getElementById("consolidationPage")?.dataset
@@ -34,15 +69,35 @@ document.addEventListener("DOMContentLoaded", () => {
 function renderDraftDocuments(docs) {
     const list = document.getElementById("draftDocumentsList");
     if (!list) return;
+    const docTypeLabel = {
+        bol: "BOL",
+        booking_confirmation: "Booking Conf.",
+        invoice: "Invoice",
+        other: "Other",
+    };
+    const requiredTypes = ["bol", "booking_confirmation"];
+    const presentTypes = new Set(docs.map((d) => d.doc_type));
+    const missingRequired = requiredTypes.filter((t) => !presentTypes.has(t));
+
+    const completenessHtml =
+        missingRequired.length === 0
+            ? `<div class="d-inline-flex align-items-center gap-1 mb-2"><span class="badge bg-success">✓ All required documents present</span></div>`
+            : `<div class="d-inline-flex align-items-center gap-1 mb-2"><span class="badge bg-warning text-dark">⚠ Missing: ${missingRequired.map((t) => docTypeLabel[t] || t).join(", ")}</span></div>`;
+
     list.innerHTML =
-        docs.length > 0
+        completenessHtml +
+        (docs.length > 0
             ? docs
                   .map(
                       (d) =>
-                          `<div class="d-flex align-items-center gap-2 mb-1"><a href="/cargochina/backend/${esc(d.file_path)}" target="_blank" class="small">${esc(d.doc_type)}</a><button type="button" class="btn btn-link btn-sm p-0 text-danger" onclick="removeDraftDoc(${d.id})">×</button></div>`,
+                          `<div class="d-flex align-items-center gap-2 mb-1">
+                            <span class="badge bg-light text-dark border">${esc(docTypeLabel[d.doc_type] || d.doc_type)}</span>
+                            <a href="/cargochina/backend/${esc(d.file_path)}" target="_blank" class="small text-truncate" style="max-width:200px">${esc(d.file_path.split("/").pop())}</a>
+                            <button type="button" class="btn btn-link btn-sm p-0 text-danger ms-auto" onclick="removeDraftDoc(${d.id})">✕</button>
+                          </div>`,
                   )
                   .join("")
-            : '<span class="text-muted">No documents</span>';
+            : '<div class="text-muted small">No documents attached</div>');
 }
 
 async function saveDraftCarrierRefs() {
@@ -370,16 +425,15 @@ async function openDraftModal(id) {
 
         const containerId = draftRes.data.container_id;
         const containerData = containers?.find((c) => c.id == containerId);
-        let hint = "";
-        if (containerData) {
-            const okCbm = draftCbm <= containerData.max_cbm;
-            const okWt = draftWeight <= containerData.max_weight;
-            hint =
-                okCbm && okWt
-                    ? `<span class="text-success">Within capacity</span>`
-                    : `<span class="text-danger">Exceeds capacity</span>`;
-        }
-        if (hintEl) hintEl.innerHTML = hint;
+        renderCapacityBars(draftCbm, draftWeight, containerData, hintEl);
+
+        // Re-render capacity bars when container selection changes (preview before assign)
+        containerSel.onchange = () => {
+            const selId = containerSel.value;
+            const selContainer =
+                containers.find((c) => String(c.id) === String(selId)) || null;
+            renderCapacityBars(draftCbm, draftWeight, selContainer, hintEl);
+        };
 
         new bootstrap.Modal(document.getElementById("draftModal")).show();
     } catch (e) {

@@ -424,3 +424,53 @@ async function deleteProduct(id) {
         showToast(e.message, "danger");
     }
 }
+
+window.openImportModal = function (entity) {
+    window._importEntity = entity || "products";
+    window._importOnSuccess = loadProducts;
+    const ta = document.getElementById("importCsvData");
+    const resultEl = document.getElementById("importResult");
+    const fileInput = document.getElementById("importCsvFile");
+    if (ta) ta.value = "";
+    if (fileInput) fileInput.value = "";
+    if (resultEl) {
+        resultEl.classList.add("d-none");
+        resultEl.textContent = "";
+    }
+};
+
+window.doImport = async function () {
+    const entity = window._importEntity || "products";
+    const csv = document.getElementById("importCsvData")?.value?.trim();
+    if (!csv) {
+        showToast("Paste CSV data first", "danger");
+        return;
+    }
+    const btn = document.getElementById("importBtn");
+    const resultEl = document.getElementById("importResult");
+    try {
+        setLoading(btn, true);
+        if (resultEl) {
+            resultEl.classList.add("d-none");
+            resultEl.textContent = "";
+        }
+        const res = await api("POST", "/" + entity + "/import", { csv });
+        const d = res.data;
+        let msg = `Created: ${d.created}, Skipped: ${d.skipped}`;
+        if (d.errors?.length) msg += `; Errors: ${d.errors.join("; ")}`;
+        if (resultEl) {
+            resultEl.textContent = msg;
+            resultEl.className =
+                "alert alert-" +
+                (d.errors?.length ? "warning" : "success") +
+                " mt-2";
+            resultEl.classList.remove("d-none");
+        }
+        showToast(msg);
+        if (d.created > 0 && window._importOnSuccess) window._importOnSuccess();
+    } catch (e) {
+        showToast(e.message, "danger");
+    } finally {
+        setLoading(btn, false);
+    }
+};

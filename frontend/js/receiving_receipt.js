@@ -45,7 +45,7 @@ async function loadReceipt() {
                           .join("");
                       return `
                 <tr>
-                  <td>${escapeHtml(it.description_en || it.description_cn || "-")}</td>
+                  <td>${escapeHtml(typeof descText === "function" ? descText(it) : it.description_en || it.description_cn || "-")}</td>
                   <td>${it.declared_cbm || 0} CBM / ${it.declared_weight || 0} kg</td>
                   <td>${it.actual_cbm ?? "-"} CBM / ${it.actual_weight ?? "-"} kg</td>
                   <td>${escapeHtml(it.receipt_condition || it.condition || "good")}</td>

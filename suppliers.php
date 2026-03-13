@@ -7,16 +7,55 @@ $pageTitle = 'Suppliers';
 require 'includes/layout.php';
 ?>
 <h1 class="mb-4">Suppliers</h1>
+<div class="card mb-3">
+  <div class="card-body py-3">
+    <div class="row g-2 align-items-end flex-wrap">
+      <div class="col-12 col-md-4 col-lg-3">
+        <label class="form-label small mb-0">Search</label>
+        <input type="text" class="form-control form-control-sm" id="supplierSearch" placeholder="Code, name, phone, store, location...">
+      </div>
+      <div class="col-12 col-md-4 col-lg-2">
+        <label class="form-label small mb-0">Payment status</label>
+        <select class="form-select form-select-sm" id="supplierPaymentFilter">
+          <option value="">All</option>
+          <option value="outstanding">Outstanding balance</option>
+          <option value="fully_paid">Fully paid</option>
+        </select>
+      </div>
+      <div class="col-12 col-md-4 col-lg-2">
+        <label class="form-label small mb-0">Sort by</label>
+        <select class="form-select form-select-sm" id="supplierSort">
+          <option value="name">Name</option>
+          <option value="code">Code</option>
+          <option value="store_id">Store ID</option>
+          <option value="phone">Phone</option>
+          <option value="factory_location">Factory</option>
+        </select>
+      </div>
+      <div class="col-12 col-md-4 col-lg-2">
+        <label class="form-label small mb-0">Order</label>
+        <select class="form-select form-select-sm" id="supplierOrder">
+          <option value="asc">A → Z</option>
+          <option value="desc">Z → A</option>
+        </select>
+      </div>
+      <div class="col-12 col-md-4 col-lg-2">
+        <button type="button" class="btn btn-primary btn-sm w-100" id="supplierApplyBtn" onclick="applySupplierFilters()">Apply</button>
+      </div>
+    </div>
+  </div>
+</div>
 <div class="card" data-is-buyer="<?= $isBuyer ? '1' : '0' ?>">
   <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <span>Supplier List</span>
     <?php if ($isBuyer): ?>
+      <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#importModal" onclick="openImportModal('suppliers')">Import CSV</button>
       <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#supplierModal" onclick="openSupplierForm()">+ Add Supplier</button>
     <?php endif; ?>
   </div>
   <div class="card-body">
     <div id="suppliersTable" class="table-responsive">
-      <table class="table table-hover">
+      <table class="table table-hover table-striped table-sm align-middle">
         <thead>
           <tr>
             <th>Code</th>
@@ -50,11 +89,13 @@ require 'includes/layout.php';
             <div class="col-12 col-md-4 mb-2"><label class="form-label">Name *</label><input type="text" class="form-control" id="supplierName" required></div>
           </div>
           <div class="row form-row-responsive">
-            <div class="col-12 col-md-6 mb-2"><label class="form-label">Phone</label>
+            <div class="col-12 col-md-4 mb-2"><label class="form-label">Phone</label>
               <div class="input-group"><span class="input-group-text">+</span><input type="tel" class="form-control" id="supplierPhone" placeholder="e.g. +86 123 4567 8900"></div>
             </div>
-            <div class="col-12 col-md-6 mb-2"><label class="form-label">Factory Location</label><input type="text" class="form-control" id="supplierFactory"></div>
+            <div class="col-12 col-md-4 mb-2"><label class="form-label">Fax</label><input type="text" class="form-control" id="supplierFax" placeholder="Fax number (optional)"></div>
+            <div class="col-12 col-md-4 mb-2"><label class="form-label">Factory Location</label><input type="text" class="form-control" id="supplierFactory"></div>
           </div>
+          <div class="mb-2"><label class="form-label">Address</label><input type="text" class="form-control" id="supplierAddress" placeholder="Full address (used in order export header)"></div>
           <div class="mb-2"><label class="form-label">Notes</label><textarea class="form-control" id="supplierNotes" rows="2"></textarea></div>
           <div class="mb-2">
             <label class="form-label">Additional IDs (e.g. Tax ID, VAT)</label>
@@ -66,6 +107,27 @@ require 'includes/layout.php';
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
         <button type="button" class="btn btn-primary" id="supplierSaveBtn" onclick="saveSupplier()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- Import CSV Modal -->
+<div class="modal fade" id="importModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Import Suppliers CSV</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small">Paste CSV or choose file. Columns: <code>code</code>, <code>name</code>, <code>store_id</code>, <code>phone</code>, <code>factory_location</code>, <code>notes</code>. Duplicate codes are skipped.</p>
+        <input type="file" class="form-control form-control-sm mb-2" id="importCsvFile" accept=".csv,.txt" title="Choose CSV file">
+        <textarea class="form-control font-monospace" id="importCsvData" rows="10" placeholder="code,name,store_id,phone,factory_location,notes&#10;S001,Acme Store,ST,+,Yiwu,notes"></textarea>
+        <div id="importResult" class="alert d-none mt-2"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="importBtn" onclick="doImport()">Import</button>
       </div>
     </div>
   </div>

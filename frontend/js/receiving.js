@@ -42,20 +42,44 @@ document.addEventListener("DOMContentLoaded", () => {
                 renderSchedule();
         }),
     );
-    const sel = document.getElementById("receiveOrder");
-    if (sel)
-        sel.onchange = () => {
-            const form = document.getElementById("receiveForm");
-            form.classList.toggle("d-none", !sel.value);
-            if (sel.value) {
-                updateVariancePhotoAlert();
-                loadOrderForReceive(sel.value);
-            } else {
-                receiveOrderItems = [];
-                receiveItemPhotos = {};
-            }
-        };
+    setupReceiveOrderSearch();
 });
+function setupReceiveOrderSearch() {
+    const searchEl = document.getElementById("receiveOrderSearch");
+    const idEl = document.getElementById("receiveOrderId");
+    const form = document.getElementById("receiveForm");
+    if (!searchEl || !idEl) return;
+    if (typeof Autocomplete === "undefined") return;
+    Autocomplete.init(searchEl, {
+        resource: "receiving",
+        searchPath: "/search",
+        placeholder:
+            "Search by order #, customer, supplier, phone, shipping code...",
+        renderItem: (o) =>
+            `#${o.id} — ${o.customer_name || ""} — ${o.supplier_name || ""} — ${o.expected_ready_date || ""}`.replace(
+                /\s*—\s*$/g,
+                "",
+            ),
+        onSelect: (item) => {
+            idEl.value = String(item.id);
+            searchEl.dataset.declaredCbm = String(item.declared_cbm || 0);
+            searchEl.dataset.declaredWeight = String(item.declared_weight || 0);
+            form.classList.remove("d-none");
+            updateVariancePhotoAlert();
+            loadOrderForReceive(item.id);
+        },
+    });
+    searchEl.addEventListener("input", () => {
+        if (!searchEl.value.trim()) {
+            idEl.value = "";
+            delete searchEl.dataset.declaredCbm;
+            delete searchEl.dataset.declaredWeight;
+            form.classList.add("d-none");
+            receiveOrderItems = [];
+            receiveItemPhotos = {};
+        }
+    });
+}
 
 function setupReceiveDimensionInputs() {
     const cbmEl = document.getElementById("actualCbm");
@@ -143,15 +167,13 @@ function removeReceivePhoto(index) {
 function updateVariancePhotoAlert() {
     const alertEl = document.getElementById("variancePhotoAlert");
     if (!alertEl) return;
-    const orderId = document.getElementById("receiveOrder").value;
+    const orderId = document.getElementById("receiveOrderId")?.value;
     if (!orderId) {
         alertEl.classList.add("d-none");
         return;
     }
-    const opt = document.querySelector(
-        `#receiveOrder option[value="${orderId}"]`,
-    );
-    const declaredCbm = parseFloat(opt?.dataset.declaredCbm || 0);
+    const searchEl = document.getElementById("receiveOrderSearch");
+    const declaredCbm = parseFloat(searchEl?.dataset.declaredCbm || 0);
     const actualCbm = parseFloat(
         document.getElementById("actualCbm")?.value || 0,
     );
@@ -216,7 +238,12 @@ function getFilterParams() {
 }
 
 async function applyFilters() {
+    const listEl = document.getElementById("warehouseList");
+    const emptyEl = document.getElementById("warehouseListEmpty");
+    const applyBtn = document.getElementById("applyFiltersBtn");
     try {
+        if (listEl) listEl.classList.add("opacity-50");
+        if (applyBtn) applyBtn.disabled = true;
         const qs = getFilterParams();
         const res = await api("GET", "/receiving/queue?" + qs);
         warehouseQueueData = res.data || [];
@@ -224,11 +251,13 @@ async function applyFilters() {
         renderReceiveDropdown();
         renderCalendar();
         renderSchedule();
-        document
-            .getElementById("warehouseListEmpty")
-            ?.classList.toggle("d-none", warehouseQueueData.length > 0);
+        if (emptyEl)
+            emptyEl.classList.toggle("d-none", warehouseQueueData.length > 0);
     } catch (e) {
         showToast(e.message, "danger");
+    } finally {
+        if (listEl) listEl.classList.remove("opacity-50");
+        if (applyBtn) applyBtn.disabled = false;
     }
 }
 
@@ -315,7 +344,7 @@ function renderWarehouseList() {
             <div class="card-body">
               <div class="d-flex justify-content-between align-items-start mb-2">
                 <h6 class="mb-0">#${o.id} — ${escapeHtml(o.customer_name)}</h6>
-                <span class="badge bg-secondary">${escapeHtml(o.status)}</span>
+                <span class="badge ${typeof statusBadgeClass === "function" ? statusBadgeClass(o.status) : "bg-secondary"}">${typeof statusLabel === "function" ? statusLabel(o.status) : escapeHtml(o.status)}</span>
               </div>
               <div class="small text-muted mb-2">${escapeHtml(o.expected_ready_date)}</div>
               <dl class="row mb-0 small">
@@ -337,31 +366,41 @@ function renderWarehouseList() {
 }
 
 function renderReceiveDropdown() {
-    const sel = document.getElementById("receiveOrder");
-    if (!sel) return;
-    sel.innerHTML =
-        '<option value="">— Select order —</option>' +
-        warehouseQueueData
-            .map((o) => {
-                const dcbm = (o.items || []).reduce(
-                    (s, i) => s + (parseFloat(i.declared_cbm) || 0),
-                    0,
-                );
-                const dw = (o.items || []).reduce(
-                    (s, i) => s + (parseFloat(i.declared_weight) || 0),
-                    0,
-                );
-                return `<option value="${o.id}" data-declared-cbm="${dcbm}" data-declared-weight="${dw}">#${o.id} - ${escapeHtml(o.customer_name)} - ${o.expected_ready_date}</option>`;
-            })
-            .join("");
+    // Receiving no longer uses a dropdown; order selection is via search autocomplete
 }
 
 function receiveOrderById(orderId) {
-    const sel = document.getElementById("receiveOrder");
-    if (sel) {
-        sel.value = orderId;
-        sel.dispatchEvent(new Event("change"));
+    const order = warehouseQueueData.find((o) => o.id == orderId);
+    const searchEl = document.getElementById("receiveOrderSearch");
+    const idEl = document.getElementById("receiveOrderId");
+    const form = document.getElementById("receiveForm");
+    if (!searchEl || !idEl) return;
+    let dcbm = 0,
+        dw = 0,
+        display = `#${orderId}`;
+    if (order) {
+        dcbm = (order.items || []).reduce(
+            (s, i) => s + (parseFloat(i.declared_cbm) || 0),
+            0,
+        );
+        dw = (order.items || []).reduce(
+            (s, i) => s + (parseFloat(i.declared_weight) || 0),
+            0,
+        );
+        display =
+            `#${order.id} — ${order.customer_name || ""} — ${order.supplier_name || ""} — ${order.expected_ready_date || ""}`.replace(
+                /\s*—\s*$/g,
+                "",
+            );
     }
+    searchEl.value = display;
+    searchEl.dataset.selectedId = String(orderId);
+    searchEl.dataset.declaredCbm = String(dcbm);
+    searchEl.dataset.declaredWeight = String(dw);
+    idEl.value = String(orderId);
+    form?.classList.remove("d-none");
+    updateVariancePhotoAlert();
+    loadOrderForReceive(orderId);
 }
 
 function showReceiveForm() {
@@ -487,7 +526,7 @@ async function loadOrderForReceive(orderId) {
             .map(
                 (it, i) => `
           <tr data-order-item-id="${it.id}">
-            <td>${escapeHtml((it.description_cn || it.description_en || "Item " + (i + 1)).substring(0, 40))}</td>
+            <td>${escapeHtml((typeof descText === "function" ? descText(it) : it.description_en || it.description_cn || "Item " + (i + 1)).substring(0, 40))}</td>
             <td>${it.declared_cbm || 0} CBM / ${it.declared_weight || 0} kg</td>
             <td><input type="number" class="form-control form-control-sm item-actual-cartons" min="0" placeholder="0"></td>
             <td><input type="number" step="0.0001" class="form-control form-control-sm item-actual-cbm" min="0" placeholder="0"></td>
@@ -550,7 +589,7 @@ function removeItemPhoto(orderItemId, index) {
 }
 
 async function submitReceive() {
-    const orderId = document.getElementById("receiveOrder").value;
+    const orderId = document.getElementById("receiveOrderId")?.value;
     if (!orderId) {
         showToast("Select an order", "danger");
         return;
@@ -578,11 +617,9 @@ async function submitReceive() {
     const notes = document.getElementById("receiveNotes").value;
     const photoPaths = receivePhotoPaths;
 
-    const opt = document.querySelector(
-        `#receiveOrder option[value="${orderId}"]`,
-    );
-    const declaredCbm = parseFloat(opt?.dataset.declaredCbm || 0);
-    const declaredWeight = parseFloat(opt?.dataset.declaredWeight || 0);
+    const searchEl = document.getElementById("receiveOrderSearch");
+    const declaredCbm = parseFloat(searchEl?.dataset.declaredCbm || 0);
+    const declaredWeight = parseFloat(searchEl?.dataset.declaredWeight || 0);
     const variancePct =
         declaredCbm > 0
             ? (Math.abs(actualCbm - declaredCbm) / declaredCbm) * 100
@@ -660,7 +697,8 @@ async function submitReceive() {
         );
         loadReceivableOrders();
         document.getElementById("receiveForm").classList.add("d-none");
-        document.getElementById("receiveOrder").value = "";
+        document.getElementById("receiveOrderSearch").value = "";
+        document.getElementById("receiveOrderId").value = "";
         receivePhotoPaths = [];
         receiveItemPhotos = {};
         renderReceivePhotoPreview();

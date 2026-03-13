@@ -80,6 +80,9 @@ async function loadConfig() {
             c.tracking_push_enabled ?? 0;
         document.getElementById("trackingPushDryRun").value =
             c.tracking_push_dry_run ?? 1;
+        document.getElementById("staleOrderThresholdDays").value =
+            c.stale_order_threshold_days ?? 3;
+        document.getElementById("appUrl").value = c.app_url ?? "";
     } catch (e) {
         showToast(e.message, "danger");
     }
@@ -184,6 +187,10 @@ async function saveConfig() {
                     document.getElementById("trackingPushEnabled").value || 0,
                 TRACKING_PUSH_DRY_RUN:
                     document.getElementById("trackingPushDryRun").value ?? 1,
+                STALE_ORDER_THRESHOLD_DAYS:
+                    document.getElementById("staleOrderThresholdDays").value ||
+                    3,
+                APP_URL: document.getElementById("appUrl").value?.trim() || "",
             },
         };
         const token = document.getElementById("trackingApiToken").value?.trim();

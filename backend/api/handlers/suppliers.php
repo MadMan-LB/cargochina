@@ -6,6 +6,34 @@
 
 require_once __DIR__ . '/../helpers.php';
 
+function calcSupplierScore(PDO $pdo, int $supplierId): ?float
+{
+    $orders = $pdo->prepare("SELECT COUNT(*) as total, SUM(CASE WHEN status IN ('ReceivedAtWarehouse','AwaitingCustomerConfirmation','Confirmed','ReadyForConsolidation','ConsolidatedIntoShipmentDraft','AssignedToContainer','FinalizedAndPushedToTracking') THEN 1 ELSE 0 END) as completed FROM orders WHERE supplier_id = ?");
+    $orders->execute([$supplierId]);
+    $ord = $orders->fetch(PDO::FETCH_ASSOC);
+    $totalOrders = (int) $ord['total'];
+    if ($totalOrders < 1) return null;
+    $completed = (int) $ord['completed'];
+
+    $variance = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE supplier_id = ? AND status = 'AwaitingCustomerConfirmation'");
+    $variance->execute([$supplierId]);
+    $varianceCount = (int) $variance->fetchColumn();
+
+    $visits = $pdo->prepare("SELECT COUNT(*) FROM supplier_interactions WHERE supplier_id = ?");
+    $visits->execute([$supplierId]);
+    $visitCount = (int) $visits->fetchColumn();
+
+    $payFull = $pdo->prepare("SELECT COUNT(*) FROM supplier_payments WHERE supplier_id = ? AND marked_full_payment = 1");
+    $payFull->execute([$supplierId]);
+    $fullPaid = (int) $payFull->fetchColumn();
+
+    // Score 0–5: weighted combination
+    $completionRate = $totalOrders > 0 ? $completed / $totalOrders : 0;
+    $varianceRate = $totalOrders > 0 ? $varianceCount / $totalOrders : 0;
+    $score = ($completionRate * 2.5) + ((1 - $varianceRate) * 1.5) + (min($visitCount, 5) / 5 * 0.5) + (min($fullPaid, 3) / 3 * 0.5);
+    return round(min(5, max(0, $score)), 1);
+}
+
 function validatePhone(?string $phone): void
 {
     if ($phone === null || $phone === '') return;
@@ -31,11 +59,37 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 jsonResponse(['data' => $rows]);
             }
             if ($id === null) {
-                $stmt = $pdo->query("SELECT * FROM suppliers ORDER BY name");
+                $q = trim($_GET['q'] ?? '');
+                $paymentStatus = trim($_GET['payment_status'] ?? '');
+                $sort = in_array($_GET['sort'] ?? '', ['name', 'code', 'store_id', 'phone', 'factory_location']) ? $_GET['sort'] : 'name';
+                $order = strtolower($_GET['order'] ?? '') === 'desc' ? 'DESC' : 'ASC';
+
+                $where = [];
+                $params = [];
+                if (strlen($q) >= 1) {
+                    $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+                    $where[] = "(s.name LIKE ? OR s.code LIKE ? OR (s.phone IS NOT NULL AND s.phone LIKE ?) OR (s.store_id IS NOT NULL AND s.store_id LIKE ?) OR (s.factory_location IS NOT NULL AND s.factory_location LIKE ?))";
+                    $params = array_merge($params, [$like, $like, $like, $like, $like]);
+                }
+                if ($paymentStatus === 'outstanding') {
+                    $where[] = "EXISTS (SELECT 1 FROM (SELECT currency, SUM(COALESCE(invoice_amount, amount)) as inv, SUM(amount) as paid FROM supplier_payments WHERE supplier_id = s.id GROUP BY currency) x WHERE (inv - paid) > 0)";
+                } elseif ($paymentStatus === 'fully_paid') {
+                    $where[] = "NOT EXISTS (SELECT 1 FROM (SELECT currency, SUM(COALESCE(invoice_amount, amount)) as inv, SUM(amount) as paid FROM supplier_payments WHERE supplier_id = s.id GROUP BY currency) x WHERE (inv - paid) > 0)";
+                }
+                $sql = "SELECT s.* FROM suppliers s";
+                if (!empty($where)) {
+                    $sql .= " WHERE " . implode(" AND ", $where);
+                }
+                $sql .= " ORDER BY s." . $sort . " " . $order;
+
+                $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
+                if ($params) $stmt->execute($params);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
                 foreach ($rows as &$r) {
                     $r['contacts'] = $r['contacts'] ? json_decode($r['contacts'], true) : [];
                     $r['additional_ids'] = $r['additional_ids'] ? json_decode($r['additional_ids'], true) : [];
+                    $r['reliability_score'] = calcSupplierScore($pdo, (int) $r['id']);
                 }
                 jsonResponse(['data' => $rows]);
             }
@@ -47,6 +101,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             $row['contacts'] = $row['contacts'] ? json_decode($row['contacts'], true) : [];
             $row['additional_ids'] = $row['additional_ids'] ? json_decode($row['additional_ids'], true) : [];
+            $row['reliability_score'] = calcSupplierScore($pdo, (int) $id);
 
             $payments = $pdo->prepare("SELECT * FROM supplier_payments WHERE supplier_id = ? ORDER BY created_at DESC");
             $payments->execute([$id]);
@@ -61,6 +116,44 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             jsonResponse(['data' => $row]);
 
         case 'POST':
+            if ($id === 'import') {
+                $csv = trim($input['csv'] ?? $input['data'] ?? '');
+                if (!$csv) jsonError('No CSV data provided', 400);
+                $lines = preg_split('/\r\n|\r|\n/', $csv);
+                $header = array_map('trim', str_getcsv(array_shift($lines) ?? ''));
+                $codeIdx = array_search('code', array_map('strtolower', $header)) !== false ? array_search('code', array_map('strtolower', $header)) : 0;
+                $nameIdx = array_search('name', array_map('strtolower', $header)) !== false ? array_search('name', array_map('strtolower', $header)) : 1;
+                $storeIdx = array_search('store_id', array_map('strtolower', $header)) !== false ? array_search('store_id', array_map('strtolower', $header)) : null;
+                $phoneIdx = array_search('phone', array_map('strtolower', $header)) !== false ? array_search('phone', array_map('strtolower', $header)) : null;
+                $factoryIdx = array_search('factory_location', array_map('strtolower', $header)) !== false ? array_search('factory_location', array_map('strtolower', $header)) : null;
+                $notesIdx = array_search('notes', array_map('strtolower', $header)) !== false ? array_search('notes', array_map('strtolower', $header)) : null;
+                $created = 0;
+                $skipped = 0;
+                $errors = [];
+                foreach ($lines as $i => $line) {
+                    $row = str_getcsv($line);
+                    if (count($row) < 2) continue;
+                    $code = trim($row[$codeIdx] ?? $row[0] ?? '');
+                    $name = trim($row[$nameIdx] ?? $row[1] ?? '');
+                    if (!$code || !$name) {
+                        $skipped++;
+                        continue;
+                    }
+                    $storeId = $storeIdx !== null && isset($row[$storeIdx]) ? trim($row[$storeIdx]) : null;
+                    $phone = $phoneIdx !== null && isset($row[$phoneIdx]) ? trim($row[$phoneIdx]) : null;
+                    $factory = $factoryIdx !== null && isset($row[$factoryIdx]) ? trim($row[$factoryIdx]) : null;
+                    $notes = $notesIdx !== null && isset($row[$notesIdx]) ? trim($row[$notesIdx]) : null;
+                    try {
+                        $pdo->prepare("INSERT INTO suppliers (code, store_id, name, phone, factory_location, notes) VALUES (?,?,?,?,?,?)")
+                            ->execute([$code, $storeId ?: null, $name, $phone ?: null, $factory ?: null, $notes ?: null]);
+                        $created++;
+                    } catch (PDOException $e) {
+                        if ($e->getCode() == 23000) $skipped++;
+                        else $errors[] = "Row " . ($i + 2) . ": " . $e->getMessage();
+                    }
+                }
+                jsonResponse(['data' => ['created' => $created, 'skipped' => $skipped, 'errors' => $errors]]);
+            }
             if ($id && $action === 'payments') {
                 $stmt = $pdo->prepare("SELECT id FROM suppliers WHERE id = ?");
                 $stmt->execute([$id]);
@@ -75,8 +168,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $invoiceAmount = isset($input['invoice_amount']) ? (float) $input['invoice_amount'] : null;
                 $markedFull = !empty($input['marked_full_payment']) ? 1 : 0;
                 $discountAmount = ($invoiceAmount !== null && $invoiceAmount > $amount) ? round($invoiceAmount - $amount, 4) : 0;
-                $markedBy = $markedFull ? $userId : null;
                 $userId = getAuthUserId() ?? 1;
+                $markedBy = $markedFull ? $userId : null;
                 $pdo->prepare("INSERT INTO supplier_payments (supplier_id, order_id, amount, invoice_amount, discount_amount, marked_full_payment, marked_by, currency, payment_type, notes) VALUES (?,?,?,?,?,?,?,?,?,?)")
                     ->execute([$id, $orderId, $amount, $invoiceAmount, $discountAmount, $markedFull, $markedBy, $currency, $paymentType, $notes]);
                 $newId = (int) $pdo->lastInsertId();
@@ -131,9 +224,28 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $contacts = isset($input['contacts']) ? json_encode($input['contacts']) : null;
             $factoryLocation = $input['factory_location'] ?? null;
             $notes = $input['notes'] ?? null;
+            $address = isset($input['address']) ? trim($input['address']) : null;
+            $fax = isset($input['fax']) ? trim($input['fax']) : null;
             try {
-                $stmt = $pdo->prepare("INSERT INTO suppliers (code, name, store_id, contacts, factory_location, notes, phone, additional_ids) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-                $stmt->execute([$code, $name, $storeId ?: null, $contacts, $factoryLocation, $notes, $phone ?: null, $additionalIds]);
+                $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'address'");
+                $hasAddr = $chk && $chk->rowCount() > 0;
+                $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'fax'");
+                $hasFax = $chk && $chk->rowCount() > 0;
+                $cols = "code, name, store_id, contacts, factory_location, notes, phone, additional_ids";
+                $vals = "?, ?, ?, ?, ?, ?, ?, ?";
+                $params = [$code, $name, $storeId ?: null, $contacts, $factoryLocation, $notes, $phone ?: null, $additionalIds];
+                if ($hasAddr) {
+                    $cols .= ", address";
+                    $vals .= ", ?";
+                    $params[] = $address ?: null;
+                }
+                if ($hasFax) {
+                    $cols .= ", fax";
+                    $vals .= ", ?";
+                    $params[] = $fax ?: null;
+                }
+                $stmt = $pdo->prepare("INSERT INTO suppliers ($cols) VALUES ($vals)");
+                $stmt->execute($params);
                 $newId = (int) $pdo->lastInsertId();
                 $stmt = $pdo->prepare("SELECT * FROM suppliers WHERE id = ?");
                 $stmt->execute([$newId]);
@@ -169,8 +281,24 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $contacts = isset($input['contacts']) ? json_encode($input['contacts']) : null;
             $factoryLocation = $input['factory_location'] ?? null;
             $notes = $input['notes'] ?? null;
-            $pdo->prepare("UPDATE suppliers SET code=?, name=?, store_id=?, contacts=?, factory_location=?, notes=?, phone=?, additional_ids=? WHERE id=?")
-                ->execute([$code, $name, $storeId ?: null, $contacts, $factoryLocation, $notes, $phone ?: null, $additionalIds, $id]);
+            $address = isset($input['address']) ? trim($input['address']) : null;
+            $fax = isset($input['fax']) ? trim($input['fax']) : null;
+            $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'address'");
+            $hasAddr = $chk && $chk->rowCount() > 0;
+            $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'fax'");
+            $hasFax = $chk && $chk->rowCount() > 0;
+            $sets = "code=?, name=?, store_id=?, contacts=?, factory_location=?, notes=?, phone=?, additional_ids=?";
+            $params = [$code, $name, $storeId ?: null, $contacts, $factoryLocation, $notes, $phone ?: null, $additionalIds];
+            if ($hasAddr) {
+                $sets .= ", address=?";
+                $params[] = $address ?: null;
+            }
+            if ($hasFax) {
+                $sets .= ", fax=?";
+                $params[] = $fax ?: null;
+            }
+            $params[] = $id;
+            $pdo->prepare("UPDATE suppliers SET $sets WHERE id=?")->execute($params);
             $stmt = $pdo->prepare("SELECT * FROM suppliers WHERE id = ?");
             $stmt->execute([$id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);

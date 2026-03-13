@@ -35,7 +35,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     jsonResponse(['data' => []]);
                 }
                 $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
-                $stmt = $pdo->prepare("SELECT id, description_cn, description_en, hs_code, cbm, weight FROM products WHERE description_cn LIKE ? OR description_en LIKE ? OR hs_code LIKE ? ORDER BY id DESC LIMIT 10");
+                $stmt = $pdo->prepare("SELECT p.id, p.description_cn, p.description_en, p.hs_code, p.cbm, p.weight, p.length_cm, p.width_cm, p.height_cm, p.pieces_per_carton, p.unit_price, p.image_paths, p.supplier_id, s.name as supplier_name FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id WHERE p.description_cn LIKE ? OR p.description_en LIKE ? OR p.hs_code LIKE ? ORDER BY p.id DESC LIMIT 10");
                 $stmt->execute([$like, $like, $like]);
                 jsonResponse(['data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
             }
@@ -94,6 +94,78 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             jsonResponse(['data' => $row]);
 
         case 'POST':
+            if ($id === 'import') {
+                $csv = trim($input['csv'] ?? $input['data'] ?? '');
+                if (!$csv) jsonError('No CSV data provided', 400);
+                $lines = preg_split('/\r\n|\r|\n/', $csv);
+                $header = array_map('trim', array_map('strtolower', str_getcsv(array_shift($lines) ?? '')));
+                $col = fn($n) => array_search($n, $header) !== false ? array_search($n, $header) : (['description_cn' => 0, 'description_en' => 1, 'cbm' => 2, 'weight' => 3, 'hs_code' => 4, 'pieces_per_carton' => 5, 'unit_price' => 6, 'packaging' => 7, 'supplier_code' => 8][$n] ?? -1);
+                $created = 0;
+                $skipped = 0;
+                $errors = [];
+                $hasPpc = (bool) @$pdo->query("SHOW COLUMNS FROM products LIKE 'pieces_per_carton'")->rowCount();
+                $hasUp = (bool) @$pdo->query("SHOW COLUMNS FROM products LIKE 'unit_price'")->rowCount();
+                $hasLwh = (bool) @$pdo->query("SHOW COLUMNS FROM products LIKE 'length_cm'")->rowCount();
+                foreach ($lines as $i => $line) {
+                    $row = str_getcsv($line);
+                    if (count($row) < 3) continue;
+                    $descCn = trim($row[$col('description_cn')] ?? $row[0] ?? '');
+                    $descEn = trim($row[$col('description_en')] ?? $row[1] ?? '');
+                    $cbm = (float) ($row[$col('cbm')] ?? $row[2] ?? 0);
+                    $weight = (float) ($row[$col('weight')] ?? $row[3] ?? 0);
+                    if (!$descCn && !$descEn) {
+                        $skipped++;
+                        continue;
+                    }
+                    if ($cbm <= 0) {
+                        $errors[] = "Row " . ($i + 2) . ": CBM required";
+                        continue;
+                    }
+                    $supplierCode = $col('supplier_code') >= 0 && isset($row[$col('supplier_code')]) ? trim($row[$col('supplier_code')]) : null;
+                    $supplierId = null;
+                    if ($supplierCode) {
+                        $s = $pdo->prepare("SELECT id FROM suppliers WHERE code = ?");
+                        $s->execute([$supplierCode]);
+                        $supplierId = $s->fetchColumn() ?: null;
+                    }
+                    $hsCode = $col('hs_code') >= 0 && isset($row[$col('hs_code')]) ? trim($row[$col('hs_code')]) : null;
+                    $ppc = $hasPpc && $col('pieces_per_carton') >= 0 && isset($row[$col('pieces_per_carton')]) ? (int) $row[$col('pieces_per_carton')] : null;
+                    $up = $hasUp && $col('unit_price') >= 0 && isset($row[$col('unit_price')]) ? (float) $row[$col('unit_price')] : null;
+                    $packaging = $col('packaging') >= 0 && isset($row[$col('packaging')]) ? trim($row[$col('packaging')]) : null;
+                    $chk = $pdo->prepare("SELECT id FROM products WHERE (? != '' AND description_cn = ?) OR (? != '' AND description_en = ?)");
+                    $chk->execute([$descCn, $descCn, $descEn, $descEn]);
+                    if ($chk->fetch()) {
+                        $skipped++;
+                        continue;
+                    }
+                    $cols = ['supplier_id', 'cbm', 'weight', 'description_cn', 'description_en', 'hs_code', 'packaging', 'image_paths'];
+                    $vals = [$supplierId, $cbm, $weight, $descCn ?: null, $descEn ?: null, $hsCode ?: null, $packaging ?: null, null];
+                    if ($hasLwh) {
+                        $cols[] = 'length_cm';
+                        $cols[] = 'width_cm';
+                        $cols[] = 'height_cm';
+                        $vals[] = null;
+                        $vals[] = null;
+                        $vals[] = null;
+                    }
+                    if ($hasPpc) {
+                        $cols[] = 'pieces_per_carton';
+                        $vals[] = $ppc;
+                    }
+                    if ($hasUp) {
+                        $cols[] = 'unit_price';
+                        $vals[] = $up;
+                    }
+                    try {
+                        $ph = implode(',', array_fill(0, count($vals), '?'));
+                        $pdo->prepare("INSERT INTO products (" . implode(',', $cols) . ") VALUES ($ph)")->execute($vals);
+                        $created++;
+                    } catch (PDOException $e) {
+                        $errors[] = "Row " . ($i + 2) . ": " . $e->getMessage();
+                    }
+                }
+                jsonResponse(['data' => ['created' => $created, 'skipped' => $skipped, 'errors' => $errors]]);
+            }
             $forceCreate = !empty($input['force_create']);
             $cbm = (float) ($input['cbm'] ?? 0);
             $lengthCm = isset($input['length_cm']) ? (float) $input['length_cm'] : null;

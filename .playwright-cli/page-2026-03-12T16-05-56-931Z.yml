@@ -1,0 +1,142 @@
+- generic [active] [ref=e1]:
+  - complementary [ref=e2]:
+    - link "CLMS" [ref=e4] [cursor=pointer]:
+      - /url: /cargochina/index.php
+    - navigation [ref=e5]:
+      - generic [ref=e6]: Main
+      - link "Dashboard" [ref=e7] [cursor=pointer]:
+        - /url: /cargochina/index.php
+        - img [ref=e8]
+        - text: Dashboard
+      - link "Orders" [ref=e10] [cursor=pointer]:
+        - /url: /cargochina/orders.php
+        - img [ref=e11]
+        - text: Orders
+      - link "Receiving" [ref=e13] [cursor=pointer]:
+        - /url: /cargochina/receiving.php
+        - img [ref=e14]
+        - text: Receiving
+      - link "Confirmations" [ref=e16] [cursor=pointer]:
+        - /url: /cargochina/confirmations.php
+        - img [ref=e17]
+        - text: Confirmations
+      - link "Pipeline" [ref=e19] [cursor=pointer]:
+        - /url: /cargochina/pipeline.php
+        - img [ref=e20]
+        - text: Pipeline
+      - link "Consolidation" [ref=e22] [cursor=pointer]:
+        - /url: /cargochina/consolidation.php
+        - img [ref=e23]
+        - text: Consolidation
+      - generic [ref=e25]: Data
+      - link "Suppliers" [ref=e26] [cursor=pointer]:
+        - /url: /cargochina/suppliers.php
+        - img [ref=e27]
+        - text: Suppliers
+      - link "Customers" [ref=e29] [cursor=pointer]:
+        - /url: /cargochina/customers.php
+        - img [ref=e30]
+        - text: Customers
+      - link "Products" [ref=e32] [cursor=pointer]:
+        - /url: /cargochina/products.php
+        - img [ref=e33]
+        - text: Products
+      - generic [ref=e35]: Notifications
+      - link "Notifications 1" [ref=e36] [cursor=pointer]:
+        - /url: /cargochina/notifications.php
+        - img [ref=e37]
+        - text: Notifications
+        - generic [ref=e39]: "1"
+      - link "Preferences" [ref=e40] [cursor=pointer]:
+        - /url: /cargochina/notification_preferences.php
+        - img [ref=e41]
+        - text: Preferences
+      - generic [ref=e43]: Administration
+      - link "Configuration" [ref=e44] [cursor=pointer]:
+        - /url: /cargochina/admin_config.php
+        - img [ref=e45]
+        - text: Configuration
+      - link "Users" [ref=e48] [cursor=pointer]:
+        - /url: /cargochina/admin_users.php
+        - img [ref=e49]
+        - text: Users
+      - link "Diagnostics" [ref=e51] [cursor=pointer]:
+        - /url: /cargochina/admin_diagnostics.php
+        - img [ref=e52]
+        - text: Diagnostics
+      - link "Tracking Push Log" [ref=e54] [cursor=pointer]:
+        - /url: /cargochina/admin_tracking_push.php
+        - img [ref=e55]
+        - text: Tracking Push Log
+      - link "Audit Log" [ref=e57] [cursor=pointer]:
+        - /url: /cargochina/admin_audit_log.php
+        - img [ref=e58]
+        - text: Audit Log
+    - generic [ref=e60]:
+      - generic [ref=e61]:
+        - img [ref=e62]
+        - generic [ref=e64]: Super Admin
+      - link "Logout" [ref=e65] [cursor=pointer]:
+        - /url: /cargochina/login.php?logout=1
+        - img [ref=e66]
+        - text: Logout
+  - generic [ref=e68]:
+    - banner [ref=e69]:
+      - button "Toggle sidebar" [ref=e70] [cursor=pointer]:
+        - img [ref=e71]
+      - generic [ref=e73]: Order Confirmations
+      - generic [ref=e75]: SuperAdmin
+    - generic [ref=e76]:
+      - heading "Order Confirmations" [level=1] [ref=e77]
+      - paragraph [ref=e78]: Confirm orders on behalf of customers. This system is internal — admins can confirm without customer action.
+      - generic [ref=e79]:
+        - generic [ref=e80]:
+          - generic [ref=e81]: Orders Awaiting Confirmation
+          - button "Confirm Selected" [disabled]
+        - generic [ref=e82]:
+          - generic [ref=e83]:
+            - generic [ref=e84]:
+              - generic [ref=e85]: Date from
+              - textbox [ref=e86]
+            - generic [ref=e87]:
+              - generic [ref=e88]: Date to
+              - textbox [ref=e89]
+            - generic [ref=e90]:
+              - generic [ref=e91]: Order ID
+              - textbox "e.g. 3" [ref=e92]
+            - generic [ref=e93]:
+              - generic [ref=e94]: Customer
+              - textbox "Type to search..." [ref=e95]
+            - generic [ref=e96]:
+              - generic [ref=e97]: Supplier
+              - textbox "Type to search..." [ref=e98]
+            - generic [ref=e99]:
+              - button "Apply" [ref=e100] [cursor=pointer]
+              - button "Clear" [ref=e101] [cursor=pointer]
+          - table [ref=e103]:
+            - rowgroup [ref=e104]:
+              - row "Select all ID Customer Supplier Expected Ready Status CBM Weight Actions" [ref=e105]:
+                - columnheader "Select all" [ref=e106]:
+                  - checkbox "Select all" [ref=e107]
+                - columnheader "ID" [ref=e108]
+                - columnheader "Customer" [ref=e109]
+                - columnheader "Supplier" [ref=e110]
+                - columnheader "Expected Ready" [ref=e111]
+                - columnheader "Status" [ref=e112]
+                - columnheader "CBM" [ref=e113]
+                - columnheader "Weight" [ref=e114]
+                - columnheader "Actions" [ref=e115]
+            - rowgroup [ref=e116]:
+              - row "Select 3 housseinalzekra Mastertools Company Limited, Test 2026-02-20 AwaitingCustomerConfirmation 3.00 75 kg Confirm" [ref=e117]:
+                - cell "Select" [ref=e118]:
+                  - checkbox "Select" [ref=e119]
+                - cell "3" [ref=e120]
+                - cell "housseinalzekra" [ref=e121]
+                - cell "Mastertools Company Limited, Test" [ref=e122]
+                - cell "2026-02-20" [ref=e123]
+                - cell "AwaitingCustomerConfirmation" [ref=e124]:
+                  - generic [ref=e125]: AwaitingCustomerConfirmation
+                - cell "3.00" [ref=e126]
+                - cell "75 kg" [ref=e127]
+                - cell "Confirm" [ref=e128]:
+                  - button "Confirm" [ref=e129] [cursor=pointer]

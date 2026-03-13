@@ -92,6 +92,12 @@ require 'includes/layout.php';
             <option value="0">No (real push)</option>
           </select></div>
       </div>
+      <hr>
+      <h5 class="mb-3">Stale Order Alerts</h5>
+      <div class="row mb-3">
+        <div class="col-md-6"><label class="form-label">Stale Threshold (days)</label><input type="number" min="1" max="30" class="form-control" id="staleOrderThresholdDays" placeholder="3"><small class="text-muted">Orders in AwaitingConfirmation or past ready date beyond this many days trigger dashboard alerts.</small></div>
+        <div class="col-md-6"><label class="form-label">App Base URL</label><input type="url" class="form-control" id="appUrl" placeholder="http://localhost/cargochina"><small class="text-muted">Used in customer confirmation links sent via notifications.</small></div>
+      </div>
       <button type="button" class="btn btn-primary" onclick="saveConfig()">Save</button>
     </form>
   </div>

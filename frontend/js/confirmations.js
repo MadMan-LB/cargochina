@@ -1,0 +1,225 @@
+/**
+ * Confirmations page - admin confirm orders for customers
+ */
+
+let filterCustomerAc, filterSupplierAc;
+
+let filterDebounce = null;
+
+document.addEventListener("DOMContentLoaded", function () {
+    filterCustomerAc = Autocomplete.init(
+        document.getElementById("filterCustomer"),
+        {
+            resource: "customers",
+            placeholder: "Type to search...",
+            onSelect: () => applyFiltersDebounced(),
+        },
+    );
+    filterSupplierAc = Autocomplete.init(
+        document.getElementById("filterSupplier"),
+        {
+            resource: "suppliers",
+            placeholder: "Type to search...",
+            onSelect: () => applyFiltersDebounced(),
+        },
+    );
+    const selectAll = document.getElementById("selectAllConfirm");
+    if (selectAll) {
+        selectAll.addEventListener("change", function () {
+            document
+                .querySelectorAll(".confirm-cb")
+                .forEach((cb) => (cb.checked = this.checked));
+            updateBulkConfirmBtn();
+        });
+    }
+    ["filterDateFrom", "filterDateTo", "filterOrderId"].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener("change", applyFiltersDebounced);
+    });
+    ["filterCustomer", "filterSupplier"].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener("input", applyFiltersDebounced);
+    });
+    readFiltersFromUrl();
+    loadConfirmations();
+});
+
+function applyFiltersDebounced() {
+    clearTimeout(filterDebounce);
+    filterDebounce = setTimeout(() => {
+        syncFiltersToUrl();
+        loadConfirmations();
+    }, 300);
+}
+
+function readFiltersFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const dateFrom = params.get("date_from");
+    const dateTo = params.get("date_to");
+    const orderId = params.get("order_id");
+    if (dateFrom) document.getElementById("filterDateFrom").value = dateFrom;
+    if (dateTo) document.getElementById("filterDateTo").value = dateTo;
+    if (orderId) document.getElementById("filterOrderId").value = orderId;
+}
+
+function syncFiltersToUrl() {
+    const dateFrom = document.getElementById("filterDateFrom")?.value;
+    const dateTo = document.getElementById("filterDateTo")?.value;
+    const orderId = document.getElementById("filterOrderId")?.value?.trim();
+    const customerId = filterCustomerAc?.getSelectedId() || "";
+    const supplierId = filterSupplierAc?.getSelectedId() || "";
+    const params = new URLSearchParams();
+    if (dateFrom) params.set("date_from", dateFrom);
+    if (dateTo) params.set("date_to", dateTo);
+    if (orderId) params.set("order_id", orderId);
+    if (customerId) params.set("customer_id", customerId);
+    if (supplierId) params.set("supplier_id", supplierId);
+    const qs = params.toString();
+    const url = qs
+        ? window.location.pathname + "?" + qs
+        : window.location.pathname;
+    if (window.history.replaceState) window.history.replaceState({}, "", url);
+}
+
+function updateBulkConfirmBtn() {
+    const checked = document.querySelectorAll(".confirm-cb:checked");
+    const btn = document.getElementById("bulkConfirmBtn");
+    if (btn) btn.disabled = checked.length === 0;
+}
+
+function getSelectedOrderIds() {
+    return Array.from(document.querySelectorAll(".confirm-cb:checked")).map(
+        (cb) => parseInt(cb.value, 10),
+    );
+}
+
+function buildConfirmationsPath() {
+    const dateFrom = document.getElementById("filterDateFrom").value;
+    const dateTo = document.getElementById("filterDateTo").value;
+    const orderId = document.getElementById("filterOrderId").value.trim();
+    const customerId = filterCustomerAc?.getSelectedId() || "";
+    const supplierId = filterSupplierAc?.getSelectedId() || "";
+    let path = "/orders?status=AwaitingCustomerConfirmation";
+    if (dateFrom) path += "&date_from=" + encodeURIComponent(dateFrom);
+    if (dateTo) path += "&date_to=" + encodeURIComponent(dateTo);
+    if (orderId) path += "&order_id=" + encodeURIComponent(orderId);
+    if (customerId) path += "&customer_id=" + encodeURIComponent(customerId);
+    if (supplierId) path += "&supplier_id=" + encodeURIComponent(supplierId);
+    return path;
+}
+
+async function loadConfirmations() {
+    try {
+        const res = await api("GET", buildConfirmationsPath());
+        const rows = res.data || [];
+        const tbody = document.querySelector("#confirmationsTable tbody");
+        const suppDisplay = (r) => {
+            const items = r.items || [];
+            const names = [
+                ...new Set(items.map((i) => i.supplier_name).filter(Boolean)),
+            ];
+            if (names.length > 0) return names.join(", ");
+            return r.supplier_name || "-";
+        };
+        const cbm = (r) =>
+            (r.items || []).reduce(
+                (s, i) => s + (parseFloat(i.declared_cbm) || 0),
+                0,
+            );
+        const wt = (r) =>
+            (r.items || []).reduce(
+                (s, i) => s + (parseFloat(i.declared_weight) || 0),
+                0,
+            );
+        tbody.innerHTML =
+            rows
+                .map(
+                    (r) => `
+        <tr data-order-id="${r.id}">
+          <td><input type="checkbox" class="form-check-input confirm-cb" value="${r.id}" aria-label="Select"></td>
+          <td>${r.id}</td>
+          <td>${escapeHtml(r.customer_name || "-")}</td>
+          <td>${escapeHtml(suppDisplay(r))}</td>
+          <td>${r.expected_ready_date || "-"}</td>
+          <td><span class="badge bg-warning text-dark">${escapeHtml(typeof statusLabel === "function" ? statusLabel(r.status) : r.status)}</span></td>
+          <td>${cbm(r).toFixed(2)}</td>
+          <td>${wt(r).toFixed(0)} kg</td>
+          <td>
+            <button class="btn btn-sm btn-success" onclick="confirmOrder(${r.id})">Confirm</button>
+          </td>
+        </tr>
+      `,
+                )
+                .join("") ||
+            '<tr><td colspan="9" class="text-muted">No orders awaiting confirmation.</td></tr>';
+        document.querySelectorAll(".confirm-cb").forEach((cb) => {
+            cb.addEventListener("change", updateBulkConfirmBtn);
+        });
+        updateBulkConfirmBtn();
+        const selectAll = document.getElementById("selectAllConfirm");
+        if (selectAll) selectAll.checked = false;
+    } catch (e) {
+        showToast(e.message || "Failed to load", "danger");
+    }
+}
+
+async function bulkConfirm() {
+    const ids = getSelectedOrderIds();
+    if (ids.length === 0) return;
+    const msg =
+        `Confirm ${ids.length} order(s) on behalf of customer?\n\n` +
+        "This accepts the actual warehouse measurements (CBM, weight, cartons) and moves orders to Confirmed. The customer will not need to take any action.";
+    if (!confirm(msg)) return;
+    const btn = document.getElementById("bulkConfirmBtn");
+    try {
+        setLoading(btn, true);
+        let ok = 0,
+            err = 0;
+        for (const id of ids) {
+            try {
+                await api("POST", "/orders/" + id + "/confirm", {});
+                ok++;
+            } catch (e) {
+                err++;
+                showToast(
+                    "Order #" + id + ": " + (e.message || "Failed"),
+                    "danger",
+                );
+            }
+        }
+        showToast(`Confirmed ${ok} order(s)` + (err ? `, ${err} failed` : ""));
+        loadConfirmations();
+    } finally {
+        setLoading(btn, false);
+    }
+}
+
+async function confirmOrder(id) {
+    try {
+        const res = await api("GET", "/orders/" + id);
+        const o = res.data;
+        const receipt = o.receipt;
+        let msg =
+            "Confirm acceptance of actual warehouse measurements on behalf of customer?\n\n" +
+            "This will move the order to Confirmed. The customer will not need to take any action.";
+        if (receipt) {
+            msg += `\n\nActual: ${receipt.actual_cbm} CBM, ${receipt.actual_weight} kg, ${receipt.actual_cartons} cartons`;
+        }
+        if (!confirm(msg)) return;
+        await api("POST", "/orders/" + id + "/confirm", {});
+        showToast("Order confirmed");
+        loadConfirmations();
+    } catch (e) {
+        showToast(e.message || "Request failed", "danger");
+    }
+}
+
+function clearFilters() {
+    document.getElementById("filterDateFrom").value = "";
+    document.getElementById("filterDateTo").value = "";
+    document.getElementById("filterOrderId").value = "";
+    filterCustomerAc?.setValue(null);
+    filterSupplierAc?.setValue(null);
+    syncFiltersToUrl();
+    loadConfirmations();
+}

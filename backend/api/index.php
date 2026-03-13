@@ -77,7 +77,17 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
+    if ($resource === 'orders' && $action === 'confirm' && !hasAnyRole($rbac['orders']['confirm'] ?? [])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
     if ($resource === 'users' && !hasAnyRole($rbac['users'] ?? [])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'roles' && !hasAnyRole($rbac['users'] ?? [])) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
@@ -88,6 +98,21 @@ if (!in_array($resource, $publicResources)) {
         exit;
     }
     if ($resource === 'config' && $id === 'receiving' && !hasAnyRole(['WarehouseStaff', 'SuperAdmin'])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'customers' && $id === 'import' && !hasAnyRole(['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'suppliers' && $id === 'import' && !hasAnyRole(['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'products' && $id === 'import' && !hasAnyRole(['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'])) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;

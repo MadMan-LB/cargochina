@@ -1,0 +1,199 @@
+- generic [active] [ref=e1]:
+  - complementary [ref=e2]:
+    - link "CLMS" [ref=e4] [cursor=pointer]:
+      - /url: /cargochina/index.php
+    - navigation [ref=e5]:
+      - generic [ref=e6]: Main
+      - link "Dashboard" [ref=e7] [cursor=pointer]:
+        - /url: /cargochina/index.php
+        - img [ref=e8]
+        - text: Dashboard
+      - link "Orders" [ref=e10] [cursor=pointer]:
+        - /url: /cargochina/orders.php
+        - img [ref=e11]
+        - text: Orders
+      - link "Receiving" [ref=e13] [cursor=pointer]:
+        - /url: /cargochina/receiving.php
+        - img [ref=e14]
+        - text: Receiving
+      - link "Pipeline" [ref=e16] [cursor=pointer]:
+        - /url: /cargochina/pipeline.php
+        - img [ref=e17]
+        - text: Pipeline
+      - link "Consolidation" [ref=e19] [cursor=pointer]:
+        - /url: /cargochina/consolidation.php
+        - img [ref=e20]
+        - text: Consolidation
+      - generic [ref=e22]: Data
+      - link "Suppliers" [ref=e23] [cursor=pointer]:
+        - /url: /cargochina/suppliers.php
+        - img [ref=e24]
+        - text: Suppliers
+      - link "Customers" [ref=e26] [cursor=pointer]:
+        - /url: /cargochina/customers.php
+        - img [ref=e27]
+        - text: Customers
+      - link "Products" [ref=e29] [cursor=pointer]:
+        - /url: /cargochina/products.php
+        - img [ref=e30]
+        - text: Products
+      - generic [ref=e32]: Notifications
+      - link "Notifications" [ref=e33] [cursor=pointer]:
+        - /url: /cargochina/notifications.php
+        - img [ref=e34]
+        - text: Notifications
+      - link "Preferences" [ref=e36] [cursor=pointer]:
+        - /url: /cargochina/notification_preferences.php
+        - img [ref=e37]
+        - text: Preferences
+      - generic [ref=e39]: Administration
+      - link "Configuration" [ref=e40] [cursor=pointer]:
+        - /url: /cargochina/admin_config.php
+        - img [ref=e41]
+        - text: Configuration
+      - link "Users" [ref=e44] [cursor=pointer]:
+        - /url: /cargochina/admin_users.php
+        - img [ref=e45]
+        - text: Users
+      - link "Diagnostics" [ref=e47] [cursor=pointer]:
+        - /url: /cargochina/admin_diagnostics.php
+        - img [ref=e48]
+        - text: Diagnostics
+      - link "Tracking Push Log" [ref=e50] [cursor=pointer]:
+        - /url: /cargochina/admin_tracking_push.php
+        - img [ref=e51]
+        - text: Tracking Push Log
+      - link "Audit Log" [ref=e53] [cursor=pointer]:
+        - /url: /cargochina/admin_audit_log.php
+        - img [ref=e54]
+        - text: Audit Log
+    - generic [ref=e56]:
+      - generic [ref=e57]:
+        - img [ref=e58]
+        - generic [ref=e60]: Super Admin
+      - link "Logout" [ref=e61] [cursor=pointer]:
+        - /url: /cargochina/login.php?logout=1
+        - img [ref=e62]
+        - text: Logout
+  - generic [ref=e64]:
+    - banner [ref=e65]:
+      - button "Toggle sidebar" [ref=e66] [cursor=pointer]:
+        - img [ref=e67]
+      - generic [ref=e69]: Configuration
+      - generic [ref=e71]: SuperAdmin
+    - generic [ref=e72]:
+      - heading "System Configuration" [level=1] [ref=e73]
+      - generic [ref=e76]:
+        - generic [ref=e77]:
+          - generic [ref=e78]:
+            - generic [ref=e79]: Variance Threshold %
+            - spinbutton [ref=e80]: "10"
+          - generic [ref=e81]:
+            - generic [ref=e82]: Variance Threshold Abs CBM
+            - spinbutton [ref=e83]: "0.1"
+        - generic [ref=e84]:
+          - generic [ref=e85]:
+            - generic [ref=e86]: Confirmation Required
+            - combobox [ref=e87]:
+              - option "Variance only" [selected]
+              - option "Always on arrival"
+          - generic [ref=e88]:
+            - generic [ref=e89]: Customer Photo Visibility
+            - combobox [ref=e90]:
+              - option "Internal only" [selected]
+              - option "Customer visible"
+        - generic [ref=e91]:
+          - generic [ref=e92]:
+            - generic [ref=e93]: Min Photos per Item (for submit)
+            - spinbutton [ref=e94]: "1"
+          - generic [ref=e95]:
+            - generic [ref=e96]: Notification Channels
+            - textbox "dashboard,email,whatsapp" [ref=e97]: dashboard
+        - generic [ref=e98]:
+          - generic [ref=e99]:
+            - generic [ref=e100]: Item-Level Receiving Enabled
+            - combobox [ref=e101]:
+              - option "No (order-level only)" [selected]
+              - option "Yes"
+          - generic [ref=e102]:
+            - generic [ref=e103]: Photo Evidence per Item (when variance)
+            - combobox [ref=e104]:
+              - option "No"
+              - option "Yes" [selected]
+        - separator [ref=e105]
+        - heading "Email (Notifications)" [level=5] [ref=e106]
+        - generic [ref=e107]:
+          - generic [ref=e108]:
+            - generic [ref=e109]: From Address
+            - textbox "noreply@example.com" [ref=e110]
+          - generic [ref=e111]:
+            - generic [ref=e112]: From Name
+            - textbox "CLMS" [ref=e113]
+        - separator [ref=e114]
+        - heading "WhatsApp (Notifications)" [level=5] [ref=e115]
+        - generic [ref=e117]:
+          - generic [ref=e118]: Provider
+          - combobox [ref=e119]:
+            - option "Generic HTTP API" [selected]
+            - option "Twilio"
+        - generic [ref=e120]:
+          - generic [ref=e121]:
+            - generic [ref=e122]: API URL
+            - textbox "https://api.example.com/whatsapp" [ref=e123]
+          - generic [ref=e124]:
+            - generic [ref=e125]: API Token
+            - textbox "Leave blank to keep current" [ref=e126]
+        - separator [ref=e127]
+        - heading "Notification Retry" [level=5] [ref=e128]
+        - generic [ref=e129]:
+          - generic [ref=e130]:
+            - generic [ref=e131]: Max Attempts (email/WhatsApp)
+            - spinbutton [ref=e132]: "5"
+          - generic [ref=e133]:
+            - generic [ref=e134]: Retry Delay (seconds)
+            - spinbutton [ref=e135]: "10"
+        - separator [ref=e136]
+        - heading "Tracking Integration (Phase 3)" [level=5] [ref=e137]
+        - generic [ref=e139]:
+          - generic [ref=e140]: API Base URL
+          - textbox "https://tracking.example.com" [ref=e141]
+        - generic [ref=e142]:
+          - generic [ref=e143]:
+            - generic [ref=e144]: API Token
+            - textbox "Leave blank to keep current" [ref=e145]
+          - generic [ref=e146]:
+            - generic [ref=e147]: API Path
+            - textbox "/api/import/clms" [ref=e148]
+        - generic [ref=e149]:
+          - generic [ref=e150]:
+            - generic [ref=e151]: Timeout (sec)
+            - spinbutton [ref=e152]: "15"
+          - generic [ref=e153]:
+            - generic [ref=e154]: Retry Count
+            - spinbutton [ref=e155]: "3"
+          - generic [ref=e156]:
+            - generic [ref=e157]: Retry Backoff (ms)
+            - spinbutton [ref=e158]: "800"
+        - generic [ref=e159]:
+          - generic [ref=e160]:
+            - generic [ref=e161]: Push Enabled
+            - combobox [ref=e162]:
+              - option "No" [selected]
+              - option "Yes"
+          - generic [ref=e163]:
+            - generic [ref=e164]: Dry Run
+            - combobox [ref=e165]:
+              - option "Yes (log only)" [selected]
+              - option "No (real push)"
+        - separator [ref=e166]
+        - heading "Stale Order Alerts" [level=5] [ref=e167]
+        - generic [ref=e168]:
+          - generic [ref=e169]:
+            - generic [ref=e170]: Stale Threshold (days)
+            - spinbutton [ref=e171]: "3"
+            - text: Orders in AwaitingConfirmation or past ready date beyond this many days trigger dashboard alerts.
+          - generic [ref=e172]:
+            - generic [ref=e173]: App Base URL
+            - textbox "http://localhost/cargochina" [ref=e174]
+            - text: Used in customer confirmation links sent via notifications.
+        - button "Save" [ref=e175] [cursor=pointer]

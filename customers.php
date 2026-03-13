@@ -10,14 +10,15 @@ require 'includes/layout.php';
 <div class="card">
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2 py-3">
     <span class="fw-semibold">Customer List</span>
-    <div class="d-flex gap-2 align-items-center">
+    <div class="d-flex gap-2 align-items-center flex-wrap">
       <input type="text" class="form-control form-control-sm" id="customerSearch" placeholder="Search by name, code, or phone..." style="min-width:220px">
+      <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#importModal" onclick="openImportModal('customers')">Import CSV</button>
       <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#customerModal" onclick="openCustomerForm()">+ Add Customer</button>
     </div>
   </div>
   <div class="card-body py-3">
     <div id="customersTable" class="table-responsive">
-      <table class="table table-hover mb-0">
+      <table class="table table-hover table-striped table-sm align-middle mb-0">
         <thead>
           <tr>
             <th>Code</th>
@@ -143,6 +144,27 @@ require 'includes/layout.php';
   </div>
 </div>
 
+<!-- Import CSV Modal -->
+<div class="modal fade" id="importModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Import CSV</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small">Paste CSV or choose file. Columns: <code>code</code>, <code>name</code>, <code>phone</code>, <code>address</code>, <code>payment_terms</code>. Duplicate codes are skipped.</p>
+        <input type="file" class="form-control form-control-sm mb-2" id="importCsvFile" accept=".csv,.txt" title="Choose CSV file">
+        <textarea class="form-control font-monospace" id="importCsvData" rows="10" placeholder="code,name,phone,address,payment_terms&#10;CUST001,Acme Co,+86-21-12345678,123 Shanghai,Net 30"></textarea>
+        <div id="importResult" class="alert d-none mt-2"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="importBtn" onclick="doImport()">Import</button>
+      </div>
+    </div>
+  </div>
+</div>
 <!-- Orders & Shipments Modal -->
 <div class="modal fade" id="ordersModal" tabindex="-1">
   <div class="modal-dialog modal-xl">

@@ -15,6 +15,21 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $stmt = $pdo->prepare("SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 50");
             $stmt->execute([$userId]);
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($rows as &$r) {
+                if ($r['type'] === 'variance_confirmation') {
+                    if (preg_match('/Confirmation link:\s*(\S+)/', $r['body'] ?? '', $m)) {
+                        $r['confirmation_link'] = trim($m[1]);
+                    }
+                    if (preg_match('/Order #(\d+)/', $r['title'] ?? '', $m)) {
+                        $orderId = (int) $m[1];
+                        $r['order_id'] = $orderId;
+                        $cust = $pdo->prepare("SELECT c.phone FROM orders o JOIN customers c ON o.customer_id = c.id WHERE o.id = ?");
+                        $cust->execute([$orderId]);
+                        $phone = $cust->fetchColumn();
+                        $r['customer_phone'] = $phone ? preg_replace('/\D/', '', $phone) : null;
+                    }
+                }
+            }
             jsonResponse(['data' => $rows]);
             break;
 

@@ -10,11 +10,14 @@ require 'includes/layout.php';
 <div class="card">
   <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <span>Product List</span>
-    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#productModal" onclick="openProductForm()">+ Add Product</button>
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#importModal" onclick="openImportModal('products')">Import CSV</button>
+      <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#productModal" onclick="openProductForm()">+ Add Product</button>
+    </div>
   </div>
   <div class="card-body">
     <div id="productsTable" class="table-responsive">
-      <table class="table table-hover">
+      <table class="table table-hover table-striped table-sm align-middle">
         <thead>
           <tr>
             <th>Thumbnail</th>
@@ -91,6 +94,27 @@ require 'includes/layout.php';
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
         <button type="button" class="btn btn-primary" id="productSaveBtn" onclick="saveProduct()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- Import CSV Modal -->
+<div class="modal fade" id="importModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Import Products CSV</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small">Paste CSV or choose file. Columns: <code>description_cn</code>, <code>description_en</code>, <code>cbm</code>, <code>weight</code>, <code>hs_code</code>, <code>pieces_per_carton</code>, <code>unit_price</code>, <code>packaging</code>, <code>supplier_code</code>. Duplicate descriptions skipped.</p>
+        <input type="file" class="form-control form-control-sm mb-2" id="importCsvFile" accept=".csv,.txt" title="Choose CSV file">
+        <textarea class="form-control font-monospace" id="importCsvData" rows="10" placeholder="description_cn,description_en,cbm,weight,hs_code,pieces_per_carton,unit_price,packaging,supplier_code&#10;产品A,Product A,0.05,2.5,12345678,24,0.5,Box,S001"></textarea>
+        <div id="importResult" class="alert d-none mt-2"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="importBtn" onclick="doImport()">Import</button>
       </div>
     </div>
   </div>

@@ -38,6 +38,20 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         jsonResponse(['data' => $row]);
     }
 
+    if ($method === 'POST' && $id && $action === 'reset-password') {
+        $newPassword = trim($input['password'] ?? '');
+        if (strlen($newPassword) < 6) {
+            jsonError('Password must be at least 6 characters', 400);
+        }
+        $stmt = $pdo->prepare("SELECT id, email FROM users WHERE id = ?");
+        $stmt->execute([$id]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$user) jsonError('User not found', 404);
+        $hash = password_hash($newPassword, PASSWORD_DEFAULT);
+        $pdo->prepare("UPDATE users SET password_hash = ? WHERE id = ?")->execute([$hash, $id]);
+        jsonResponse(['data' => ['user_id' => (int) $id, 'email' => $user['email'], 'new_password' => $newPassword]]);
+    }
+
     if ($method === 'PUT' && $id) {
         $roles = $input['roles'] ?? null;
         $departmentIds = $input['department_ids'] ?? null;

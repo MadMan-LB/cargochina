@@ -1,0 +1,163 @@
+- generic [active] [ref=e1]:
+  - complementary [ref=e2]:
+    - generic [ref=e3]:
+      - link "CLMS" [ref=e4] [cursor=pointer]:
+        - /url: /cargochina/index.php
+      - button "Close" [ref=e5] [cursor=pointer]: ×
+    - navigation [ref=e6]:
+      - generic [ref=e7]: Main
+      - link "Dashboard" [ref=e8] [cursor=pointer]:
+        - /url: /cargochina/index.php
+        - img [ref=e9]
+        - text: Dashboard
+      - link "Orders" [ref=e11] [cursor=pointer]:
+        - /url: /cargochina/orders.php
+        - img [ref=e12]
+        - text: Orders
+      - link "Receiving" [ref=e14] [cursor=pointer]:
+        - /url: /cargochina/receiving.php
+        - img [ref=e15]
+        - text: Receiving
+      - link "Pipeline" [ref=e17] [cursor=pointer]:
+        - /url: /cargochina/pipeline.php
+        - img [ref=e18]
+        - text: Pipeline
+      - link "Consolidation" [ref=e20] [cursor=pointer]:
+        - /url: /cargochina/consolidation.php
+        - img [ref=e21]
+        - text: Consolidation
+      - generic [ref=e23]: Data
+      - link "Suppliers" [ref=e24] [cursor=pointer]:
+        - /url: /cargochina/suppliers.php
+        - img [ref=e25]
+        - text: Suppliers
+      - link "Customers" [ref=e27] [cursor=pointer]:
+        - /url: /cargochina/customers.php
+        - img [ref=e28]
+        - text: Customers
+      - link "Products" [ref=e30] [cursor=pointer]:
+        - /url: /cargochina/products.php
+        - img [ref=e31]
+        - text: Products
+      - generic [ref=e33]: Notifications
+      - link "Notifications" [ref=e34] [cursor=pointer]:
+        - /url: /cargochina/notifications.php
+        - img [ref=e35]
+        - text: Notifications
+      - link "Preferences" [ref=e37] [cursor=pointer]:
+        - /url: /cargochina/notification_preferences.php
+        - img [ref=e38]
+        - text: Preferences
+      - generic [ref=e40]: Administration
+      - link "Configuration" [ref=e41] [cursor=pointer]:
+        - /url: /cargochina/admin_config.php
+        - img [ref=e42]
+        - text: Configuration
+      - link "Users" [ref=e45] [cursor=pointer]:
+        - /url: /cargochina/admin_users.php
+        - img [ref=e46]
+        - text: Users
+      - link "Diagnostics" [ref=e48] [cursor=pointer]:
+        - /url: /cargochina/admin_diagnostics.php
+        - img [ref=e49]
+        - text: Diagnostics
+      - link "Tracking Push Log" [ref=e51] [cursor=pointer]:
+        - /url: /cargochina/admin_tracking_push.php
+        - img [ref=e52]
+        - text: Tracking Push Log
+      - link "Audit Log" [ref=e54] [cursor=pointer]:
+        - /url: /cargochina/admin_audit_log.php
+        - img [ref=e55]
+        - text: Audit Log
+    - generic [ref=e57]:
+      - generic [ref=e58]:
+        - img [ref=e59]
+        - generic [ref=e61]: Super Admin
+      - link "Logout" [ref=e62] [cursor=pointer]:
+        - /url: /cargochina/login.php?logout=1
+        - img [ref=e63]
+        - text: Logout
+  - generic [ref=e65]:
+    - banner [ref=e66]:
+      - button "Toggle sidebar" [ref=e67] [cursor=pointer]:
+        - img [ref=e68]
+      - generic [ref=e70]: Dashboard
+      - generic [ref=e72]: SuperAdmin
+    - generic [ref=e73]:
+      - heading "Dashboard" [level=1] [ref=e74]
+      - paragraph [ref=e75]: China Logistics Management System — Salameh Cargo
+      - generic [ref=e76]:
+        - generic [ref=e79]:
+          - generic [ref=e80]:
+            - generic [ref=e81]: To receive
+            - generic [ref=e82]: —
+          - link "View queue →" [ref=e83] [cursor=pointer]:
+            - /url: receiving.php
+        - generic [ref=e86]:
+          - generic [ref=e87]:
+            - generic [ref=e88]: Awaiting confirm
+            - generic [ref=e89]: —
+          - link "View →" [ref=e90] [cursor=pointer]:
+            - /url: orders.php?status=AwaitingCustomerConfirmation
+        - generic [ref=e93]:
+          - generic [ref=e94]:
+            - generic [ref=e95]: Ready to consolidate
+            - generic [ref=e96]: —
+          - link "View →" [ref=e97] [cursor=pointer]:
+            - /url: consolidation.php
+        - generic [ref=e100]:
+          - generic [ref=e101]:
+            - generic [ref=e102]: Notifications
+            - generic [ref=e103]: —
+          - link "View →" [ref=e104] [cursor=pointer]:
+            - /url: notifications.php
+      - generic [ref=e105]:
+        - link "📋 Orders Create & manage" [ref=e107] [cursor=pointer]:
+          - /url: orders.php
+          - generic [ref=e108]:
+            - generic [ref=e109]: 📋
+            - generic [ref=e110]:
+              - generic [ref=e111]: Orders
+              - generic [ref=e112]: Create & manage
+        - link "🏭 Suppliers Master data" [ref=e114] [cursor=pointer]:
+          - /url: suppliers.php
+          - generic [ref=e115]:
+            - generic [ref=e116]: 🏭
+            - generic [ref=e117]:
+              - generic [ref=e118]: Suppliers
+              - generic [ref=e119]: Master data
+        - link "👥 Customers Ledger & deposits" [ref=e121] [cursor=pointer]:
+          - /url: customers.php
+          - generic [ref=e122]:
+            - generic [ref=e123]: 👥
+            - generic [ref=e124]:
+              - generic [ref=e125]: Customers
+              - generic [ref=e126]: Ledger & deposits
+        - link "📦 Products Catalog" [ref=e128] [cursor=pointer]:
+          - /url: products.php
+          - generic [ref=e129]:
+            - generic [ref=e130]: 📦
+            - generic [ref=e131]:
+              - generic [ref=e132]: Products
+              - generic [ref=e133]: Catalog
+        - link "🏪 Receiving Warehouse queue" [ref=e135] [cursor=pointer]:
+          - /url: receiving.php
+          - generic [ref=e136]:
+            - generic [ref=e137]: 🏪
+            - generic [ref=e138]:
+              - generic [ref=e139]: Receiving
+              - generic [ref=e140]: Warehouse queue
+        - link "🚢 Consolidation Shipment drafts" [ref=e142] [cursor=pointer]:
+          - /url: consolidation.php
+          - generic [ref=e143]:
+            - generic [ref=e144]: 🚢
+            - generic [ref=e145]:
+              - generic [ref=e146]: Consolidation
+              - generic [ref=e147]: Shipment drafts
+        - link "📊 Pipeline Full status view" [ref=e149] [cursor=pointer]:
+          - /url: pipeline.php
+          - generic [ref=e150]:
+            - generic [ref=e151]: 📊
+            - generic [ref=e152]:
+              - generic [ref=e153]: Pipeline
+              - generic [ref=e154]: Full status view

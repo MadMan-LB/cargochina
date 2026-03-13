@@ -1,0 +1,146 @@
+- generic [ref=e1]:
+  - complementary [ref=e2]:
+    - link "CLMS" [ref=e4] [cursor=pointer]:
+      - /url: /cargochina/index.php
+    - navigation [ref=e5]:
+      - generic [ref=e6]: Main
+      - link "Dashboard" [ref=e7] [cursor=pointer]:
+        - /url: /cargochina/index.php
+        - img [ref=e8]
+        - text: Dashboard
+      - link "Orders" [ref=e10] [cursor=pointer]:
+        - /url: /cargochina/orders.php
+        - img [ref=e11]
+        - text: Orders
+      - link "Receiving" [ref=e13] [cursor=pointer]:
+        - /url: /cargochina/receiving.php
+        - img [ref=e14]
+        - text: Receiving
+      - link "Pipeline" [ref=e16] [cursor=pointer]:
+        - /url: /cargochina/pipeline.php
+        - img [ref=e17]
+        - text: Pipeline
+      - link "Consolidation" [ref=e19] [cursor=pointer]:
+        - /url: /cargochina/consolidation.php
+        - img [ref=e20]
+        - text: Consolidation
+      - generic [ref=e22]: Data
+      - link "Suppliers" [ref=e23] [cursor=pointer]:
+        - /url: /cargochina/suppliers.php
+        - img [ref=e24]
+        - text: Suppliers
+      - link "Customers" [ref=e26] [cursor=pointer]:
+        - /url: /cargochina/customers.php
+        - img [ref=e27]
+        - text: Customers
+      - link "Products" [ref=e29] [cursor=pointer]:
+        - /url: /cargochina/products.php
+        - img [ref=e30]
+        - text: Products
+      - generic [ref=e32]: Notifications
+      - link "Notifications" [ref=e33] [cursor=pointer]:
+        - /url: /cargochina/notifications.php
+        - img [ref=e34]
+        - text: Notifications
+      - link "Preferences" [ref=e36] [cursor=pointer]:
+        - /url: /cargochina/notification_preferences.php
+        - img [ref=e37]
+        - text: Preferences
+      - generic [ref=e39]: Administration
+      - link "Configuration" [ref=e40] [cursor=pointer]:
+        - /url: /cargochina/admin_config.php
+        - img [ref=e41]
+        - text: Configuration
+      - link "Users" [ref=e44] [cursor=pointer]:
+        - /url: /cargochina/admin_users.php
+        - img [ref=e45]
+        - text: Users
+      - link "Diagnostics" [ref=e47] [cursor=pointer]:
+        - /url: /cargochina/admin_diagnostics.php
+        - img [ref=e48]
+        - text: Diagnostics
+      - link "Tracking Push Log" [ref=e50] [cursor=pointer]:
+        - /url: /cargochina/admin_tracking_push.php
+        - img [ref=e51]
+        - text: Tracking Push Log
+      - link "Audit Log" [ref=e53] [cursor=pointer]:
+        - /url: /cargochina/admin_audit_log.php
+        - img [ref=e54]
+        - text: Audit Log
+    - generic [ref=e56]:
+      - generic [ref=e57]:
+        - img [ref=e58]
+        - generic [ref=e60]: Super Admin
+      - link "Logout" [ref=e61] [cursor=pointer]:
+        - /url: /cargochina/login.php?logout=1
+        - img [ref=e62]
+        - text: Logout
+  - generic [ref=e64]:
+    - banner [ref=e65]:
+      - button "Toggle sidebar" [ref=e66] [cursor=pointer]:
+        - img [ref=e67]
+      - generic [ref=e69]: Suppliers
+      - generic [ref=e71]: SuperAdmin
+    - generic [ref=e72]:
+      - heading "Suppliers" [level=1] [ref=e73]
+      - generic [ref=e74]:
+        - generic [ref=e75]:
+          - generic [ref=e76]: Supplier List
+          - button "+ Add Supplier" [active] [ref=e77] [cursor=pointer]
+        - table [ref=e80]:
+          - rowgroup [ref=e81]:
+            - row "Code Store ID Name Phone Factory Location Additional IDs Actions" [ref=e82]:
+              - columnheader "Code" [ref=e83]
+              - columnheader "Store ID" [ref=e84]
+              - columnheader "Name" [ref=e85]
+              - columnheader "Phone" [ref=e86]
+              - columnheader "Factory Location" [ref=e87]
+              - columnheader "Additional IDs" [ref=e88]
+              - columnheader "Actions" [ref=e89]
+          - rowgroup [ref=e90]:
+            - 'row "ADS919106 - Autotest Debug Supplier 919106 - - Tax ID: DBG Log visit Edit Pay History Del" [ref=e91]':
+              - cell "ADS919106" [ref=e92]
+              - cell "-" [ref=e93]
+              - cell "Autotest Debug Supplier 919106" [ref=e94]
+              - cell "-" [ref=e95]
+              - cell "-" [ref=e96]
+              - 'cell "Tax ID: DBG" [ref=e97]'
+              - cell "Log visit Edit Pay History Del" [ref=e98]:
+                - button "Log visit" [ref=e99] [cursor=pointer]
+                - button "Edit" [ref=e100] [cursor=pointer]
+                - button "Pay" [ref=e101] [cursor=pointer]
+                - button "History" [ref=e102] [cursor=pointer]
+                - button "Del" [ref=e103] [cursor=pointer]
+            - 'row "hs_supplier - Mastertools Company Limited 2.8 ★ China-Zhejiang Province-Yiwu City-Jiandong Street-Wuyue Squa… 0579-85178151/85178152 Fax: 0579-85177247 china idid - Log visit Edit Pay History Del" [ref=e104]':
+              - cell "hs_supplier" [ref=e105]
+              - cell "-" [ref=e106]
+              - cell "Mastertools Company Limited 2.8 ★ China-Zhejiang Province-Yiwu City-Jiandong Street-Wuyue Squa…" [ref=e107]:
+                - text: Mastertools Company Limited
+                - generic "Reliability score based on orders, payments, variance rate" [ref=e109]: 2.8 ★
+                - text: China-Zhejiang Province-Yiwu City-Jiandong Street-Wuyue Squa…
+              - 'cell "0579-85178151/85178152 Fax: 0579-85177247" [ref=e110]':
+                - text: 0579-85178151/85178152
+                - text: "Fax: 0579-85177247"
+              - cell "china idid" [ref=e111]
+              - cell "-" [ref=e112]
+              - cell "Log visit Edit Pay History Del" [ref=e113]:
+                - button "Log visit" [ref=e114] [cursor=pointer]
+                - button "Edit" [ref=e115] [cursor=pointer]
+                - button "Pay" [ref=e116] [cursor=pointer]
+                - button "History" [ref=e117] [cursor=pointer]
+                - button "Del" [ref=e118] [cursor=pointer]
+            - row "TST - Test 4.0 ★ - - - Log visit Edit Pay History Del" [ref=e119]:
+              - cell "TST" [ref=e120]
+              - cell "-" [ref=e121]
+              - cell "Test 4.0 ★" [ref=e122]:
+                - text: Test
+                - generic "Reliability score based on orders, payments, variance rate" [ref=e124]: 4.0 ★
+              - cell "-" [ref=e125]
+              - cell "-" [ref=e126]
+              - cell "-" [ref=e127]
+              - cell "Log visit Edit Pay History Del" [ref=e128]:
+                - button "Log visit" [ref=e129] [cursor=pointer]
+                - button "Edit" [ref=e130] [cursor=pointer]
+                - button "Pay" [ref=e131] [cursor=pointer]
+                - button "History" [ref=e132] [cursor=pointer]
+                - button "Del" [ref=e133] [cursor=pointer]

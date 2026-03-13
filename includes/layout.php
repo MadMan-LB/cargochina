@@ -57,6 +57,14 @@ $breadcrumbs = $breadcrumbs ?? [];
           Receiving
         </a>
       <?php endif; ?>
+      <?php if ($isAdmin || $isWarehouse): ?>
+        <a class="sidebar-link <?= $currentPage === 'confirmations' ? 'active' : '' ?>" href="<?= $basePath ?>/confirmations.php">
+          <svg class="sidebar-icon" viewBox="0 0 24 24">
+            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+          </svg>
+          Confirmations
+        </a>
+      <?php endif; ?>
       <?php if ($isAdmin): ?>
         <a class="sidebar-link <?= $currentPage === 'pipeline' ? 'active' : '' ?>" href="<?= $basePath ?>/pipeline.php">
           <svg class="sidebar-icon" viewBox="0 0 24 24">
@@ -69,6 +77,12 @@ $breadcrumbs = $breadcrumbs ?? [];
             <path d="M20 2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9h-4v4h-2v-4H9v4H7v-4H3V9h4V5h2v4h4V5h2v4h4v2z" />
           </svg>
           Consolidation
+        </a>
+        <a class="sidebar-link <?= $currentPage === 'containers' ? 'active' : '' ?>" href="<?= $basePath ?>/containers.php">
+          <svg class="sidebar-icon" viewBox="0 0 24 24">
+            <path d="M20 8h-3V4H3c-1.1 0-2 .9-2 2v11h2c0 1.66 1.34 3 3 3s3-1.34 3-3h6c0 1.66 1.34 3 3 3s3-1.34 3-3h2v-5l-3-4zM6 18.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm13.5-9l1.96 2.5H17V9.5h2.5zm-1.5 9c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z" />
+          </svg>
+          Containers
         </a>
       <?php endif; ?>
 
@@ -169,7 +183,11 @@ $breadcrumbs = $breadcrumbs ?? [];
         </svg>
       </button>
       <div class="topbar-title"><?= htmlspecialchars($pageTitle) ?></div>
-      <div class="topbar-actions">
+      <div class="topbar-actions d-flex align-items-center gap-2">
+        <span class="btn-group btn-group-sm" role="group" title="Description language">
+          <button type="button" class="btn btn-outline-secondary btn-sm desc-lang-btn" data-lang="en">EN</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm desc-lang-btn" data-lang="cn">中文</button>
+        </span>
         <span class="topbar-role badge bg-primary bg-opacity-10 text-primary"><?= htmlspecialchars(implode(', ', $userRoles)) ?></span>
       </div>
     </header>

@@ -1,7 +1,8 @@
 <?php
 
 /**
- * Receiving API - queue (pending orders), receipts (history), receipt detail
+ * Receiving API - queue (pending orders), search, receipts (history), receipt detail
+ * GET /receiving/search?q= — Search orders by id, customer/supplier name, phone, shipping code (Approved/InTransit)
  * GET /receiving/queue?status=&customer_id=&supplier_id=&order_id=&date_from=&date_to=
  * GET /receiving/receipts?order_id=&customer_id=&date_from=&date_to=
  * GET /receiving/receipts/{id}
@@ -15,6 +16,48 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         jsonError('Method not allowed', 405);
     }
     $pdo = getDb();
+
+    if ($id === 'search') {
+        $q = trim($_GET['q'] ?? '');
+        if (strlen($q) < 1) {
+            jsonResponse(['data' => []]);
+        }
+        $statuses = ['Approved', 'InTransitToWarehouse'];
+        $placeholders = implode(',', array_fill(0, count($statuses), '?'));
+        $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+        $sql = "SELECT o.id, o.customer_id, o.supplier_id, o.expected_ready_date, o.status,
+            c.name as customer_name, c.phone as customer_phone, c.code as customer_code,
+            s.name as supplier_name, s.phone as supplier_phone
+            FROM orders o
+            JOIN customers c ON o.customer_id = c.id
+            JOIN suppliers s ON o.supplier_id = s.id
+            WHERE o.status IN ($placeholders)
+            AND (
+                o.id = ?
+                OR c.name LIKE ?
+                OR c.code LIKE ?
+                OR (c.phone IS NOT NULL AND c.phone LIKE ?)
+                OR s.name LIKE ?
+                OR s.code LIKE ?
+                OR (s.phone IS NOT NULL AND s.phone LIKE ?)
+                OR EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND oi.shipping_code LIKE ?)
+            )
+            ORDER BY o.expected_ready_date ASC, o.id ASC
+            LIMIT 30";
+        $oid = ctype_digit($q) ? (int) $q : 0;
+        $params = array_merge($statuses, [$oid, $like, $like, $like, $like, $like, $like, $like]);
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as &$r) {
+            $items = $pdo->prepare("SELECT oi.id, oi.shipping_code, oi.cartons, oi.declared_cbm, oi.declared_weight FROM order_items oi WHERE oi.order_id = ?");
+            $items->execute([$r['id']]);
+            $r['items'] = $items->fetchAll(PDO::FETCH_ASSOC);
+            $r['declared_cbm'] = array_sum(array_column($r['items'], 'declared_cbm'));
+            $r['declared_weight'] = array_sum(array_column($r['items'], 'declared_weight'));
+        }
+        jsonResponse(['data' => $rows]);
+    }
 
     if ($id === 'queue') {
         $statuses = $_GET['status'] ?? null;

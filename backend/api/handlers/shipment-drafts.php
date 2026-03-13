@@ -175,8 +175,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     jsonError('Capacity exceeded: total CBM/weight exceeds container limits', 400);
                 }
                 $pdo->prepare("UPDATE shipment_drafts SET container_id = ? WHERE id = ?")->execute([$containerId, $id]);
-                $ph = implode(',', array_fill(0, count($orderIds), '?'));
-                $pdo->prepare("UPDATE orders SET status='AssignedToContainer' WHERE id IN ($ph)")->execute($orderIds);
+                if (!empty($orderIds)) {
+                    $ph = implode(',', array_fill(0, count($orderIds), '?'));
+                    $pdo->prepare("UPDATE orders SET status='AssignedToContainer' WHERE id IN ($ph)")->execute($orderIds);
+                }
                 $stmt = $pdo->prepare("SELECT sd.*, c.code as container_code FROM shipment_drafts sd LEFT JOIN containers c ON sd.container_id = c.id WHERE sd.id = ?");
                 $stmt->execute([$id]);
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);

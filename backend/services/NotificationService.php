@@ -209,14 +209,42 @@ class NotificationService
         unset($GLOBALS['_log_order_id']);
     }
 
-    public function notifyOrderReceived(int $orderId, int $userId, bool $varianceDetected): void
+    public function notifyOrderReceived(int $orderId, int $userId, bool $varianceDetected, ?string $confirmToken = null): void
     {
         $eventType = $varianceDetected ? 'variance_confirmation' : 'order_received';
         $title = $varianceDetected ? 'Order #' . $orderId . ' — confirmation required' : 'Order #' . $orderId . ' received';
-        $body = $varianceDetected ? 'CBM/weight variance detected. Customer confirmation required.' : 'Order received at warehouse.';
+        $confirmLink = '';
+        if ($varianceDetected && $confirmToken) {
+            $base = rtrim($this->config['app_url'] ?? 'http://localhost/cargochina', '/');
+            $confirmLink = "\n\nConfirmation link: $base/confirm.php?token=$confirmToken\n(Share with customer to confirm or cancel variance)";
+        }
+        $body = $varianceDetected
+            ? 'CBM/weight variance detected. Customer confirmation required.' . $confirmLink
+            : 'Order received at warehouse.';
         $GLOBALS['_log_order_id'] = $orderId;
         $this->notifyAdmins($eventType, $title, $body, ['order_id' => $orderId, 'variance' => $varianceDetected]);
         unset($GLOBALS['_log_order_id']);
+    }
+
+    /** Notify admins about stale orders (awaiting confirmation or overdue) */
+    public function notifyStaleOrders(int $awaitingCount, int $overdueCount, int $thresholdDays): void
+    {
+        if ($awaitingCount <= 0 && $overdueCount <= 0) {
+            return;
+        }
+        $parts = [];
+        if ($awaitingCount > 0) {
+            $parts[] = $awaitingCount . ' order(s) awaiting confirmation beyond ' . $thresholdDays . ' days';
+        }
+        if ($overdueCount > 0) {
+            $parts[] = $overdueCount . ' order(s) overdue (past expected ready date)';
+        }
+        $title = 'Stale order alert';
+        $body = implode('; ', $parts) . '. See Confirmations or Orders.';
+        $this->notifyAdmins('stale_order_alert', $title, $body, [
+            'stale_awaiting_confirmation' => $awaitingCount,
+            'stale_overdue' => $overdueCount,
+        ]);
     }
 
     public function notifyShipmentFinalized(int $shipmentDraftId, int $orderCount): void

@@ -1,5 +1,5 @@
 /**
- * Dashboard - load actionable counts, my tasks (zero-click visibility)
+ * Dashboard - load actionable counts, my tasks, stale-order alerts
  */
 document.addEventListener("DOMContentLoaded", loadDashboardStats);
 
@@ -8,6 +8,7 @@ async function loadDashboardStats() {
         const res = await api("GET", "/dashboard/stats");
         const s = res.data || {};
         const el = (id) => document.getElementById(id);
+
         if (el("statPendingReceiving"))
             el("statPendingReceiving").textContent = s.pending_receiving ?? 0;
         if (el("statAwaitingConfirm"))
@@ -19,6 +20,25 @@ async function loadDashboardStats() {
         if (el("statUnreadNotif"))
             el("statUnreadNotif").textContent = s.unread_notifications ?? 0;
 
+        // Stale-order alert
+        const staleAlert = el("staleAlert");
+        const staleText = el("staleAlertText");
+        const msgs = [];
+        const days = s.stale_threshold_days ?? 3;
+        if ((s.stale_awaiting_confirmation ?? 0) > 0)
+            msgs.push(
+                `${s.stale_awaiting_confirmation} order${s.stale_awaiting_confirmation > 1 ? "s" : ""} awaiting customer confirmation for more than ${days} day${days > 1 ? "s" : ""}`,
+            );
+        if ((s.stale_overdue ?? 0) > 0)
+            msgs.push(
+                `${s.stale_overdue} order${s.stale_overdue > 1 ? "s" : ""} past expected ready date`,
+            );
+        if (staleAlert && staleText && msgs.length > 0) {
+            staleText.textContent = msgs.join(" · ");
+            staleAlert.classList.remove("d-none");
+        }
+
+        // My tasks
         const tasks = s.my_tasks || [];
         const container = el("myTasksContainer");
         const card = el("myTasksCard");

@@ -29,7 +29,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if (!$tpl) {
             jsonError('Template not found', 404);
         }
-        $si = $pdo->prepare("SELECT * FROM order_template_items WHERE template_id = ? ORDER BY sort_order, id");
+        $chk = @$pdo->query("SHOW COLUMNS FROM order_template_items LIKE 'supplier_id'");
+        $hasSupplier = $chk && $chk->rowCount() > 0;
+        $sql = $hasSupplier
+            ? "SELECT oti.*, s.name as supplier_name FROM order_template_items oti LEFT JOIN suppliers s ON oti.supplier_id = s.id WHERE oti.template_id = ? ORDER BY oti.sort_order, oti.id"
+            : "SELECT * FROM order_template_items WHERE template_id = ? ORDER BY sort_order, id";
+        $si = $pdo->prepare($sql);
         $si->execute([$id]);
         $tpl['items'] = $si->fetchAll(PDO::FETCH_ASSOC);
         jsonResponse(['data' => $tpl]);
@@ -51,7 +56,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $ins->execute([$name, $userId]);
             $templateId = (int) $pdo->lastInsertId();
 
-            $insItem = $pdo->prepare("INSERT INTO order_template_items (template_id, sort_order, item_no, shipping_code, product_id, description_cn, description_en, cartons, qty_per_carton, quantity, unit, declared_cbm, declared_weight, item_length, item_width, item_height, unit_price, total_amount, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+            $chk = @$pdo->query("SHOW COLUMNS FROM order_template_items LIKE 'supplier_id'");
+            $hasSupplier = $chk && $chk->rowCount() > 0;
+            $insCols = "template_id, sort_order, item_no, shipping_code, product_id, description_cn, description_en, cartons, qty_per_carton, quantity, unit, declared_cbm, declared_weight, item_length, item_width, item_height, unit_price, total_amount, notes";
+            $insVals = "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?";
+            if ($hasSupplier) {
+                $insCols .= ", supplier_id";
+                $insVals .= ",?";
+            }
+            $insItem = $pdo->prepare("INSERT INTO order_template_items ($insCols) VALUES ($insVals)");
 
             foreach ($items as $idx => $it) {
                 $qty = (float) ($it['quantity'] ?? 0);
@@ -61,7 +74,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
                 $unit = in_array($it['unit'] ?? '', ['cartons', 'pieces']) ? $it['unit'] : 'cartons';
                 $desc = $it['description_cn'] ?? $it['description'] ?? '';
-                $insItem->execute([
+                $supplierId = !empty($it['supplier_id']) ? (int) $it['supplier_id'] : null;
+                $params = [
                     $templateId,
                     $idx,
                     $it['item_no'] ?? null,
@@ -81,7 +95,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     isset($it['unit_price']) ? (float) $it['unit_price'] : null,
                     isset($it['total_amount']) ? (float) $it['total_amount'] : null,
                     $it['notes'] ?? null,
-                ]);
+                ];
+                if ($hasSupplier) {
+                    $params[] = $supplierId;
+                }
+                $insItem->execute($params);
             }
             $pdo->commit();
             jsonResponse(['data' => ['id' => $templateId, 'name' => $name]], 201);

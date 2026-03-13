@@ -1,4 +1,16 @@
-document.addEventListener("DOMContentLoaded", loadSuppliers);
+document.addEventListener("DOMContentLoaded", () => {
+    loadSuppliers();
+    document
+        .getElementById("supplierSearch")
+        ?.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") applySupplierFilters();
+        });
+    ["supplierPaymentFilter", "supplierSort", "supplierOrder"].forEach((id) => {
+        document
+            .getElementById(id)
+            ?.addEventListener("change", applySupplierFilters);
+    });
+});
 
 let additionalIdIndex = 0;
 
@@ -7,9 +19,31 @@ function isBuyer() {
     return card?.dataset?.isBuyer === "1";
 }
 
+function getSupplierParams() {
+    const params = new URLSearchParams();
+    const q = document.getElementById("supplierSearch")?.value?.trim();
+    const payment = document
+        .getElementById("supplierPaymentFilter")
+        ?.value?.trim();
+    const sort = document.getElementById("supplierSort")?.value || "name";
+    const order = document.getElementById("supplierOrder")?.value || "asc";
+    if (q) params.set("q", q);
+    if (payment) params.set("payment_status", payment);
+    params.set("sort", sort);
+    params.set("order", order);
+    return params.toString();
+}
+
+function applySupplierFilters() {
+    loadSuppliers();
+}
+
 async function loadSuppliers() {
+    const btn = document.getElementById("supplierApplyBtn");
     try {
-        const res = await api("GET", "/suppliers");
+        if (btn) btn.disabled = true;
+        const qs = getSupplierParams();
+        const res = await api("GET", "/suppliers" + (qs ? "?" + qs : ""));
         const rows = res.data || [];
         const tbody = document.querySelector("#suppliersTable tbody");
         const buyer = isBuyer();
@@ -29,12 +63,23 @@ async function loadSuppliers() {
           <button class="btn btn-sm btn-outline-info" onclick="showPayHistory(${r.id}, '${nameEsc}')">History</button>
           <button class="btn btn-sm btn-outline-danger" onclick="deleteSupplier(${r.id}, '${nameEsc}')">Del</button>`;
                     }
+                    const scoreHtml =
+                        r.reliability_score != null
+                            ? `<span class="badge ${r.reliability_score >= 4 ? "bg-success" : r.reliability_score >= 2.5 ? "bg-warning text-dark" : "bg-danger"}" title="Reliability score based on orders, payments, variance rate">${parseFloat(r.reliability_score).toFixed(1)} ★</span>`
+                            : "";
+                    const addrTitle = [r.address, r.factory_location]
+                        .filter(Boolean)
+                        .join(" | ");
                     return `
       <tr>
         <td>${escapeHtml(r.code)}</td>
         <td>${escapeHtml(r.store_id || "-")}</td>
-        <td>${escapeHtml(r.name)}</td>
-        <td>${escapeHtml(r.phone || "-")}</td>
+        <td>
+          ${escapeHtml(r.name)}
+          ${scoreHtml ? `<br><small>${scoreHtml}</small>` : ""}
+          ${addrTitle ? `<br><small class="text-muted">${escapeHtml(addrTitle.substring(0, 60))}${addrTitle.length > 60 ? "…" : ""}</small>` : ""}
+        </td>
+        <td>${escapeHtml(r.phone || "-")}${r.fax ? `<br><small class="text-muted">Fax: ${escapeHtml(r.fax)}</small>` : ""}</td>
         <td>${escapeHtml(r.factory_location || "-")}</td>
         <td><small class="text-muted">${escapeHtml(addIdsStr)}</small></td>
         <td class="table-actions">${actions}</td>
@@ -45,6 +90,8 @@ async function loadSuppliers() {
             '<tr><td colspan="7" class="text-muted">No suppliers yet.</td></tr>';
     } catch (e) {
         showToast(e.message, "danger");
+    } finally {
+        if (btn) btn.disabled = false;
     }
 }
 
@@ -133,6 +180,8 @@ function openSupplierForm() {
     document.getElementById("supplierId").value = "";
     document.getElementById("supplierModalTitle").textContent = "Add Supplier";
     document.getElementById("additionalIdsContainer").innerHTML = "";
+    document.getElementById("supplierFax").value = "";
+    document.getElementById("supplierAddress").value = "";
     addAdditionalIdRow();
 }
 
@@ -145,8 +194,10 @@ async function editSupplier(id) {
         document.getElementById("supplierStoreId").value = d.store_id || "";
         document.getElementById("supplierName").value = d.name;
         document.getElementById("supplierPhone").value = d.phone || "";
+        document.getElementById("supplierFax").value = d.fax || "";
         document.getElementById("supplierFactory").value =
             d.factory_location || "";
+        document.getElementById("supplierAddress").value = d.address || "";
         document.getElementById("supplierNotes").value = d.notes || "";
         document.getElementById("supplierModalTitle").textContent =
             "Edit Supplier";
@@ -174,8 +225,11 @@ async function saveSupplier() {
             document.getElementById("supplierStoreId").value.trim() || null,
         name: document.getElementById("supplierName").value.trim(),
         phone: document.getElementById("supplierPhone").value.trim() || null,
+        fax: document.getElementById("supplierFax").value.trim() || null,
         factory_location:
             document.getElementById("supplierFactory").value.trim() || null,
+        address:
+            document.getElementById("supplierAddress").value.trim() || null,
         notes: document.getElementById("supplierNotes").value.trim() || null,
         additional_ids: collectAdditionalIds(),
     };
@@ -319,3 +373,53 @@ async function deleteSupplier(id, name) {
         showToast(e.message, "danger");
     }
 }
+
+window.openImportModal = function (entity) {
+    window._importEntity = entity || "suppliers";
+    window._importOnSuccess = loadSuppliers;
+    const ta = document.getElementById("importCsvData");
+    const resultEl = document.getElementById("importResult");
+    const fileInput = document.getElementById("importCsvFile");
+    if (ta) ta.value = "";
+    if (fileInput) fileInput.value = "";
+    if (resultEl) {
+        resultEl.classList.add("d-none");
+        resultEl.textContent = "";
+    }
+};
+
+window.doImport = async function () {
+    const entity = window._importEntity || "suppliers";
+    const csv = document.getElementById("importCsvData")?.value?.trim();
+    if (!csv) {
+        showToast("Paste CSV data first", "danger");
+        return;
+    }
+    const btn = document.getElementById("importBtn");
+    const resultEl = document.getElementById("importResult");
+    try {
+        setLoading(btn, true);
+        if (resultEl) {
+            resultEl.classList.add("d-none");
+            resultEl.textContent = "";
+        }
+        const res = await api("POST", "/" + entity + "/import", { csv });
+        const d = res.data;
+        let msg = `Created: ${d.created}, Skipped: ${d.skipped}`;
+        if (d.errors?.length) msg += `; Errors: ${d.errors.join("; ")}`;
+        if (resultEl) {
+            resultEl.textContent = msg;
+            resultEl.className =
+                "alert alert-" +
+                (d.errors?.length ? "warning" : "success") +
+                " mt-2";
+            resultEl.classList.remove("d-none");
+        }
+        showToast(msg);
+        if (d.created > 0 && window._importOnSuccess) window._importOnSuccess();
+    } catch (e) {
+        showToast(e.message, "danger");
+    } finally {
+        setLoading(btn, false);
+    }
+};

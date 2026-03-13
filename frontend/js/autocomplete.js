@@ -8,6 +8,13 @@ const AUTOCOMPLETE_API_BASE =
         ? window.API_BASE
         : "/cargochina/api/v1";
 
+function formatAutocompleteParts(...parts) {
+    return parts
+        .map((part) => (part == null ? "" : String(part).trim()))
+        .filter(Boolean)
+        .join(" — ");
+}
+
 const Autocomplete = {
     debounceMs: 250,
     minChars: 1,
@@ -184,16 +191,14 @@ const Autocomplete = {
 
     defaultRender: {
         customers: (c) =>
-            `${c.name || ""} — ${c.code || ""}`
-                .replace(/^ — | — $/g, "")
-                .trim() || `#${c.id}`,
+            formatAutocompleteParts(c.name, c.code) || `#${c.id}`,
         suppliers: (s) =>
-            `${s.name || ""} — ${s.phone || ""} — ${s.code || s.store_id || ""}`
-                .replace(/^ — | — $/g, "")
-                .trim() || `#${s.id}`,
+            formatAutocompleteParts(s.name, s.phone, s.code || s.store_id) ||
+            `#${s.id}`,
         products: (p) =>
-            `${p.description_cn || p.description_en || ""} — ${p.hs_code || ""}`
-                .replace(/^ — | — $/g, "")
-                .trim() || `#${p.id}`,
+            formatAutocompleteParts(
+                p.description_cn || p.description_en,
+                p.hs_code,
+            ) || `#${p.id}`,
     },
 };

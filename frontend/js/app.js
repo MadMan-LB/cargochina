@@ -3,11 +3,91 @@
  */
 
 const API_BASE = "/cargochina/api/v1";
-if (typeof window !== "undefined") window.API_BASE = API_BASE;
+
+/** Humanized order status labels (backend values unchanged) */
+const ORDER_STATUS_LABELS = {
+    Draft: "Draft",
+    Submitted: "Submitted",
+    Approved: "Approved",
+    InTransitToWarehouse: "In Transit",
+    ReceivedAtWarehouse: "Received",
+    AwaitingCustomerConfirmation: "Awaiting Confirmation",
+    Confirmed: "Confirmed",
+    ReadyForConsolidation: "Ready for Consolidation",
+    ConsolidatedIntoShipmentDraft: "In Shipment Draft",
+    AssignedToContainer: "Assigned to Container",
+    FinalizedAndPushedToTracking: "Finalized",
+};
+function statusLabel(s) {
+    return (s && ORDER_STATUS_LABELS[s]) || s || "—";
+}
+function statusBadgeClass(s) {
+    const map = {
+        Draft: "status-draft",
+        Submitted: "status-submitted",
+        Approved: "status-approved",
+        InTransitToWarehouse: "status-in-transit",
+        ReceivedAtWarehouse: "status-received",
+        AwaitingCustomerConfirmation: "status-awaiting",
+        Confirmed: "status-confirmed",
+        ReadyForConsolidation: "status-ready",
+        ConsolidatedIntoShipmentDraft: "status-consolidated",
+        AssignedToContainer: "status-assigned",
+        FinalizedAndPushedToTracking: "status-finalized",
+    };
+    return (s && map[s]) || "status-draft";
+}
+/** Description language: 'en' or 'cn'. Stored in localStorage. Default 'en'. */
+function descLang() {
+    return (
+        (typeof localStorage !== "undefined" &&
+            localStorage.getItem("clms_desc_lang")) ||
+        "en"
+    );
+}
+function descText(item) {
+    if (!item) return "—";
+    const lang = descLang();
+    const en = item.description_en || item.description_cn;
+    const cn = item.description_cn || item.description_en;
+    return (lang === "cn" ? cn : en) || "—";
+}
+function setDescLang(lang) {
+    if (typeof localStorage !== "undefined")
+        localStorage.setItem("clms_desc_lang", lang);
+}
+
+if (typeof window !== "undefined") {
+    window.statusLabel = statusLabel;
+    window.statusBadgeClass = statusBadgeClass;
+    window.API_BASE = API_BASE;
+    window.descLang = descLang;
+    window.descText = descText;
+    window.setDescLang = setDescLang;
+}
 
 const UPLOAD_BASE = "/cargochina/api/v1/upload";
 
+/** In-memory cache for read-heavy GET endpoints (departments, roles, config). TTL 60s. */
+const _apiCache = { data: {}, ts: {} };
+const _cachePaths = ["/departments", "/roles", "/config/receiving"];
+const _cacheTtlMs = 60000;
+
 async function api(method, path, body = null) {
+    const cacheKey = method + " " + path;
+    if (
+        method === "GET" &&
+        _cachePaths.some((p) => path === p || path.startsWith(p + "?"))
+    ) {
+        const now = Date.now();
+        if (
+            _apiCache.data[cacheKey] &&
+            _apiCache.ts[cacheKey] &&
+            now - _apiCache.ts[cacheKey] < _cacheTtlMs
+        ) {
+            return _apiCache.data[cacheKey];
+        }
+    }
     const opts = {
         method,
         headers: { "Content-Type": "application/json" },
@@ -24,6 +104,13 @@ async function api(method, path, body = null) {
             err.message || data.message || res.statusText || "Request failed";
         const reqId = err.request_id || data.request_id;
         throw new Error(msg + (reqId ? ` (ref: ${reqId})` : ""));
+    }
+    if (
+        method === "GET" &&
+        _cachePaths.some((p) => path === p || path.startsWith(p + "?"))
+    ) {
+        _apiCache.data[cacheKey] = data;
+        _apiCache.ts[cacheKey] = Date.now();
     }
     return data;
 }
@@ -105,3 +192,15 @@ async function uploadFile(file, opts = {}) {
         (j.data?.url ? j.data.url.replace("/cargochina/backend/", "") : null)
     );
 }
+
+document.addEventListener("change", function (e) {
+    if (e.target.id === "importCsvFile" && e.target.files?.[0]) {
+        const f = e.target.files[0];
+        const r = new FileReader();
+        r.onload = function () {
+            const ta = document.getElementById("importCsvData");
+            if (ta) ta.value = r.result;
+        };
+        r.readAsText(f);
+    }
+});

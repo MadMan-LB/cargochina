@@ -1,0 +1,17 @@
+{
+    "name": "clms/cargochina",
+    "description": "CLMS Cargo China",
+    "require": {
+        "php": ">=7.4",
+        "phpoffice/phpspreadsheet": "^1.29",
+        "maennchen/zipstream-php": "^2.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "CLMS\\": "backend/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true
+    }
+}

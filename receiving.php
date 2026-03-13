@@ -32,10 +32,10 @@ require 'includes/layout.php';
       </div>
       <div class="col-12 col-md-6 col-lg-2">
         <label class="form-label small mb-0">Shipping code</label>
-        <input type="text" class="form-control form-control-sm" id="filterShippingCode" placeholder="Agent code">
+        <input type="text" class="form-control form-control-sm" id="filterShippingCode" placeholder="e.g. DUM_C003">
       </div>
       <div class="col-12 col-md-6 col-lg-2">
-        <button type="button" class="btn btn-primary btn-sm w-100" onclick="applyFilters()">Apply</button>
+        <button type="button" class="btn btn-primary btn-sm w-100" id="applyFiltersBtn" onclick="applyFilters()">Apply</button>
       </div>
       <div class="col-12 col-md-6 col-lg-2">
         <button type="button" class="btn btn-outline-secondary btn-sm w-100" onclick="exportReceivingCsv()" title="Export queue to CSV">Export CSV</button>
@@ -81,6 +81,8 @@ require 'includes/layout.php';
   </div>
 </div>
 
+<p class="text-muted small mb-3">To merge orders into the same container or keep them in separate containers, use <a href="<?= $basePath ?? '/cargochina' ?>/consolidation.php">Consolidation</a>: add orders to a shipment draft = one container; create multiple drafts for multiple containers.</p>
+
 <!-- Receive Order Card -->
 <div class="card mt-4">
   <div class="card-header d-flex justify-content-between align-items-center">
@@ -92,9 +94,9 @@ require 'includes/layout.php';
       <div class="row mb-3 form-row-responsive">
         <div class="col-12 col-md-6">
           <label class="form-label">Select Order (Approved / In Transit)</label>
-          <select class="form-select" id="receiveOrder">
-            <option value="">— Select order —</option>
-          </select>
+          <input type="text" class="form-control" id="receiveOrderSearch" placeholder="Search by order #, customer, supplier, phone, shipping code..." autocomplete="off">
+          <input type="hidden" id="receiveOrderId">
+          <small class="text-muted">Type to search across order ID, customer/supplier names, phone numbers, shipping codes</small>
         </div>
       </div>
     </div>
