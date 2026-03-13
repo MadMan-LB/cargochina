@@ -4,25 +4,69 @@ require_once 'includes/page_guard.php';
 requireRoleForPage(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin']);
 $currentPage = 'containers';
 $pageTitle = 'Containers';
+$isSuperAdmin = in_array('SuperAdmin', $_SESSION['user_roles'] ?? []);
 require 'includes/layout.php';
 ?>
-<h1 class="mb-4">Containers</h1>
-<p class="text-muted mb-4">View and download all orders in a container. Each download is a single Excel file with orders separated by <code>##</code>, customer name, and phone.</p>
+<h1 class="mb-3">Containers</h1>
+
+<!-- Search & Filter bar -->
+<div class="card mb-3">
+  <div class="card-body py-3">
+    <div class="row g-2 align-items-end">
+      <div class="col-12 col-md-4">
+        <label class="form-label small mb-1">Search</label>
+        <input type="text" id="containerSearch" class="form-control form-control-sm" placeholder="Code, customer, phone, shipping code, item description…" oninput="debounceSearch()">
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label small mb-1">Status</label>
+        <select id="containerStatusFilter" class="form-select form-select-sm" onchange="loadContainers()">
+          <option value="">All statuses</option>
+          <option value="planning">Planning</option>
+          <option value="to_go">To Go</option>
+          <option value="on_route">On Route</option>
+          <option value="arrived">Arrived</option>
+          <option value="available">Available</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label small mb-1">Fill Level</label>
+        <select id="containerFillFilter" class="form-select form-select-sm" onchange="applyClientFilters()">
+          <option value="">Any</option>
+          <option value="empty">Empty (0%)</option>
+          <option value="partial">Partial (1–84%)</option>
+          <option value="almost">Almost Full (≥85%)</option>
+          <option value="full">Full (100%)</option>
+        </select>
+      </div>
+      <div class="col-12 col-md-2">
+        <button class="btn btn-outline-secondary btn-sm w-100" onclick="resetFilters()">Clear</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Container list -->
 <div class="card">
-  <div class="card-header">Container List</div>
-  <div class="card-body">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span class="fw-semibold">Container List <span class="text-muted fw-normal" id="containerCountLabel"></span></span>
+  </div>
+  <div class="card-body p-0">
     <div id="containersTable" class="table-responsive">
-      <table class="table table-hover table-striped table-sm align-middle">
-        <thead>
+      <table class="table table-hover table-striped table-sm align-middle mb-0">
+        <thead class="table-light">
           <tr>
             <th>ID</th>
             <th>Code</th>
+            <th>Status</th>
+            <th>Orders</th>
+            <th>CBM Fill</th>
+            <th>Weight Fill</th>
             <th>Max CBM</th>
-            <th>Max Weight (kg)</th>
+            <th>Max Weight</th>
             <th>Actions</th>
           </tr>
         </thead>
-        <tbody></tbody>
+        <tbody id="containersTbody"></tbody>
       </table>
     </div>
   </div>
@@ -33,7 +77,10 @@ require 'includes/layout.php';
   <div class="modal-dialog modal-xl modal-fullscreen-lg-down">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title" id="containerViewTitle">Container Orders</h5>
+        <div>
+          <h5 class="modal-title" id="containerViewTitle">Container</h5>
+          <div id="containerViewSubtitle" class="text-muted small"></div>
+        </div>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body" id="containerViewBody">
@@ -44,6 +91,83 @@ require 'includes/layout.php';
       <div class="modal-footer">
         <a id="containerViewDownload" class="btn btn-outline-success" href="#" download>Download Excel</a>
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Assign Orders to Container Modal -->
+<div class="modal fade" id="assignOrdersModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h5 class="modal-title" id="assignOrdersTitle">Assign Orders</h5>
+          <div id="assignOrdersSubtitle" class="text-muted small"></div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <!-- Capacity bars -->
+        <div id="assignCapacityPanel" class="mb-3">
+          <div class="d-flex justify-content-between small mb-1"><span class="text-muted fw-semibold">CBM Fill</span><span id="assignCbmLabel"></span></div>
+          <div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;" class="mb-2">
+            <div id="assignCbmBar" style="height:100%;border-radius:4px;transition:width .3s;"></div>
+          </div>
+          <div class="d-flex justify-content-between small mb-1"><span class="text-muted fw-semibold">Weight Fill</span><span id="assignWLabel"></span></div>
+          <div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;">
+            <div id="assignWBar" style="height:100%;border-radius:4px;transition:width .3s;"></div>
+          </div>
+        </div>
+        <div id="assignCapacityWarning" class="alert alert-danger py-2 small d-none"></div>
+        <!-- Order list -->
+        <div class="table-responsive" style="max-height:340px;overflow-y:auto;">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="table-light sticky-top">
+              <tr>
+                <th><input type="checkbox" class="form-check-input" id="assignMasterCb" onchange="toggleAssignAll(this)"></th>
+                <th>ID</th>
+                <th>Customer</th>
+                <th>Supplier</th>
+                <th class="text-end">CBM</th>
+                <th class="text-end">Weight</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="assignOrdersTbody">
+              <tr>
+                <td colspan="7" class="text-center text-muted py-3">Loading…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer justify-content-between">
+        <small class="text-muted">Selected: <strong id="assignSelCount">0</strong> orders</small>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="assignConfirmBtn" onclick="confirmAssignOrders()" disabled>Assign to Container</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- Status Change Modal -->
+<div class="modal fade" id="statusModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">Change Status</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="statusModalContainerId">
+        <div class="d-grid gap-2">
+          <button class="btn btn-outline-secondary btn-sm" onclick="setContainerStatus('planning')">Planning</button>
+          <button class="btn btn-outline-warning btn-sm" onclick="setContainerStatus('to_go')">To Go</button>
+          <button class="btn btn-outline-primary btn-sm" onclick="setContainerStatus('on_route')">On Route</button>
+          <button class="btn btn-outline-success btn-sm" onclick="setContainerStatus('arrived')">Arrived</button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="setContainerStatus('available')">Available</button>
+        </div>
       </div>
     </div>
   </div>

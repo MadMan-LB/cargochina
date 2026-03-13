@@ -56,7 +56,9 @@ class OrderExcelService
         $sheet = $spreadsheet->getActiveSheet();
         $this->setColumnWidths($sheet);
 
-        $row = 1;
+        // Same MASTERTOOLS header as single-order export (rows 1–4)
+        $firstOrder = ($ordersWithItems[0] ?? [])['order'] ?? [];
+        $row = $this->writeSupplierHeader($sheet, $firstOrder, 1);
         $this->writeColumnHeaders($sheet, $row);
         $row++;
 
@@ -114,17 +116,15 @@ class OrderExcelService
 
     private function writeSupplierHeader($sheet, array $order, int $startRow): int
     {
-        $name    = strtoupper($order['supplier_name'] ?? '');
-        $addr    = $order['supplier_address'] ?? $order['supplier_factory'] ?? '';
-        if ($addr) $addr = '        ADDRESS: ' . strtoupper($addr);
-        $tel     = $order['supplier_phone'] ?? '';
-        $fax     = $order['supplier_fax'] ?? '';
-        $contact = trim(
-            ($tel ? '        TEL: ' . $tel : '') .
-                ($fax ? '        FAX: ' . $fax  : '')
-        );
+        // Fixed header from Template.xlsx — matches the exact company header text
+        $headerRows = [
+            'MASTERTOOLS COMPANY LIMITED',
+            '        ADDRESS: CHINA-ZHEJIANG PROVINCE-YIWU CITY-JIANDONG STREET-WUYUE SQUARE -MANSION NO.1 -25th FLOOR-2515',
+            '        TEL: 0579-85178151/85178152        FAX: 0579-85177247',
+            'GOOD DETAILS',
+        ];
 
-        foreach ([$name, $addr, $contact, 'GOOD DETAILS'] as $i => $text) {
+        foreach ($headerRows as $i => $text) {
             $r = $startRow + $i;
             $sheet->setCellValue('B' . $r, $text);
             $sheet->mergeCells(sprintf(self::HEADER_MERGE, $r, $r));

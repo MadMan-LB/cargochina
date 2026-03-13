@@ -84,6 +84,12 @@ $breadcrumbs = $breadcrumbs ?? [];
           </svg>
           Containers
         </a>
+        <a class="sidebar-link <?= $currentPage === 'assign_container' ? 'active' : '' ?>" href="<?= $basePath ?>/assign_container.php">
+          <svg class="sidebar-icon" viewBox="0 0 24 24">
+            <path d="M19 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2zm-7 3a1 1 0 011 1v3h3a1 1 0 010 2h-3v3a1 1 0 01-2 0v-3H8a1 1 0 010-2h3V7a1 1 0 011-1z" />
+          </svg>
+          Assign to Container
+        </a>
       <?php endif; ?>
 
       <div class="sidebar-section-label">Data</div>

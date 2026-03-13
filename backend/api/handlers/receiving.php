@@ -40,12 +40,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 OR s.name LIKE ?
                 OR s.code LIKE ?
                 OR (s.phone IS NOT NULL AND s.phone LIKE ?)
-                OR EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND oi.shipping_code LIKE ?)
+                OR EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND (oi.shipping_code LIKE ? OR oi.item_no LIKE ? OR oi.description_cn LIKE ? OR oi.description_en LIKE ?))
             )
             ORDER BY o.expected_ready_date ASC, o.id ASC
             LIMIT 30";
         $oid = ctype_digit($q) ? (int) $q : 0;
-        $params = array_merge($statuses, [$oid, $like, $like, $like, $like, $like, $like, $like]);
+        $params = array_merge($statuses, [$oid, $like, $like, $like, $like, $like, $like, $like, $like, $like, $like]);
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);

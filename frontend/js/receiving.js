@@ -9,6 +9,16 @@ document.addEventListener("DOMContentLoaded", () => {
     setupFilterAutocomplete();
     loadReceivingConfig();
     applyFilters();
+    const handleReceiveClick = (e) => {
+        const btn = e.target.closest(".js-receive-btn");
+        if (btn) receiveOrderById(parseInt(btn.dataset.orderId, 10));
+    };
+    document
+        .getElementById("warehouseList")
+        ?.addEventListener("click", handleReceiveClick);
+    document
+        .getElementById("scheduleList")
+        ?.addEventListener("click", handleReceiveClick);
     const input = document.getElementById("receivePhotos");
     if (input) input.onchange = () => handleReceivePhotos(input.files);
     document
@@ -54,12 +64,14 @@ function setupReceiveOrderSearch() {
         resource: "receiving",
         searchPath: "/search",
         placeholder:
-            "Search by order #, customer, supplier, phone, shipping code...",
-        renderItem: (o) =>
-            `#${o.id} — ${o.customer_name || ""} — ${o.supplier_name || ""} — ${o.expected_ready_date || ""}`.replace(
-                /\s*—\s*$/g,
-                "",
-            ),
+            "Search: #ID, customer, supplier, phone, shipping code, items — verify then enter actuals",
+        renderItem: (o) => {
+            const items = (o.items || [])
+                .map((i) => `${i.shipping_code || "-"} ${i.cartons || 0}ctn`)
+                .join("; ");
+            const base = `#${o.id} — ${o.customer_name || ""} — ${o.supplier_name || ""} — ${o.expected_ready_date || ""}`;
+            return items ? `${base} | ${items}` : base.replace(/\s*—\s*$/g, "");
+        },
         onSelect: (item) => {
             idEl.value = String(item.id);
             searchEl.dataset.declaredCbm = String(item.declared_cbm || 0);
@@ -77,6 +89,7 @@ function setupReceiveOrderSearch() {
             form.classList.add("d-none");
             receiveOrderItems = [];
             receiveItemPhotos = {};
+            updateDeclaredSummary(null);
         }
     });
 }
@@ -356,7 +369,7 @@ function renderWarehouseList() {
               </dl>
               ${items.length ? `<div class="mt-2 pt-2 border-top"><small class="text-muted">Items:</small> ${items.map((it) => `<span class="badge bg-light text-dark me-1">${escapeHtml(it.shipping_code || "—")} ${it.cartons || 0}ctn ${it.qty_per_carton || ""}/ctn HS:${escapeHtml(it.hs_code || "-")}</span>`).join("")}</div>` : ""}
               <div class="mt-2 pt-2">
-                <button type="button" class="btn btn-sm btn-primary" onclick="receiveOrderById(${o.id})">Receive</button>
+                <button type="button" class="btn btn-sm btn-primary js-receive-btn" data-order-id="${o.id}">Receive</button>
               </div>
             </div>
           </div>
@@ -399,6 +412,7 @@ function receiveOrderById(orderId) {
     searchEl.dataset.declaredWeight = String(dw);
     idEl.value = String(orderId);
     form?.classList.remove("d-none");
+    form?.scrollIntoView({ behavior: "smooth", block: "start" });
     updateVariancePhotoAlert();
     loadOrderForReceive(orderId);
 }
@@ -482,7 +496,7 @@ function renderSchedule() {
           <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
             <div class="small">#${o.id} — ${escapeHtml(o.customer_name)}</div>
             <div class="small text-muted">${escapeHtml(o.supplier_name || "-")} · ${parseFloat(o.declared_cbm || 0).toFixed(2)} CBM</div>
-            <button type="button" class="btn btn-sm btn-outline-primary" onclick="receiveOrderById(${o.id})">Receive</button>
+            <button type="button" class="btn btn-sm btn-outline-primary js-receive-btn" data-order-id="${o.id}">Receive</button>
           </div>
         `,
             )
@@ -515,11 +529,54 @@ document.getElementById("toggleItemLevel")?.addEventListener("click", () => {
     );
 });
 
+function updateDeclaredSummary(order) {
+    const el = document.getElementById("receiveDeclaredText");
+    if (!el) return;
+    if (!order) {
+        el.textContent = "—";
+        const ac = document.getElementById("actualCartons");
+        const acbm = document.getElementById("actualCbm");
+        const aw = document.getElementById("actualWeight");
+        if (ac) ac.placeholder = "";
+        if (acbm) acbm.placeholder = "Direct or from L×W×H";
+        if (aw) aw.placeholder = "";
+        return;
+    }
+    const items = order.items || [];
+    const cartons = items.reduce((s, i) => s + (parseInt(i.cartons) || 0), 0);
+    const cbm = items.reduce(
+        (s, i) => s + (parseFloat(i.declared_cbm) || 0),
+        0,
+    );
+    const weight = items.reduce(
+        (s, i) => s + (parseFloat(i.declared_weight) || 0),
+        0,
+    );
+    const itemsStr = items
+        .map(
+            (i) =>
+                `${i.shipping_code || "-"} ${i.cartons || 0}ctn ${i.qty_per_carton || ""}/ctn`,
+        )
+        .join("; ");
+    el.textContent = `${cartons} cartons, ${cbm.toFixed(4)} CBM, ${weight.toFixed(2)} kg. Items: ${itemsStr || "—"}`;
+
+    // Set declared values as placeholders on Actual inputs so user can verify before entering
+    const ac = document.getElementById("actualCartons");
+    const acbm = document.getElementById("actualCbm");
+    const aw = document.getElementById("actualWeight");
+    if (ac) ac.placeholder = String(cartons || "");
+    if (acbm)
+        acbm.placeholder = cbm > 0 ? cbm.toFixed(4) : "Direct or from L×W×H";
+    if (aw) aw.placeholder = weight > 0 ? weight.toFixed(2) : "";
+}
+
 async function loadOrderForReceive(orderId) {
     try {
         const res = await api("GET", "/orders/" + orderId);
-        receiveOrderItems = res.data?.items || [];
+        const order = res.data;
+        receiveOrderItems = order?.items || [];
         receiveItemPhotos = {};
+        updateDeclaredSummary(order);
         const tbody = document.getElementById("itemLevelBody");
         if (!tbody) return;
         tbody.innerHTML = receiveOrderItems

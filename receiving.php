@@ -94,13 +94,17 @@ require 'includes/layout.php';
       <div class="row mb-3 form-row-responsive">
         <div class="col-12 col-md-6">
           <label class="form-label">Select Order (Approved / In Transit)</label>
-          <input type="text" class="form-control" id="receiveOrderSearch" placeholder="Search by order #, customer, supplier, phone, shipping code..." autocomplete="off">
+          <input type="text" class="form-control" id="receiveOrderSearch" placeholder="Search: #ID, customer, supplier, phone, shipping code, item description — verify order details below, then enter actuals" autocomplete="off">
           <input type="hidden" id="receiveOrderId">
-          <small class="text-muted">Type to search across order ID, customer/supplier names, phone numbers, shipping codes</small>
+          <small class="text-muted">Selected order shows: #ID, customer, supplier, expected date, items. Verify before entering actual cartons, CBM, and weight.</small>
         </div>
       </div>
     </div>
     <div id="receiveForm" class="d-none">
+      <div id="receiveDeclaredSummary" class="alert alert-light border mb-3 py-2 small">
+        <strong>Declared (verify before entering actuals):</strong>
+        <span id="receiveDeclaredText">—</span>
+      </div>
       <div class="row mb-3 form-row-responsive">
         <div class="col-12 col-md-4 mb-2"><label class="form-label">Actual Cartons *</label><input type="number" class="form-control" id="actualCartons" min="0" required></div>
         <div class="col-12 col-md-4 mb-2">

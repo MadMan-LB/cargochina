@@ -18,8 +18,9 @@ require 'includes/layout.php';
     </div>
   </div>
   <div class="card-body">
-    <div class="row mb-3 form-row-responsive">
-      <div class="col-12 col-md-4">
+    <div class="row mb-3 form-row-responsive g-2 align-items-end">
+      <div class="col-12 col-md-3">
+        <label class="form-label small mb-1">Status</label>
         <select class="form-select form-select-sm" id="filterStatus" onchange="loadOrders()">
           <option value="">All statuses</option>
           <option value="Draft">Draft</option>
@@ -36,7 +37,12 @@ require 'includes/layout.php';
         </select>
       </div>
       <div class="col-12 col-md-4">
-        <input type="text" class="form-control form-control-sm" id="filterCustomer" placeholder="Filter by customer (type to search)">
+        <label class="form-label small mb-1">Search</label>
+        <div class="input-group input-group-sm">
+          <input type="text" class="form-control" id="orderSearch" placeholder="Customer, phone, shipping code, items…" onkeydown="if(event.key==='Enter'){event.preventDefault();loadOrders();}">
+          <button class="btn btn-outline-primary" type="button" onclick="loadOrders()" title="Search">Search</button>
+          <button class="btn btn-outline-secondary" type="button" onclick="document.getElementById('orderSearch').value='';loadOrders();" title="Clear">Clear</button>
+        </div>
       </div>
     </div>
     <div id="ordersTable" class="table-responsive">
@@ -162,6 +168,29 @@ require 'includes/layout.php';
         <div class="text-center py-5">
           <div class="spinner-border text-primary"></div>
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- Assign to Draft Modal -->
+<div class="modal fade" id="assignDraftModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Assign Order to Shipment Draft</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small mb-3">Order <strong id="assignDraftOrderLabel"></strong></p>
+        <div id="assignDraftWarning" class="alert alert-warning d-none mb-3"></div>
+        <div id="assignDraftList">
+          <div class="text-center py-3">
+            <div class="spinner-border spinner-border-sm text-primary"></div>
+          </div>
+        </div>
+        <hr class="my-3">
+        <p class="small text-muted mb-1">Or create a new draft for this order:</p>
+        <button class="btn btn-outline-primary btn-sm" onclick="assignOrderToNewDraft()">+ New Shipment Draft</button>
       </div>
     </div>
   </div>

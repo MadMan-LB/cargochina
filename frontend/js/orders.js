@@ -1,5 +1,5 @@
 let itemIndex = 0;
-let orderCustomerAc, orderSupplierAc, filterCustomerAc;
+let orderCustomerAc, orderSupplierAc;
 const RECENT_KEY_CUSTOMERS = "cargochina_recent_customers";
 const RECENT_KEY_SUPPLIERS = "cargochina_recent_suppliers";
 const RECENT_MAX = 8;
@@ -165,18 +165,12 @@ document.addEventListener("DOMContentLoaded", () => {
             },
         },
     );
-    filterCustomerAc = Autocomplete.init(
-        document.getElementById("filterCustomer"),
-        {
-            resource: "customers",
-            placeholder: "Filter by customer (type to search)",
-            onSelect: () => loadOrders(),
-        },
-    );
-    const filterInput = document.getElementById("filterCustomer");
-    if (filterInput) {
-        filterInput.addEventListener("blur", () => {
-            if (!filterInput.value.trim()) loadOrders();
+    const orderSearchEl = document.getElementById("orderSearch");
+    if (orderSearchEl) {
+        let searchDebounce;
+        orderSearchEl.addEventListener("input", () => {
+            clearTimeout(searchDebounce);
+            searchDebounce = setTimeout(loadOrders, 350);
         });
     }
     const curSel = document.getElementById("orderCurrency");
@@ -193,11 +187,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
 async function loadOrders() {
     try {
-        const status = document.getElementById("filterStatus").value;
-        const customerId = filterCustomerAc?.getSelectedId() || "";
+        const status = document.getElementById("filterStatus")?.value || "";
+        const q = (document.getElementById("orderSearch")?.value || "").trim();
         let path = "/orders?";
         if (status) path += "status=" + encodeURIComponent(status) + "&";
-        if (customerId) path += "customer_id=" + encodeURIComponent(customerId);
+        if (q) path += "q=" + encodeURIComponent(q) + "&";
         const res = await api("GET", path);
         const rows = res.data || [];
         const tbody = document.querySelector("#ordersTable tbody");
@@ -254,6 +248,7 @@ async function loadOrders() {
           ${r.status === "Draft" ? `<button class="btn btn-sm btn-success" onclick="submitOrder(${r.id})">Submit</button>` : ""}
           ${r.status === "Submitted" ? `<button class="btn btn-sm btn-success" onclick="approveOrder(${r.id})">Approve</button>` : ""}
           ${r.status === "AwaitingCustomerConfirmation" ? `<button class="btn btn-sm btn-warning" onclick="confirmOrder(${r.id})">Confirm</button>` : ""}
+          ${r.status === "ReadyForConsolidation" || r.status === "Confirmed" ? `<button class="btn btn-sm btn-outline-primary" onclick="openAssignDraftModal(${r.id}, '${escapeHtml(r.customer_name)}')" title="Assign to Shipment Draft">→ Draft</button>` : ""}
           <button class="btn btn-sm btn-outline-secondary" onclick="showOrderFinance(${r.id})" title="P&amp;L / Finance">$</button>
         </td>
       </tr>
@@ -268,11 +263,11 @@ async function loadOrders() {
 
 async function exportOrdersCsv() {
     try {
-        const status = document.getElementById("filterStatus").value;
-        const customerId = filterCustomerAc?.getSelectedId() || "";
+        const status = document.getElementById("filterStatus")?.value || "";
+        const q = (document.getElementById("orderSearch")?.value || "").trim();
         let path = "/orders?";
         if (status) path += "status=" + encodeURIComponent(status) + "&";
-        if (customerId) path += "customer_id=" + encodeURIComponent(customerId);
+        if (q) path += "q=" + encodeURIComponent(q) + "&";
         const res = await api("GET", path);
         const rows = res.data || [];
         const headers = [
@@ -1677,5 +1672,133 @@ async function showOrderInfo(id) {
     } catch (e) {
         document.getElementById("orderInfoBody").innerHTML =
             `<div class="alert alert-danger">${escapeHtml(e.message)}</div>`;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Assign Order to Shipment Draft — from Orders page
+// ---------------------------------------------------------------------------
+let _assignOrderId = null;
+
+async function openAssignDraftModal(orderId, customerName) {
+    _assignOrderId = orderId;
+    const modalEl = document.getElementById("assignDraftModal");
+    if (!modalEl) return;
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+
+    const labelEl = document.getElementById("assignDraftOrderLabel");
+    const warnEl = document.getElementById("assignDraftWarning");
+    const listEl = document.getElementById("assignDraftList");
+    if (labelEl) labelEl.textContent = `#${orderId} — ${customerName}`;
+    if (warnEl) warnEl.classList.add("d-none");
+    if (listEl)
+        listEl.innerHTML =
+            '<div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div></div>';
+    modal.show();
+
+    try {
+        // Load open shipment drafts + check if order is already in any
+        const [draftsRes, orderRes] = await Promise.all([
+            api("GET", "/shipment-drafts"),
+            api("GET", "/orders/" + orderId),
+        ]);
+        const drafts = (draftsRes.data || []).filter(
+            (d) => d.status !== "finalized",
+        );
+        const order = orderRes.data || {};
+
+        // Check if already in a draft
+        const existingDraftIds = drafts
+            .filter((d) => (d.order_ids || []).includes(orderId))
+            .map((d) => d.id);
+        if (existingDraftIds.length > 0 && warnEl) {
+            warnEl.textContent = `⚠ This order is already in Draft #${existingDraftIds.join(", #")}. Assigning again will add it to another draft (allowed for large/split shipments). Please confirm below.`;
+            warnEl.classList.remove("d-none");
+        }
+
+        if (drafts.length === 0) {
+            listEl.innerHTML =
+                '<p class="text-muted small">No open shipment drafts. Create a new one below.</p>';
+            return;
+        }
+
+        listEl.innerHTML = `
+            <p class="small text-muted mb-2">Select an open draft to add this order to:</p>
+            <div class="list-group">
+              ${drafts
+                  .map((d) => {
+                      const alreadyIn = (d.order_ids || []).includes(orderId);
+                      const codeTag = d.container_code
+                          ? `<span class="text-muted ms-1">→ ${escapeHtml(d.container_code)}</span>`
+                          : "";
+                      const badge = alreadyIn
+                          ? '<span class="badge bg-warning text-dark ms-1">Already in this draft</span>'
+                          : "";
+                      const orderList =
+                          (d.order_ids || []).length > 0
+                              ? `<small class="d-block text-muted">Orders: ${d.order_ids.join(", ")}</small>`
+                              : "";
+                      return `<button type="button"
+                      class="list-group-item list-group-item-action d-flex justify-content-between align-items-start"
+                      onclick="confirmAssignToDraft(${d.id}, ${alreadyIn})">
+                    <div>
+                      <strong>Draft #${d.id}</strong> ${codeTag} ${badge}
+                      ${orderList}
+                    </div>
+                    <span class="badge bg-primary">${(d.order_ids || []).length} orders</span>
+                  </button>`;
+                  })
+                  .join("")}
+            </div>`;
+    } catch (e) {
+        if (listEl)
+            listEl.innerHTML = `<div class="alert alert-danger">${escapeHtml(e.message)}</div>`;
+    }
+}
+
+async function confirmAssignToDraft(draftId, alreadyInThisDraft) {
+    const orderId = _assignOrderId;
+    if (!orderId) return;
+
+    if (alreadyInThisDraft) {
+        if (
+            !confirm(
+                `Order #${orderId} is already in Draft #${draftId}.\n\nAssign it again to this same draft? (This is allowed for split-container large shipments.)`,
+            )
+        )
+            return;
+    }
+
+    try {
+        await api("POST", "/shipment-drafts/" + draftId + "/add-orders", {
+            order_ids: [orderId],
+        });
+        bootstrap.Modal.getOrCreateInstance(
+            document.getElementById("assignDraftModal"),
+        ).hide();
+        showToast(`Order #${orderId} added to Draft #${draftId}`);
+        loadOrders();
+    } catch (e) {
+        showToast(e.message || "Failed to assign order", "danger");
+    }
+}
+
+async function assignOrderToNewDraft() {
+    const orderId = _assignOrderId;
+    if (!orderId) return;
+    try {
+        const createRes = await api("POST", "/shipment-drafts");
+        const newDraft = createRes.data || {};
+        if (!newDraft.id) throw new Error("Failed to create draft");
+        await api("POST", "/shipment-drafts/" + newDraft.id + "/add-orders", {
+            order_ids: [orderId],
+        });
+        bootstrap.Modal.getOrCreateInstance(
+            document.getElementById("assignDraftModal"),
+        ).hide();
+        showToast(`Order #${orderId} added to new Draft #${newDraft.id}`);
+        loadOrders();
+    } catch (e) {
+        showToast(e.message || "Failed to create draft", "danger");
     }
 }

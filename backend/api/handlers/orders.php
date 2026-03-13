@@ -114,6 +114,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $dateTo = $_GET['date_to'] ?? null;
                 $orderId = $_GET['order_id'] ?? null;
                 $shippingCode = trim($_GET['shipping_code'] ?? '');
+                $q = trim($_GET['q'] ?? '');
                 $sql = "SELECT o.*, c.name as customer_name, s.name as supplier_name FROM orders o
                     JOIN customers c ON o.customer_id = c.id JOIN suppliers s ON o.supplier_id = s.id WHERE 1=1";
                 $params = [];
@@ -144,6 +145,36 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if ($shippingCode !== '') {
                     $sql .= " AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND oi.shipping_code LIKE ?)";
                     $params[] = '%' . $shippingCode . '%';
+                }
+                if ($q !== '') {
+                    $like = '%' . $q . '%';
+                    $chkSupp = $pdo->query("SHOW COLUMNS FROM suppliers LIKE 'phone'");
+                    $hasSuppPhone = $chkSupp && $chkSupp->rowCount() > 0;
+                    $chkCust = $pdo->query("SHOW COLUMNS FROM customers LIKE 'phone'");
+                    $hasCustPhone = $chkCust && $chkCust->rowCount() > 0;
+                    $sql .= " AND (c.name LIKE ? OR c.code LIKE ?";
+                    $params[] = $like;
+                    $params[] = $like;
+                    if ($hasCustPhone) {
+                        $sql .= " OR c.phone LIKE ?";
+                        $params[] = $like;
+                    }
+                    $sql .= " OR s.name LIKE ?";
+                    $params[] = $like;
+                    if ($hasSuppPhone) {
+                        $sql .= " OR s.phone LIKE ?";
+                        $params[] = $like;
+                    }
+                    if (is_numeric($q)) {
+                        $sql .= " OR o.id = ?";
+                        $params[] = (int) $q;
+                    }
+                    $sql .= " OR EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND (oi.shipping_code LIKE ? OR oi.item_no LIKE ? OR oi.description_cn LIKE ? OR oi.description_en LIKE ?))";
+                    $params[] = $like;
+                    $params[] = $like;
+                    $params[] = $like;
+                    $params[] = $like;
+                    $sql .= ")";
                 }
                 $sql .= " ORDER BY o.expected_ready_date ASC, o.created_at DESC";
                 $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
