@@ -42,8 +42,54 @@ function validatePhone(?string $phone): void
     }
 }
 
+function normalizeSupplierCommission(array $input): array
+{
+    $type = in_array($input['commission_type'] ?? '', ['percentage', 'fixed'], true)
+        ? $input['commission_type']
+        : 'percentage';
+    $appliedOn = in_array($input['commission_applied_on'] ?? '', ['buy_value', 'sell_value'], true)
+        ? $input['commission_applied_on']
+        : 'buy_value';
+    $rateRaw = $input['commission_rate'] ?? null;
+
+    if ($rateRaw === null || $rateRaw === '') {
+        return [null, $type, $appliedOn];
+    }
+
+    $rate = (float) $rateRaw;
+    if ($rate < 0) {
+        jsonError('Commission must be zero or positive', 400);
+    }
+    if ($type === 'percentage' && $rate > 100) {
+        jsonError('Percentage commission cannot exceed 100', 400);
+    }
+
+    return [round($rate, 4), $type, $appliedOn];
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
+    $readRoles = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'FieldStaff', 'SuperAdmin'];
+    $buyerRoles = ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'];
+    $financeRoles = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'SuperAdmin'];
+    $interactionRoles = ['ChinaAdmin', 'ChinaEmployee', 'FieldStaff', 'SuperAdmin'];
+    $canViewFinancials = hasAnyRole($financeRoles);
+
+    if ($method === 'GET') {
+        requireRole($readRoles);
+    } elseif ($method === 'PUT' || $method === 'DELETE') {
+        requireRole($buyerRoles);
+    } elseif ($method === 'POST') {
+        if ($id === 'import') {
+            requireRole($buyerRoles);
+        } elseif ($id && $action === 'interactions') {
+            requireRole($interactionRoles);
+        } elseif ($id && in_array($action, ['payments', 'balance'], true)) {
+            requireRole($financeRoles);
+        } else {
+            requireRole($buyerRoles);
+        }
+    }
 
     switch ($method) {
         case 'GET':
@@ -53,8 +99,20 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     jsonResponse(['data' => []]);
                 }
                 $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
-                $stmt = $pdo->prepare("SELECT id, code, name, phone, store_id FROM suppliers WHERE name LIKE ? OR code LIKE ? OR (phone IS NOT NULL AND phone LIKE ?) OR (store_id IS NOT NULL AND store_id LIKE ?) ORDER BY name LIMIT 10");
-                $stmt->execute([$like, $like, $like, $like]);
+                $chkAddr = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'address'");
+                $chkFactory = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'factory_location'");
+                $extra = '';
+                $extraParams = [];
+                if ($chkAddr && $chkAddr->rowCount() > 0) {
+                    $extra .= ' OR (address IS NOT NULL AND address LIKE ?)';
+                    $extraParams[] = $like;
+                }
+                if ($chkFactory && $chkFactory->rowCount() > 0) {
+                    $extra .= ' OR (factory_location IS NOT NULL AND factory_location LIKE ?)';
+                    $extraParams[] = $like;
+                }
+                $stmt = $pdo->prepare("SELECT id, code, name, phone, store_id FROM suppliers WHERE name LIKE ? OR code LIKE ? OR (phone IS NOT NULL AND phone LIKE ?) OR (store_id IS NOT NULL AND store_id LIKE ?)$extra ORDER BY name LIMIT 15");
+                $stmt->execute(array_merge([$like, $like, $like, $like], $extraParams));
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 jsonResponse(['data' => $rows]);
             }
@@ -90,6 +148,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $r['contacts'] = $r['contacts'] ? json_decode($r['contacts'], true) : [];
                     $r['additional_ids'] = $r['additional_ids'] ? json_decode($r['additional_ids'], true) : [];
                     $r['reliability_score'] = calcSupplierScore($pdo, (int) $r['id']);
+                    if (!$canViewFinancials) {
+                        unset($r['commission_rate'], $r['commission_type'], $r['commission_applied_on']);
+                    }
                 }
                 jsonResponse(['data' => $rows]);
             }
@@ -103,9 +164,28 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $row['additional_ids'] = $row['additional_ids'] ? json_decode($row['additional_ids'], true) : [];
             $row['reliability_score'] = calcSupplierScore($pdo, (int) $id);
 
-            $payments = $pdo->prepare("SELECT * FROM supplier_payments WHERE supplier_id = ? ORDER BY created_at DESC");
-            $payments->execute([$id]);
-            $row['payments'] = $payments->fetchAll(PDO::FETCH_ASSOC);
+            if ($action === 'balance') {
+                requireRole($financeRoles);
+                $stmt = $pdo->prepare("SELECT currency, SUM(amount) as total_paid, SUM(COALESCE(invoice_amount,amount)) as total_invoiced, SUM(COALESCE(discount_amount,0)) as total_discount FROM supplier_payments WHERE supplier_id = ? GROUP BY currency");
+                $stmt->execute([$id]);
+                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                $balance = [];
+                foreach ($rows as $r) {
+                    $balance[$r['currency']] = [
+                        'total_paid' => (float) $r['total_paid'],
+                        'total_invoiced' => (float) $r['total_invoiced'],
+                        'total_discount' => (float) $r['total_discount'],
+                        'outstanding' => round((float) $r['total_invoiced'] - (float) $r['total_paid'], 4),
+                    ];
+                }
+                jsonResponse(['data' => $balance]);
+            }
+
+            if ($canViewFinancials) {
+                $payments = $pdo->prepare("SELECT * FROM supplier_payments WHERE supplier_id = ? ORDER BY created_at DESC");
+                $payments->execute([$id]);
+                $row['payments'] = $payments->fetchAll(PDO::FETCH_ASSOC);
+            }
             $interactions = $pdo->prepare("SELECT si.*, u.full_name as created_by_name FROM supplier_interactions si LEFT JOIN users u ON si.created_by = u.id WHERE si.supplier_id = ? ORDER BY si.created_at DESC");
             $interactions->execute([$id]);
             $intRows = $interactions->fetchAll(PDO::FETCH_ASSOC);
@@ -113,6 +193,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $r['content'] = $r['content'] ? json_decode($r['content'], true) : null;
             }
             $row['interactions'] = $intRows;
+            if (!$canViewFinancials) {
+                unset($row['commission_rate'], $row['commission_type'], $row['commission_applied_on']);
+            }
             jsonResponse(['data' => $row]);
 
         case 'POST':
@@ -226,14 +309,24 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $notes = $input['notes'] ?? null;
             $address = isset($input['address']) ? trim($input['address']) : null;
             $fax = isset($input['fax']) ? trim($input['fax']) : null;
+            [$commissionRate, $commissionType, $commissionAppliedOn] = normalizeSupplierCommission($input);
             try {
                 $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'address'");
                 $hasAddr = $chk && $chk->rowCount() > 0;
                 $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'fax'");
                 $hasFax = $chk && $chk->rowCount() > 0;
+                $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'commission_rate'");
+                $hasCommission = $chk && $chk->rowCount() > 0;
                 $cols = "code, name, store_id, contacts, factory_location, notes, phone, additional_ids";
                 $vals = "?, ?, ?, ?, ?, ?, ?, ?";
                 $params = [$code, $name, $storeId ?: null, $contacts, $factoryLocation, $notes, $phone ?: null, $additionalIds];
+                if ($hasCommission) {
+                    $cols .= ", commission_rate, commission_type, commission_applied_on";
+                    $vals .= ", ?, ?, ?";
+                    $params[] = $commissionRate;
+                    $params[] = $commissionType;
+                    $params[] = $commissionAppliedOn;
+                }
                 if ($hasAddr) {
                     $cols .= ", address";
                     $vals .= ", ?";
@@ -283,12 +376,21 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $notes = $input['notes'] ?? null;
             $address = isset($input['address']) ? trim($input['address']) : null;
             $fax = isset($input['fax']) ? trim($input['fax']) : null;
+            [$commissionRate, $commissionType, $commissionAppliedOn] = normalizeSupplierCommission($input);
             $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'address'");
             $hasAddr = $chk && $chk->rowCount() > 0;
             $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'fax'");
             $hasFax = $chk && $chk->rowCount() > 0;
+            $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'commission_rate'");
+            $hasCommission = $chk && $chk->rowCount() > 0;
             $sets = "code=?, name=?, store_id=?, contacts=?, factory_location=?, notes=?, phone=?, additional_ids=?";
             $params = [$code, $name, $storeId ?: null, $contacts, $factoryLocation, $notes, $phone ?: null, $additionalIds];
+            if ($hasCommission) {
+                $sets .= ", commission_rate=?, commission_type=?, commission_applied_on=?";
+                $params[] = $commissionRate;
+                $params[] = $commissionType;
+                $params[] = $commissionAppliedOn;
+            }
             if ($hasAddr) {
                 $sets .= ", address=?";
                 $params[] = $address ?: null;

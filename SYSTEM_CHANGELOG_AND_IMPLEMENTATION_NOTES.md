@@ -1,0 +1,728 @@
+# CLMS System Changelog and Implementation Notes
+
+**Enhancement Phase — Cross-Border Logistics Platform**  
+*Document tracks all changes, decisions, and implementation status.*
+
+---
+
+## Implementation Plan Overview
+
+### Phase 1: Schema & Business Rules Foundation
+- Supplier commissions (rate, type, applied_on)
+- Buy price vs sell price (products, order_items)
+- Customer priority levels
+- Business settings table (ETA offsets, notification thresholds)
+- High-alert notes structure
+- Design attachments support
+- Expense categories and expenses table
+- Container destination
+- Customer decline flow (decline_reason)
+- Fix 20HQ CBM (28 not 68)
+
+### Phase 2: Order Flow Enhancements
+- Draft orders / procurement drafts
+- Multi-supplier: relax/remove top-level supplier
+- Order quantity flexibility (pieces, carton override)
+- Shipping code auto-insert from customer
+- Duplicate shipping code check on customer
+
+### Phase 3: Expenses, Profit, Balances
+- Expenses page
+- Salaries, order expenses, container expenses
+- Profit reporting
+- Outstanding balances (receivables, payables)
+- Commission impact in calculations
+
+### Phase 4: Customer Portal & Communication
+- Customer portal (secure: one-time link / impersonation)
+- Order status timeline
+- Confirm/decline with reason
+- Internal chat / communication center
+
+### Phase 5: Warehouse & Planning
+- Warehouse stock page
+- CBM / warehouse-direct customers
+- Calendar / timeline planning
+- Arrival / near-arrival notifications
+
+### Phase 6: Polish & Professionalization
+- Exports (PDF, Excel) with role-based field visibility
+- Multi-status checkbox filtering
+- Admin price-difference notifications
+- HS code / import tax page (architecture)
+- General UX and validation improvements
+
+---
+
+## Security Decisions
+
+### A) Customer Portal Access
+**Decision:** One-time login link + optional admin impersonation with audit.
+- **Rationale:** No plaintext passwords. One-time links sent via notification; admin can "View as customer" with full audit trail.
+- **Implementation:** `customer_portal_tokens` table (token, customer_id, expires_at, used_at); admin action logs impersonation.
+
+### B) Master Password
+**Decision:** NOT implemented. Support access via secure impersonation with reason field and audit.
+
+### C) Price Visibility
+**Decision:** All customer-facing views, exports, PDFs, Excel show only `sell_price`. `buy_price` and margin data are internal-only. Role check before including internal fields.
+
+---
+
+## Phase 1 Implementation
+
+### Migration 033: Foundation Schema (Phase 1)
+
+**File:** `backend/migrations/033_phase1_foundation.sql`
+
+**Changes:**
+
+1. **Suppliers — Commission**
+   - `commission_rate` DECIMAL(6,4) NULL — percentage or fixed amount
+   - `commission_type` ENUM('percentage','fixed') DEFAULT 'percentage'
+   - `commission_applied_on` ENUM('buy_value','sell_value','net_value') DEFAULT 'buy_value'
+
+2. **Customers — Priority & Shipping**
+   - `priority_level` ENUM('normal','priority','high_priority','critical') DEFAULT 'normal'
+   - `priority_note` TEXT NULL
+   - `default_shipping_code` VARCHAR(100) NULL — auto-insert into orders
+
+3. **Products — Buy/Sell Pricing**
+   - `buy_price` DECIMAL(12,4) NULL — internal cost
+   - `sell_price` DECIMAL(12,4) NULL — customer-facing (existing unit_price remains for backward compat; sell_price preferred)
+
+4. **Order Items — Buy/Sell Override**
+   - `buy_price` DECIMAL(12,4) NULL
+   - `sell_price` DECIMAL(12,4) NULL — overrides product; customer-facing
+   - `order_cartons` INT NULL — override cartons for this order
+   - `order_qty_per_carton` DECIMAL(12,4) NULL — override qty per carton
+
+5. **Orders — Draft & High-Alert**
+   - `high_alert_notes` TEXT NULL — special handling, fragile, etc.
+   - `order_type` ENUM('standard','draft_procurement','cbm_direct') DEFAULT 'standard'
+
+6. **Containers**
+   - `destination_country` VARCHAR(100) NULL
+   - `destination` VARCHAR(255) NULL
+   - Fix 20HQ preset: 28 CBM (in consolidation.php)
+
+7. **Customer Confirmations**
+   - `declined_at` TIMESTAMP NULL
+   - `decline_reason` TEXT NULL
+
+8. **Business Settings Table**
+   - `business_settings` (key_name, key_value, updated_at)
+   - ETA offsets per country, notification thresholds, etc.
+
+9. **Expense Categories**
+   - `expense_categories` (id, code, name, type: operational|salary|fixed|variable|order|container)
+
+10. **Expenses**
+    - `expenses` (id, category_id, amount, currency, expense_date, payee, notes, order_id, container_id, customer_id, created_by, created_at)
+
+11. **Design Attachments**
+    - `design_attachments` (id, entity_type, entity_id, file_path, file_type, uploaded_by, uploaded_at, internal_note)
+    - entity_type: 'product'|'order_item'
+
+12. **Draft Procurement**
+    - `procurement_drafts` (id, name, supplier_id, status, created_by, created_at)
+    - status: draft|pending_review|sent_to_supplier|converted|cancelled
+    - `procurement_draft_items` (draft_id, product_id, quantity, notes, sort_order)
+
+13. **Customer Portal Tokens**
+    - `customer_portal_tokens` (id, customer_id, token_hash, expires_at, used_at, created_by)
+
+14. **Internal Messages (Chat)**
+    - `internal_messages` (id, customer_id, order_id, container_id, sender_id, body, read_at, created_at)
+
+15. **HS Code Tax (Architecture)**
+    - `hs_code_tax_rates` (id, hs_code, country_code, rate_percent, effective_from, notes)
+
+---
+
+## Database Migration Notes
+
+- All migrations use idempotent ADD COLUMN where possible (check information_schema before adding).
+- Rollback notes included in migration file comments.
+- Preserve existing data; new columns nullable or with defaults.
+
+---
+
+## Business Rule Decisions
+
+| Topic | Decision |
+|-------|----------|
+| Commission applied on | Default: buy_value. Configurable per supplier. |
+| 20HQ CBM | 28 m³ (standard 20ft high cube). 40HQ=68, 45HQ=78. |
+| Order supplier | Keep supplier_id on orders for "primary/default"; line-level supplier_id is source of truth for multi-supplier. |
+| Customer portal auth | One-time link; no stored customer passwords. |
+| Sell price default | If sell_price null, fall back to unit_price for backward compat. |
+
+---
+
+## Assumptions
+
+- Existing `unit_price` on products/order_items is treated as sell/customer price until migration.
+- Orders with single supplier: supplier_id remains; multi-supplier orders use line-level supplier_id.
+- Expense categories seeded with common types (transport, handling, customs, salary, etc.).
+- ETA offset rules stored as JSON in business_settings (e.g. `{"LB":{"groupage":15,"full_container":0}}`).
+
+---
+
+## Deferred / Risky Items
+
+- **Full real-time chat:** Implement as threaded message center first; structure for WebSocket later.
+- **HS code data:** Architecture only; actual tariff data to be added later.
+- **CBM direct customers:** Separate flow; may need dedicated tables for warehouse-direct intake.
+- **Split shipments across containers:** Complex; requires order_item_container_allocation table; deferred to later phase.
+
+---
+
+## Admin / User Impact
+
+| Role | New Access |
+|------|------------|
+| SuperAdmin | Business settings, expense categories, all financial data |
+| ChinaAdmin | Customer priority, expenses (view/add), profit reports (internal) |
+| LebanonAdmin | Container destination, expenses, financial visibility |
+| WarehouseStaff | High-alert notes visibility, design badges |
+| ChinaEmployee | Customer priority display, draft orders |
+
+---
+
+## Testing Notes
+
+- Run `php backend/migrations/run.php` after each migration.
+- Smoke test: create order, add expense, view customer with priority.
+- Verify 20HQ preset shows 28 CBM in Add Container modal.
+- Customer-facing export must NOT include buy_price.
+
+---
+
+## Completed Features
+
+### Phase 1 (Implemented)
+- **Migration 033:** Supplier commission (rate, type, applied_on), customer priority (level, note, default_shipping_code), products buy_price/sell_price, order_items buy_price/sell_price/order_cartons/order_qty_per_carton, orders high_alert_notes/order_type, containers destination_country/destination, customer_confirmations declined_at/decline_reason, business_settings, expense_categories, expenses, design_attachments, procurement_drafts, customer_portal_tokens, internal_messages, hs_code_tax_rates
+- **20HQ CBM fix:** consolidation.php preset changed from 68 to 28 CBM
+- **Expenses page:** Full CRUD, filters (date, category, order, container), summary by currency
+- **Expenses API:** GET list/categories, POST, PUT, DELETE
+- **Customer decline flow:** confirm.php + confirm API support decline with reason; CustomerDeclined status; NotificationService::notifyOrderDeclined
+- **Order status:** CustomerDeclined added to OrderStateService, app.js, orders filter, CSS
+
+### Phase 2 (Implemented)
+- **Migration 034:** Orders supplier_id nullable; containers eta_date, actual_arrival_date; container_arrival_notifications
+- **Procurement drafts:** Full CRUD API + procurement_drafts.php page; POST /procurement-drafts/{id}/convert creates order
+- **Business settings API:** GET/PUT for SuperAdmin
+- **Orders API:** Multi-status filter support (status[] array), LEFT JOIN suppliers for nullable supplier_id
+- **Phase 2A:** Procurement convert (modal + API), shipping code auto-fill from customer default, nullable supplier_id
+- **Phase 2B:** Buy/sell enforcement in Excel export (sell_price ?? unit_price), customer priority badge, high_alert_notes (form, API POST/PUT, list badge, order info modal)
+- **Phase 2C:** Design attachments API (GET/POST/DELETE), product form design attachments UI, multi-supplier (optional default supplier)
+
+### Phase 3 (Implemented)
+- **Financials page:** Profit by order (sell/buy/margin), customer balances (deposits vs receivable), supplier payables
+- **Financials API:** GET /financials/profit, GET /financials/balances
+
+### Phase 4 (Implemented)
+- **Customer portal:** customer_portal.php (token-based, one-time), customer-portal-tokens API (POST generate, GET list)
+- **Internal messages:** internal-messages API (GET by customer_id, POST send); Messages modal on customers page
+- **Portal link button:** Customers page → Generate one-time link for customer to view order status
+
+### Phase 5 (Implemented)
+- **Warehouse stock page:** warehouse_stock.php + warehouse-stock API; filter by customer, supplier, status
+- **Calendar page:** calendar.php — orders by expected_ready_date, containers by eta_date
+
+### Phase 6 (Implemented)
+- **Business settings page:** business_settings.php for ETA offsets, container CBM, arrival notify days
+- **Multi-status filter:** Orders API accepts status[] array for multiple statuses
+
+---
+
+## Phase 2A/2B/2C Completion Proof
+
+### Phase 2A: Procurement Drafts, Shipping Auto-Fill, Nullable Supplier
+| Feature | Complete because |
+|---------|------------------|
+| Procurement convert | POST /procurement-drafts/{id}/convert creates order with order_type=draft_procurement, copies items, sets draft status=converted; procurement_drafts.php has Convert modal with customer autocomplete, expected date, currency; Convert/View Order buttons in table |
+| Shipping auto-fill | customers search returns default_shipping_code; orders.js applyCustomerDefaultShippingCode() fills first empty shipping code on customer select; addOrderItem() pre-fills from selected customer |
+| Nullable supplier | Migration 034 makes orders.supplier_id nullable; POST/PUT accept null; all queries use LEFT JOIN suppliers |
+
+### Phase 2B: Buy/Sell, Customer Priority, High-Alert Notes
+| Feature | Complete because |
+|---------|------------------|
+| Buy/sell enforcement | OrderExcelService uses sell_price ?? unit_price for unit price in Excel export |
+| Customer priority | customers.js shows priority badge (non-normal) with tooltip for priority_note |
+| High-alert notes | orders.php has orderHighAlertNotes textarea; orders.js includes in save payload, populates on edit/copy; order info modal shows warning alert; orders API POST/PUT persist high_alert_notes; list shows ⚠️ badge when set |
+
+### Phase 2C: Design Attachments, Multi-Supplier
+| Feature | Complete because |
+|---------|------------------|
+| Design attachments | design-attachments API: GET ?entity_type&entity_id, POST {entity_type, entity_id, file_path}, DELETE /{id}; RBAC for ChinaAdmin, ChinaEmployee, WarehouseStaff, SuperAdmin; products.php Design attachments section; products.js load/add/delete; upload → POST design-attachments flow |
+| Multi-supplier | Order form "Default supplier" is optional (label + no required); backend accepts supplier_id null; per-item supplier_id remains source of truth |
+
+### Files Changed (Phase 2A/2B/2C)
+- backend/api/handlers/procurement-drafts.php, orders.php, customers.php, design-attachments.php
+- backend/api/index.php (RBAC)
+- backend/config/rbac.php
+- backend/services/OrderExcelService.php
+- frontend/js/orders.js, products.js, customers.js, procurement_drafts.js
+- orders.php, products.php, procurement_drafts.php, customers.php
+- frontend/css/style.css (status-declined)
+
+### DB Changes
+- Migration 033: design_attachments table (already present)
+- Migration 034: orders.supplier_id nullable (already present)
+- No new migrations in this phase
+
+### Role/Permission Impact
+- design-attachments: ChinaAdmin, ChinaEmployee, WarehouseStaff, SuperAdmin
+- procurement-drafts: ChinaAdmin, ChinaEmployee, SuperAdmin (existing)
+- Orders: no new role changes; supplier optional for all order roles
+
+### Manual QA Required
+- [ ] Procurement draft: create draft, add items, Convert → order created, draft marked converted
+- [ ] Shipping auto-fill: select customer with default_shipping_code, verify first item gets it
+- [ ] Nullable supplier: create order without supplier, save; verify no error
+- [ ] Excel export: order with sell_price on item → export shows sell_price
+- [ ] Customer priority: set priority_level on customer, verify badge in list
+- [ ] High-alert notes: add notes on order, save; verify badge in list, text in order info modal
+- [ ] Design attachments: edit product, add design file, verify list; delete attachment
+- [ ] Multi-supplier: create order with no default supplier, add items with per-item suppliers
+
+### Phase 2D/2E (Additional Phases Completed)
+| Feature | Complete because |
+|---------|------------------|
+| Consolidation presets from Business Settings | GET /config/container-presets returns CBM from business_settings; consolidation.js loads on init, preset buttons use fetched values |
+| Order-item design attachments | Design button in item header (visible when editing saved order); modal to add/delete attachments for order_item |
+| Buy/sell in product form | productBuyPrice, productSellPrice fields; products API POST/PUT accept buy_price, sell_price |
+| Buy/sell in order item | item-sell-price field; product suggest pre-fills sell_price; orders API insert/update sell_price; Excel uses sell_price ?? unit_price |
+| Duplicate shipping code check | checkDuplicateShippingCodes() in orders handler; warning in response when same customer has duplicate shipping codes |
+| ETA offsets integration | Container PUT accepts eta_date, destination_country, destination; Consolidation: Edit modal, Suggest button uses GET /config/eta-offsets |
+
+### Files Changed (Phase 2D/2E)
+- backend/api/handlers/config.php (container-presets, eta-offsets), containers.php (PUT eta_date, destination_country, destination), orders.php (sell_price, duplicate check), products.php (buy_price, sell_price)
+- backend/api/index.php (config/container-presets, eta-offsets RBAC)
+- frontend/js/consolidation.js (loadContainers ETA/dest, openContainerEditModal, saveContainerEdit, suggestEtaFromOffsets), orders.js, products.js
+- consolidation.php (container edit modal, ETA/Destination columns)
+
+### Manual QA (Phase 2D/2E)
+- [ ] Business Settings: change 20HQ CBM, verify consolidation Add Container preset uses it
+- [ ] Edit draft order: Design button on items, add/delete design attachment
+- [ ] Product form: set buy_price, sell_price; verify save and edit
+- [ ] Order item: set sell_price; verify Excel export uses it
+- [ ] Duplicate shipping code: create two orders same customer, same shipping code on item; verify warning on save
+- [ ] Container ETA: Consolidation → Edit on container → set ETA, destination country, destination; Suggest uses ETA_OFFSETS_JSON
+
+### Phase 3F (Financials + Customer Priority)
+| Feature | Complete because |
+|---------|------------------|
+| Profit API sell_price | Uses sell_price ?? unit_price for sell total; buy_price ?? unit_price for buy |
+| Supplier commission in profit | commission_rate/type/applied_on from suppliers; per-order commission; net_profit = gross - commission |
+| Customer priority in orders | Orders list + confirmations show priority badge (non-normal) with tooltip |
+| Balances resilient | SHOW TABLES check for customer_deposits, supplier_payments; graceful fallback |
+
+### Files Changed (Phase 3F)
+- backend/api/handlers/orders.php (customer_priority_level, customer_priority_note in list/single)
+- backend/api/handlers/financials.php (sell_price, buy_price, commission, balances fallback)
+- frontend/js/orders.js, confirmations.js (priority badge)
+- frontend/js/financials.js (commission column, net profit in summary)
+- financials.php (Commission column)
+
+### Manual QA (Phase 3F)
+- [ ] Customer priority: set priority_level on customer, verify badge in orders list and confirmations
+- [ ] Profit: orders with sell_price/buy_price; supplier with commission_rate; verify Commission column and Net Profit
+- [ ] Balances: verify loads when customer_deposits/supplier_payments exist or not
+
+### Phase 4 (Customer Priority + Arrival Notifications)
+| Feature | Complete because |
+|---------|------------------|
+| Customer priority in receiving | receiving API queue/receipts/search include priority; receiving_index.js, receiving.js, receiving_receive.js show badge |
+| Customer priority in consolidation | consolidation.js draft add/remove order rows show badge |
+| Customer priority in containers | containers API orders include priority; containers.js shows badge |
+| Arrival notifications cron | backend/cron/container_arrival_notifications.php; ARRIVAL_NOTIFY_DAYS from business_settings; container_arrival_notifications table; notifyContainerArrival in NotificationService |
+
+### Files Changed (Phase 4)
+- backend/api/handlers/receiving.php (priority_level, LEFT JOIN suppliers)
+- backend/api/handlers/containers.php (priority in orders, LEFT JOIN suppliers)
+- backend/services/NotificationService.php (notifyContainerArrival)
+- backend/cron/container_arrival_notifications.php (new)
+- frontend/js/receiving_index.js, receiving.js, receiving_receive.js (priority badge)
+- frontend/js/consolidation.js, containers.js (priority badge)
+
+### Manual QA (Phase 4)
+- [ ] Receiving queue/history: customer with priority shows badge
+- [ ] Consolidation draft: add/remove order rows show priority badge
+- [ ] Containers: order list shows priority badge
+- [ ] Arrival cron: set container eta_date 7 days from today, ARRIVAL_NOTIFY_DAYS=7,3,1; run cron; verify notification and container_arrival_notifications row
+
+### Deferred Items
+- Order-item design attachments: Implemented in Phase 2D
+
+### Known Risks
+- Design attachments: upload config may restrict to images only; PDF support requires UPLOAD_ALLOWED_TYPES change
+
+---
+
+## Partially Completed Features
+
+- **Supplier commission:** Schema added; integrated into profit API (per-order commission, net profit)
+- **Customer priority:** Badge in customer list, orders, confirmations, receiving, consolidation, containers
+- **Buy/sell price:** Excel export uses sell_price; product/order form UI done
+- **Business settings:** Table created; business_settings.php exists; ETA offsets applied in container edit Suggest
+
+---
+
+## Migration Steps (Manual)
+
+1. Backup database before running migrations.
+2. `php backend/migrations/run.php` (or `c:\xampp\php\php.exe backend/migrations/run.php` on Windows)
+3. Verify new columns exist: `DESCRIBE suppliers; DESCRIBE customers;` etc.
+4. Seed expense categories if migration includes seed.
+
+---
+
+## Final Summary
+
+### Completed Features
+- **Migration 033** — Foundation schema for commissions, buy/sell pricing, customer priority, expenses, business settings, design attachments, procurement drafts, portal tokens, internal messages, HS code tax
+- **20HQ CBM** — Fixed to 28 m³ in consolidation container presets
+- **Expenses module** — Full page, API, filters, categories
+- **Customer decline flow** — Decline button and reason on confirm.php; CustomerDeclined status; admin notifications
+
+### Partially Completed
+- Customer priority — full integration (list, orders, confirmations, receiving, consolidation, containers)
+- Business settings — table ready; ETA offsets used in container edit Suggest
+- Design attachments, procurement drafts — implemented
+
+### Deferred / Risky Items
+- Full customer portal (one-time link) — schema ready; implementation deferred
+- Internal chat real-time — table ready; UI deferred
+- CBM direct customers — complex flow; deferred
+- Split shipments across containers — requires allocation logic; deferred
+
+### Migration Steps
+1. Backup database
+2. Run `php backend/migrations/run.php` (or `c:\xampp\php\php.exe backend/migrations/run.php` on Windows)
+3. Verify new tables: `expenses`, `expense_categories`, `business_settings`, `design_attachments`, `procurement_drafts`, `procurement_draft_items`, `customer_portal_tokens`, `internal_messages`, `hs_code_tax_rates`
+
+### Manual QA Checklist
+- [ ] Expenses page loads; add/edit/delete expense
+- [ ] 20HQ preset shows 28 CBM in Add Container modal
+- [ ] confirm.php shows Decline option; decline with reason works; internal team receives notification
+- [ ] Orders filter includes CustomerDeclined
+- [ ] CustomerDeclined badge displays correctly
+
+### Future Recommended Upgrades
+- Implement business settings page for notification thresholds (ETA offsets done)
+- Implement procurement draft flow (draft → convert to order)
+- Build profit/balances/outstanding pages
+- Implement customer portal with one-time link
+- Add internal message center UI
+
+---
+
+## Additional Ideas From Cursor
+
+1. **Exchange rate support** — Add `exchange_rates` table (from_currency, to_currency, rate, effective_date) for multi-currency normalization in profit and balance reports.
+
+2. **Status history table** — `order_status_history` (order_id, from_status, to_status, changed_by, changed_at) for full audit trail of order lifecycle transitions.
+
+3. **Approval workflows** — Extend beyond single-step approve; support multi-level approval for high-value orders with configurable thresholds.
+
+4. **Container ETA tracking** — `containers.eta_date`, `destination_country`, `destination` added; edit UI in Consolidation; ETA_OFFSETS_JSON used for Suggest. Cron `container_arrival_notifications.php` sends notifications at ARRIVAL_NOTIFY_DAYS (e.g. 7,3,1).
+
+5. **Customer credit limit** — Add `customers.credit_limit` and validation before order submission to prevent over-exposure.
+
+6. **Batch operations** — Bulk status change, bulk assign to container, bulk export with consistent permission checks.
+
+7. **Dashboard widgets** — Configurable dashboard with role-based widgets (expenses this month, orders by status, container fill rates, etc.).
+
+8. **API versioning** — Prepare for `/api/v2/` when breaking changes are needed; keep v1 stable.
+
+9. **Staged rollout** — Feature flags in `system_config` (e.g. `FEATURE_DRAFT_ORDERS`) to enable new flows gradually.
+
+10. **Stronger validation** — Central validation service for order items (CBM/weight sanity, unit consistency) used by both API and future imports.
+
+---
+
+## Independent Review Checklist
+
+Independent review pass completed on 2026-03-14. This section is the authoritative review record for the current codebase and should be treated as higher-confidence than earlier self-reported completion notes when they conflict.
+
+1. Supplier commissions
+- Status: Complete
+- Evidence: `backend/migrations/033_phase1_foundation.sql` adds supplier commission columns; `backend/api/handlers/suppliers.php` now persists `commission_rate`, `commission_type`, and `commission_applied_on`; `backend/api/handlers/financials.php` applies commission in margin calculations.
+- Problem: The schema and finance math existed, but the supplier maintenance flow did not expose or validate commission settings.
+- Action taken: Added supplier form/API support, validation for percentage vs fixed commissions, and hid commission data from non-finance readers.
+- Manual QA needed: Create one percentage-commission supplier and one fixed-commission supplier, then verify order profit results in Financials.
+
+2. Draft orders / draft procurement lists
+- Status: Partially Complete
+- Evidence: Orders save as `Draft`; `backend/api/handlers/procurement-drafts.php` and `procurement_drafts.php` support draft procurement records and conversion to orders.
+- Problem: Procurement drafts are still primarily single-supplier records and do not fully cover richer supplier-grouped procurement planning across mixed-source scenarios.
+- Action taken: Re-checked the flows and left the existing guarded draft/edit/convert behavior in place.
+- Manual QA needed: Create, edit, and convert procurement drafts; verify mixed-source business expectations against current single-supplier draft behavior.
+
+3. Custom product design attachments
+- Status: Partially Complete
+- Evidence: `backend/api/handlers/design-attachments.php`, `products.php`, `orders.php`, `frontend/js/products.js`, and `frontend/js/orders.js` support product and order-item design files.
+- Problem: Attachment handling accepted arbitrary stored paths, and the UI/docs said PDFs were supported while the upload policy only allowed image types.
+- Action taken: Locked attachment paths to validated uploaded files under `uploads/`, enabled PDF support in upload policy, and updated design-file inputs to accept images and PDFs.
+- Manual QA needed: Upload image and PDF attachments on a product and an order item, open them back from the UI, and verify invalid/manual path injection is rejected.
+
+4. Customer priority notifications
+- Status: Complete
+- Evidence: Customer priority columns exist in migration 033; priority badges are rendered in customers, orders, confirmations, receiving, consolidation, and containers; `backend/api/handlers/customers.php` now saves `priority_level` and `priority_note`.
+- Problem: Priority existed in schema and downstream displays, but the customer maintenance UI/API did not fully manage it.
+- Action taken: Added customer form/API support for priority level and priority note so the business can actually maintain the feature.
+- Manual QA needed: Set `high` and `critical` customers and verify badge visibility and hover note across the main operational screens.
+
+5. Order quantity flexibility
+- Status: Partially Complete
+- Evidence: Orders and products support cartons, pieces, and qty-per-carton; migration 033 adds `order_cartons` and `order_qty_per_carton`; `backend/api/handlers/orders.php` now persists those override columns when available.
+- Problem: The order flow relied mostly on legacy `cartons` and `qty_per_carton` fields, so the "default product packing vs order override" distinction was not consistently persisted.
+- Action taken: Persisted order-level packing override columns during order create/update while keeping existing UI calculations intact.
+- Manual QA needed: Create orders that use product defaults, then override cartons and qty-per-carton at order level and confirm totals stay correct after save/reload.
+
+6. Expenses module
+- Status: Complete
+- Evidence: `expenses.php`, `frontend/js/expenses.js`, and `backend/api/handlers/expenses.php` provide the module, categories, linking to orders/containers/customers/suppliers, and filtering.
+- Problem: Updating an existing expense could not persist `supplier_id` because the editable field list omitted it.
+- Action taken: Fixed the update path to include `supplier_id` alongside the other linked dimensions.
+- Manual QA needed: Edit an existing expense and change the linked supplier to confirm the update persists.
+
+7. Profit / balances / outstanding / payables / receivables
+- Status: Partially Complete
+- Evidence: `financials.php`, `frontend/js/financials.js`, and `backend/api/handlers/financials.php` provide profit and balances views.
+- Problem: Sell-price reporting was partially overridden by `total_amount`, customer receivables could misstate sell-side totals, and expenses are not yet allocated back into order/container profitability.
+- Action taken: Corrected sell-side profit and balance calculations to respect `sell_price` when present and re-verified commission handling.
+- Manual QA needed: Compare a sample order using buy/sell prices against the Financials UI, then validate balances with deposits and supplier payments in place.
+
+8. Buy price vs sell price
+- Status: Complete
+- Evidence: Product and order models carry `buy_price` and `sell_price`; `OrderExcelService.php` exports customer-facing amounts from `sell_price`; customer portal/confirmation pages do not render buy cost.
+- Problem: The biggest leak risk came from API-level RBAC gaps and sell-side financial calculations preferring `total_amount`.
+- Action taken: Hardened API permissions for key internal resources and corrected financial calculations so sell-side data is used where intended without exposing buy-side data externally.
+- Manual QA needed: Verify products/orders/financial endpoints as different roles and confirm customer-facing exports still only show sell values.
+
+9. Customer portal
+- Status: Partially Complete
+- Evidence: `customer_portal.php` now shows order cards with status, dates, receipt details, a simple timeline, and direct links into the existing `confirm.php` acceptance/decline flow; `backend/api/handlers/customer-portal-tokens.php` uses hashed one-time tokens.
+- Problem: The portal previously acted as a thin read-only list and did not surface the pending confirmation flow in a useful way.
+- Action taken: Upgraded the portal to show timelines, receipt actuals, dates, confirmation state, and direct confirm/decline handoff links; added audit logging for portal-token issuance.
+- Manual QA needed: Generate a portal link, open it once, verify orders/dates/timeline, and confirm that an awaiting-confirmation order can be reviewed via the linked confirmation page.
+
+10. Arrival / near-arrival notifications
+- Status: Complete
+- Evidence: `backend/cron/container_arrival_notifications.php`, `container_arrival_notifications` tracking, `business_settings.ARRIVAL_NOTIFY_DAYS`, and `NotificationService::notifyContainerArrival()` implement thresholded arrival alerts.
+- Problem: None found in the main duplicate-prevention path; the cron is already keyed to prevent re-sending the same threshold notification.
+- Action taken: Re-verified the duplicate-safe arrival-notification behavior during the audit.
+- Manual QA needed: Set ETA and thresholds, run the cron manually, and verify one notification per threshold per container.
+
+11. Country-specific ETA display rules
+- Status: Implemented but Incorrect
+- Evidence: `business_settings.php` and `ETA_OFFSETS_JSON` exist; container/consolidation logic reads ETA offsets.
+- Problem: The current ETA logic is still too generic and does not fully model per-country plus per-shipment-mode behavior, especially the requested Lebanon groupage handling.
+- Action taken: Re-validated the current settings path and documented the remaining logic gap rather than hardcoding a risky partial rule.
+- Manual QA needed: Validate Lebanon groupage, Lebanon full-container, and non-Lebanon examples against expected ETA calculations before treating the feature as done.
+
+12. Settings page
+- Status: Partially Complete
+- Evidence: `business_settings.php` and `backend/api/handlers/business-settings.php` provide a SuperAdmin-only business rules page; `admin_config.php` provides system-level configuration.
+- Problem: Important rules were split across two pages, and duplicate shipping-code behavior was configurable in DB but not surfaced in the business settings UI.
+- Action taken: Added duplicate shipping-code handling to Business Settings and upload-policy management to System Configuration.
+- Manual QA needed: Change duplicate shipping handling and upload policy from the UI, save, reload, and verify the values are respected by the relevant flows.
+
+13. Exports / printing / PDF / Excel
+- Status: Needs Manual Verification
+- Evidence: `backend/services/OrderExcelService.php`, `backend/api/handlers/orders.php`, and `backend/api/handlers/containers.php` provide order and container Excel export paths.
+- Problem: The export logic exists, but invoice/warehouse-invoice layout and print fidelity still need human output verification; nullable top-level supplier orders also risked being skipped in container export.
+- Action taken: Fixed container export to use `LEFT JOIN suppliers` so supplier-null orders are not dropped and re-checked sell-price-only export behavior.
+- Manual QA needed: Generate single-order and container exports, plus any invoice/warehouse-invoice prints, and inspect both layout and pricing columns manually.
+
+14. Multi-status checkbox filtering
+- Status: Complete
+- Evidence: `orders.php` / `frontend/js/orders.js`, `containers.php` / `frontend/js/containers.js`, and `warehouse_stock.php` / `frontend/js/warehouse_stock.js` now expose checkbox-based multi-status filters with include/exclude modes; `backend/api/handlers/orders.php`, `backend/api/handlers/containers.php`, and `backend/api/handlers/warehouse-stock.php` now honor `status[]` plus `status_mode`.
+- Problem: The earlier implementation only allowed single-status filtering on key list screens.
+- Action taken: Replaced the main single-select filters with real checkbox-based include/exclude filters and aligned the backend query handling.
+- Manual QA needed: Verify include and exclude combinations on orders, containers, and warehouse stock against expected counts/results.
+
+15. Container destination + money tracking
+- Status: Partially Complete
+- Evidence: Container destination fields exist and are editable; containers show totals and capacity usage.
+- Problem: Destination metadata is present, but container-level money/cost tracking is not yet deeply integrated into the workflow or reporting.
+- Action taken: Re-validated destination handling and documented the incomplete money-tracking portion.
+- Manual QA needed: Confirm whether container-level cost capture belongs in Expenses only or also requires native container financial fields/UI.
+
+16. High-alert comments / special handling notes
+- Status: Partially Complete
+- Evidence: `orders.php` and `frontend/js/orders.js` already surfaced high-alert notes; `backend/api/handlers/receiving.php`, `backend/api/handlers/containers.php`, `frontend/js/receiving.js`, `frontend/js/receiving_receive.js`, and `frontend/js/containers.js` now surface them in more operational screens.
+- Problem: High-alert notes previously existed but were too easy to miss outside the main orders UI.
+- Action taken: Added high-alert visibility in receiving and container assignment/detail views.
+- Manual QA needed: Create a high-alert order and verify it is visible in orders, receiving queue, receiving detail, and container screens.
+
+17. Auto-insert shipping code from customer
+- Status: Complete
+- Evidence: Orders UI already called `applyCustomerDefaultShippingCode()` from the selected customer; `backend/api/handlers/customers.php` plus `customers.php`/`frontend/js/customers.js` now let staff maintain `default_shipping_code`.
+- Problem: The auto-fill logic existed, but there was no stable maintenance path for the customer default shipping code.
+- Action taken: Added UI/API support for maintaining customer default shipping code.
+- Manual QA needed: Set a customer default shipping code, create a new order, pick that customer, and confirm the item row auto-fills it.
+
+18. 20HQ container CBM fix
+- Status: Complete
+- Evidence: Runtime settings and consolidation presets use `28`; search re-check found one stray `20HQ` seed constant in `scripts/seed_consolidation_export_dataset.py`.
+- Problem: A non-runtime seed script still used `33.2`, which could reintroduce confusion in test data.
+- Action taken: Updated the seed script to use `28.0` for `20HQ` as well.
+- Manual QA needed: Re-run the seed script if it is still used and verify seeded 20HQ containers are created at `28.0` CBM.
+
+19. Removal/redesign of top-level supplier field
+- Status: Partially Complete
+- Evidence: `orders.supplier_id` is nullable and `order_items.supplier_id` exists; `backend/api/handlers/orders.php` uses item-level suppliers; confirm/container export joins were re-checked.
+- Problem: Some flows still assume a top-level supplier for summaries and historical reporting, so nullable supplier compatibility is improved but not fully universal.
+- Action taken: Fixed `confirm.php` and container export joins to stop excluding supplier-null orders and re-checked the main order-item supplier fallback logic.
+- Manual QA needed: Push a supplier-null / multi-supplier order through confirmation, export, and container assignment to identify remaining top-level supplier assumptions.
+
+20. Admin notifications for cross-supplier price differences
+- Status: Complete
+- Evidence: `backend/api/handlers/orders.php` now detects same-`product_id`, same-currency, still-not-received cross-supplier price differences; `NotificationService.php` sends an admin notification; audit-log signatures prevent duplicate repeats for the same match set.
+- Problem: The feature was missing entirely.
+- Action taken: Added a narrow, low-noise notifier that only compares open orders (`Draft`, `Submitted`, `Approved`, `InTransitToWarehouse`) and only when the same product carries different supplier prices.
+- Manual QA needed: Save an order with a product already quoted under another supplier at a different unit price and confirm admins receive one alert only.
+
+21. Internal communication channel/chat
+- Status: Partially Complete
+- Evidence: `backend/api/handlers/internal-messages.php` and the customer Messages modal in `frontend/js/customers.js` exist.
+- Problem: The channel is still mostly customer-scoped in the UI rather than deeply tied to order/container context, and audit logging was missing.
+- Action taken: Added audit-log entries for message creation; documented the remaining context/threading gap.
+- Manual QA needed: Send messages for a customer and verify audit rows plus message visibility; decide whether order/container thread views are required next.
+
+22. Duplicate shipping code checks
+- Status: Complete
+- Evidence: `backend/api/handlers/orders.php` already checked duplicate item shipping codes; `backend/api/handlers/customers.php` now checks duplicate customer default shipping codes; `business_settings.php` exposes `SHIPPING_CODE_DUPLICATE_ACTION`.
+- Problem: Duplicate checks were warning-only, and customer create/edit did not participate.
+- Action taken: Added configurable warn/block behavior for both customer default shipping codes and order-item shipping code checks.
+- Manual QA needed: Set duplicate mode to `warn` and `block`, then verify customer save and order save behavior in both modes.
+
+23. Editability of orders/products/containers
+- Status: Partially Complete
+- Evidence: Products and containers are editable; draft orders are editable; container/order actions are audited in several paths.
+- Problem: Order editability is intentionally restricted to `Draft`, and the system still lacks a dedicated full status-history table for richer auditability.
+- Action taken: Kept the draft-only guardrail, re-checked container write permissions, and preserved audit-log writes on key mutations.
+- Manual QA needed: Attempt edits at each major status boundary and confirm blocked states fail safely without corrupting linked data.
+
+24. Split large customer shipments across multiple containers/batches
+- Status: Implemented but Unsafe
+- Evidence: Orders can be added to multiple shipment drafts and the UI warns about it; however, allocation is still whole-order, not item- or quantity-level.
+- Problem: The current approach allows operationally ambiguous multi-draft assignment without true partial allocation tracking.
+- Action taken: Documented this as unsafe rather than overstating it as complete.
+- Manual QA needed: Do not rely on this for true split-shipment operations until item-level allocation tables and status logic exist.
+
+25. Calendar / timeline / planning / notifications
+- Status: Partially Complete
+- Evidence: `calendar.php` exists; notifications and arrival alerts exist; the portal now has a lightweight order timeline.
+- Problem: Planning/timeline views are still basic and not yet a strong operational calendar with dense event coverage.
+- Action taken: Upgraded the customer portal timeline and re-verified notification linkage, but did not rebuild the internal calendar UX in this pass.
+- Manual QA needed: Review whether the existing calendar plus notifications meets planning needs or whether a richer event board is required.
+
+26. Customer decline flow with reason
+- Status: Complete
+- Evidence: `backend/api/handlers/confirm.php` requires a minimum reason on decline, records audit data, and calls `NotificationService::notifyOrderDeclined()`.
+- Problem: No blocking issue found in the main decline flow.
+- Action taken: Re-verified the decline path and confirmed the internal notification and audit trail behavior.
+- Manual QA needed: Decline a confirmation from `confirm.php` and verify the reason, order status, notification, and audit row.
+
+27. CBM / warehouse-direct customers flow
+- Status: Partially Complete
+- Evidence: Supplier-null orders are supported more safely than before; receiving variance notifications already support customer discrepancy handling.
+- Problem: There is still no dedicated warehouse-direct / supplier-free operational path or specialized UI section for this workflow.
+- Action taken: Improved supplier-null compatibility in confirmation/export-related joins and documented the remaining dedicated-flow gap.
+- Manual QA needed: Run a supplier-null order through create, receive, confirm, and export flows to validate current business acceptability.
+
+28. HS code / import tax calculation page
+- Status: Complete
+- Evidence: `hs_code_tax.php`, `frontend/js/hs_code_tax.js`, and `backend/api/handlers/hs-code-tax.php` now provide an internal rate library plus an estimate tool for manual HS-code, product, order, and container contexts on top of `hs_code_tax_rates`.
+- Problem: The platform previously had schema only, with no usable page or calculator.
+- Action taken: Added an admin-only HS code tax module with searchable/editable rate records, country-specific lookup, and planning estimates using stored pricing with explicit valuation-mode control.
+- Manual QA needed: Populate representative rates, run product/order/container estimates, and confirm the business wants the current buy-first default valuation mode.
+
+29. Warehouse stock page
+- Status: Partially Complete
+- Evidence: `warehouse_stock.php`, `frontend/js/warehouse_stock.js`, and `backend/api/handlers/warehouse-stock.php` provide the page plus customer/supplier/status/search filters.
+- Problem: The page is useful, but filtering/reporting is still fairly basic and not yet country-aware or deeply warehouse-analytics-focused.
+- Action taken: Re-verified the page and documented it as useful-but-not-finished rather than overstating completion.
+- Manual QA needed: Confirm the current columns and filters are sufficient for warehouse operations, especially around country/container slicing.
+
+30. Professionalization / international-grade improvements
+- Status: Partially Complete
+- Evidence: The codebase now has stronger audit logs, safer API permissions for major internal resources, duplicate-safe arrival notifications, improved finance correctness, and better field management for business rules.
+- Problem: Major enterprise-grade gaps still remain, especially full status-history tables, richer finance traceability, and safer true partial-allocation shipping logic.
+- Action taken: Prioritized substantive backend/business-rule fixes over cosmetic UI changes and documented the remaining structural upgrades clearly.
+- Manual QA needed: Treat the remaining risks section below as the operational follow-up list before calling the platform fully production-hardened.
+
+## Independent Review Findings
+
+1. The largest real risk was not missing screens; it was trust gaps between schema, UI, and permissions. Several requested fields already existed in the database but were not truly manageable or safely exposed.
+2. API RBAC was too permissive for key internal resources. The review pass hardened `orders`, `customers`, `products`, and container writes at the router level and tightened supplier-role handling in the handler itself.
+3. Finance had a material correctness issue: sell-side reporting could prefer `total_amount` even when `sell_price` existed. That is now corrected in Financials.
+4. Supplier commissions and customer priority/default shipping code were present structurally but not operationally maintainable. That gap is now closed.
+5. Attachment handling needed a security correction. Design and shipment document references are now constrained to validated uploaded files under `uploads/`.
+6. The customer portal was too thin for the requested behavior. It now surfaces dates, receipt details, a basic timeline, and direct handoff into the existing confirm/decline flow.
+7. Several items remain genuinely incomplete, not merely unverified: robust ETA mode logic, true split-shipment allocation, and deeper finance allocation/reporting completeness.
+
+## Fixes Applied In Review Pass
+
+- Hardened API permissions in `backend/api/index.php` and `backend/config/rbac.php` for major internal resources and aligned container write roles with the actual admin UI.
+- Added supplier commission maintenance and validation in `backend/api/handlers/suppliers.php`, `suppliers.php`, and `frontend/js/suppliers.js`.
+- Added customer priority/default shipping code maintenance plus duplicate-check policy enforcement in `backend/api/handlers/customers.php`, `customers.php`, `frontend/js/customers.js`, `backend/api/handlers/orders.php`, and `business_settings.php`.
+- Added duplicate shipping warn/block validation to Business Settings and surfaced upload policy fields in System Configuration.
+- Fixed supplier-linked expense editing in `backend/api/handlers/expenses.php`.
+- Corrected financial sell-side and receivable calculations in `backend/api/handlers/financials.php`.
+- Locked design/shipment attachment paths to validated uploads in `backend/api/helpers.php`, `backend/api/handlers/design-attachments.php`, and `backend/api/handlers/shipment-drafts.php`.
+- Enabled safe PDF attachment support through `backend/config/config.php`, `backend/api/handlers/upload.php`, `backend/api/handlers/config.php`, `frontend/js/upload-utils.js`, `products.php`, `orders.php`, and `admin_config.php` / `frontend/js/admin_config.js`.
+- Improved customer portal behavior in `customer_portal.php` and added audit logging in `backend/api/handlers/customer-portal-tokens.php`.
+- Fixed nullable-supplier compatibility in `backend/api/handlers/confirm.php` and `backend/api/handlers/containers.php` export logic.
+- Expanded high-alert visibility in receiving and container operations via `backend/api/handlers/receiving.php`, `backend/api/handlers/containers.php`, `frontend/js/receiving.js`, `frontend/js/receiving_receive.js`, and `frontend/js/containers.js`.
+- Added audit logging for internal messages in `backend/api/handlers/internal-messages.php`.
+- Added narrow, duplicate-safe cross-supplier price-difference admin alerts in `backend/api/handlers/orders.php` and `backend/services/NotificationService.php`.
+- Removed the remaining stray 20HQ seed constant mismatch in `scripts/seed_consolidation_export_dataset.py`.
+- Replaced single-select status filters with checkbox include/exclude filters across orders, containers, and warehouse stock, and aligned the corresponding backend handlers.
+- Added a real internal HS code tax module in `hs_code_tax.php`, `frontend/js/hs_code_tax.js`, and `backend/api/handlers/hs-code-tax.php`, with RBAC and navigation integration.
+
+## Remaining Risks / Manual QA Needed
+
+1. ETA offsets are still not strong enough for the requested per-country plus per-shipment-mode rules, especially Lebanon groupage logic.
+2. Split shipments across multiple containers remain unsafe because assignment is still whole-order and not allocation-based.
+3. Financial reporting is improved, but expenses are still not allocated back into order/container profitability in a business-complete way.
+4. Exports and print layouts need human verification, especially any invoice or warehouse-invoice outputs beyond the Excel code paths reviewed here.
+5. The customer portal is much better aligned now, but it still uses single-use tokens and hands confirmation/decline off to the dedicated confirmation page rather than keeping the entire flow in one surface.
+6. Supplier-null / warehouse-direct workflows need business QA before being called complete.
+7. The new HS code tax module still needs real tariff data entry and business validation of valuation assumptions before it should be used operationally.
+
+## Final Compliance Against Requested Features
+
+- Complete: 12 / 30
+- Partially Complete: 15 / 30
+- Missing: 0 / 30
+- Implemented but Incorrect: 1 / 30
+- Implemented but Unsafe: 1 / 30
+- Needs Manual Verification: 1 / 30
+
+High-confidence completed items after this review pass:
+- Supplier commissions
+- Customer priority management
+- Expenses module core flow
+- Buy vs sell price separation
+- Arrival notifications
+- Multi-status checkbox filtering
+- Auto-insert shipping code from customer
+- 20HQ CBM fix
+- Cross-supplier price-difference admin alerts
+- Duplicate shipping code warn/block handling
+- Customer decline flow with reason
+- HS code / import tax module
+
+## Additional Ideas From Codex Review
+
+1. Add an `order_status_history` table and write every status transition there. The current audit log is useful, but a first-class status history table would make workflow reviews, SLA tracking, and dispute resolution much stronger.
+2. Extend the new HS code tax module with landed-cost rules per destination country once the business confirms the customs valuation method and tariff maintenance process.
+3. Replace the current one-time portal page with a short-lived signed session portal if customers are expected to revisit status multiple times before shipment completion.
+4. Introduce true item-level shipment allocation tables before expanding split-shipment operations. This is the most important remaining structural workflow gap.

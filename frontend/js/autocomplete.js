@@ -16,7 +16,7 @@ function formatAutocompleteParts(...parts) {
 }
 
 const Autocomplete = {
-    debounceMs: 250,
+    debounceMs: 120,
     minChars: 1,
 
     init(inputEl, opts = {}) {
@@ -124,6 +124,7 @@ const Autocomplete = {
             }
         };
 
+        const debounceMs = opts.debounceMs ?? this.debounceMs;
         let debounceTimer;
         inputEl.addEventListener("input", () => {
             const q = inputEl.value.trim();
@@ -137,7 +138,7 @@ const Autocomplete = {
             debounceTimer = setTimeout(async () => {
                 const list = await fetchSearch(q);
                 show(list);
-            }, this.debounceMs);
+            }, debounceMs);
         });
 
         inputEl.addEventListener("focus", () => {
@@ -183,15 +184,15 @@ const Autocomplete = {
                     inputEl.dataset.selectedJson = JSON.stringify(item);
                 } else {
                     inputEl.value = "";
-                    inputEl.dataset.selectedId = "";
+                    delete inputEl.dataset.selectedId;
+                    delete inputEl.dataset.selectedJson;
                 }
             },
         };
     },
 
     defaultRender: {
-        customers: (c) =>
-            formatAutocompleteParts(c.name, c.code) || `#${c.id}`,
+        customers: (c) => formatAutocompleteParts(c.name, c.code) || `#${c.id}`,
         suppliers: (s) =>
             formatAutocompleteParts(s.name, s.phone, s.code || s.store_id) ||
             `#${s.id}`,
@@ -200,5 +201,15 @@ const Autocomplete = {
                 p.description_cn || p.description_en,
                 p.hs_code,
             ) || `#${p.id}`,
+        orders: (o) =>
+            formatAutocompleteParts(
+                `#${o.id}`,
+                o.customer_name,
+                o.expected_ready_date,
+                o.status,
+            ) || `#${o.id}`,
+        containers: (c) =>
+            formatAutocompleteParts(c.code, `#${c.id}`, c.status) || `#${c.id}`,
+        expenses: (p) => p.payee || p.name || String(p.id || ""),
     },
 };

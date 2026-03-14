@@ -67,6 +67,10 @@ async function loadSuppliers() {
                         r.reliability_score != null
                             ? `<span class="badge ${r.reliability_score >= 4 ? "bg-success" : r.reliability_score >= 2.5 ? "bg-warning text-dark" : "bg-danger"}" title="Reliability score based on orders, payments, variance rate">${parseFloat(r.reliability_score).toFixed(1)} ★</span>`
                             : "";
+                    const commissionHtml =
+                        buyer && r.commission_rate != null
+                            ? `<br><small class="text-muted">Commission: ${escapeHtml(String(r.commission_rate))}${r.commission_type === "fixed" ? "" : "%"} on ${escapeHtml(r.commission_applied_on === "sell_value" ? "sell" : "buy")}</small>`
+                            : "";
                     const addrTitle = [r.address, r.factory_location]
                         .filter(Boolean)
                         .join(" | ");
@@ -77,6 +81,7 @@ async function loadSuppliers() {
         <td>
           ${escapeHtml(r.name)}
           ${scoreHtml ? `<br><small>${scoreHtml}</small>` : ""}
+          ${commissionHtml}
           ${addrTitle ? `<br><small class="text-muted">${escapeHtml(addrTitle.substring(0, 60))}${addrTitle.length > 60 ? "…" : ""}</small>` : ""}
         </td>
         <td>${escapeHtml(r.phone || "-")}${r.fax ? `<br><small class="text-muted">Fax: ${escapeHtml(r.fax)}</small>` : ""}</td>
@@ -182,6 +187,9 @@ function openSupplierForm() {
     document.getElementById("additionalIdsContainer").innerHTML = "";
     document.getElementById("supplierFax").value = "";
     document.getElementById("supplierAddress").value = "";
+    document.getElementById("supplierCommissionRate").value = "";
+    document.getElementById("supplierCommissionType").value = "percentage";
+    document.getElementById("supplierCommissionAppliedOn").value = "buy_value";
     addAdditionalIdRow();
 }
 
@@ -198,6 +206,12 @@ async function editSupplier(id) {
         document.getElementById("supplierFactory").value =
             d.factory_location || "";
         document.getElementById("supplierAddress").value = d.address || "";
+        document.getElementById("supplierCommissionRate").value =
+            d.commission_rate ?? "";
+        document.getElementById("supplierCommissionType").value =
+            d.commission_type || "percentage";
+        document.getElementById("supplierCommissionAppliedOn").value =
+            d.commission_applied_on || "buy_value";
         document.getElementById("supplierNotes").value = d.notes || "";
         document.getElementById("supplierModalTitle").textContent =
             "Edit Supplier";
@@ -230,6 +244,17 @@ async function saveSupplier() {
             document.getElementById("supplierFactory").value.trim() || null,
         address:
             document.getElementById("supplierAddress").value.trim() || null,
+        commission_rate: document.getElementById("supplierCommissionRate").value
+            ? parseFloat(
+                  document.getElementById("supplierCommissionRate").value,
+              )
+            : null,
+        commission_type:
+            document.getElementById("supplierCommissionType").value ||
+            "percentage",
+        commission_applied_on:
+            document.getElementById("supplierCommissionAppliedOn").value ||
+            "buy_value",
         notes: document.getElementById("supplierNotes").value.trim() || null,
         additional_ids: collectAdditionalIds(),
     };

@@ -347,6 +347,13 @@ function renderWarehouseList() {
             const shippingCodes = [
                 ...new Set(items.map((i) => i.shipping_code).filter(Boolean)),
             ].join(", ");
+            const productAlerts = [
+                ...new Set(
+                    items
+                        .map((i) => (i.product_high_alert_note || "").trim())
+                        .filter(Boolean),
+                ),
+            ];
             const totalCartons = items.reduce(
                 (s, i) => s + (parseInt(i.cartons) || 0),
                 0,
@@ -356,10 +363,18 @@ function renderWarehouseList() {
           <div class="card warehouse-record-card h-100">
             <div class="card-body">
               <div class="d-flex justify-content-between align-items-start mb-2">
-                <h6 class="mb-0">#${o.id} — ${escapeHtml(o.customer_name)}</h6>
+                <h6 class="mb-0">#${o.id} — ${escapeHtml(o.customer_name)}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(o.customer_priority_note || "")}">${escapeHtml(o.customer_priority_level)}</span>` : ""}</h6>
                 <span class="badge ${typeof statusBadgeClass === "function" ? statusBadgeClass(o.status) : "bg-secondary"}">${typeof statusLabel === "function" ? statusLabel(o.status) : escapeHtml(o.status)}</span>
               </div>
               <div class="small text-muted mb-2">${escapeHtml(o.expected_ready_date)}</div>
+              ${o.high_alert_notes ? `<div class="alert alert-danger py-2 px-2 small mb-2"><strong>High alert:</strong> ${escapeHtml(o.high_alert_notes)}</div>` : ""}
+              ${
+                  productAlerts.length
+                      ? `<div class="product-alert-inline mb-2"><strong>Product alerts:</strong> ${productAlerts
+                            .map((note) => escapeHtml(note))
+                            .join(" | ")}</div>`
+                      : ""
+              }
               <dl class="row mb-0 small">
                 <dt class="col-5">Supplier</dt><dd class="col-7">${escapeHtml(o.supplier_name || "-")}</dd>
                 <dt class="col-5">Supplier phone</dt><dd class="col-7">${escapeHtml(o.supplier_phone || "-")}</dd>
@@ -367,7 +382,7 @@ function renderWarehouseList() {
                 <dt class="col-5">Cartons</dt><dd class="col-7">${totalCartons}</dd>
                 <dt class="col-5">CBM / Weight</dt><dd class="col-7">${parseFloat(o.declared_cbm || 0).toFixed(4)} / ${parseFloat(o.declared_weight || 0)} kg</dd>
               </dl>
-              ${items.length ? `<div class="mt-2 pt-2 border-top"><small class="text-muted">Items:</small> ${items.map((it) => `<span class="badge bg-light text-dark me-1">${escapeHtml(it.shipping_code || "—")} ${it.cartons || 0}ctn ${it.qty_per_carton || ""}/ctn HS:${escapeHtml(it.hs_code || "-")}</span>`).join("")}</div>` : ""}
+              ${items.length ? `<div class="mt-2 pt-2 border-top"><small class="text-muted">Items:</small> ${items.map((it) => `<span class="badge bg-light text-dark me-1">${escapeHtml(it.shipping_code || "—")} ${it.cartons || 0}ctn ${it.qty_per_carton || ""}/ctn HS:${escapeHtml(it.hs_code || "-")}${it.product_high_alert_note ? " ALERT" : ""}</span>`).join("")}</div>` : ""}
               <div class="mt-2 pt-2">
                 <button type="button" class="btn btn-sm btn-primary js-receive-btn" data-order-id="${o.id}">Receive</button>
               </div>
@@ -583,7 +598,7 @@ async function loadOrderForReceive(orderId) {
             .map(
                 (it, i) => `
           <tr data-order-item-id="${it.id}">
-            <td>${escapeHtml((typeof descText === "function" ? descText(it) : it.description_en || it.description_cn || "Item " + (i + 1)).substring(0, 40))}</td>
+            <td>${escapeHtml((typeof descText === "function" ? descText(it) : it.description_en || it.description_cn || "Item " + (i + 1)).substring(0, 40))}${it.product_high_alert_note ? `<div class="product-alert-badge mt-1" title="${escapeHtml(it.product_high_alert_note)}">Alert</div>` : ""}</td>
             <td>${it.declared_cbm || 0} CBM / ${it.declared_weight || 0} kg</td>
             <td><input type="number" class="form-control form-control-sm item-actual-cartons" min="0" placeholder="0"></td>
             <td><input type="number" step="0.0001" class="form-control form-control-sm item-actual-cbm" min="0" placeholder="0"></td>

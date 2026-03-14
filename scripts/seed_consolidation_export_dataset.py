@@ -171,7 +171,7 @@ def cleanup_existing_seed_data(db: DbClient, seed_tag: str) -> None:
 
 def upsert_containers(db: DbClient, seed_tag: str) -> list[dict]:
     containers = [
-        {"code": f"{seed_tag}-20HQ", "max_cbm": 33.2, "max_weight": 28200.0},
+        {"code": f"{seed_tag}-20HQ", "max_cbm": 28.0, "max_weight": 28200.0},
         {"code": f"{seed_tag}-40HQ", "max_cbm": 67.7, "max_weight": 26800.0},
         {"code": f"{seed_tag}-45HQ", "max_cbm": 86.0, "max_weight": 29500.0},
     ]

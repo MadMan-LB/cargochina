@@ -21,7 +21,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
              wr.actual_cbm, wr.actual_weight, wr.actual_cartons, wr.receipt_condition
              FROM orders o
              JOIN customers c ON o.customer_id = c.id
-             JOIN suppliers s ON o.supplier_id = s.id
+             LEFT JOIN suppliers s ON o.supplier_id = s.id
              LEFT JOIN warehouse_receipts wr ON wr.order_id = o.id
              WHERE o.confirmation_token = ?
              ORDER BY wr.received_at DESC
@@ -57,7 +57,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $token = trim($input['token'] ?? '');
         if (!$token) jsonError('Token required', 400);
 
-        $stmt = $pdo->prepare("SELECT id, status, confirmation_token FROM orders WHERE confirmation_token = ?");
+        $decline = !empty($input['decline']);
+        $declineReason = trim($input['decline_reason'] ?? '');
+
+        if ($decline && strlen($declineReason) < 5) {
+            jsonError('Decline reason is required (minimum 5 characters)', 400);
+        }
+
+        $stmt = $pdo->prepare("SELECT id, status, confirmation_token, customer_id FROM orders WHERE confirmation_token = ?");
         $stmt->execute([$token]);
         $order = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$order) jsonError('Invalid or expired confirmation link', 404);
@@ -68,22 +75,41 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             jsonError('Invalid confirmation token', 403);
         }
 
-        $wr = $pdo->prepare("SELECT * FROM warehouse_receipts WHERE order_id = ? ORDER BY received_at DESC LIMIT 1");
-        $wr->execute([$order['id']]);
-        $receipt = $wr->fetch(PDO::FETCH_ASSOC);
-        $accepted = $receipt ? [
-            'actual_cbm' => $receipt['actual_cbm'],
-            'actual_weight' => $receipt['actual_weight'],
-            'actual_cartons' => $receipt['actual_cartons']
-        ] : [];
+        if ($decline) {
+            $pdo->prepare("UPDATE orders SET status='CustomerDeclined', confirmation_token=NULL WHERE id=?")->execute([$order['id']]);
+            $chk = $pdo->query("SHOW COLUMNS FROM customer_confirmations LIKE 'declined_at'");
+            if ($chk && $chk->rowCount() > 0) {
+                $pdo->prepare("INSERT INTO customer_confirmations (order_id, confirmed_by, confirmed_at, accepted_actuals, declined_at, decline_reason) VALUES (?,NULL,NULL,NULL,NOW(),?)")
+                    ->execute([$order['id'], $declineReason]);
+            } else {
+                $pdo->prepare("INSERT INTO customer_confirmations (order_id, confirmed_by, accepted_actuals) VALUES (?,NULL,?)")
+                    ->execute([$order['id'], json_encode(['declined' => true, 'reason' => $declineReason])]);
+            }
+            $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order',?,'decline_by_token',?,NULL)")
+                ->execute([$order['id'], json_encode(['token_used' => true, 'reason' => $declineReason])]);
 
-        $pdo->prepare("UPDATE orders SET status='Confirmed', confirmation_token=NULL WHERE id=?")->execute([$order['id']]);
-        $pdo->prepare("INSERT INTO customer_confirmations (order_id, confirmed_by, accepted_actuals) VALUES (?,NULL,?)")
-            ->execute([$order['id'], json_encode($accepted)]);
-        $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order',?,'confirm_by_token',?,NULL)")
-            ->execute([$order['id'], json_encode(['token_used' => true])]);
+            require_once dirname(__DIR__, 2) . '/services/NotificationService.php';
+            NotificationService::notifyOrderDeclined((int) $order['id'], $declineReason);
 
-        jsonResponse(['data' => ['status' => 'Confirmed', 'order_id' => (int) $order['id']]]);
+            jsonResponse(['data' => ['status' => 'CustomerDeclined', 'order_id' => (int) $order['id']]]);
+        } else {
+            $wr = $pdo->prepare("SELECT * FROM warehouse_receipts WHERE order_id = ? ORDER BY received_at DESC LIMIT 1");
+            $wr->execute([$order['id']]);
+            $receipt = $wr->fetch(PDO::FETCH_ASSOC);
+            $accepted = $receipt ? [
+                'actual_cbm' => $receipt['actual_cbm'],
+                'actual_weight' => $receipt['actual_weight'],
+                'actual_cartons' => $receipt['actual_cartons']
+            ] : [];
+
+            $pdo->prepare("UPDATE orders SET status='Confirmed', confirmation_token=NULL WHERE id=?")->execute([$order['id']]);
+            $pdo->prepare("INSERT INTO customer_confirmations (order_id, confirmed_by, accepted_actuals) VALUES (?,NULL,?)")
+                ->execute([$order['id'], json_encode($accepted)]);
+            $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order',?,'confirm_by_token',?,NULL)")
+                ->execute([$order['id'], json_encode(['token_used' => true])]);
+
+            jsonResponse(['data' => ['status' => 'Confirmed', 'order_id' => (int) $order['id']]]);
+        }
     }
 
     jsonError('Method not allowed', 405);

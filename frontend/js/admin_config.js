@@ -59,6 +59,12 @@ async function loadConfig() {
             c.notification_max_attempts ?? 3;
         document.getElementById("notificationRetrySeconds").value =
             c.notification_retry_seconds ?? 60;
+        document.getElementById("uploadMaxMb").value = c.upload_max_mb ?? 8;
+        document.getElementById("uploadAllowedTypes").value = Array.isArray(
+            c.upload_allowed_types,
+        )
+            ? c.upload_allowed_types.join(",")
+            : c.upload_allowed_types || "jpg,jpeg,png,webp,gif,pdf";
         toggleWhatsAppSections();
         document.getElementById("whatsappProvider").onchange =
             toggleWhatsAppSections;
@@ -113,6 +119,21 @@ function validateConfig(cfg) {
     const retrySec = parseInt(cfg.NOTIFICATION_RETRY_SECONDS, 10);
     if (!isNaN(retrySec) && (retrySec < 1 || retrySec > 3600))
         errs.push("Notification retry seconds must be 1–3600");
+    const uploadMb = parseFloat(cfg.UPLOAD_MAX_MB);
+    if (!isNaN(uploadMb) && (uploadMb < 0.5 || uploadMb > 50))
+        errs.push("Upload max MB must be 0.5–50");
+    const allowedTypes = String(cfg.UPLOAD_ALLOWED_TYPES || "")
+        .split(",")
+        .map((t) => t.trim().toLowerCase())
+        .filter(Boolean);
+    if (
+        allowedTypes.length &&
+        allowedTypes.some(
+            (t) => !["jpg", "jpeg", "png", "webp", "gif", "pdf"].includes(t),
+        )
+    ) {
+        errs.push("Upload allowed types must be jpg,jpeg,png,webp,gif,pdf");
+    }
     return errs;
 }
 
@@ -169,6 +190,12 @@ async function saveConfig() {
                 NOTIFICATION_RETRY_SECONDS:
                     document.getElementById("notificationRetrySeconds").value ||
                     60,
+                UPLOAD_MAX_MB:
+                    document.getElementById("uploadMaxMb").value || 8,
+                UPLOAD_ALLOWED_TYPES:
+                    document
+                        .getElementById("uploadAllowedTypes")
+                        .value?.trim() || "jpg,jpeg,png,webp,gif,pdf",
                 TRACKING_API_BASE_URL:
                     document
                         .getElementById("trackingApiBaseUrl")

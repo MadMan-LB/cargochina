@@ -8,7 +8,7 @@ require_once __DIR__ . '/../helpers.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
-    if ($id !== 'receiving' && $id !== 'upload') {
+    if ($id !== 'receiving' && $id !== 'upload' && $id !== 'container-presets' && $id !== 'eta-offsets') {
         requireRole(['SuperAdmin']);
     }
 
@@ -25,8 +25,39 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 jsonResponse(['data' => [
                     'max_upload_mb' => (float) ($fileConfig['upload_max_mb'] ?? 8),
-                    'allowed_types' => $fileConfig['upload_allowed_types'] ?? ['jpg', 'jpeg', 'png', 'webp'],
+                    'allowed_types' => $fileConfig['upload_allowed_types'] ?? ['jpg', 'jpeg', 'png', 'webp', 'gif', 'pdf'],
                 ]]);
+                return;
+            }
+            if ($id === 'container-presets') {
+                $data = [
+                    'CONTAINER_20HQ_CBM' => '28',
+                    'CONTAINER_40HQ_CBM' => '68',
+                    'CONTAINER_45HQ_CBM' => '78',
+                ];
+                $chk = @$pdo->query("SHOW TABLES LIKE 'business_settings'");
+                if ($chk && $chk->rowCount() > 0) {
+                    $stmt = $pdo->query("SELECT key_name, key_value FROM business_settings WHERE key_name IN ('CONTAINER_20HQ_CBM','CONTAINER_40HQ_CBM','CONTAINER_45HQ_CBM')");
+                    if ($stmt) {
+                        while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                            $data[$r['key_name']] = $r['key_value'];
+                        }
+                    }
+                }
+                jsonResponse(['data' => $data]);
+                return;
+            }
+            if ($id === 'eta-offsets') {
+                $data = ['LB' => ['groupage' => 15, 'full_container' => 0, 'special' => 0], 'DEFAULT' => ['groupage' => 0, 'full_container' => 0, 'special' => 0]];
+                $chk = @$pdo->query("SHOW TABLES LIKE 'business_settings'");
+                if ($chk && $chk->rowCount() > 0) {
+                    $stmt = $pdo->query("SELECT key_value FROM business_settings WHERE key_name = 'ETA_OFFSETS_JSON' LIMIT 1");
+                    if ($stmt && $r = $stmt->fetch(PDO::FETCH_ASSOC) && !empty($r['key_value'])) {
+                        $decoded = json_decode($r['key_value'], true);
+                        if (is_array($decoded)) $data = $decoded;
+                    }
+                }
+                jsonResponse(['data' => $data]);
                 return;
             }
             if ($id === 'receiving') {
@@ -74,6 +105,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     elseif ($k === 'PHOTO_EVIDENCE_PER_ITEM') $fileConfig['photo_evidence_per_item'] = (int) $r['key_value'];
                     elseif ($k === 'NOTIFICATION_MAX_ATTEMPTS') $fileConfig['notification_max_attempts'] = (int) ($r['key_value'] ?? 3);
                     elseif ($k === 'NOTIFICATION_RETRY_SECONDS') $fileConfig['notification_retry_seconds'] = (int) ($r['key_value'] ?? 60);
+                    elseif ($k === 'UPLOAD_MAX_MB') $fileConfig['upload_max_mb'] = (float) ($r['key_value'] ?? 8);
+                    elseif ($k === 'UPLOAD_ALLOWED_TYPES') $fileConfig['upload_allowed_types'] = array_map('trim', explode(',', $r['key_value'] ?? ''));
                 }
             }
             $provider = $fileConfig['whatsapp_provider'] ?? 'generic';
@@ -142,8 +175,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             if (isset($updates['UPLOAD_ALLOWED_TYPES'])) {
                 $t = is_array($updates['UPLOAD_ALLOWED_TYPES']) ? $updates['UPLOAD_ALLOWED_TYPES'] : array_map('trim', explode(',', (string) $updates['UPLOAD_ALLOWED_TYPES']));
-                $allowed = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
-                if (!empty(array_diff(array_map('strtolower', $t), $allowed))) $errors['UPLOAD_ALLOWED_TYPES'] = 'Only jpg,jpeg,png,webp,gif allowed';
+                $allowed = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'pdf'];
+                if (!empty(array_diff(array_map('strtolower', $t), $allowed))) $errors['UPLOAD_ALLOWED_TYPES'] = 'Only jpg,jpeg,png,webp,gif,pdf allowed';
             }
             if (!empty($errors)) {
                 jsonError('Validation failed', 400, $errors);

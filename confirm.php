@@ -331,17 +331,26 @@
     <div class="action-panel">
       <p class="text-muted small mb-3">By confirming, you acknowledge the actual measurements above and release Salameh Cargo from responsibility for any declared vs. actual discrepancy.</p>
       <div id="errorMsg" class="alert alert-danger d-none mb-3"></div>
+      <div id="declineSection" class="mb-3">
+        <label class="form-label small">Or decline (reason required)</label>
+        <div class="input-group input-group-sm mb-2">
+          <input type="text" class="form-control" id="declineReason" placeholder="Reason for decline (min 5 characters)" maxlength="500">
+          <button class="btn btn-outline-danger" type="button" id="declineBtn" onclick="submitDecline()">Decline</button>
+        </div>
+      </div>
       <button class="btn-confirm" id="confirmBtn" onclick="submitConfirmation()">
         ✓ I Confirm — Accept Actual Measurements
       </button>
-      <p class="text-center mt-2 mb-0"><small class="text-muted">This link is single-use and will expire after confirmation.</small></p>
+      <p class="text-center mt-2 mb-0"><small class="text-muted">This link is single-use and will expire after confirmation or decline.</small></p>
     </div>`;
     }
 
     async function submitConfirmation() {
       const btn = document.getElementById('confirmBtn');
+      const declineBtn = document.getElementById('declineBtn');
       const errEl = document.getElementById('errorMsg');
       btn.disabled = true;
+      if (declineBtn) declineBtn.disabled = true;
       btn.textContent = 'Confirming…';
       errEl.classList.add('d-none');
       try {
@@ -359,6 +368,7 @@
           errEl.textContent = data.message || 'Confirmation failed.';
           errEl.classList.remove('d-none');
           btn.disabled = false;
+          if (declineBtn) declineBtn.disabled = false;
           btn.textContent = '✓ I Confirm — Accept Actual Measurements';
           return;
         }
@@ -367,7 +377,58 @@
         errEl.textContent = 'Network error. Please try again.';
         errEl.classList.remove('d-none');
         btn.disabled = false;
+        if (declineBtn) declineBtn.disabled = false;
         btn.textContent = '✓ I Confirm — Accept Actual Measurements';
+      }
+    }
+
+    async function submitDecline() {
+      const reason = (document.getElementById('declineReason') || {}).value || '';
+      if (reason.trim().length < 5) {
+        const errEl = document.getElementById('errorMsg');
+        errEl.textContent = 'Please provide a reason for decline (minimum 5 characters).';
+        errEl.classList.remove('d-none');
+        return;
+      }
+      const btn = document.getElementById('confirmBtn');
+      const declineBtn = document.getElementById('declineBtn');
+      const errEl = document.getElementById('errorMsg');
+      btn.disabled = true;
+      if (declineBtn) declineBtn.disabled = true;
+      declineBtn.textContent = 'Declining…';
+      errEl.classList.add('d-none');
+      try {
+        const res = await fetch(`${API}/?path=confirm`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            token,
+            decline: true,
+            decline_reason: reason.trim()
+          })
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          errEl.textContent = data.message || 'Decline failed.';
+          errEl.classList.remove('d-none');
+          btn.disabled = false;
+          if (declineBtn) {
+            declineBtn.disabled = false;
+            declineBtn.textContent = 'Decline';
+          }
+          return;
+        }
+        renderDeclined(document.getElementById('app'));
+      } catch (e) {
+        errEl.textContent = 'Network error. Please try again.';
+        errEl.classList.remove('d-none');
+        btn.disabled = false;
+        if (declineBtn) {
+          declineBtn.disabled = false;
+          declineBtn.textContent = 'Decline';
+        }
       }
     }
 
@@ -377,6 +438,16 @@
       <div class="success-icon">✅</div>
       <h2 style="color:#16a34a; font-weight:700;">Confirmed!</h2>
       <p class="text-muted">Thank you. Your confirmation has been recorded and Salameh Cargo has been notified.</p>
+      <p class="text-muted small">You may close this page.</p>
+    </div>`;
+    }
+
+    function renderDeclined(app) {
+      app.innerHTML = `
+    <div class="success-state">
+      <div class="success-icon" style="font-size:3rem;">📋</div>
+      <h2 style="color:#d97706; font-weight:700;">Declined</h2>
+      <p class="text-muted">Your decline has been recorded. Salameh Cargo has been notified and will contact you.</p>
       <p class="text-muted small">You may close this page.</p>
     </div>`;
     }

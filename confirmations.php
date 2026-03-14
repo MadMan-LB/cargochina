@@ -16,6 +16,10 @@ require 'includes/layout.php';
   <div class="card-body">
     <div class="row mb-3 g-2 form-row-responsive">
       <div class="col-12 col-md-6 col-lg-2">
+        <label class="form-label small">Search</label>
+        <input type="text" class="form-control form-control-sm" id="filterSearch" placeholder="Customer, order ID…" autocomplete="off">
+      </div>
+      <div class="col-12 col-md-6 col-lg-2">
         <label class="form-label small">Date from</label>
         <input type="date" class="form-control form-control-sm" id="filterDateFrom">
       </div>
@@ -24,8 +28,8 @@ require 'includes/layout.php';
         <input type="date" class="form-control form-control-sm" id="filterDateTo">
       </div>
       <div class="col-12 col-md-6 col-lg-2">
-        <label class="form-label small">Order ID</label>
-        <input type="text" class="form-control form-control-sm" id="filterOrderId" placeholder="e.g. 3">
+        <label class="form-label small">Order</label>
+        <input type="text" class="form-control form-control-sm" id="filterOrderId" placeholder="Type to search…" autocomplete="off">
       </div>
       <div class="col-12 col-md-6 col-lg-2">
         <label class="form-label small">Customer</label>

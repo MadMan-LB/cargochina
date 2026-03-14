@@ -24,7 +24,10 @@ function showSkeleton(id, show) {
 }
 
 async function loadQueue() {
-    const orderId = document.getElementById("filterOrderId")?.value?.trim();
+    const orderId =
+        filterOrderAc?.getSelectedId?.() ||
+        document.getElementById("filterOrderId")?.value?.trim() ||
+        "";
     const customerId = document.getElementById("filterCustomerId")?.value;
     const supplierId = document.getElementById("filterSupplierId")?.value;
     const dateFrom = document.getElementById("filterDateFrom")?.value;
@@ -60,7 +63,7 @@ async function loadQueue() {
                     (o) => `
                 <tr>
                     <td><a href="${AREA_BASE}/receiving/receive.php?order_id=${o.id}">#${o.id}</a></td>
-                    <td>${escapeHtml(o.customer_name)}</td>
+                    <td>${escapeHtml(o.customer_name)}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(o.customer_priority_note || "")}">${escapeHtml(o.customer_priority_level)}</span>` : ""}</td>
                     <td>${escapeHtml(o.supplier_name)}</td>
                     <td>${escapeHtml(o.expected_ready_date)}</td>
                     <td>${parseFloat(o.declared_cbm || 0).toFixed(2)} CBM / ${parseFloat(o.declared_weight || 0).toFixed(0)} kg</td>
@@ -109,7 +112,7 @@ async function loadHistory() {
                 <tr>
                     <td><a href="${AREA_BASE}/receiving/receipt.php?id=${r.id}">#${r.id}</a></td>
                     <td>#${r.order_id}</td>
-                    <td>${escapeHtml(r.customer_name)}</td>
+                    <td>${escapeHtml(r.customer_name)}${r.customer_priority_level && r.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(r.customer_priority_note || "")}">${escapeHtml(r.customer_priority_level)}</span>` : ""}</td>
                     <td>${parseFloat(r.actual_cbm || 0).toFixed(2)} CBM / ${parseFloat(r.actual_weight || 0).toFixed(0)} kg</td>
                     <td>${escapeHtml((r.received_at || "").replace(" ", " "))}</td>
                     <td><a class="btn btn-sm btn-outline-secondary" href="${AREA_BASE}/receiving/receipt.php?id=${r.id}">View</a></td>
@@ -129,7 +132,10 @@ async function loadHistory() {
 }
 
 async function exportQueueCsv() {
-    const orderId = document.getElementById("filterOrderId")?.value?.trim();
+    const orderId =
+        filterOrderAc?.getSelectedId?.() ||
+        document.getElementById("filterOrderId")?.value?.trim() ||
+        "";
     const customerId = document.getElementById("filterCustomerId")?.value;
     const supplierId = document.getElementById("filterSupplierId")?.value;
     const dateFrom = document.getElementById("filterDateFrom")?.value;
@@ -209,36 +215,51 @@ async function exportQueueCsv() {
     }
 }
 
+let filterOrderAc;
+
 function setupFilterAutocomplete() {
+    const orderInput = document.getElementById("filterOrderId");
     const supInput = document.getElementById("filterSupplier");
     const supId = document.getElementById("filterSupplierId");
     const custInput = document.getElementById("filterCustomer");
     const custId = document.getElementById("filterCustomerId");
-    if (!supInput || !custInput || typeof Autocomplete === "undefined") return;
-    Autocomplete.init(supInput, {
-        resource: "suppliers",
-        placeholder: "Type to search supplier...",
-        onSelect: (item) => {
-            if (supId) supId.value = item.id;
-        },
-    });
-    supInput.addEventListener("input", () => {
-        if (!supInput.value.trim() && supId) supId.value = "";
-    });
-    Autocomplete.init(custInput, {
-        resource: "customers",
-        placeholder: "Type to search customer...",
-        renderItem: (c) =>
-            `${c.name || ""} — ${c.code || ""}`
-                .replace(/^ — | — $/g, "")
-                .trim() || `#${c.id}`,
-        onSelect: (item) => {
-            if (custId) custId.value = item.id;
-        },
-    });
-    custInput.addEventListener("input", () => {
-        if (!custInput.value.trim() && custId) custId.value = "";
-    });
+    if (typeof Autocomplete === "undefined") return;
+    if (orderInput) {
+        filterOrderAc = Autocomplete.init(orderInput, {
+            resource: "orders",
+            searchPath: "/search",
+            placeholder: "Type to search order…",
+            onSelect: () => loadQueue(),
+        });
+    }
+    if (supInput) {
+        Autocomplete.init(supInput, {
+            resource: "suppliers",
+            placeholder: "Type to search supplier...",
+            onSelect: (item) => {
+                if (supId) supId.value = item.id;
+            },
+        });
+        supInput.addEventListener("input", () => {
+            if (!supInput.value.trim() && supId) supId.value = "";
+        });
+    }
+    if (custInput) {
+        Autocomplete.init(custInput, {
+            resource: "customers",
+            placeholder: "Type to search customer...",
+            renderItem: (c) =>
+                `${c.name || ""} — ${c.code || ""}`
+                    .replace(/^ — | — $/g, "")
+                    .trim() || `#${c.id}`,
+            onSelect: (item) => {
+                if (custId) custId.value = item.id;
+            },
+        });
+        custInput.addEventListener("input", () => {
+            if (!custInput.value.trim() && custId) custId.value = "";
+        });
+    }
 }
 
 document.addEventListener("DOMContentLoaded", () => {

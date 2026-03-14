@@ -25,12 +25,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $statuses = ['Approved', 'InTransitToWarehouse'];
         $placeholders = implode(',', array_fill(0, count($statuses), '?'));
         $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
-        $sql = "SELECT o.id, o.customer_id, o.supplier_id, o.expected_ready_date, o.status,
-            c.name as customer_name, c.phone as customer_phone, c.code as customer_code,
+        $custCols = 'c.name as customer_name, c.phone as customer_phone, c.code as customer_code';
+        $chkPrio = @$pdo->query("SHOW COLUMNS FROM customers LIKE 'priority_level'");
+        if ($chkPrio && $chkPrio->rowCount() > 0) $custCols .= ', c.priority_level as customer_priority_level, c.priority_note as customer_priority_note';
+        $sql = "SELECT o.id, o.customer_id, o.supplier_id, o.expected_ready_date, o.status, o.high_alert_notes,
+            $custCols,
             s.name as supplier_name, s.phone as supplier_phone
             FROM orders o
             JOIN customers c ON o.customer_id = c.id
-            JOIN suppliers s ON o.supplier_id = s.id
+            LEFT JOIN suppliers s ON o.supplier_id = s.id
             WHERE o.status IN ($placeholders)
             AND (
                 o.id = ?
@@ -49,8 +52,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $chkProductAlert = @$pdo->query("SHOW COLUMNS FROM products LIKE 'high_alert_note'");
+        $itemAlertCol = ($chkProductAlert && $chkProductAlert->rowCount() > 0) ? ", p.high_alert_note as product_high_alert_note" : "";
         foreach ($rows as &$r) {
-            $items = $pdo->prepare("SELECT oi.id, oi.shipping_code, oi.cartons, oi.declared_cbm, oi.declared_weight FROM order_items oi WHERE oi.order_id = ?");
+            $items = $pdo->prepare("SELECT oi.id, oi.shipping_code, oi.cartons, oi.declared_cbm, oi.declared_weight$itemAlertCol FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?");
             $items->execute([$r['id']]);
             $r['items'] = $items->fetchAll(PDO::FETCH_ASSOC);
             $r['declared_cbm'] = array_sum(array_column($r['items'], 'declared_cbm'));
@@ -74,11 +79,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $shippingCode = trim($_GET['shipping_code'] ?? '');
 
         $placeholders = implode(',', array_fill(0, count($statuses), '?'));
-        $sql = "SELECT o.id, o.customer_id, o.supplier_id, o.expected_ready_date, o.status, o.created_at,
-            c.name as customer_name, s.name as supplier_name, s.phone as supplier_phone
+        $custCols = 'c.name as customer_name';
+        $chkPrio = @$pdo->query("SHOW COLUMNS FROM customers LIKE 'priority_level'");
+        if ($chkPrio && $chkPrio->rowCount() > 0) $custCols .= ', c.priority_level as customer_priority_level, c.priority_note as customer_priority_note';
+        $sql = "SELECT o.id, o.customer_id, o.supplier_id, o.expected_ready_date, o.status, o.created_at, o.high_alert_notes,
+            $custCols, s.name as supplier_name, s.phone as supplier_phone
             FROM orders o
             JOIN customers c ON o.customer_id = c.id
-            JOIN suppliers s ON o.supplier_id = s.id
+            LEFT JOIN suppliers s ON o.supplier_id = s.id
             WHERE o.status IN ($placeholders)";
         $params = $statuses;
         if ($customerId) {
@@ -110,8 +118,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $chkProductAlert = @$pdo->query("SHOW COLUMNS FROM products LIKE 'high_alert_note'");
+        $itemAlertCol = ($chkProductAlert && $chkProductAlert->rowCount() > 0) ? ", p.high_alert_note as product_high_alert_note" : "";
         foreach ($rows as &$r) {
-            $items = $pdo->prepare("SELECT oi.id, oi.shipping_code, oi.cartons, oi.qty_per_carton, oi.declared_cbm, oi.declared_weight, oi.item_length, oi.item_width, oi.item_height, oi.description_cn, oi.description_en, p.hs_code FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?");
+            $items = $pdo->prepare("SELECT oi.id, oi.shipping_code, oi.cartons, oi.qty_per_carton, oi.declared_cbm, oi.declared_weight, oi.item_length, oi.item_width, oi.item_height, oi.description_cn, oi.description_en, p.hs_code$itemAlertCol FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?");
             $items->execute([$r['id']]);
             $r['items'] = $items->fetchAll(PDO::FETCH_ASSOC);
             $r['declared_cbm'] = array_sum(array_column($r['items'], 'declared_cbm'));
@@ -123,12 +133,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     if ($id === 'receipts') {
         if (is_numeric($action)) {
             $receiptId = (int) $action;
-            $stmt = $pdo->prepare("SELECT wr.*, o.id as order_id, o.customer_id, o.supplier_id, o.expected_ready_date, o.status as order_status,
-                c.name as customer_name, s.name as supplier_name, u.full_name as received_by_name
+            $custCols = 'c.name as customer_name';
+            $chkPrio = @$pdo->query("SHOW COLUMNS FROM customers LIKE 'priority_level'");
+            if ($chkPrio && $chkPrio->rowCount() > 0) $custCols .= ', c.priority_level as customer_priority_level, c.priority_note as customer_priority_note';
+            $stmt = $pdo->prepare("SELECT wr.*, o.id as order_id, o.customer_id, o.supplier_id, o.expected_ready_date, o.status as order_status, o.high_alert_notes,
+                $custCols, s.name as supplier_name, u.full_name as received_by_name
                 FROM warehouse_receipts wr
                 JOIN orders o ON wr.order_id = o.id
                 JOIN customers c ON o.customer_id = c.id
-                JOIN suppliers s ON o.supplier_id = s.id
+                LEFT JOIN suppliers s ON o.supplier_id = s.id
                 LEFT JOIN users u ON wr.received_by = u.id
                 WHERE wr.id = ?");
             $stmt->execute([$receiptId]);
@@ -156,12 +169,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $limit = min(100, max(1, (int)($_GET['limit'] ?? 50)));
         $offset = max(0, (int)($_GET['offset'] ?? 0));
 
+        $custCols = 'c.name as customer_name';
+        $chkPrio = @$pdo->query("SHOW COLUMNS FROM customers LIKE 'priority_level'");
+        if ($chkPrio && $chkPrio->rowCount() > 0) $custCols .= ', c.priority_level as customer_priority_level, c.priority_note as customer_priority_note';
         $sql = "SELECT wr.id, wr.order_id, wr.actual_cartons, wr.actual_cbm, wr.actual_weight, wr.received_at, wr.receipt_condition,
-            o.expected_ready_date, o.status as order_status, c.name as customer_name, s.name as supplier_name
+            o.expected_ready_date, o.status as order_status, $custCols, s.name as supplier_name
             FROM warehouse_receipts wr
             JOIN orders o ON wr.order_id = o.id
             JOIN customers c ON o.customer_id = c.id
-            JOIN suppliers s ON o.supplier_id = s.id
+            LEFT JOIN suppliers s ON o.supplier_id = s.id
             WHERE 1=1";
         $params = [];
         if ($orderId) {

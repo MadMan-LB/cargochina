@@ -75,7 +75,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             $docs = $pdo->prepare("SELECT id, file_path, doc_type, created_at FROM shipment_draft_documents WHERE shipment_draft_id = ? ORDER BY created_at");
             $docs->execute([$id]);
-            $row['documents'] = $docs->fetchAll(PDO::FETCH_ASSOC);
+            $row['documents'] = array_map(function (array $doc) {
+                $doc['file_path'] = normalizeStoredUploadPath((string) $doc['file_path'], false);
+                return $doc;
+            }, $docs->fetchAll(PDO::FETCH_ASSOC));
             jsonResponse(['data' => $row]);
             break;
 
@@ -110,7 +113,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $row['order_ids'] = array_column($so->fetchAll(PDO::FETCH_ASSOC), 'order_id');
             $docs = $pdo->prepare("SELECT id, file_path, doc_type, created_at FROM shipment_draft_documents WHERE shipment_draft_id = ? ORDER BY created_at");
             $docs->execute([$id]);
-            $row['documents'] = $docs->fetchAll(PDO::FETCH_ASSOC);
+            $row['documents'] = array_map(function (array $doc) {
+                $doc['file_path'] = normalizeStoredUploadPath((string) $doc['file_path'], false);
+                return $doc;
+            }, $docs->fetchAll(PDO::FETCH_ASSOC));
             jsonResponse(['data' => $row]);
             break;
 
@@ -238,14 +244,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt = $pdo->prepare("SELECT id FROM shipment_drafts WHERE id = ?");
                 $stmt->execute([$id]);
                 if (!$stmt->fetch()) jsonError('Shipment draft not found', 404);
-                $filePath = trim($input['file_path'] ?? '');
+                $filePath = normalizeStoredUploadPath((string) ($input['file_path'] ?? ''));
                 $docType = in_array($input['doc_type'] ?? '', ['bol', 'booking_confirmation', 'invoice', 'other']) ? $input['doc_type'] : 'other';
                 if (!$filePath) jsonError('file_path required', 400);
                 $pdo->prepare("INSERT INTO shipment_draft_documents (shipment_draft_id, file_path, doc_type) VALUES (?,?,?)")->execute([$id, $filePath, $docType]);
                 $newId = (int) $pdo->lastInsertId();
                 $row = $pdo->prepare("SELECT id, file_path, doc_type, created_at FROM shipment_draft_documents WHERE id = ?");
                 $row->execute([$newId]);
-                jsonResponse(['data' => $row->fetch(PDO::FETCH_ASSOC)], 201);
+                $doc = $row->fetch(PDO::FETCH_ASSOC);
+                $doc['file_path'] = normalizeStoredUploadPath((string) $doc['file_path']);
+                jsonResponse(['data' => $doc], 201);
                 break;
             }
             if ($action === 'remove-document') {

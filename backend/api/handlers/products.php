@@ -16,8 +16,46 @@ function hasProductDescEntries(PDO $pdo): bool
     }
 }
 
+function productHasColumn(PDO $pdo, string $column): bool
+{
+    try {
+        $stmt = $pdo->prepare("SHOW COLUMNS FROM products LIKE ?");
+        $stmt->execute([$column]);
+        return (bool) $stmt->rowCount();
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+function ensureProductHighAlertColumn(PDO $pdo): bool
+{
+    static $checked = false;
+    static $available = false;
+
+    if ($checked) {
+        return $available;
+    }
+
+    $checked = true;
+    if (productHasColumn($pdo, 'high_alert_note')) {
+        $available = true;
+        return true;
+    }
+
+    try {
+        $pdo->exec("ALTER TABLE products ADD COLUMN high_alert_note TEXT NULL");
+    } catch (Throwable $e) {
+        // If another process added it first or the DB user cannot alter schema,
+        // fall back to a final existence check and keep the request usable.
+    }
+
+    $available = productHasColumn($pdo, 'high_alert_note');
+    return $available;
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
+    $hasHighAlertColumn = ensureProductHighAlertColumn($pdo);
 
     switch ($method) {
         case 'GET':
@@ -35,7 +73,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     jsonResponse(['data' => []]);
                 }
                 $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
-                $stmt = $pdo->prepare("SELECT p.id, p.description_cn, p.description_en, p.hs_code, p.cbm, p.weight, p.length_cm, p.width_cm, p.height_cm, p.pieces_per_carton, p.unit_price, p.image_paths, p.supplier_id, s.name as supplier_name FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id WHERE p.description_cn LIKE ? OR p.description_en LIKE ? OR p.hs_code LIKE ? ORDER BY p.id DESC LIMIT 10");
+                $searchCols = "p.id, p.description_cn, p.description_en, p.hs_code, p.cbm, p.weight, p.length_cm, p.width_cm, p.height_cm, p.pieces_per_carton, p.unit_price, p.image_paths, p.supplier_id, s.name as supplier_name";
+                if ($hasHighAlertColumn) {
+                    $searchCols .= ", p.high_alert_note";
+                }
+                $stmt = $pdo->prepare("SELECT $searchCols FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id WHERE p.description_cn LIKE ? OR p.description_en LIKE ? OR p.hs_code LIKE ? ORDER BY p.id DESC LIMIT 10");
                 $stmt->execute([$like, $like, $like]);
                 jsonResponse(['data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
             }
@@ -221,13 +263,21 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             $hasPpc = false;
             $hasUp = false;
+            $hasBuy = false;
+            $hasSell = false;
+            $hasAlert = $hasHighAlertColumn;
             try {
-                $chk = $pdo->query("SHOW COLUMNS FROM products WHERE Field IN ('pieces_per_carton','unit_price')");
-                $cols = $chk ? array_column($chk->fetchAll(PDO::FETCH_ASSOC), 'Field') : [];
-                $hasPpc = in_array('pieces_per_carton', $cols, true);
-                $hasUp = in_array('unit_price', $cols, true);
+                $chk = $pdo->query("SHOW COLUMNS FROM products WHERE Field IN ('pieces_per_carton','unit_price','buy_price','sell_price')");
+                $dbCols = $chk ? array_column($chk->fetchAll(PDO::FETCH_ASSOC), 'Field') : [];
+                $hasPpc = in_array('pieces_per_carton', $dbCols, true);
+                $hasUp = in_array('unit_price', $dbCols, true);
+                $hasBuy = in_array('buy_price', $dbCols, true);
+                $hasSell = in_array('sell_price', $dbCols, true);
             } catch (Throwable $e) {
             }
+            $buyPrice = isset($input['buy_price']) ? (float) $input['buy_price'] : null;
+            $sellPrice = isset($input['sell_price']) ? (float) $input['sell_price'] : null;
+            $highAlertNote = isset($input['high_alert_note']) ? trim((string) $input['high_alert_note']) : null;
             $cols = ['supplier_id', 'cbm', 'weight', 'length_cm', 'width_cm', 'height_cm', 'packaging', 'hs_code', 'description_cn', 'description_en', 'image_paths'];
             $vals = [$supplierId, $cbm, $weight, $lengthCm, $widthCm, $heightCm, $packaging, $hsCode, $descriptionCn, $descriptionEn, $imagePaths];
             if ($hasPpc) {
@@ -237,6 +287,18 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if ($hasUp) {
                 $cols[] = 'unit_price';
                 $vals[] = $unitPrice;
+            }
+            if ($hasBuy) {
+                $cols[] = 'buy_price';
+                $vals[] = $buyPrice;
+            }
+            if ($hasSell) {
+                $cols[] = 'sell_price';
+                $vals[] = $sellPrice;
+            }
+            if ($hasAlert) {
+                $cols[] = 'high_alert_note';
+                $vals[] = $highAlertNote ?: null;
             }
             $ph = implode(',', array_fill(0, count($vals), '?'));
             $colStr = implode(', ', $cols);
@@ -312,13 +374,21 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $imagePaths = isset($input['image_paths']) ? json_encode($input['image_paths']) : null;
             $hasPpc = false;
             $hasUp = false;
+            $hasBuy = false;
+            $hasSell = false;
+            $hasAlert = $hasHighAlertColumn;
             try {
-                $chk = $pdo->query("SHOW COLUMNS FROM products WHERE Field IN ('pieces_per_carton','unit_price')");
-                $cols = $chk ? array_column($chk->fetchAll(PDO::FETCH_ASSOC), 'Field') : [];
-                $hasPpc = in_array('pieces_per_carton', $cols, true);
-                $hasUp = in_array('unit_price', $cols, true);
+                $chk = $pdo->query("SHOW COLUMNS FROM products WHERE Field IN ('pieces_per_carton','unit_price','buy_price','sell_price')");
+                $dbCols = $chk ? array_column($chk->fetchAll(PDO::FETCH_ASSOC), 'Field') : [];
+                $hasPpc = in_array('pieces_per_carton', $dbCols, true);
+                $hasUp = in_array('unit_price', $dbCols, true);
+                $hasBuy = in_array('buy_price', $dbCols, true);
+                $hasSell = in_array('sell_price', $dbCols, true);
             } catch (Throwable $e) {
             }
+            $buyPrice = isset($input['buy_price']) ? (float) $input['buy_price'] : null;
+            $sellPrice = isset($input['sell_price']) ? (float) $input['sell_price'] : null;
+            $highAlertNote = isset($input['high_alert_note']) ? trim((string) $input['high_alert_note']) : null;
             $sets = ['supplier_id=?', 'cbm=?', 'weight=?', 'length_cm=?', 'width_cm=?', 'height_cm=?', 'packaging=?', 'hs_code=?', 'description_cn=?', 'description_en=?', 'image_paths=?'];
             $vals = [$supplierId, $cbm, $weight, $lengthCm, $widthCm, $heightCm, $packaging, $hsCode, $descriptionCn, $descriptionEn, $imagePaths];
             if ($hasPpc) {
@@ -328,6 +398,18 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if ($hasUp) {
                 $sets[] = 'unit_price=?';
                 $vals[] = $unitPrice;
+            }
+            if ($hasBuy) {
+                $sets[] = 'buy_price=?';
+                $vals[] = $buyPrice;
+            }
+            if ($hasSell) {
+                $sets[] = 'sell_price=?';
+                $vals[] = $sellPrice;
+            }
+            if ($hasAlert) {
+                $sets[] = 'high_alert_note=?';
+                $vals[] = $highAlertNote ?: null;
             }
             $vals[] = $id;
             $pdo->prepare("UPDATE products SET " . implode(', ', $sets) . " WHERE id=?")->execute($vals);

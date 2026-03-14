@@ -20,7 +20,7 @@ require __DIR__ . '/../../includes/area_layout.php';
     <div class="card mb-3">
       <div class="card-body py-2">
         <div class="row g-2 align-items-end">
-          <div class="col-auto"><label class="form-label small mb-0">Order ID</label><input type="number" class="form-control form-control-sm" id="filterOrderId" placeholder="ID" style="width:80px"></div>
+          <div class="col-auto"><label class="form-label small mb-0">Order</label><input type="text" class="form-control form-control-sm" id="filterOrderId" placeholder="Type to search…" autocomplete="off" style="width:140px"></div>
           <div class="col-auto"><label class="form-label small mb-0">Customer</label>
             <input type="text" class="form-control form-control-sm" id="filterCustomer" placeholder="Type to search..." autocomplete="off" style="width:140px">
             <input type="hidden" id="filterCustomerId">

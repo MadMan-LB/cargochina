@@ -2,11 +2,20 @@
  * Confirmations page - admin confirm orders for customers
  */
 
-let filterCustomerAc, filterSupplierAc;
+let filterCustomerAc, filterSupplierAc, filterOrderAc;
 
 let filterDebounce = null;
 
 document.addEventListener("DOMContentLoaded", function () {
+    filterOrderAc = Autocomplete.init(
+        document.getElementById("filterOrderId"),
+        {
+            resource: "orders",
+            searchPath: "/search",
+            placeholder: "Type to search order…",
+            onSelect: () => applyFiltersDebounced(),
+        },
+    );
     filterCustomerAc = Autocomplete.init(
         document.getElementById("filterCustomer"),
         {
@@ -36,6 +45,8 @@ document.addEventListener("DOMContentLoaded", function () {
         const el = document.getElementById(id);
         if (el) el.addEventListener("change", applyFiltersDebounced);
     });
+    const searchEl = document.getElementById("filterSearch");
+    if (searchEl) searchEl.addEventListener("input", applyFiltersDebounced);
     ["filterCustomer", "filterSupplier"].forEach((id) => {
         const el = document.getElementById(id);
         if (el) el.addEventListener("input", applyFiltersDebounced);
@@ -49,26 +60,42 @@ function applyFiltersDebounced() {
     filterDebounce = setTimeout(() => {
         syncFiltersToUrl();
         loadConfirmations();
-    }, 300);
+    }, 200);
 }
 
 function readFiltersFromUrl() {
     const params = new URLSearchParams(window.location.search);
+    const q = params.get("q");
     const dateFrom = params.get("date_from");
     const dateTo = params.get("date_to");
     const orderId = params.get("order_id");
+    if (q) document.getElementById("filterSearch").value = q;
     if (dateFrom) document.getElementById("filterDateFrom").value = dateFrom;
     if (dateTo) document.getElementById("filterDateTo").value = dateTo;
-    if (orderId) document.getElementById("filterOrderId").value = orderId;
+    if (orderId && filterOrderAc?.setValue) {
+        filterOrderAc.setValue({
+            id: orderId,
+            customer_name: "",
+            expected_ready_date: "",
+            status: "",
+        });
+    } else if (orderId) {
+        document.getElementById("filterOrderId").value = orderId;
+    }
 }
 
 function syncFiltersToUrl() {
+    const q = document.getElementById("filterSearch")?.value?.trim() || "";
     const dateFrom = document.getElementById("filterDateFrom")?.value;
     const dateTo = document.getElementById("filterDateTo")?.value;
-    const orderId = document.getElementById("filterOrderId")?.value?.trim();
+    const orderId =
+        filterOrderAc?.getSelectedId?.() ||
+        document.getElementById("filterOrderId")?.value?.trim() ||
+        "";
     const customerId = filterCustomerAc?.getSelectedId() || "";
     const supplierId = filterSupplierAc?.getSelectedId() || "";
     const params = new URLSearchParams();
+    if (q) params.set("q", q);
     if (dateFrom) params.set("date_from", dateFrom);
     if (dateTo) params.set("date_to", dateTo);
     if (orderId) params.set("order_id", orderId);
@@ -94,12 +121,17 @@ function getSelectedOrderIds() {
 }
 
 function buildConfirmationsPath() {
+    const q = document.getElementById("filterSearch")?.value?.trim() || "";
     const dateFrom = document.getElementById("filterDateFrom").value;
     const dateTo = document.getElementById("filterDateTo").value;
-    const orderId = document.getElementById("filterOrderId").value.trim();
+    const orderId =
+        filterOrderAc?.getSelectedId?.() ||
+        document.getElementById("filterOrderId")?.value?.trim() ||
+        "";
     const customerId = filterCustomerAc?.getSelectedId() || "";
     const supplierId = filterSupplierAc?.getSelectedId() || "";
     let path = "/orders?status=AwaitingCustomerConfirmation";
+    if (q) path += "&q=" + encodeURIComponent(q);
     if (dateFrom) path += "&date_from=" + encodeURIComponent(dateFrom);
     if (dateTo) path += "&date_to=" + encodeURIComponent(dateTo);
     if (orderId) path += "&order_id=" + encodeURIComponent(orderId);
@@ -138,7 +170,7 @@ async function loadConfirmations() {
         <tr data-order-id="${r.id}">
           <td><input type="checkbox" class="form-check-input confirm-cb" value="${r.id}" aria-label="Select"></td>
           <td>${r.id}</td>
-          <td>${escapeHtml(r.customer_name || "-")}</td>
+          <td>${escapeHtml(r.customer_name || "-")}${r.customer_priority_level && r.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(r.customer_priority_note || "")}">${escapeHtml(r.customer_priority_level)}</span>` : ""}</td>
           <td>${escapeHtml(suppDisplay(r))}</td>
           <td>${r.expected_ready_date || "-"}</td>
           <td><span class="badge bg-warning text-dark">${escapeHtml(typeof statusLabel === "function" ? statusLabel(r.status) : r.status)}</span></td>
@@ -217,7 +249,9 @@ async function confirmOrder(id) {
 function clearFilters() {
     document.getElementById("filterDateFrom").value = "";
     document.getElementById("filterDateTo").value = "";
-    document.getElementById("filterOrderId").value = "";
+    document.getElementById("filterSearch").value = "";
+    if (filterOrderAc?.setValue) filterOrderAc.setValue(null);
+    else document.getElementById("filterOrderId").value = "";
     filterCustomerAc?.setValue(null);
     filterSupplierAc?.setValue(null);
     syncFiltersToUrl();

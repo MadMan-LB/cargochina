@@ -7,61 +7,87 @@ $pageTitle = 'Pipeline';
 require 'includes/layout.php';
 ?>
 <h1 class="mb-4">Order Pipeline</h1>
-<p class="text-muted">End-to-end view: order → receive → confirm → consolidate → ship → track</p>
+<p class="text-muted mb-4">A clearer operations board for approval, receiving, customer confirmation, consolidation, and final dispatch.</p>
 
-<div class="row g-3 mb-4" id="pipelineStages">
-  <div class="col-6 col-md-4 col-lg-2">
-    <a href="orders.php?status=Draft" class="card text-decoration-none border-0 bg-light text-dark">
-      <div class="card-body py-3 text-center">
-        <div class="fs-4 fw-bold" id="pipeDraft">—</div>
-        <small class="text-muted">Draft</small>
+<div class="card page-hero-card mb-4">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+      <div>
+        <div class="text-uppercase text-muted small fw-semibold mb-2">Operations Snapshot</div>
+        <h2 class="h4 mb-2">See where work is piling up before it becomes a delay.</h2>
+        <p class="text-muted mb-0">The cards below focus on actionable stages, stalled confirmations, and next shipment movement.</p>
       </div>
-    </a>
+      <a href="/cargochina/calendar.php" class="btn btn-outline-primary btn-sm">Open Calendar / Timeline</a>
+    </div>
   </div>
-  <div class="col-6 col-md-4 col-lg-2">
-    <a href="orders.php?status=Submitted" class="card text-decoration-none border-0 bg-light text-dark">
-      <div class="card-body py-3 text-center">
-        <div class="fs-4 fw-bold" id="pipeSubmitted">—</div>
-        <small class="text-muted">Submitted</small>
-      </div>
-    </a>
+</div>
+
+<div class="metric-card-grid mb-4">
+  <div class="metric-card">
+    <div class="eyebrow">Draft</div>
+    <div class="value" id="pipeDraft">0</div>
+    <div class="detail">Orders not yet submitted</div>
   </div>
-  <div class="col-6 col-md-4 col-lg-2">
-    <a href="receiving.php" class="card text-decoration-none border-0 bg-primary bg-opacity-10 text-primary">
-      <div class="card-body py-3 text-center">
-        <div class="fs-4 fw-bold" id="pipeToReceive">—</div>
-        <small class="text-muted">To receive</small>
-      </div>
-    </a>
+  <div class="metric-card">
+    <div class="eyebrow">Pending Receiving</div>
+    <div class="value" id="pipeToReceive">0</div>
+    <div class="detail">Approved or in-transit orders waiting for warehouse action</div>
   </div>
-  <div class="col-6 col-md-4 col-lg-2">
-    <a href="orders.php?status=AwaitingCustomerConfirmation" class="card text-decoration-none border-0 bg-warning bg-opacity-10 text-dark">
-      <div class="card-body py-3 text-center">
-        <div class="fs-4 fw-bold" id="pipeAwaitConfirm">—</div>
-        <small class="text-muted">Await confirm</small>
-      </div>
-    </a>
+  <div class="metric-card">
+    <div class="eyebrow">Awaiting Confirmation</div>
+    <div class="value" id="pipeAwaitConfirm">0</div>
+    <div class="detail">Orders blocked on customer confirmation</div>
   </div>
-  <div class="col-6 col-md-4 col-lg-2">
-    <a href="consolidation.php" class="card text-decoration-none border-0 bg-success bg-opacity-10 text-success">
-      <div class="card-body py-3 text-center">
-        <div class="fs-4 fw-bold" id="pipeReady">—</div>
-        <small class="text-muted">Ready</small>
-      </div>
-    </a>
+  <div class="metric-card">
+    <div class="eyebrow">Finalized</div>
+    <div class="value" id="pipeFinalized">0</div>
+    <div class="detail">Orders fully pushed through the workflow</div>
   </div>
-  <div class="col-6 col-md-4 col-lg-2">
-    <a href="consolidation.php" class="card text-decoration-none border-0 bg-secondary bg-opacity-10 text-secondary">
-      <div class="card-body py-3 text-center">
-        <div class="fs-4 fw-bold" id="pipeFinalized">—</div>
-        <small class="text-muted">Finalized</small>
+</div>
+
+<div class="balanced-panels mb-4">
+  <div class="card">
+    <div class="card-header">Stage Board</div>
+    <div class="card-body">
+      <div id="pipelineStageBoard" class="pipeline-stage-grid">
+        <div class="text-muted">Loading pipeline stages…</div>
       </div>
-    </a>
+    </div>
+  </div>
+
+  <div class="stack-card-list">
+    <div class="card">
+      <div class="card-header">My Focus</div>
+      <div class="card-body" id="pipelineTasksList">
+        <div class="text-muted">Loading tasks…</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Exceptions & Shipping</div>
+      <div class="card-body">
+        <div class="mb-3">
+          <div class="small text-uppercase text-muted fw-semibold mb-1">Stale Items</div>
+          <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+            <span class="small">Awaiting customer confirmation</span>
+            <strong id="pipelineStaleConfirm">0</strong>
+          </div>
+          <div class="d-flex justify-content-between align-items-center py-2">
+            <span class="small">Overdue approved / in transit</span>
+            <strong id="pipelineStaleOverdue">0</strong>
+          </div>
+        </div>
+        <div>
+          <div class="small text-uppercase text-muted fw-semibold mb-2">Shipment Progress</div>
+          <div id="pipelineShipSummary" class="small text-muted">Loading shipping view…</div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
 <div class="card">
-  <div class="card-header">Stage summary</div>
+  <div class="card-header">Stage Summary</div>
   <div class="card-body">
     <div class="table-responsive">
       <table class="table table-sm mb-0">

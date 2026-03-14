@@ -33,7 +33,7 @@ async function loadCustomers() {
                     (r) => `
       <tr>
         <td>${esc(r.code)}</td>
-        <td>${esc(r.name)}</td>
+        <td>${esc(r.name)}${r.priority_level && r.priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${esc(r.priority_note || "")}">${esc(r.priority_level)}</span>` : ""}${r.default_shipping_code ? `<br><small class="text-muted">Ship code: ${esc(r.default_shipping_code)}</small>` : ""}</td>
         <td>${esc(r.phone || "-")}</td>
         <td class="text-truncate" style="max-width:180px" title="${esc(r.address || "")}">${esc((r.address || "-").substring(0, 50))}${(r.address || "").length > 50 ? "…" : ""}</td>
         <td>${esc(r.payment_terms || "-")}</td>
@@ -42,6 +42,8 @@ async function loadCustomers() {
           <button type="button" class="btn btn-sm btn-outline-info" onclick="showOrders(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Orders</button>
           <button type="button" class="btn btn-sm btn-outline-success" onclick="openDepositModal(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Deposit</button>
           <button type="button" class="btn btn-sm btn-outline-secondary" onclick="showBalance(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Balance</button>
+          <button type="button" class="btn btn-sm btn-outline-info" onclick="generatePortalLink(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')" title="One-time portal link">Portal</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="openMessagesModal(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Messages</button>
           <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteCustomer(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Del</button>
         </td>
       </tr>
@@ -115,6 +117,12 @@ async function editCustomer(id) {
         document.getElementById("customerAddress").value = d.address || "";
         document.getElementById("customerPaymentTerms").value =
             d.payment_terms || "";
+        document.getElementById("customerPriorityLevel").value =
+            d.priority_level || "normal";
+        document.getElementById("customerPriorityNote").value =
+            d.priority_note || "";
+        document.getElementById("customerDefaultShippingCode").value =
+            d.default_shipping_code || "";
         customerPaymentLinks = (d.payment_links || []).map((p, i) => ({
             id: Date.now() + i,
             name: p.name || "",
@@ -140,6 +148,15 @@ async function saveCustomer() {
         payment_terms:
             document.getElementById("customerPaymentTerms").value.trim() ||
             null,
+        priority_level:
+            document.getElementById("customerPriorityLevel").value || "normal",
+        priority_note:
+            document.getElementById("customerPriorityNote").value.trim() ||
+            null,
+        default_shipping_code:
+            document
+                .getElementById("customerDefaultShippingCode")
+                .value.trim() || null,
         payment_links: customerPaymentLinks
             .filter((p) => (p.name || "").trim())
             .map((p) => ({
@@ -153,11 +170,13 @@ async function saveCustomer() {
     }
     try {
         if (id) {
-            await api("PUT", "/customers/" + id, payload);
+            const res = await api("PUT", "/customers/" + id, payload);
             showToast("Customer updated");
+            if (res?.warning) showToast(res.warning, "warning");
         } else {
-            await api("POST", "/customers", payload);
+            const res = await api("POST", "/customers", payload);
             showToast("Customer created");
+            if (res?.warning) showToast(res.warning, "warning");
         }
         bootstrap.Modal.getInstance(
             document.getElementById("customerModal"),
@@ -328,6 +347,96 @@ async function deleteCustomer(id, name) {
         showToast(e.message, "danger");
     }
 }
+
+window.generatePortalLink = function (customerId, name) {
+    window._portalCustomerId = customerId;
+    document.getElementById("portalCustomerName").textContent = name;
+    document.getElementById("portalLinkResult").classList.add("d-none");
+    document.getElementById("portalLinkInput").value = "";
+    new bootstrap.Modal(document.getElementById("portalModal")).show();
+};
+
+window.doGeneratePortalLink = async function () {
+    const customerId = window._portalCustomerId;
+    const hours = parseInt(document.getElementById("portalHours").value) || 24;
+    const btn = document.getElementById("portalGenBtn");
+    try {
+        setLoading(btn, true);
+        const res = await api("POST", "/customer-portal-tokens", {
+            customer_id: customerId,
+            hours,
+        });
+        const link = res.data?.link || "";
+        document.getElementById("portalLinkInput").value = link;
+        document.getElementById("portalLinkResult").classList.remove("d-none");
+        showToast("Link generated");
+    } catch (e) {
+        showToast(e.message, "danger");
+    } finally {
+        setLoading(btn, false);
+    }
+};
+
+window.copyPortalLink = function () {
+    const inp = document.getElementById("portalLinkInput");
+    inp.select();
+    document.execCommand("copy");
+    showToast("Copied to clipboard");
+};
+
+window.openMessagesModal = function (customerId, name) {
+    window._messagesCustomerId = customerId;
+    document.getElementById("messagesCustomerName").textContent = name;
+    document.getElementById("messageBody").value = "";
+    loadMessages();
+    new bootstrap.Modal(document.getElementById("messagesModal")).show();
+};
+
+async function loadMessages() {
+    const customerId = window._messagesCustomerId;
+    if (!customerId) return;
+    try {
+        const res = await api(
+            "GET",
+            "/internal-messages?customer_id=" + customerId,
+        );
+        const msgs = res.data || [];
+        const list = document.getElementById("messagesList");
+        list.innerHTML = msgs.length
+            ? msgs
+                  .map(
+                      (m) =>
+                          `<div class="mb-2 p-2 rounded ${m.sender_id ? "bg-light" : ""}"><small class="text-muted">${esc(m.sender_name || "System")} — ${m.created_at || ""}</small><div>${esc(m.body || "")}</div></div>`,
+                  )
+                  .join("")
+            : '<p class="text-muted small">No messages yet.</p>';
+        list.scrollTop = list.scrollHeight;
+    } catch (e) {
+        document.getElementById("messagesList").innerHTML =
+            '<p class="text-danger small">Failed to load messages.</p>';
+    }
+}
+
+window.sendMessage = async function () {
+    const customerId = window._messagesCustomerId;
+    const body = document.getElementById("messageBody").value.trim();
+    if (!body) return;
+    const btn = document.getElementById("messageSendBtn");
+    try {
+        setLoading(btn, true);
+        await api("POST", "/internal-messages", {
+            customer_id: customerId,
+            body,
+        });
+        document.getElementById("messageBody").value = "";
+        loadMessages();
+        showToast("Message sent");
+    } catch (e) {
+        showToast(e.message, "danger");
+    } finally {
+        setLoading(btn, false);
+    }
+};
 
 window.openImportModal = function (entity) {
     window._importEntity = entity || "customers";

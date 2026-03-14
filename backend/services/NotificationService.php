@@ -226,6 +226,38 @@ class NotificationService
         unset($GLOBALS['_log_order_id']);
     }
 
+    public function notifyCrossSupplierPriceDifference(int $orderId, array $matches): void
+    {
+        if (empty($matches)) {
+            return;
+        }
+
+        $lines = [];
+        foreach (array_slice($matches, 0, 5) as $match) {
+            $lines[] = sprintf(
+                '%s: %s @ %.4f vs %s @ %.4f (existing order #%d)',
+                $match['description'] ?: ('Product #' . ($match['product_id'] ?? '')),
+                $match['current_supplier_name'] ?: ('Supplier #' . ($match['current_supplier_id'] ?? '')),
+                (float) ($match['current_price'] ?? 0),
+                $match['other_supplier_name'] ?: ('Supplier #' . ($match['other_supplier_id'] ?? '')),
+                (float) ($match['other_price'] ?? 0),
+                (int) ($match['other_order_id'] ?? 0)
+            );
+        }
+        if (count($matches) > 5) {
+            $lines[] = '...and ' . (count($matches) - 5) . ' more difference(s).';
+        }
+
+        $GLOBALS['_log_order_id'] = $orderId;
+        $this->notifyAdmins(
+            'cross_supplier_price_difference',
+            'Order #' . $orderId . ' — cross-supplier price difference detected',
+            implode("\n", $lines),
+            ['order_id' => $orderId, 'matches' => $matches]
+        );
+        unset($GLOBALS['_log_order_id']);
+    }
+
     /** Notify admins about stale orders (awaiting confirmation or overdue) */
     public function notifyStaleOrders(int $awaitingCount, int $overdueCount, int $thresholdDays): void
     {
@@ -247,6 +279,18 @@ class NotificationService
         ]);
     }
 
+    /** Notify admins when container ETA is X days away (for arrival planning) */
+    public function notifyContainerArrival(int $containerId, string $containerCode, string $etaDate, int $daysBefore): void
+    {
+        $title = "Container {$containerCode} — {$daysBefore} day(s) to ETA";
+        $body = "Container {$containerCode} is expected {$etaDate}. ETA in {$daysBefore} day(s). See Consolidation.";
+        $this->notifyAdmins('container_arrival', $title, $body, [
+            'container_id' => $containerId,
+            'eta_date' => $etaDate,
+            'days_before' => $daysBefore,
+        ]);
+    }
+
     public function notifyShipmentFinalized(int $shipmentDraftId, int $orderCount): void
     {
         $this->notifyAdmins(
@@ -255,6 +299,21 @@ class NotificationService
             $orderCount . ' order(s) pushed to tracking.',
             ['shipment_draft_id' => $shipmentDraftId]
         );
+    }
+
+    /** Notify admins when customer declines variance confirmation (static for use from confirm API) */
+    public static function notifyOrderDeclined(int $orderId, string $reason): void
+    {
+        $pdo = getDb();
+        $svc = new self($pdo);
+        $GLOBALS['_log_order_id'] = $orderId;
+        $svc->notifyAdmins(
+            'order_declined',
+            'Order #' . $orderId . ' — Customer declined',
+            'Customer declined variance confirmation. Reason: ' . $reason,
+            ['order_id' => $orderId, 'decline_reason' => $reason]
+        );
+        unset($GLOBALS['_log_order_id']);
     }
 
     /** Retry a failed delivery (safe: skips if payload_hash already succeeded) */

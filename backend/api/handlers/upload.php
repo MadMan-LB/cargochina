@@ -24,7 +24,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $config = require dirname(__DIR__, 2) . '/config/config.php';
         $maxSize = (int) ($config['upload_max_size'] ?? 8388608);
         $maxMb = (float) ($config['upload_max_mb'] ?? 8);
-        $allowed = $config['upload_allowed_extensions'] ?? ['jpg', 'jpeg', 'png', 'webp'];
+        $allowed = $config['upload_allowed_extensions'] ?? ['jpg', 'jpeg', 'png', 'webp', 'gif', 'pdf'];
+        $allowedMimeMap = [
+            'jpg' => ['image/jpeg'],
+            'jpeg' => ['image/jpeg'],
+            'png' => ['image/png'],
+            'webp' => ['image/webp'],
+            'gif' => ['image/gif'],
+            'pdf' => ['application/pdf'],
+        ];
 
         if ($file['error'] !== UPLOAD_ERR_OK) {
             $errMsg = [
@@ -52,6 +60,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
         if (!in_array($ext, $allowed)) {
             jsonResponse(['error' => ['message' => 'File type not allowed. Allowed: ' . implode(', ', $allowed), 'code' => 'UPLOAD_FAILED', 'allowed_types' => $allowed, 'request_id' => $requestId]], 400);
+        }
+        if (!empty($allowedMimeMap[$ext])) {
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            $mime = $finfo ? finfo_file($finfo, $file['tmp_name']) : null;
+            if ($finfo) {
+                finfo_close($finfo);
+            }
+            if ($mime && !in_array($mime, $allowedMimeMap[$ext], true)) {
+                jsonResponse(['error' => ['message' => 'Uploaded file content does not match the file extension', 'code' => 'UPLOAD_FAILED', 'request_id' => $requestId]], 400);
+            }
         }
 
         $uploadDir = dirname(__DIR__, 2) . '/uploads/';

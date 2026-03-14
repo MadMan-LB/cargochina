@@ -8,28 +8,85 @@ $isSuperAdmin = in_array('SuperAdmin', $_SESSION['user_roles'] ?? []);
 require 'includes/layout.php';
 ?>
 <h1 class="mb-3">Containers</h1>
+<p class="text-muted mb-4">Monitor fill levels, container movement, and assignment pressure with cleaner multi-status filtering.</p>
+
+<div class="metric-card-grid mb-4">
+  <div class="metric-card">
+    <div class="eyebrow">Visible Containers</div>
+    <div class="value" id="containersTotalCount">0</div>
+    <div class="detail">Containers matching the current filters</div>
+  </div>
+  <div class="metric-card">
+    <div class="eyebrow">Planning</div>
+    <div class="value" id="containersPlanningCount">0</div>
+    <div class="detail">Still being prepared</div>
+  </div>
+  <div class="metric-card">
+    <div class="eyebrow">High Utilization</div>
+    <div class="value" id="containersHighLoadCount">0</div>
+    <div class="detail">At or above 85% CBM fill</div>
+  </div>
+  <div class="metric-card">
+    <div class="eyebrow">Assigned Orders</div>
+    <div class="value" id="containersAssignedOrders">0</div>
+    <div class="detail">Orders currently packed into visible containers</div>
+  </div>
+</div>
 
 <!-- Search & Filter bar -->
 <div class="card mb-3">
   <div class="card-body py-3">
-    <div class="row g-2 align-items-end">
-      <div class="col-12 col-md-4">
-        <label class="form-label small mb-1">Search</label>
+    <div class="filter-toolbar-grid compact">
+      <div class="filter-toolbar-card soft">
+        <div class="filter-toolbar-head">
+          <div>
+            <div class="title">Search</div>
+            <div class="filter-toolbar-subtext">Find by code, customer, phone, shipping code, or item description.</div>
+          </div>
+        </div>
         <input type="text" id="containerSearch" class="form-control form-control-sm" placeholder="Code, customer, phone, shipping code, item description…" oninput="debounceSearch()">
       </div>
-      <div class="col-6 col-md-2">
-        <label class="form-label small mb-1">Status</label>
-        <select id="containerStatusFilter" class="form-select form-select-sm" onchange="loadContainers()">
-          <option value="">All statuses</option>
-          <option value="planning">Planning</option>
-          <option value="to_go">To Go</option>
-          <option value="on_route">On Route</option>
-          <option value="arrived">Arrived</option>
-          <option value="available">Available</option>
-        </select>
+
+      <div class="filter-toolbar-card">
+        <div class="filter-toolbar-head">
+          <div>
+            <div class="title">Statuses</div>
+            <div class="filter-toolbar-subtext">Use checkbox chips to include or exclude multiple container states.</div>
+          </div>
+          <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" onclick="clearContainerStatusFilter()">Clear</button>
+        </div>
+        <div class="filter-chip-grid" id="containerStatusFilterList">
+          <?php foreach ([
+            'planning' => 'Planning',
+            'to_go' => 'To Go',
+            'on_route' => 'On Route',
+            'arrived' => 'Arrived',
+            'available' => 'Available',
+          ] as $statusValue => $statusLabel): ?>
+            <div class="form-check filter-chip">
+              <input class="form-check-input container-status-filter" type="checkbox" value="<?= htmlspecialchars($statusValue) ?>" id="containerStatus<?= htmlspecialchars($statusValue) ?>" onchange="updateContainerStatusFilterSummary();loadContainers()">
+              <label class="form-check-label" for="containerStatus<?= htmlspecialchars($statusValue) ?>"><?= htmlspecialchars($statusLabel) ?></label>
+            </div>
+          <?php endforeach; ?>
+        </div>
+        <div class="filter-summary-row">
+          <div class="d-flex gap-2 align-items-center flex-wrap">
+            <select id="containerStatusMode" class="form-select form-select-sm" onchange="updateContainerStatusFilterSummary();loadContainers()">
+              <option value="include">Include selected</option>
+              <option value="exclude">Exclude selected</option>
+            </select>
+            <small class="summary-text" id="containerStatusSummary">All statuses</small>
+          </div>
+        </div>
       </div>
-      <div class="col-6 col-md-2">
-        <label class="form-label small mb-1">Fill Level</label>
+
+      <div class="filter-toolbar-card">
+        <div class="filter-toolbar-head">
+          <div>
+            <div class="title">Capacity View</div>
+            <div class="filter-toolbar-subtext">Quickly focus on empty, partial, or nearly full containers.</div>
+          </div>
+        </div>
         <select id="containerFillFilter" class="form-select form-select-sm" onchange="applyClientFilters()">
           <option value="">Any</option>
           <option value="empty">Empty (0%)</option>
@@ -37,9 +94,9 @@ require 'includes/layout.php';
           <option value="almost">Almost Full (≥85%)</option>
           <option value="full">Full (100%)</option>
         </select>
-      </div>
-      <div class="col-12 col-md-2">
-        <button class="btn btn-outline-secondary btn-sm w-100" onclick="resetFilters()">Clear</button>
+        <div class="filter-summary-row">
+          <button class="btn btn-outline-secondary btn-sm" onclick="resetFilters()">Clear All Filters</button>
+        </div>
       </div>
     </div>
   </div>

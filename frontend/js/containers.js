@@ -12,17 +12,78 @@ const CONTAINER_STATUS = {
 let _allContainers = [];
 let _searchTimer = null;
 
+function containerStatusDisplay(status) {
+    return CONTAINER_STATUS[status]?.label || status || "—";
+}
+
+function updateContainerOverview(rows) {
+    const list = rows || [];
+    const setText = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    };
+    setText("containersTotalCount", list.length);
+    setText(
+        "containersPlanningCount",
+        list.filter((c) => c.status === "planning").length,
+    );
+    setText(
+        "containersHighLoadCount",
+        list.filter((c) => (parseFloat(c.fill_pct_cbm) || 0) >= 85).length,
+    );
+    setText(
+        "containersAssignedOrders",
+        list.reduce((sum, c) => sum + (parseInt(c.order_count, 10) || 0), 0),
+    );
+}
+
+function getSelectedContainerStatuses() {
+    return Array.from(
+        document.querySelectorAll(".container-status-filter:checked"),
+    ).map((el) => el.value);
+}
+
+function updateContainerStatusFilterSummary() {
+    const summaryEl = document.getElementById("containerStatusSummary");
+    if (!summaryEl) return;
+    const selected = getSelectedContainerStatuses();
+    const mode =
+        document.getElementById("containerStatusMode")?.value || "include";
+    if (!selected.length) {
+        summaryEl.textContent = "All statuses";
+        return;
+    }
+    summaryEl.textContent =
+        (mode === "exclude" ? "Excluding: " : "Including: ") +
+        selected.map(containerStatusDisplay).join(", ");
+}
+
+function setContainerStatusFilter(statuses = [], mode = "include") {
+    const selected = new Set((statuses || []).map(String));
+    document.querySelectorAll(".container-status-filter").forEach((el) => {
+        el.checked = selected.has(el.value);
+    });
+    const modeEl = document.getElementById("containerStatusMode");
+    if (modeEl) modeEl.value = mode === "exclude" ? "exclude" : "include";
+    updateContainerStatusFilterSummary();
+}
+
 function debounceSearch() {
     clearTimeout(_searchTimer);
-    _searchTimer = setTimeout(loadContainers, 300);
+    _searchTimer = setTimeout(loadContainers, 200);
 }
 
 function resetFilters() {
     document.getElementById("containerSearch").value = "";
-    document.getElementById("containerStatusFilter").value = "";
+    setContainerStatusFilter([], "include");
     document.getElementById("containerFillFilter").value = "";
     loadContainers();
 }
+
+window.clearContainerStatusFilter = function () {
+    setContainerStatusFilter([], "include");
+    loadContainers();
+};
 
 async function loadContainers() {
     const tbody = document.getElementById("containersTbody");
@@ -31,16 +92,16 @@ async function loadContainers() {
     tbody.innerHTML =
         '<tr><td colspan="9" class="text-center text-muted py-4">Loading…</td></tr>';
 
-    const q = encodeURIComponent(
-        document.getElementById("containerSearch")?.value?.trim() || "",
-    );
-    const status = encodeURIComponent(
-        document.getElementById("containerStatusFilter")?.value || "",
-    );
+    const q = document.getElementById("containerSearch")?.value?.trim() || "";
+    const statuses = getSelectedContainerStatuses();
+    const statusMode =
+        document.getElementById("containerStatusMode")?.value || "include";
     let url = CONTAINERS_API_BASE + "/containers";
-    const qs = [q ? "q=" + q : "", status ? "status=" + status : ""]
-        .filter(Boolean)
-        .join("&");
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    statuses.forEach((status) => params.append("status[]", status));
+    if (statuses.length) params.set("status_mode", statusMode);
+    const qs = params.toString();
     if (qs) url += "?" + qs;
 
     try {
@@ -55,9 +116,24 @@ async function loadContainers() {
         _allContainers = data.data || [];
         applyClientFilters();
     } catch (e) {
+        updateContainerOverview([]);
         tbody.innerHTML = `<tr><td colspan="9" class="text-center text-danger py-4">${escHtml(e.message)}</td></tr>`;
     }
 }
+
+document.addEventListener("DOMContentLoaded", () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const statusFromUrl = urlParams.getAll("status[]");
+    const legacyStatus = urlParams.get("status");
+    const statusMode = urlParams.get("status_mode") || "include";
+    if (statusFromUrl.length) {
+        setContainerStatusFilter(statusFromUrl, statusMode);
+    } else if (legacyStatus) {
+        setContainerStatusFilter([legacyStatus], statusMode);
+    } else {
+        updateContainerStatusFilterSummary();
+    }
+});
 
 function applyClientFilters() {
     const fill = document.getElementById("containerFillFilter")?.value || "";
@@ -78,6 +154,7 @@ function applyClientFilters() {
     }
 
     if (label) label.textContent = rows.length ? `(${rows.length})` : "";
+    updateContainerOverview(rows);
 
     if (rows.length === 0) {
         tbody.innerHTML =
@@ -102,9 +179,18 @@ function applyClientFilters() {
                 `<div style="height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;"><div style="height:100%;width:${Math.min(100, p)}%;background:${barC(p)};border-radius:3px;"></div></div><small class="text-muted">${parseFloat(c.used_cbm || 0).toFixed(2)}/${c.max_cbm}</small>`;
             const wBar = (p) =>
                 `<div style="height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;"><div style="height:100%;width:${Math.min(100, p)}%;background:${barC(p)};border-radius:3px;"></div></div><small class="text-muted">${parseFloat(c.used_weight || 0).toFixed(0)}/${c.max_weight} kg</small>`;
+            const destination = c.destination || c.destination_country || "";
+            const eta = c.eta_date || "";
             return `<tr>
             <td>${c.id}</td>
-            <td><strong>${escHtml(c.code || "")}</strong></td>
+            <td>
+              <div class="fw-semibold">${escHtml(c.code || "")}</div>
+              ${
+                  destination || eta
+                      ? `<div class="small text-muted">${destination ? escHtml(destination) : ""}${destination && eta ? " • " : ""}${eta ? `ETA ${escHtml(eta)}` : ""}</div>`
+                      : ""
+              }
+            </td>
             <td>
               <span class="badge ${st.cls} me-1">${escHtml(st.label)}</span>
               <button class="btn btn-link btn-sm p-0 text-muted js-status-btn" data-id="${c.id}" title="Change status">✎</button>
@@ -254,7 +340,7 @@ async function viewContainer(id, code) {
                         : escHtml(o.status || "—");
                 return `<tr>
               <td>${o.id}</td>
-              <td>${escHtml(o.customer_name || "—")}</td>
+              <td>${escHtml(o.customer_name || "—")}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escHtml(o.customer_priority_note || "")}">${escHtml(o.customer_priority_level)}</span>` : ""}${o.high_alert_notes ? ` <span class="badge bg-danger-subtle text-danger border border-danger-subtle ms-1" title="${escHtml(o.high_alert_notes)}">Alert</span>` : ""}</td>
               <td>${escHtml(o.supplier_name || "—")}</td>
               <td>${escHtml(o.expected_ready_date || "—")}</td>
               <td>${sBadge}</td>
@@ -391,7 +477,7 @@ function _renderAssignOrders() {
         <tr>
           <td><input type="checkbox" class="form-check-input assign-order-cb" data-id="${o.id}" data-cbm="${o.total_cbm}" data-weight="${o.total_weight}" onchange="_onAssignSelChange()"></td>
           <td class="fw-semibold">${o.id}</td>
-          <td>${escHtml(o.customer_name || "—")}</td>
+          <td>${escHtml(o.customer_name || "—")}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escHtml(o.customer_priority_note || "")}">${escHtml(o.customer_priority_level)}</span>` : ""}${o.high_alert_notes ? ` <span class="badge bg-danger-subtle text-danger border border-danger-subtle ms-1" title="${escHtml(o.high_alert_notes)}">Alert</span>` : ""}</td>
           <td class="small text-muted">${escHtml((o.supplier_name || "—").substring(0, 22))}</td>
           <td class="text-end">${o.total_cbm.toFixed(3)}</td>
           <td class="text-end">${o.total_weight.toFixed(2)} kg</td>

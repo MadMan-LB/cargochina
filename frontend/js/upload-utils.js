@@ -14,7 +14,7 @@ async function getUploadConfig() {
         throw new Error(d.error?.message || "Failed to load upload config");
     uploadConfigCache = d.data || {
         max_upload_mb: 8,
-        allowed_types: ["jpg", "jpeg", "png", "webp"],
+        allowed_types: ["jpg", "jpeg", "png", "webp", "gif", "pdf"],
     };
     return uploadConfigCache;
 }
@@ -90,7 +90,14 @@ async function uploadFileWithProgress(file, opts = {}) {
     const { onProgress, showToast = () => {} } = opts;
     const config = await getUploadConfig();
     const maxMb = config.max_upload_mb || 8;
-    const allowed = config.allowed_types || ["jpg", "jpeg", "png", "webp"];
+    const allowed = config.allowed_types || [
+        "jpg",
+        "jpeg",
+        "png",
+        "webp",
+        "gif",
+        "pdf",
+    ];
     const ext = getExt(file);
 
     if (!allowed.includes(ext)) {

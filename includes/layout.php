@@ -90,6 +90,44 @@ $breadcrumbs = $breadcrumbs ?? [];
           </svg>
           Assign to Container
         </a>
+        <a class="sidebar-link <?= $currentPage === 'expenses' ? 'active' : '' ?>" href="<?= $basePath ?>/expenses.php">
+          <svg class="sidebar-icon" viewBox="0 0 24 24">
+            <path d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z" />
+          </svg>
+          Expenses
+        </a>
+        <a class="sidebar-link <?= $currentPage === 'financials' ? 'active' : '' ?>" href="<?= $basePath ?>/financials.php">
+          <svg class="sidebar-icon" viewBox="0 0 24 24">
+            <path d="M3.5 18.49l6-6.01 4 4L22 6.92l-1.41-1.41-7.09 7.97-4-4L2 16.99z" />
+          </svg>
+          Financials
+        </a>
+        <a class="sidebar-link <?= $currentPage === 'hs_code_tax' ? 'active' : '' ?>" href="<?= $basePath ?>/hs_code_tax.php">
+          <svg class="sidebar-icon" viewBox="0 0 24 24">
+            <path d="M4 4h16v2H4zm0 7h10v2H4zm0 7h16v2H4zm12-8h4v6h-4z" />
+          </svg>
+          HS Code Tax
+        </a>
+        <a class="sidebar-link <?= $currentPage === 'calendar' ? 'active' : '' ?>" href="<?= $basePath ?>/calendar.php">
+          <svg class="sidebar-icon" viewBox="0 0 24 24">
+            <path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zm0-12H5V6h14v2z" />
+          </svg>
+          Calendar
+        </a>
+        <a class="sidebar-link <?= $currentPage === 'warehouse_stock' ? 'active' : '' ?>" href="<?= $basePath ?>/warehouse_stock.php">
+          <svg class="sidebar-icon" viewBox="0 0 24 24">
+            <path d="M20 8h-4V4H3c-1.1 0-2 .9-2 2v11h2c0 1.66 1.34 3 3 3s3-1.34 3-3h6c0 1.66 1.34 3 3 3s3-1.34 3-3h2v-5l-3-4z" />
+          </svg>
+          Warehouse Stock
+        </a>
+      <?php endif; ?>
+      <?php if ($isBuyer): ?>
+        <a class="sidebar-link <?= $currentPage === 'procurement_drafts' ? 'active' : '' ?>" href="<?= $basePath ?>/procurement_drafts.php">
+          <svg class="sidebar-icon" viewBox="0 0 24 24">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm4 18H6V4h7v5h5v11z" />
+          </svg>
+          Procurement Drafts
+        </a>
       <?php endif; ?>
 
       <div class="sidebar-section-label">Data</div>
@@ -132,6 +170,12 @@ $breadcrumbs = $breadcrumbs ?? [];
 
       <?php if ($isSuperAdmin): ?>
         <div class="sidebar-section-label">Administration</div>
+        <a class="sidebar-link <?= $currentPage === 'business_settings' ? 'active' : '' ?>" href="<?= $basePath ?>/business_settings.php">
+          <svg class="sidebar-icon" viewBox="0 0 24 24">
+            <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" />
+          </svg>
+          Business Settings
+        </a>
         <a class="sidebar-link <?= $currentPage === 'admin_config' ? 'active' : '' ?>" href="<?= $basePath ?>/admin_config.php">
           <svg class="sidebar-icon" viewBox="0 0 24 24">
             <path d="M17 11c.34 0 .67.04 1 .09V6.27L10.5 3 3 6.27v4.91c0 4.54 3.2 8.79 7.5 9.82.55-.13 1.08-.32 1.6-.55-.69-.98-1.1-2.17-1.1-3.45 0-3.31 2.69-6 6-6z" />

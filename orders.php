@@ -7,6 +7,31 @@ $pageTitle = 'Orders';
 require 'includes/layout.php';
 ?>
 <h1 class="mb-4">Orders</h1>
+<p class="text-muted mb-4">Track draft, approval, confirmation, and consolidation readiness from one cleaner workspace.</p>
+
+<div class="metric-card-grid mb-4">
+  <div class="metric-card">
+    <div class="eyebrow">Visible Now</div>
+    <div class="value" id="orderVisibleCount">0</div>
+    <div class="detail">Orders matching the current filters</div>
+  </div>
+  <div class="metric-card">
+    <div class="eyebrow">Draft</div>
+    <div class="value" id="orderDraftCount">0</div>
+    <div class="detail">Still waiting to be submitted</div>
+  </div>
+  <div class="metric-card">
+    <div class="eyebrow">Awaiting Confirmation</div>
+    <div class="value" id="orderAwaitingCount">0</div>
+    <div class="detail">Customer action still needed</div>
+  </div>
+  <div class="metric-card">
+    <div class="eyebrow">Ready to Move</div>
+    <div class="value" id="orderReadyCount">0</div>
+    <div class="detail">Ready for consolidation or already assigned</div>
+  </div>
+</div>
+
 <div class="card mb-4">
   <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <span>Order List</span>
@@ -18,30 +43,60 @@ require 'includes/layout.php';
     </div>
   </div>
   <div class="card-body">
-    <div class="row mb-3 form-row-responsive g-2 align-items-end">
-      <div class="col-12 col-md-3">
-        <label class="form-label small mb-1">Status</label>
-        <select class="form-select form-select-sm" id="filterStatus" onchange="loadOrders()">
-          <option value="">All statuses</option>
-          <option value="Draft">Draft</option>
-          <option value="Submitted">Submitted</option>
-          <option value="Approved">Approved</option>
-          <option value="InTransitToWarehouse">In Transit</option>
-          <option value="ReceivedAtWarehouse">Received</option>
-          <option value="AwaitingCustomerConfirmation">Awaiting Confirmation</option>
-          <option value="Confirmed">Confirmed</option>
-          <option value="ReadyForConsolidation">Ready for Consolidation</option>
-          <option value="ConsolidatedIntoShipmentDraft">In Shipment Draft</option>
-          <option value="AssignedToContainer">Assigned to Container</option>
-          <option value="FinalizedAndPushedToTracking">Finalized</option>
-        </select>
+    <div class="filter-toolbar-grid mb-3">
+      <div class="filter-toolbar-card soft">
+        <div class="filter-toolbar-head">
+          <div>
+            <div class="title">Statuses</div>
+            <div class="filter-toolbar-subtext">Pick multiple stages and include or exclude them together.</div>
+          </div>
+          <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" onclick="clearOrderStatusFilter()">Clear</button>
+        </div>
+        <div class="filter-chip-grid" id="filterStatusList">
+          <?php foreach ([
+            'Draft' => 'Draft',
+            'Submitted' => 'Submitted',
+            'Approved' => 'Approved',
+            'InTransitToWarehouse' => 'In Transit',
+            'ReceivedAtWarehouse' => 'Received',
+            'AwaitingCustomerConfirmation' => 'Awaiting Confirmation',
+            'CustomerDeclined' => 'Customer Declined',
+            'Confirmed' => 'Confirmed',
+            'ReadyForConsolidation' => 'Ready for Consolidation',
+            'ConsolidatedIntoShipmentDraft' => 'In Shipment Draft',
+            'AssignedToContainer' => 'Assigned to Container',
+            'FinalizedAndPushedToTracking' => 'Finalized',
+          ] as $statusValue => $statusLabel): ?>
+            <div class="form-check filter-chip">
+              <input class="form-check-input order-status-filter" type="checkbox" value="<?= htmlspecialchars($statusValue) ?>" id="orderStatus<?= htmlspecialchars($statusValue) ?>" onchange="updateOrderStatusFilterSummary();loadOrders()">
+              <label class="form-check-label" for="orderStatus<?= htmlspecialchars($statusValue) ?>"><?= htmlspecialchars($statusLabel) ?></label>
+            </div>
+          <?php endforeach; ?>
+        </div>
+        <div class="filter-summary-row">
+          <div class="d-flex gap-2 align-items-center flex-wrap">
+            <select class="form-select form-select-sm" id="filterStatusMode" onchange="updateOrderStatusFilterSummary();loadOrders()">
+              <option value="include">Include selected</option>
+              <option value="exclude">Exclude selected</option>
+            </select>
+            <small class="summary-text" id="filterStatusSummary">All statuses</small>
+          </div>
+        </div>
       </div>
-      <div class="col-12 col-md-4">
-        <label class="form-label small mb-1">Search</label>
+      <div class="filter-toolbar-card">
+        <div class="filter-toolbar-head">
+          <div>
+            <div class="title">Search & Actions</div>
+            <div class="filter-toolbar-subtext">Find by customer, phone, shipping code, supplier, or item details.</div>
+          </div>
+        </div>
         <div class="input-group input-group-sm">
           <input type="text" class="form-control" id="orderSearch" placeholder="Customer, phone, shipping code, items…" onkeydown="if(event.key==='Enter'){event.preventDefault();loadOrders();}">
           <button class="btn btn-outline-primary" type="button" onclick="loadOrders()" title="Search">Search</button>
           <button class="btn btn-outline-secondary" type="button" onclick="document.getElementById('orderSearch').value='';loadOrders();" title="Clear">Clear</button>
+        </div>
+        <div class="filter-summary-row">
+          <small class="summary-text">Tip: you can combine the search box with the status chips above.</small>
         </div>
       </div>
     </div>
@@ -89,9 +144,9 @@ require 'includes/layout.php';
                 <div class="mt-2 small order-inline-help" id="recentCustomers"></div>
               </div>
               <div class="col-12 col-md-4">
-                <label class="form-label">Default supplier *</label>
-                <input type="text" class="form-control" id="orderSupplier" placeholder="Type to search... (used for new items)" required>
-                <small class="text-muted d-block mt-2">Each item can have its own supplier; this sets the default for new rows.</small>
+                <label class="form-label">Default supplier (optional)</label>
+                <input type="text" class="form-control" id="orderSupplier" placeholder="Type to search... (used for new items)" autocomplete="off">
+                <small class="text-muted d-block mt-2">Each item can have its own supplier; this sets the default for new rows. Leave blank for multi-supplier orders.</small>
                 <div class="mt-2 small order-inline-help" id="recentSuppliers"></div>
               </div>
               <div class="col-12 col-md-2">
@@ -104,6 +159,10 @@ require 'includes/layout.php';
                   <option value="USD">USD</option>
                   <option value="RMB">RMB</option>
                 </select>
+              </div>
+              <div class="col-12">
+                <label class="form-label">High Alert Notes</label>
+                <textarea class="form-control" id="orderHighAlertNotes" rows="2" placeholder="Fragile, special handling, etc."></textarea>
               </div>
             </div>
           </div>
@@ -191,6 +250,22 @@ require 'includes/layout.php';
         <hr class="my-3">
         <p class="small text-muted mb-1">Or create a new draft for this order:</p>
         <button class="btn btn-outline-primary btn-sm" onclick="assignOrderToNewDraft()">+ New Shipment Draft</button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- Order Item Design Attachments Modal -->
+<div class="modal fade" id="orderItemDesignModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Design Attachments — Item <span id="orderItemDesignLabel"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="orderItemDesignList" class="mb-2"></div>
+        <input type="file" class="d-none" id="orderItemDesignInput" accept="image/*,application/pdf,.pdf">
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('orderItemDesignInput').click()">+ Add design file</button>
       </div>
     </div>
   </div>

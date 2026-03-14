@@ -6,6 +6,40 @@
 
 require_once __DIR__ . '/../helpers.php';
 
+function normalizeCustomerPriority(array $input): array
+{
+    $priorityLevel = trim((string) ($input['priority_level'] ?? 'normal'));
+    if (!in_array($priorityLevel, ['normal', 'medium', 'high', 'critical'], true)) {
+        $priorityLevel = 'normal';
+    }
+    $priorityNote = isset($input['priority_note']) ? trim((string) $input['priority_note']) : null;
+    if ($priorityLevel === 'normal') {
+        $priorityNote = $priorityNote ?: null;
+    } elseif ($priorityNote === '') {
+        jsonError('Priority note is required when priority is not normal', 400);
+    }
+
+    return [$priorityLevel, $priorityNote ?: null];
+}
+
+function findDuplicateCustomerShippingCode(PDO $pdo, ?string $shippingCode, int $excludeCustomerId = 0): ?array
+{
+    $shippingCode = trim((string) $shippingCode);
+    if ($shippingCode === '') {
+        return null;
+    }
+
+    $chk = @$pdo->query("SHOW COLUMNS FROM customers LIKE 'default_shipping_code'");
+    if (!$chk || $chk->rowCount() === 0) {
+        return null;
+    }
+
+    $stmt = $pdo->prepare("SELECT id, code, name FROM customers WHERE default_shipping_code = ? AND id != ? LIMIT 1");
+    $stmt->execute([$shippingCode, $excludeCustomerId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
 
@@ -17,7 +51,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     jsonResponse(['data' => []]);
                 }
                 $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
-                $cols = ['id', 'code', 'name'];
+                $cols = ['id', 'code', 'name', 'default_shipping_code'];
                 $hasPhone = false;
                 try {
                     $chk = $pdo->query("SHOW COLUMNS FROM customers LIKE 'phone'");
@@ -179,14 +213,33 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 : null;
             $phone = !empty($input['phone']) ? trim($input['phone']) : null;
             $address = !empty($input['address']) ? trim($input['address']) : null;
+            [$priorityLevel, $priorityNote] = normalizeCustomerPriority($input);
+            $defaultShippingCode = isset($input['default_shipping_code']) ? (trim((string) $input['default_shipping_code']) ?: null) : null;
             $hasPhone = false;
             $hasAddress = false;
+            $hasPriority = false;
+            $hasPriorityNote = false;
+            $hasDefaultShippingCode = false;
             try {
-                $chk = $pdo->query("SHOW COLUMNS FROM customers WHERE Field IN ('phone','address')");
+                $chk = $pdo->query("SHOW COLUMNS FROM customers WHERE Field IN ('phone','address','priority_level','priority_note','default_shipping_code')");
                 $colsExist = $chk ? array_column($chk->fetchAll(PDO::FETCH_ASSOC), 'Field') : [];
                 $hasPhone = in_array('phone', $colsExist, true);
                 $hasAddress = in_array('address', $colsExist, true);
+                $hasPriority = in_array('priority_level', $colsExist, true);
+                $hasPriorityNote = in_array('priority_note', $colsExist, true);
+                $hasDefaultShippingCode = in_array('default_shipping_code', $colsExist, true);
             } catch (Throwable $e) {
+            }
+            $duplicateWarning = null;
+            if ($hasDefaultShippingCode) {
+                $duplicate = findDuplicateCustomerShippingCode($pdo, $defaultShippingCode);
+                if ($duplicate) {
+                    $duplicateWarning = 'Default shipping code already belongs to customer ' . ($duplicate['code'] ?: ('#' . $duplicate['id'])) . ' (' . $duplicate['name'] . ')';
+                    $duplicateAction = getBusinessSetting($pdo, 'SHIPPING_CODE_DUPLICATE_ACTION', 'warn');
+                    if ($duplicateAction === 'block') {
+                        jsonError($duplicateWarning, 409);
+                    }
+                }
             }
             $cols = ['code', 'name', 'contacts', 'addresses', 'payment_terms'];
             $vals = [$code, $name, $contacts, $addresses, $paymentTerms];
@@ -208,6 +261,18 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $cols[] = 'address';
                 $vals[] = $address;
             }
+            if ($hasPriority) {
+                $cols[] = 'priority_level';
+                $vals[] = $priorityLevel;
+            }
+            if ($hasPriorityNote) {
+                $cols[] = 'priority_note';
+                $vals[] = $priorityNote;
+            }
+            if ($hasDefaultShippingCode) {
+                $cols[] = 'default_shipping_code';
+                $vals[] = $defaultShippingCode;
+            }
             $ph = implode(',', array_fill(0, count($vals), '?'));
             $colStr = implode(', ', $cols);
             try {
@@ -220,7 +285,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $row['contacts'] = $row['contacts'] ? json_decode($row['contacts'], true) : [];
                 $row['addresses'] = $row['addresses'] ? json_decode($row['addresses'], true) : [];
                 $row['payment_links'] = isset($row['payment_links']) && $row['payment_links'] ? json_decode($row['payment_links'], true) : [];
-                jsonResponse(['data' => $row], 201);
+                jsonResponse(array_filter(['data' => $row, 'warning' => $duplicateWarning]), 201);
             } catch (PDOException $e) {
                 if ($e->getCode() == 23000) {
                     jsonError('Customer code already exists', 409);
@@ -254,15 +319,34 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 : null;
             $phone = isset($input['phone']) ? trim($input['phone']) : null;
             $address = isset($input['address']) ? trim($input['address']) : null;
+            [$priorityLevel, $priorityNote] = normalizeCustomerPriority($input);
+            $defaultShippingCode = array_key_exists('default_shipping_code', $input) ? (trim((string) $input['default_shipping_code']) ?: null) : null;
             $hasPhone = false;
             $hasAddress = false;
+            $hasPriority = false;
+            $hasPriorityNote = false;
+            $hasDefaultShippingCode = false;
             try {
-                $chk = $pdo->query("SHOW COLUMNS FROM customers WHERE Field IN ('phone','address')");
+                $chk = $pdo->query("SHOW COLUMNS FROM customers WHERE Field IN ('phone','address','priority_level','priority_note','default_shipping_code')");
                 while ($r = $chk->fetch(PDO::FETCH_ASSOC)) {
                     if ($r['Field'] === 'phone') $hasPhone = true;
                     if ($r['Field'] === 'address') $hasAddress = true;
+                    if ($r['Field'] === 'priority_level') $hasPriority = true;
+                    if ($r['Field'] === 'priority_note') $hasPriorityNote = true;
+                    if ($r['Field'] === 'default_shipping_code') $hasDefaultShippingCode = true;
                 }
             } catch (Throwable $e) {
+            }
+            $duplicateWarning = null;
+            if ($hasDefaultShippingCode) {
+                $duplicate = findDuplicateCustomerShippingCode($pdo, $defaultShippingCode, (int) $id);
+                if ($duplicate) {
+                    $duplicateWarning = 'Default shipping code already belongs to customer ' . ($duplicate['code'] ?: ('#' . $duplicate['id'])) . ' (' . $duplicate['name'] . ')';
+                    $duplicateAction = getBusinessSetting($pdo, 'SHIPPING_CODE_DUPLICATE_ACTION', 'warn');
+                    if ($duplicateAction === 'block') {
+                        jsonError($duplicateWarning, 409);
+                    }
+                }
             }
             $sets = ['code=?', 'name=?', 'contacts=?', 'addresses=?', 'payment_terms=?'];
             $vals = [$code, $name, $contacts, $addresses, $paymentTerms];
@@ -284,6 +368,18 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $sets[] = 'address=?';
                 $vals[] = $address;
             }
+            if ($hasPriority) {
+                $sets[] = 'priority_level=?';
+                $vals[] = $priorityLevel;
+            }
+            if ($hasPriorityNote) {
+                $sets[] = 'priority_note=?';
+                $vals[] = $priorityNote;
+            }
+            if ($hasDefaultShippingCode) {
+                $sets[] = 'default_shipping_code=?';
+                $vals[] = $defaultShippingCode;
+            }
             $vals[] = $id;
             $pdo->prepare("UPDATE customers SET " . implode(', ', $sets) . " WHERE id=?")->execute($vals);
             $stmt = $pdo->prepare("SELECT * FROM customers WHERE id = ?");
@@ -292,7 +388,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $row['contacts'] = $row['contacts'] ? json_decode($row['contacts'], true) : [];
             $row['addresses'] = $row['addresses'] ? json_decode($row['addresses'], true) : [];
             $row['payment_links'] = isset($row['payment_links']) && $row['payment_links'] ? json_decode($row['payment_links'], true) : [];
-            jsonResponse(['data' => $row]);
+            jsonResponse(array_filter(['data' => $row, 'warning' => $duplicateWarning]));
 
         case 'DELETE':
             if (!$id) {

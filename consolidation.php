@@ -32,6 +32,9 @@ require 'includes/layout.php';
                                 <th>Code</th>
                                 <th>Max CBM</th>
                                 <th>Max Weight</th>
+                                <th>ETA</th>
+                                <th>Destination</th>
+                                <?php if ($canManageContainers): ?><th></th><?php endif; ?>
                             </tr>
                         </thead>
                         <tbody id="containersBody"></tbody>
@@ -64,13 +67,11 @@ require 'includes/layout.php';
                     <div class="modal-body">
                         <div class="mb-2"><label class="form-label">Presets</label>
                             <div class="btn-group btn-group-sm" role="group">
-                                <button type="button" class="btn btn-outline-secondary"
-                                    onclick="applyContainerPreset('20HQ',68,28000)">20HQ</button>
-                                <button type="button" class="btn btn-outline-secondary"
-                                    onclick="applyContainerPreset('40HQ',68,28000)">40HQ</button>
-                                <button type="button" class="btn btn-outline-secondary"
-                                    onclick="applyContainerPreset('45HQ',78,28000)">45HQ</button>
+                                <button type="button" class="btn btn-outline-secondary" data-container-preset="20HQ">20HQ</button>
+                                <button type="button" class="btn btn-outline-secondary" data-container-preset="40HQ">40HQ</button>
+                                <button type="button" class="btn btn-outline-secondary" data-container-preset="45HQ">45HQ</button>
                             </div>
+                            <small class="text-muted d-block mt-1">CBM from Business Settings</small>
                         </div>
                         <div class="mb-2"><label class="form-label">Code *</label><input type="text" class="form-control"
                                 id="containerCode"></div>
@@ -82,6 +83,42 @@ require 'includes/layout.php';
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                         <button type="button" class="btn btn-primary" onclick="saveContainer()">Save</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal fade" id="containerEditModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Edit Container <span id="containerEditCode"></span></h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <input type="hidden" id="containerEditId">
+                        <div class="mb-2">
+                            <label class="form-label">ETA Date</label>
+                            <div class="d-flex gap-2 align-items-center">
+                                <input type="date" class="form-control" id="containerEditEtaDate">
+                                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="suggestEtaFromOffsets()" title="Suggest from Business Settings offsets">Suggest</button>
+                            </div>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label">Destination Country (e.g. LB)</label>
+                            <input type="text" class="form-control" id="containerEditDestCountry" placeholder="LB" maxlength="10">
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label">Destination</label>
+                            <input type="text" class="form-control" id="containerEditDestination" placeholder="Beirut Port">
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label">Notes</label>
+                            <textarea class="form-control" id="containerEditNotes" rows="2"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" onclick="saveContainerEdit()">Save</button>
                     </div>
                 </div>
             </div>

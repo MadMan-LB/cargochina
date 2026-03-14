@@ -51,11 +51,18 @@ function esc(s) {
     return d.innerHTML;
 }
 
+let containerPresets = {
+    CONTAINER_20HQ_CBM: 28,
+    CONTAINER_40HQ_CBM: 68,
+    CONTAINER_45HQ_CBM: 78,
+};
+
 document.addEventListener("DOMContentLoaded", () => {
     try {
         loadContainers();
         loadShipmentDrafts();
         loadReadyTotals();
+        loadContainerPresets();
         const docInput = document.getElementById("draftDocInput");
         if (docInput)
             docInput.onchange = () => handleDraftDocUpload(docInput.files);
@@ -65,6 +72,24 @@ document.addEventListener("DOMContentLoaded", () => {
             showToast(e.message || "Load error", "danger");
     }
 });
+
+async function loadContainerPresets() {
+    try {
+        const r = await api("GET", "/config/container-presets");
+        const d = r.data || {};
+        containerPresets = {
+            CONTAINER_20HQ_CBM: parseFloat(d.CONTAINER_20HQ_CBM) || 28,
+            CONTAINER_40HQ_CBM: parseFloat(d.CONTAINER_40HQ_CBM) || 68,
+            CONTAINER_45HQ_CBM: parseFloat(d.CONTAINER_45HQ_CBM) || 78,
+        };
+        const btns = document.querySelectorAll("[data-container-preset]");
+        btns.forEach((btn) => {
+            const code = btn.dataset.containerPreset;
+            const cbm = containerPresets["CONTAINER_" + code + "_CBM"] || 28;
+            btn.onclick = () => applyContainerPreset(code, cbm, 28000);
+        });
+    } catch (_) {}
+}
 
 function renderDraftDocuments(docs) {
     const list = document.getElementById("draftDocumentsList");
@@ -206,15 +231,23 @@ async function loadContainers() {
         const emptyHint = canCreateContainers()
             ? '<small>Click "+ Add Container" to create one</small>'
             : "<small>No containers are available yet</small>";
+        const colCount = canCreateContainers() ? 6 : 5;
         tbody.innerHTML =
             rows.length > 0
                 ? rows
-                      .map(
-                          (c) =>
-                              `<tr><td>${esc(c.code)}</td><td>${c.max_cbm}</td><td>${c.max_weight}</td></tr>`,
-                      )
+                      .map((c) => {
+                          const eta = c.eta_date ? esc(c.eta_date) : "—";
+                          const dest =
+                              [c.destination_country, c.destination]
+                                  .filter(Boolean)
+                                  .join(" ") || "—";
+                          const editBtn = canCreateContainers()
+                              ? `<button type="button" class="btn btn-sm btn-outline-secondary" onclick="openContainerEditModal(${c.id})" title="Edit ETA & destination">Edit</button>`
+                              : "";
+                          return `<tr><td>${esc(c.code)}</td><td>${c.max_cbm}</td><td>${c.max_weight}</td><td>${eta}</td><td>${dest}</td>${editBtn ? `<td>${editBtn}</td>` : ""}</tr>`;
+                      })
                       .join("")
-                : `<tr><td colspan="3" class="text-center py-4 text-muted"><span class="d-block mb-1">No containers yet</span>${emptyHint}</td></tr>`;
+                : `<tr><td colspan="${colCount}" class="text-center py-4 text-muted"><span class="d-block mb-1">No containers yet</span>${emptyHint}</td></tr>`;
     } catch (e) {
         showToast(e.message, "danger");
     }
@@ -285,6 +318,71 @@ function applyContainerPreset(code, maxCbm, maxWeight) {
     document.getElementById("containerCode").value = code;
     document.getElementById("containerMaxCbm").value = maxCbm;
     document.getElementById("containerMaxWeight").value = maxWeight;
+}
+
+let etaOffsets = null;
+
+async function loadEtaOffsets() {
+    if (etaOffsets) return etaOffsets;
+    try {
+        const r = await api("GET", "/config/eta-offsets");
+        etaOffsets = r.data || {};
+        return etaOffsets;
+    } catch (_) {
+        etaOffsets = {};
+        return etaOffsets;
+    }
+}
+
+async function openContainerEditModal(containerId) {
+    if (!canCreateContainers()) return;
+    try {
+        const r = await api("GET", "/containers/" + containerId);
+        const c = r.data;
+        el("containerEditId").value = c.id;
+        el("containerEditCode").textContent = esc(c.code);
+        el("containerEditEtaDate").value = c.eta_date || "";
+        el("containerEditDestCountry").value = c.destination_country || "";
+        el("containerEditDestination").value = c.destination || "";
+        el("containerEditNotes").value = c.notes || "";
+        new bootstrap.Modal(el("containerEditModal")).show();
+    } catch (e) {
+        showToast(e.message, "danger");
+    }
+}
+
+async function saveContainerEdit() {
+    const id = el("containerEditId").value;
+    if (!id) return;
+    try {
+        await api("PUT", "/containers/" + id, {
+            eta_date: el("containerEditEtaDate").value || null,
+            destination_country:
+                el("containerEditDestCountry").value.trim() || null,
+            destination: el("containerEditDestination").value.trim() || null,
+            notes: el("containerEditNotes").value.trim() || null,
+        });
+        showToast("Container updated");
+        bootstrap.Modal.getInstance(el("containerEditModal")).hide();
+        loadContainers();
+    } catch (e) {
+        showToast(e.message, "danger");
+    }
+}
+
+async function suggestEtaFromOffsets() {
+    const country =
+        el("containerEditDestCountry").value.trim().toUpperCase() || "DEFAULT";
+    const offsets = await loadEtaOffsets();
+    const countryOffsets = offsets[country] ||
+        offsets.DEFAULT || { groupage: 0, full_container: 0 };
+    const days = countryOffsets.groupage ?? countryOffsets.full_container ?? 0;
+    if (days <= 0) {
+        showToast("No offset for " + country + "; using today", "info");
+    }
+    const d = new Date();
+    d.setDate(d.getDate() + (days || 0));
+    el("containerEditEtaDate").value = d.toISOString().slice(0, 10);
 }
 
 async function saveContainer() {
@@ -381,7 +479,7 @@ async function openDraftModal(id) {
             eligibleOrders
                 .map(
                     (o) =>
-                        `<tr><td><input type="checkbox" class="form-check-input draft-add-order-cb" value="${o.id}"></td><td>#${o.id} ${esc(o.customer_name)}</td><td>${orderCbm(o).toFixed(2)}</td><td>${orderWeight(o).toFixed(0)}</td></tr>`,
+                        `<tr><td><input type="checkbox" class="form-check-input draft-add-order-cb" value="${o.id}"></td><td>#${o.id} ${esc(o.customer_name)}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${esc(o.customer_priority_note || "")}">${esc(o.customer_priority_level)}</span>` : ""}</td><td>${orderCbm(o).toFixed(2)}</td><td>${orderWeight(o).toFixed(0)}</td></tr>`,
                 )
                 .join("") ||
             "<tr><td colspan='4' class='text-muted text-center py-2'>No orders to add</td></tr>";
@@ -390,7 +488,7 @@ async function openDraftModal(id) {
             draftOrders
                 .map(
                     (o) =>
-                        `<tr><td><input type="checkbox" class="form-check-input draft-remove-order-cb" value="${o.id}"></td><td>#${o.id} ${esc(o.customer_name)}</td><td>${orderCbm(o).toFixed(2)}</td><td>${orderWeight(o).toFixed(0)}</td></tr>`,
+                        `<tr><td><input type="checkbox" class="form-check-input draft-remove-order-cb" value="${o.id}"></td><td>#${o.id} ${esc(o.customer_name)}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${esc(o.customer_priority_note || "")}">${esc(o.customer_priority_level)}</span>` : ""}</td><td>${orderCbm(o).toFixed(2)}</td><td>${orderWeight(o).toFixed(0)}</td></tr>`,
                 )
                 .join("") ||
             "<tr><td colspan='4' class='text-muted text-center py-2'>No orders in draft</td></tr>";

@@ -7,7 +7,30 @@ $pageTitle = 'Assign to Container';
 require 'includes/layout.php';
 ?>
 <h1 class="mb-3">Assign to Container</h1>
-<p class="text-muted mb-4">Assign ready orders to containers directly. Orders must be <strong>Approved</strong>, <strong>Confirmed</strong>, or <strong>Ready for Consolidation</strong>.</p>
+<p class="text-muted mb-4">Assign ready orders to containers directly. Orders must already be <strong>Confirmed</strong> or <strong>Ready for Consolidation</strong>.</p>
+
+<div class="metric-card-grid mb-4">
+  <div class="metric-card">
+    <div class="eyebrow">Eligible Orders</div>
+    <div class="value" id="assignEligibleCount">0</div>
+    <div class="detail">Orders available to assign right now</div>
+  </div>
+  <div class="metric-card">
+    <div class="eyebrow">Selected Orders</div>
+    <div class="value" id="assignSelectedCountStat">0</div>
+    <div class="detail">Current assignment selection</div>
+  </div>
+  <div class="metric-card">
+    <div class="eyebrow">Selected CBM</div>
+    <div class="value" id="assignSelectedCbmStat">0.000</div>
+    <div class="detail">Volume that will be added</div>
+  </div>
+  <div class="metric-card">
+    <div class="eyebrow">Selected Weight</div>
+    <div class="value" id="assignSelectedWeightStat">0.00</div>
+    <div class="detail">Gross weight to be added</div>
+  </div>
+</div>
 
 <div class="row g-4">
   <!-- Left: eligible orders -->
@@ -15,8 +38,8 @@ require 'includes/layout.php';
     <div class="card h-100">
       <div class="card-header d-flex justify-content-between align-items-center">
         <span class="fw-semibold">Eligible Orders <span class="text-muted fw-normal" id="eligibleCountLabel"></span></span>
-        <div class="d-flex gap-2 align-items-center">
-          <input type="text" id="orderSearch" class="form-control form-control-sm" style="width:180px" placeholder="Search customer…" oninput="debounceOrderSearch()">
+        <div class="d-flex gap-2 align-items-center flex-wrap">
+          <input type="text" id="orderSearch" class="form-control form-control-sm" style="width:220px" placeholder="Search customer, order, supplier…" oninput="debounceOrderSearch()">
           <button class="btn btn-outline-secondary btn-sm" onclick="selectAllOrders()" id="selectAllBtn">Select All</button>
         </div>
       </div>
@@ -56,9 +79,10 @@ require 'includes/layout.php';
     <div class="card">
       <div class="card-header fw-semibold">Select Container</div>
       <div class="card-body">
-        <select id="targetContainerSelect" class="form-select mb-3" onchange="onContainerChange()">
-          <option value="">— Choose a container —</option>
-        </select>
+        <label class="form-label small">Container</label>
+        <input type="text" id="targetContainerSearch" class="form-control mb-2" placeholder="Type container code or ID..." autocomplete="off">
+        <input type="hidden" id="targetContainerId">
+        <div id="selectedContainerMeta" class="text-muted small mb-3">Search for a container to preview current fill and assignment impact.</div>
         <div id="containerCapacityPanel" class="d-none">
           <div class="mb-2">
             <div class="d-flex justify-content-between small mb-1">
@@ -119,5 +143,6 @@ require 'includes/layout.php';
   </div>
 </div>
 
+<?php $pageScripts = ['frontend/js/autocomplete.js']; ?>
 <?php $pageScript = '/cargochina/frontend/js/assign_container.js?v=' . filemtime(__DIR__ . '/frontend/js/assign_container.js'); ?>
 <?php require 'includes/footer.php'; ?>

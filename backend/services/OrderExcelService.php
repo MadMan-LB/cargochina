@@ -197,7 +197,7 @@ class OrderExcelService
             $desc       = (string) ($it['description_en'] ?? $it['description_cn'] ?? '');
             $cartons    = $it['cartons'] ?? '';
             $qtyCtn     = $it['qty_per_carton'] ?? '';
-            $unitPrice  = $it['unit_price'] ?? '';
+            $unitPrice  = $it['sell_price'] ?? $it['unit_price'] ?? '';
             $cbmPer     = $it['declared_cbm']
                 ? round((float) $it['declared_cbm'] / max(1, (float) ($it['cartons'] ?: 1)), 6)
                 : '';

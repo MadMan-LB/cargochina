@@ -10,6 +10,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setupProductSupplierAutocomplete();
     setupProductHsCodeAutocomplete();
     setupProductPricing();
+    setupProductDesignAttachments();
 });
 
 function setupProductPricing() {
@@ -27,6 +28,86 @@ function setupProductPricing() {
     unitPriceEl.addEventListener("input", updateTotal);
     piecesEl.addEventListener("input", updateTotal);
 }
+
+function setupProductDesignAttachments() {
+    const addEl = document.getElementById("productDesignAttachmentInput");
+    if (!addEl) return;
+    addEl.addEventListener("change", async function () {
+        const file = this.files?.[0];
+        this.value = "";
+        if (!file) return;
+        const pid = document.getElementById("productId")?.value;
+        if (!pid) {
+            showToast(
+                "Save product first to add design attachments",
+                "warning",
+            );
+            return;
+        }
+        try {
+            const path = await uploadFile(file);
+            if (!path) return;
+            await api("POST", "/design-attachments", {
+                entity_type: "product",
+                entity_id: parseInt(pid, 10),
+                file_path: path,
+                file_type: (file.name || "").split(".").pop() || null,
+            });
+            loadProductDesignAttachments(parseInt(pid, 10));
+            showToast("Design attachment added");
+        } catch (e) {
+            showToast(e.message, "danger");
+        }
+    });
+}
+
+async function loadProductDesignAttachments(productId) {
+    if (!productId) return;
+    try {
+        const res = await api(
+            "GET",
+            "/design-attachments?entity_type=product&entity_id=" + productId,
+        );
+        renderProductDesignAttachments(res.data || []);
+    } catch (e) {
+        renderProductDesignAttachments([]);
+    }
+}
+
+function renderProductDesignAttachments(list) {
+    const el = document.getElementById("productDesignAttachmentsList");
+    if (!el) return;
+    if (!list.length) {
+        el.innerHTML =
+            '<p class="text-muted small mb-0">No design attachments</p>';
+        return;
+    }
+    const base = (window.API_BASE || "/cargochina/api/v1").replace(
+        "/api/v1",
+        "",
+    );
+    el.innerHTML = list
+        .map(
+            (a) => `
+        <div class="d-flex align-items-center gap-2 mb-1" data-attachment-id="${a.id}">
+          <a href="${base}/backend/${a.file_path}" target="_blank" class="small text-truncate" style="max-width:200px">${escapeHtml((a.internal_note || a.file_path || "Attachment").substring(0, 40))}</a>
+          <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteProductDesignAttachment(${a.id})">×</button>
+        </div>`,
+        )
+        .join("");
+}
+
+window.deleteProductDesignAttachment = async function (attachmentId) {
+    const pid = document.getElementById("productId")?.value;
+    if (!pid) return;
+    try {
+        await api("DELETE", "/design-attachments/" + attachmentId);
+        loadProductDesignAttachments(parseInt(pid, 10));
+        showToast("Attachment removed");
+    } catch (e) {
+        showToast(e.message, "danger");
+    }
+};
 
 function setupProductDescription() {
     const containerEl = document.getElementById("productDescFields");
@@ -109,7 +190,7 @@ function setupProductSupplierAutocomplete() {
         },
     });
     inputEl.addEventListener("input", () => {
-        if (!inputEl.value.trim()) hiddenEl.value = "";
+        hiddenEl.value = "";
     });
 }
 
@@ -228,6 +309,11 @@ function mergedDescription(row) {
     return row.description_en || row.description_cn || "-";
 }
 
+function renderProductAlertBadge(note) {
+    if (!note) return '<span class="text-muted">—</span>';
+    return `<span class="product-alert-badge" title="${escapeHtml(note)}">Alert</span>`;
+}
+
 async function loadProducts() {
     try {
         const res = await api("GET", "/products");
@@ -241,6 +327,7 @@ async function loadProducts() {
         <td>${r.thumbnail_url ? `<img src="${r.thumbnail_url}" class="img-thumbnail img-thumbnail-sm" alt="">` : "—"}</td>
         <td>${r.id}</td>
         <td class="text-truncate" style="max-width:200px" title="${escapeHtml(mergedDescription(r))}">${escapeHtml(mergedDescription(r))}</td>
+        <td>${renderProductAlertBadge(r.high_alert_note)}</td>
         <td>${r.cbm}</td>
         <td>${r.weight}</td>
         <td>${r.pieces_per_carton ?? "—"}</td>
@@ -254,7 +341,7 @@ async function loadProducts() {
     `,
                 )
                 .join("") ||
-            '<tr><td colspan="9" class="text-muted">No products yet.</td></tr>';
+            '<tr><td colspan="10" class="text-muted">No products yet.</td></tr>';
     } catch (e) {
         showToast(e.message, "danger");
     }
@@ -271,6 +358,13 @@ function openProductForm() {
     if (window.renderProductDescEntries) window.renderProductDescEntries();
     if (productSupplierAutocomplete && productSupplierAutocomplete.setValue)
         productSupplierAutocomplete.setValue(null);
+    document.getElementById("productHighAlertNote").value = "";
+    const cartonTotalEl = document.getElementById("productCartonTotal");
+    if (cartonTotalEl) cartonTotalEl.textContent = "—";
+    renderProductDesignAttachments([]);
+    document
+        .getElementById("productDesignAttachmentsAdd")
+        .classList.add("d-none");
 }
 
 async function editProduct(id) {
@@ -314,9 +408,18 @@ async function editProduct(id) {
         document.getElementById("productWeight").value = d.weight;
         document.getElementById("productHsCode").value = d.hs_code || "";
         document.getElementById("productPackaging").value = d.packaging || "";
+        document.getElementById("productHighAlertNote").value =
+            d.high_alert_note || "";
         document.getElementById("productPiecesPerCarton").value =
             d.pieces_per_carton ?? "";
         document.getElementById("productUnitPrice").value = d.unit_price ?? "";
+        document
+            .getElementById("productUnitPrice")
+            ?.dispatchEvent(new Event("input"));
+        const buyEl = document.getElementById("productBuyPrice");
+        const sellEl = document.getElementById("productSellPrice");
+        if (buyEl) buyEl.value = d.buy_price ?? "";
+        if (sellEl) sellEl.value = d.sell_price ?? "";
         document.getElementById("productSupplierId").value =
             d.supplier_id || "";
         if (
@@ -336,6 +439,10 @@ async function editProduct(id) {
             "Edit Product";
         productImagePaths = d.image_paths || [];
         renderProductImagesPreview();
+        document
+            .getElementById("productDesignAttachmentsAdd")
+            .classList.remove("d-none");
+        loadProductDesignAttachments(d.id);
         new bootstrap.Modal(document.getElementById("productModal")).show();
     } catch (e) {
         showToast(e.message, "danger");
@@ -370,6 +477,9 @@ async function saveProduct() {
         hs_code: document.getElementById("productHsCode").value.trim() || null,
         packaging:
             document.getElementById("productPackaging").value.trim() || null,
+        high_alert_note:
+            document.getElementById("productHighAlertNote").value.trim() ||
+            null,
         supplier_id: document.getElementById("productSupplierId").value || null,
         pieces_per_carton: document.getElementById("productPiecesPerCarton")
             .value
@@ -380,6 +490,12 @@ async function saveProduct() {
             : null,
         unit_price: document.getElementById("productUnitPrice").value
             ? parseFloat(document.getElementById("productUnitPrice").value)
+            : null,
+        buy_price: document.getElementById("productBuyPrice")?.value
+            ? parseFloat(document.getElementById("productBuyPrice").value)
+            : null,
+        sell_price: document.getElementById("productSellPrice")?.value
+            ? parseFloat(document.getElementById("productSellPrice").value)
             : null,
         image_paths: productImagePaths,
     };

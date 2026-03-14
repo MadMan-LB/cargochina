@@ -100,6 +100,29 @@ function setItemSupplierValue(card, supplierId, supplierName) {
     if (supplierInput) supplierInput.value = supplierName || "";
 }
 
+function renderProductAlertHint(card, note) {
+    if (!card) return;
+    const slot = card.querySelector(".product-alert-slot");
+    if (!slot) return;
+    if (!note) {
+        slot.innerHTML = "";
+        return;
+    }
+    slot.innerHTML = `<div class="product-alert-inline"><strong>Product alert:</strong> ${escapeHtml(note)}</div>`;
+}
+
+function applyCustomerDefaultShippingCode(code) {
+    if (!code || typeof code !== "string" || !code.trim()) return;
+    const cards = document.querySelectorAll("#orderItemsBody .order-item-card");
+    for (const card of cards) {
+        const inp = card.querySelector(".item-shipping-code");
+        if (inp && (!inp.value || !inp.value.trim())) {
+            inp.value = code.trim();
+            break;
+        }
+    }
+}
+
 function applySelectedSupplierToItems(supplier, { onlyBlank = false } = {}) {
     if (!supplier?.id || !supplier?.name) return;
     document
@@ -145,13 +168,93 @@ function getOrderSupplierDisplay(order) {
     return "Multiple (" + [...names].join(", ") + ")";
 }
 
+function getSelectedOrderStatuses() {
+    return Array.from(
+        document.querySelectorAll(".order-status-filter:checked"),
+    ).map((el) => el.value);
+}
+
+function orderStatusDisplay(status) {
+    return typeof statusLabel === "function" ? statusLabel(status) : status;
+}
+
+function updateOrderOverview(rows) {
+    const list = rows || [];
+    const counts = {
+        visible: list.length,
+        draft: list.filter((r) => r.status === "Draft").length,
+        awaiting: list.filter(
+            (r) => r.status === "AwaitingCustomerConfirmation",
+        ).length,
+        ready: list.filter((r) =>
+            [
+                "ReadyForConsolidation",
+                "ConsolidatedIntoShipmentDraft",
+                "AssignedToContainer",
+            ].includes(r.status),
+        ).length,
+    };
+    const setText = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    };
+    setText("orderVisibleCount", counts.visible);
+    setText("orderDraftCount", counts.draft);
+    setText("orderAwaitingCount", counts.awaiting);
+    setText("orderReadyCount", counts.ready);
+}
+
+function updateOrderStatusFilterSummary() {
+    const summaryEl = document.getElementById("filterStatusSummary");
+    if (!summaryEl) return;
+    const selected = getSelectedOrderStatuses();
+    const mode = document.getElementById("filterStatusMode")?.value || "include";
+    if (!selected.length) {
+        summaryEl.textContent = "All statuses";
+        return;
+    }
+    summaryEl.textContent =
+        (mode === "exclude" ? "Excluding: " : "Including: ") +
+        selected.map(orderStatusDisplay).join(", ");
+}
+
+function setOrderStatusFilter(statuses = [], mode = "include") {
+    const selected = new Set((statuses || []).map(String));
+    document.querySelectorAll(".order-status-filter").forEach((el) => {
+        el.checked = selected.has(el.value);
+    });
+    const modeEl = document.getElementById("filterStatusMode");
+    if (modeEl) modeEl.value = mode === "exclude" ? "exclude" : "include";
+    updateOrderStatusFilterSummary();
+}
+
+function buildOrderListQuery() {
+    const params = new URLSearchParams();
+    const statuses = getSelectedOrderStatuses();
+    const statusMode =
+        document.getElementById("filterStatusMode")?.value || "include";
+    const q = (document.getElementById("orderSearch")?.value || "").trim();
+    statuses.forEach((status) => params.append("status[]", status));
+    if (statuses.length) params.set("status_mode", statusMode);
+    if (q) params.set("q", q);
+    return params.toString();
+}
+
+window.clearOrderStatusFilter = function () {
+    setOrderStatusFilter([], "include");
+    loadOrders();
+};
+
 document.addEventListener("DOMContentLoaded", () => {
     orderCustomerAc = Autocomplete.init(
         document.getElementById("orderCustomer"),
         {
             resource: "customers",
             placeholder: "Type customer name or code...",
-            onSelect: (item) => saveRecent(RECENT_KEY_CUSTOMERS, item),
+            onSelect: (item) => {
+                saveRecent(RECENT_KEY_CUSTOMERS, item);
+                applyCustomerDefaultShippingCode(item.default_shipping_code);
+            },
         },
     );
     orderSupplierAc = Autocomplete.init(
@@ -170,28 +273,30 @@ document.addEventListener("DOMContentLoaded", () => {
         let searchDebounce;
         orderSearchEl.addEventListener("input", () => {
             clearTimeout(searchDebounce);
-            searchDebounce = setTimeout(loadOrders, 350);
+            searchDebounce = setTimeout(loadOrders, 200);
         });
     }
     const curSel = document.getElementById("orderCurrency");
     if (curSel) curSel.addEventListener("change", updateOrderTotals);
-    const statusFromUrl = new URLSearchParams(window.location.search).get(
-        "status",
-    );
-    if (statusFromUrl) {
-        const filterStatus = document.getElementById("filterStatus");
-        if (filterStatus) filterStatus.value = statusFromUrl;
+    const urlParams = new URLSearchParams(window.location.search);
+    const statusFromUrl = urlParams.getAll("status[]");
+    const legacyStatus = urlParams.get("status");
+    const statusMode = urlParams.get("status_mode") || "include";
+    if (statusFromUrl.length) {
+        setOrderStatusFilter(statusFromUrl, statusMode);
+    } else if (legacyStatus) {
+        setOrderStatusFilter([legacyStatus], statusMode);
+    } else {
+        updateOrderStatusFilterSummary();
     }
     loadOrders();
 });
 
 async function loadOrders() {
     try {
-        const status = document.getElementById("filterStatus")?.value || "";
-        const q = (document.getElementById("orderSearch")?.value || "").trim();
-        let path = "/orders?";
-        if (status) path += "status=" + encodeURIComponent(status) + "&";
-        if (q) path += "q=" + encodeURIComponent(q) + "&";
+        const qs = buildOrderListQuery();
+        let path = "/orders";
+        if (qs) path += "?" + qs;
         const res = await api("GET", path);
         const rows = res.data || [];
         const tbody = document.querySelector("#ordersTable tbody");
@@ -205,6 +310,7 @@ async function loadOrders() {
             bulkApproveBtn.classList.toggle("d-none", submittedCount === 0);
         if (bulkSubmitBtn)
             bulkSubmitBtn.classList.toggle("d-none", draftCount === 0);
+        updateOrderOverview(rows);
 
         const selectAll = document.getElementById("orderSelectAll");
         if (selectAll) {
@@ -222,10 +328,6 @@ async function loadOrders() {
             if (selectAll && cbs.length)
                 selectAll.checked = checked.length === cbs.length;
         };
-        tbody.querySelectorAll(".order-bulk-cb").forEach((cb) => {
-            cb.addEventListener("change", updateSelectAllState);
-        });
-
         tbody.innerHTML =
             rows
                 .map((r) => {
@@ -236,10 +338,10 @@ async function loadOrders() {
       <tr data-order-id="${r.id}" data-status="${escapeHtml(r.status)}">
         <td class="text-center">${canBulk ? `<input type="checkbox" class="form-check-input order-bulk-cb" data-order-id="${r.id}" data-status="${escapeHtml(r.status)}">` : ""}</td>
         <td>${r.id}</td>
-        <td>${escapeHtml(r.customer_name)}</td>
+        <td>${escapeHtml(r.customer_name)}${r.customer_priority_level && r.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(r.customer_priority_note || "")}">${escapeHtml(r.customer_priority_level)}</span>` : ""}</td>
         <td>${escapeHtml(suppDisplay)}</td>
         <td>${r.expected_ready_date}</td>
-        <td><span class="badge ${typeof statusBadgeClass === "function" ? statusBadgeClass(r.status) : "bg-secondary"}">${escapeHtml(typeof statusLabel === "function" ? statusLabel(r.status) : r.status)}</span></td>
+        <td><span class="badge ${typeof statusBadgeClass === "function" ? statusBadgeClass(r.status) : "bg-secondary"}">${escapeHtml(typeof statusLabel === "function" ? statusLabel(r.status) : r.status)}</span>${r.high_alert_notes ? ' <span class="badge bg-warning text-dark" title="' + escapeHtml(r.high_alert_notes) + '">⚠️</span>' : ""}</td>
         <td class="table-actions">
           <button class="btn btn-sm btn-outline-info" onclick="showOrderInfo(${r.id})" title="View order details">ℹ</button>
           <button class="btn btn-sm btn-outline-primary" onclick="editOrder(${r.id})">Edit</button>
@@ -256,18 +358,20 @@ async function loadOrders() {
                 })
                 .join("") ||
             '<tr><td colspan="7" class="text-muted">No orders yet.</td></tr>';
+        tbody.querySelectorAll(".order-bulk-cb").forEach((cb) => {
+            cb.addEventListener("change", updateSelectAllState);
+        });
     } catch (e) {
+        updateOrderOverview([]);
         showToast(e.message, "danger");
     }
 }
 
 async function exportOrdersCsv() {
     try {
-        const status = document.getElementById("filterStatus")?.value || "";
-        const q = (document.getElementById("orderSearch")?.value || "").trim();
-        let path = "/orders?";
-        if (status) path += "status=" + encodeURIComponent(status) + "&";
-        if (q) path += "q=" + encodeURIComponent(q) + "&";
+        const qs = buildOrderListQuery();
+        let path = "/orders";
+        if (qs) path += "?" + qs;
         const res = await api("GET", path);
         const rows = res.data || [];
         const headers = [
@@ -400,11 +504,14 @@ async function loadOrderTemplate(id) {
             last.querySelector(".item-qty-per-ctn").value = qtyPerCtn || "";
             last.querySelector(".item-qty").value = qty || "";
             last.querySelector(".item-unit-price").value = it.unit_price ?? "";
+            const sellPriceEl = last.querySelector(".item-sell-price");
+            if (sellPriceEl) sellPriceEl.value = it.sell_price ?? "";
             last.querySelector(".item-cbm").value = cbmPerUnit;
             last.querySelector(".item-l").value = it.item_length ?? "";
             last.querySelector(".item-w").value = it.item_width ?? "";
             last.querySelector(".item-h").value = it.item_height ?? "";
             last.querySelector(".item-weight").value = getItemWeightPerQty(it);
+            renderProductAlertHint(last, it.product_high_alert_note || "");
             updateItemComputed(last.dataset.idx);
         }
         updateOrderTotals();
@@ -712,6 +819,10 @@ function addOrderItem() {
     card.className = "order-item-card";
     card.dataset.idx = idx;
     const selectedSupplier = orderSupplierAc?.getSelected();
+    const selectedCustomer = orderCustomerAc?.getSelected();
+    const defaultShipCode = (
+        selectedCustomer?.default_shipping_code || ""
+    ).trim();
     const defaultSuppId =
         selectedSupplier?.id || orderSupplierAc?.getSelectedId() || "";
     const defaultSuppName = (
@@ -726,7 +837,10 @@ function addOrderItem() {
           <div class="order-item-index">Item #${idx + 1}</div>
           <div class="order-item-subtitle">Add one supplier, description, packaging, and measurement set for this line.</div>
         </div>
-        <button type="button" class="btn btn-sm btn-outline-danger order-item-remove" onclick="this.closest('.order-item-card').remove(); updateOrderTotals();" title="Remove item">Remove</button>
+        <div class="d-flex gap-1">
+          <button type="button" class="btn btn-sm btn-outline-secondary order-item-design d-none" onclick="openOrderItemDesignModal(this.closest('.order-item-card'))" title="Design attachments">Design</button>
+          <button type="button" class="btn btn-sm btn-outline-danger order-item-remove" onclick="this.closest('.order-item-card').remove(); updateOrderTotals();" title="Remove item">Remove</button>
+        </div>
       </div>
       <div class="row g-3 align-items-start">
         <div class="col-12 col-lg-3">
@@ -751,13 +865,14 @@ function addOrderItem() {
             </div>
             <div class="col-6 col-md-4">
               <label class="form-label order-item-label">Ship Code</label>
-              <input type="text" class="form-control item-shipping-code" placeholder="Agent / shipping code" data-idx="${idx}">
+              <input type="text" class="form-control item-shipping-code" placeholder="Agent / shipping code" value="${defaultShipCode ? escapeHtml(defaultShipCode) : ""}" data-idx="${idx}">
             </div>
             <div class="col-12">
               <label class="form-label order-item-label">Description</label>
               <input type="text" class="form-control item-desc" placeholder="Product description" data-idx="${idx}">
               <input type="hidden" class="item-product-id" data-idx="${idx}">
               <small class="text-muted product-suggest d-block mt-2" data-idx="${idx}"></small>
+              <div class="product-alert-slot"></div>
             </div>
             <div class="col-12">
               <div class="order-item-subgrid">
@@ -781,15 +896,19 @@ function addOrderItem() {
                 <div class="order-item-subgrid-block">
                   <div class="order-item-subgrid-title">Pricing & weight</div>
                   <div class="row g-3">
-                    <div class="col-4">
+                    <div class="col-3">
                       <label class="form-label order-item-label">Unit Price</label>
                       <input type="number" step="0.01" class="form-control item-unit-price" placeholder="0" data-idx="${idx}">
                     </div>
-                    <div class="col-4">
+                    <div class="col-3">
+                      <label class="form-label order-item-label">Sell price</label>
+                      <input type="number" step="0.01" class="form-control item-sell-price" placeholder="Export" data-idx="${idx}" title="Customer-facing; falls back to unit price">
+                    </div>
+                    <div class="col-3">
                       <label class="form-label order-item-label">Weight / Qty (kg)</label>
                       <input type="number" step="0.0001" class="form-control item-weight" min="0" placeholder="0" data-idx="${idx}">
                     </div>
-                    <div class="col-4">
+                    <div class="col-3">
                       <label class="form-label order-item-label">Total $</label>
                       <div class="order-item-computed item-total-amount" data-idx="${idx}">0</div>
                     </div>
@@ -840,6 +959,9 @@ function addOrderItem() {
                 if (suppIdInput) suppIdInput.value = item.id;
             },
         });
+        suppInput.addEventListener("input", () => {
+            if (suppIdInput) suppIdInput.value = "";
+        });
         if (ac && defaultSuppId && defaultSuppName)
             ac.setValue({ id: defaultSuppId, name: defaultSuppName });
         card._supplierAc = ac;
@@ -852,7 +974,7 @@ function addOrderItem() {
             searchPath: "/search",
             placeholder: "Product description — type to search products",
             renderItem: (p) =>
-                `${p.description_cn || p.description_en || ""} — ${p.hs_code || ""}`
+                `${p.description_cn || p.description_en || ""}${p.high_alert_note ? " — Alert" : ""} — ${p.hs_code || ""}`
                     .replace(/^ — | — $/g, "")
                     .trim() || `#${p.id}`,
             onSelect: (p) => {
@@ -872,6 +994,12 @@ function addOrderItem() {
                 const unitPrice = card.querySelector(".item-unit-price");
                 if (unitPrice && p.unit_price != null)
                     unitPrice.value = p.unit_price;
+                const sellPriceEl = card.querySelector(".item-sell-price");
+                if (
+                    sellPriceEl &&
+                    (p.sell_price != null || p.unit_price != null)
+                )
+                    sellPriceEl.value = p.sell_price ?? p.unit_price ?? "";
                 const weight = card.querySelector(".item-weight");
                 if (weight && p.weight != null) weight.value = p.weight;
                 const cbm = card.querySelector(".item-cbm");
@@ -888,6 +1016,7 @@ function addOrderItem() {
                     suggest.textContent = p.hs_code
                         ? `From product (HS: ${p.hs_code}) — review and confirm values above.`
                         : "From product — review and confirm values above.";
+                renderProductAlertHint(card, p.high_alert_note || "");
                 const photosContainer = card.querySelector(".item-photos");
                 if (photosContainer) {
                     photosContainer
@@ -925,6 +1054,10 @@ function addOrderItem() {
             },
         });
     }
+    descInput?.addEventListener("input", () => {
+        if (productIdInput) productIdInput.value = "";
+        renderProductAlertHint(card, "");
+    });
     card.querySelector(".item-photo-input").addEventListener("change", (e) =>
         handleItemPhoto(e, idx),
     );
@@ -1056,6 +1189,97 @@ function updateOrderTotals() {
     if (elWeight) elWeight.textContent = totalWeight.toFixed(0);
 }
 
+let _orderItemDesignItemId = null;
+
+function openOrderItemDesignModal(card) {
+    const itemId = card?.dataset?.itemId;
+    if (!itemId) {
+        showToast(
+            "Save order first to add design attachments for this item",
+            "warning",
+        );
+        return;
+    }
+    _orderItemDesignItemId = parseInt(itemId, 10);
+    const desc = card.querySelector(".item-desc")?.value || "";
+    document.getElementById("orderItemDesignLabel").textContent = desc
+        ? escapeHtml(desc).substring(0, 30)
+        : "#" + itemId;
+    loadOrderItemDesignAttachments();
+    document.getElementById("orderItemDesignInput").value = "";
+    document.getElementById("orderItemDesignInput").onchange =
+        handleOrderItemDesignUpload;
+    new bootstrap.Modal(document.getElementById("orderItemDesignModal")).show();
+}
+
+async function loadOrderItemDesignAttachments() {
+    if (!_orderItemDesignItemId) return;
+    try {
+        const res = await api(
+            "GET",
+            "/design-attachments?entity_type=order_item&entity_id=" +
+                _orderItemDesignItemId,
+        );
+        renderOrderItemDesignAttachments(res.data || []);
+    } catch (e) {
+        renderOrderItemDesignAttachments([]);
+    }
+}
+
+function renderOrderItemDesignAttachments(list) {
+    const el = document.getElementById("orderItemDesignList");
+    if (!el) return;
+    if (!list.length) {
+        el.innerHTML =
+            '<p class="text-muted small mb-0">No design attachments</p>';
+        return;
+    }
+    const base = (window.API_BASE || "/cargochina/api/v1").replace(
+        "/api/v1",
+        "",
+    );
+    el.innerHTML = list
+        .map(
+            (a) => `
+        <div class="d-flex align-items-center gap-2 mb-1">
+          <a href="${base}/backend/${a.file_path}" target="_blank" class="small text-truncate" style="max-width:200px">${escapeHtml((a.internal_note || a.file_path || "Attachment").substring(0, 40))}</a>
+          <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteOrderItemDesignAttachment(${a.id})">×</button>
+        </div>`,
+        )
+        .join("");
+}
+
+async function handleOrderItemDesignUpload(e) {
+    const file = e.target?.files?.[0];
+    e.target.value = "";
+    if (!file || !_orderItemDesignItemId) return;
+    try {
+        const path = await uploadFile(file);
+        if (!path) return;
+        await api("POST", "/design-attachments", {
+            entity_type: "order_item",
+            entity_id: _orderItemDesignItemId,
+            file_path: path,
+            file_type: (file.name || "").split(".").pop() || null,
+        });
+        loadOrderItemDesignAttachments();
+        showToast("Design attachment added");
+    } catch (err) {
+        showToast(err.message, "danger");
+    }
+}
+
+window.deleteOrderItemDesignAttachment = async function (attachmentId) {
+    if (!_orderItemDesignItemId) return;
+    try {
+        await api("DELETE", "/design-attachments/" + attachmentId);
+        loadOrderItemDesignAttachments();
+        showToast("Attachment removed");
+    } catch (e) {
+        showToast(e.message, "danger");
+    }
+};
+
 async function copyOrder(id) {
     try {
         const res = await api("GET", "/orders/" + id);
@@ -1074,6 +1298,8 @@ async function copyOrder(id) {
         document.getElementById("orderExpectedDate").value =
             o.expected_ready_date;
         document.getElementById("orderCurrency").value = o.currency || "USD";
+        document.getElementById("orderHighAlertNotes").value =
+            o.high_alert_notes || "";
         document.getElementById("orderModalTitle").textContent =
             "Copy of Order #" + id;
         const container = document.getElementById("orderItemsBody");
@@ -1098,6 +1324,8 @@ async function copyOrder(id) {
                 it.qty_per_carton ?? "";
             last.querySelector(".item-qty").value = it.quantity ?? "";
             last.querySelector(".item-unit-price").value = it.unit_price ?? "";
+            const sellPriceEl = last.querySelector(".item-sell-price");
+            if (sellPriceEl) sellPriceEl.value = it.sell_price ?? "";
             const denom =
                 (it.cartons || 0) > 0
                     ? it.cartons
@@ -1112,6 +1340,7 @@ async function copyOrder(id) {
             last.querySelector(".item-w").value = it.item_width ?? "";
             last.querySelector(".item-h").value = it.item_height ?? "";
             last.querySelector(".item-weight").value = getItemWeightPerQty(it);
+            renderProductAlertHint(last, it.product_high_alert_note || "");
             updateItemComputed(last.dataset.idx);
             (it.image_paths || []).forEach((path) => {
                 const div = document.createElement("div");
@@ -1150,6 +1379,8 @@ async function editOrder(id) {
         document.getElementById("orderExpectedDate").value =
             o.expected_ready_date;
         document.getElementById("orderCurrency").value = o.currency || "USD";
+        document.getElementById("orderHighAlertNotes").value =
+            o.high_alert_notes || "";
         document.getElementById("orderModalTitle").textContent =
             "Edit Order #" + o.id;
         const container = document.getElementById("orderItemsBody");
@@ -1174,6 +1405,8 @@ async function editOrder(id) {
                 it.qty_per_carton ?? "";
             last.querySelector(".item-qty").value = it.quantity ?? "";
             last.querySelector(".item-unit-price").value = it.unit_price ?? "";
+            const sellPriceEl = last.querySelector(".item-sell-price");
+            if (sellPriceEl) sellPriceEl.value = it.sell_price ?? "";
             const denom =
                 (it.cartons || 0) > 0
                     ? it.cartons
@@ -1188,6 +1421,7 @@ async function editOrder(id) {
             last.querySelector(".item-w").value = it.item_width ?? "";
             last.querySelector(".item-h").value = it.item_height ?? "";
             last.querySelector(".item-weight").value = getItemWeightPerQty(it);
+            renderProductAlertHint(last, it.product_high_alert_note || "");
             updateItemComputed(last.dataset.idx);
             (it.image_paths || []).forEach((path) => {
                 const div = document.createElement("div");
@@ -1196,6 +1430,11 @@ async function editOrder(id) {
                 div.innerHTML = `<img src="/cargochina/backend/${path}" class="img-thumbnail img-thumbnail-sm" style="max-width:50px" alt=""><button type="button" class="btn-close btn-close-sm" onclick="this.closest('.d-inline-block').remove()"></button>`;
                 last.querySelector(".item-photos").appendChild(div);
             });
+            if (it.id) {
+                last.dataset.itemId = it.id;
+                const designBtn = last.querySelector(".order-item-design");
+                if (designBtn) designBtn.classList.remove("d-none");
+            }
         });
         if (o.items && o.items.length === 0) addOrderItem();
         new bootstrap.Modal(document.getElementById("orderModal")).show();
@@ -1248,6 +1487,10 @@ function collectOrderItems() {
             const unitPrice = parseFloat(
                 tr.querySelector(".item-unit-price")?.value || 0,
             );
+            const sellPriceRaw = tr
+                .querySelector(".item-sell-price")
+                ?.value?.trim();
+            const sellPrice = sellPriceRaw ? parseFloat(sellPriceRaw) : null;
             const photoDivs = tr.querySelectorAll(".item-photos [data-path]");
             const imagePaths = Array.from(photoDivs)
                 .map((d) => d.dataset.path)
@@ -1273,6 +1516,7 @@ function collectOrderItems() {
                 item_width: w > 0 ? w : null,
                 item_height: h > 0 ? h : null,
                 unit_price: unitPrice || null,
+                sell_price: sellPrice,
                 total_amount: qty > 0 && unitPrice > 0 ? qty * unitPrice : null,
                 image_paths: imagePaths.length ? imagePaths : null,
                 description_cn: desc || null,
@@ -1291,17 +1535,13 @@ async function saveOrder() {
         supplier_id: orderSupplierAc?.getSelectedId() || "",
         expected_ready_date: document.getElementById("orderExpectedDate").value,
         currency: document.getElementById("orderCurrency")?.value || "USD",
+        high_alert_notes:
+            document.getElementById("orderHighAlertNotes")?.value?.trim() ||
+            null,
         items,
     };
-    if (
-        !payload.customer_id ||
-        !payload.supplier_id ||
-        !payload.expected_ready_date
-    ) {
-        showToast(
-            "Customer, Supplier and Expected Date are required",
-            "danger",
-        );
+    if (!payload.customer_id || !payload.expected_ready_date) {
+        showToast("Customer and Expected Date are required", "danger");
         return;
     }
     if (payload.items.length === 0) {
@@ -1311,13 +1551,15 @@ async function saveOrder() {
     const saveBtn = document.querySelector("#orderModal .btn-primary");
     try {
         setLoading(saveBtn, true);
+        let res;
         if (id) {
-            await api("PUT", "/orders/" + id, payload);
+            res = await api("PUT", "/orders/" + id, payload);
             showToast("Order updated");
         } else {
-            await api("POST", "/orders", payload);
+            res = await api("POST", "/orders", payload);
             showToast("Order created");
         }
+        if (res?.warning) showToast(res.warning, "warning");
         bootstrap.Modal.getInstance(
             document.getElementById("orderModal"),
         ).hide();
@@ -1585,6 +1827,9 @@ async function showOrderInfo(id) {
                     it.description_en || it.description_cn || "—",
                 );
                 const supplier = escapeHtml(it.supplier_name || "—");
+                const productAlert = it.product_high_alert_note
+                    ? `<div class="product-alert-badge mt-1" title="${escapeHtml(it.product_high_alert_note)}">Alert</div>`
+                    : "";
                 const cbmPer =
                     it.declared_cbm && it.cartons
                         ? (
@@ -1602,7 +1847,7 @@ async function showOrderInfo(id) {
                 return `<tr>
               <td>${thumb}</td>
               <td class="small fw-semibold">${itemNo}</td>
-              <td class="small">${desc}</td>
+              <td class="small">${desc}${productAlert}</td>
               <td class="small text-muted">${supplier}</td>
               <td class="text-end small">${it.cartons || "—"} × ${it.qty_per_carton || "—"} = ${it.quantity || "—"}</td>
               <td class="text-end small">${it.unit_price != null ? parseFloat(it.unit_price).toFixed(2) : "—"}</td>
@@ -1631,6 +1876,7 @@ async function showOrderInfo(id) {
             `Order #${id} — ${escapeHtml(o.customer_name || "")}`;
 
         document.getElementById("orderInfoBody").innerHTML = `
+          ${o.high_alert_notes ? `<div class="alert alert-warning py-2 mb-3"><strong>⚠️ High Alert:</strong> ${escapeHtml(o.high_alert_notes)}</div>` : ""}
           <div class="row g-2 mb-3">
             <div class="col-auto"><span class="badge ${statusCls}">${escapeHtml(statusLbl)}</span></div>
             <div class="col-auto"><span class="badge bg-light text-dark border">${escapeHtml(o.customer_name || "—")}</span></div>

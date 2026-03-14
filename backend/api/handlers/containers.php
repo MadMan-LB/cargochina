@@ -14,21 +14,40 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
         // -------------------------------------------------------------------------
         case 'GET':
+            if ($id === 'search') {
+                $q = trim($_GET['q'] ?? '');
+                if (strlen($q) < 1) {
+                    jsonResponse(['data' => []]);
+                }
+                $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+                $chkNotes = @$pdo->query("SHOW COLUMNS FROM containers LIKE 'notes'");
+                $notesCond = ($chkNotes && $chkNotes->rowCount() > 0) ? ' OR notes LIKE ?' : '';
+                $sql = "SELECT id, code, max_cbm, status FROM containers WHERE (code LIKE ? OR id = ?$notesCond) ORDER BY id DESC LIMIT 20";
+                $stmt = $pdo->prepare($sql);
+                $execParams = [$like, is_numeric($q) ? (int) $q : 0];
+                if ($notesCond) $execParams[] = $like;
+                $stmt->execute($execParams);
+                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                jsonResponse(['data' => $rows]);
+            }
             if ($id && $action === 'orders') {
                 $stmt = $pdo->prepare("SELECT id, code, max_cbm, max_weight, status, notes FROM containers WHERE id = ?");
                 $stmt->execute([$id]);
                 $container = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$container) jsonError('Container not found', 404);
+                $custCols = 'c.name as customer_name';
+                $chkPrio = @$pdo->query("SHOW COLUMNS FROM customers LIKE 'priority_level'");
+                if ($chkPrio && $chkPrio->rowCount() > 0) $custCols .= ', c.priority_level as customer_priority_level, c.priority_note as customer_priority_note';
                 $stmt = $pdo->prepare(
-                    "SELECT o.id, o.status, o.expected_ready_date, o.currency,
-                            c.name as customer_name,
+                    "SELECT o.id, o.status, o.expected_ready_date, o.currency, o.high_alert_notes,
+                            $custCols,
                             s.name as supplier_name,
                             sd.id as draft_id
                      FROM shipment_draft_orders sdo
                      JOIN shipment_drafts sd ON sdo.shipment_draft_id = sd.id
                      JOIN orders o ON sdo.order_id = o.id
                      JOIN customers c ON o.customer_id = c.id
-                     JOIN suppliers s ON o.supplier_id = s.id
+                     LEFT JOIN suppliers s ON o.supplier_id = s.id
                      WHERE sd.container_id = ?
                      ORDER BY sd.id, o.id"
                 );
@@ -81,7 +100,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 require_once __DIR__ . '/orders.php';
                 $ordersWithItems = [];
                 foreach ($orderIds as $oid) {
-                    $stmt = $pdo->prepare("SELECT o.*, $custCols, $suppCols FROM orders o JOIN customers c ON o.customer_id = c.id JOIN suppliers s ON o.supplier_id = s.id WHERE o.id = ?");
+                    $stmt = $pdo->prepare("SELECT o.*, $custCols, $suppCols FROM orders o JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id WHERE o.id = ?");
                     $stmt->execute([$oid]);
                     $order = $stmt->fetch(PDO::FETCH_ASSOC);
                     if (!$order) continue;
@@ -95,7 +114,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if ($id === null) {
                 // Enhanced list: include fill stats + optional search
                 $search = trim($_GET['q'] ?? '');
-                $statusFilter = trim($_GET['status'] ?? '');
+                $statusParam = $_GET['status'] ?? null;
+                $statusFilter = is_array($statusParam)
+                    ? array_values(array_filter(array_map('trim', $statusParam), 'strlen'))
+                    : (trim((string) $statusParam) !== '' ? [trim((string) $statusParam)] : []);
+                $statusMode = strtolower(trim((string) ($_GET['status_mode'] ?? 'include')));
+                $statusMode = $statusMode === 'exclude' ? 'exclude' : 'include';
                 $sql = "SELECT c.*,
                     COALESCE((
                         SELECT SUM(oi.declared_cbm)
@@ -145,9 +169,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $params[] = $like;
                     foreach ($innerParams as $p) $params[] = $p;
                 }
-                if ($statusFilter !== '') {
-                    $sql .= " AND c.status = ?";
-                    $params[] = $statusFilter;
+                if (!empty($statusFilter)) {
+                    $placeholders = implode(',', array_fill(0, count($statusFilter), '?'));
+                    $sql .= $statusMode === 'exclude'
+                        ? " AND c.status NOT IN ($placeholders)"
+                        : " AND c.status IN ($placeholders)";
+                    $params = array_merge($params, $statusFilter);
                 }
                 $sql .= " ORDER BY c.id DESC";
                 $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
@@ -190,6 +217,22 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if (array_key_exists('notes', $input)) {
                 $sets[] = 'notes = ?';
                 $params[] = $input['notes'] ?: null;
+            }
+            $chkEta = @$pdo->query("SHOW COLUMNS FROM containers LIKE 'eta_date'");
+            if ($chkEta && $chkEta->rowCount() > 0 && array_key_exists('eta_date', $input)) {
+                $v = $input['eta_date'];
+                $sets[] = 'eta_date = ?';
+                $params[] = ($v && preg_match('/^\d{4}-\d{2}-\d{2}$/', $v)) ? $v : null;
+            }
+            $chkDest = @$pdo->query("SHOW COLUMNS FROM containers LIKE 'destination_country'");
+            if ($chkDest && $chkDest->rowCount() > 0 && array_key_exists('destination_country', $input)) {
+                $sets[] = 'destination_country = ?';
+                $params[] = trim($input['destination_country'] ?? '') ?: null;
+            }
+            $chkDest2 = @$pdo->query("SHOW COLUMNS FROM containers LIKE 'destination'");
+            if ($chkDest2 && $chkDest2->rowCount() > 0 && array_key_exists('destination', $input)) {
+                $sets[] = 'destination = ?';
+                $params[] = trim($input['destination'] ?? '') ?: null;
             }
             if (empty($sets)) jsonError('Nothing to update', 400);
             $params[] = $id;

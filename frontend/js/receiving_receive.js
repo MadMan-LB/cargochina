@@ -113,7 +113,8 @@ async function loadOrder() {
     } catch (e) {}
     const curSymbol = o.currency === "RMB" ? "¥" : "$";
     document.getElementById("orderOverviewBody").innerHTML = `
-      <p class="mb-1"><strong>Customer:</strong> ${escapeHtml(o.customer_name)}</p>
+      <p class="mb-1"><strong>Customer:</strong> ${escapeHtml(o.customer_name)}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(o.customer_priority_note || "")}">${escapeHtml(o.customer_priority_level)}</span>` : ""}</p>
+      ${o.high_alert_notes ? `<div class="alert alert-danger py-2 px-3 small mt-2 mb-2"><strong>High alert:</strong> ${escapeHtml(o.high_alert_notes)}</div>` : ""}
       ${custInfoHtml}
       <p class="mb-1"><strong>Supplier:</strong> ${escapeHtml(o.supplier_name)}</p>
       <p class="mb-1"><strong>Expected ready:</strong> ${escapeHtml(o.expected_ready_date)} | <strong>Currency:</strong> ${escapeHtml(o.currency || "USD")}</p>
@@ -229,26 +230,30 @@ function updateVarianceAlert() {
     }
 }
 
-document
-    .getElementById("actualCbm")
-    ?.addEventListener("input", () => {
-        if (parseFloat(document.getElementById("actualCbm")?.value || 0) > 0) {
-            document.getElementById("actualLength").value = "";
-            document.getElementById("actualWidth").value = "";
-            document.getElementById("actualHeight").value = "";
-        }
-        updateVarianceAlert();
-    });
+document.getElementById("actualCbm")?.addEventListener("input", () => {
+    if (parseFloat(document.getElementById("actualCbm")?.value || 0) > 0) {
+        document.getElementById("actualLength").value = "";
+        document.getElementById("actualWidth").value = "";
+        document.getElementById("actualHeight").value = "";
+    }
+    updateVarianceAlert();
+});
 document
     .getElementById("condition")
     ?.addEventListener("change", updateVarianceAlert);
 ["actualLength", "actualWidth", "actualHeight"].forEach((id) => {
     document.getElementById(id)?.addEventListener("input", () => {
-        const l = parseFloat(document.getElementById("actualLength")?.value) || 0;
-        const w = parseFloat(document.getElementById("actualWidth")?.value) || 0;
-        const h = parseFloat(document.getElementById("actualHeight")?.value) || 0;
+        const l =
+            parseFloat(document.getElementById("actualLength")?.value) || 0;
+        const w =
+            parseFloat(document.getElementById("actualWidth")?.value) || 0;
+        const h =
+            parseFloat(document.getElementById("actualHeight")?.value) || 0;
         if (l > 0 && w > 0 && h > 0) {
-            document.getElementById("actualCbm").value = (l * w * h / 1000000).toFixed(4);
+            document.getElementById("actualCbm").value = (
+                (l * w * h) /
+                1000000
+            ).toFixed(4);
         }
         updateVarianceAlert();
     });
@@ -307,12 +312,16 @@ document.getElementById("submitReceiveBtn").onclick = async () => {
     const w = parseFloat(document.getElementById("actualWidth")?.value) || 0;
     const h = parseFloat(document.getElementById("actualHeight")?.value) || 0;
     const actualCbm =
-        parseFloat(cbmRaw) || (l > 0 && w > 0 && h > 0 ? l * w * h / 1000000 : 0);
+        parseFloat(cbmRaw) ||
+        (l > 0 && w > 0 && h > 0 ? (l * w * h) / 1000000 : 0);
     const actualWeight = parseFloat(
         document.getElementById("actualWeight").value || 0,
     );
     if (actualCbm <= 0) {
-        showToast("Enter Actual CBM directly or L/H/W (cm) to calculate", "danger");
+        showToast(
+            "Enter Actual CBM directly or L/H/W (cm) to calculate",
+            "danger",
+        );
         return;
     }
     const condition = document.getElementById("condition").value;

@@ -57,16 +57,6 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Unauthorized']);
         exit;
     }
-    if ($resource === 'containers') {
-        $containerRoles = $method === 'GET'
-            ? ($rbac['containers']['read'] ?? [])
-            : ($rbac['containers']['write'] ?? []);
-        if (!hasAnyRole($containerRoles)) {
-            http_response_code(403);
-            echo json_encode(['error' => true, 'message' => 'Forbidden']);
-            exit;
-        }
-    }
     if ($resource === 'orders' && $action === 'approve' && !hasAnyRole($rbac['orders']['approve'] ?? [])) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
@@ -82,6 +72,19 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
+    $resourcePermissions = $rbac[$resource] ?? null;
+    $permissionKey = $method === 'GET' ? 'read' : 'write';
+    $skipGenericPermission = $resource === 'orders' && in_array($action, ['approve', 'receive', 'confirm'], true);
+    if (
+        !$skipGenericPermission &&
+        is_array($resourcePermissions) &&
+        array_key_exists($permissionKey, $resourcePermissions) &&
+        !hasAnyRole($resourcePermissions[$permissionKey] ?? [])
+    ) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
     if ($resource === 'users' && !hasAnyRole($rbac['users'] ?? [])) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
@@ -92,7 +95,12 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'config' && $id !== 'receiving' && $id !== 'upload' && !hasAnyRole($rbac['config'] ?? [])) {
+    if ($resource === 'config' && $id !== 'receiving' && $id !== 'upload' && $id !== 'container-presets' && $id !== 'eta-offsets' && !hasAnyRole($rbac['config'] ?? [])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if (($resource === 'config' && ($id === 'container-presets' || $id === 'eta-offsets')) && !hasAnyRole($rbac['containers']['read'] ?? ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'])) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
@@ -138,6 +146,46 @@ if (!in_array($resource, $publicResources)) {
         exit;
     }
     if ($resource === 'receiving' && !hasAnyRole(['WarehouseStaff', 'SuperAdmin'])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'expenses' && !hasAnyRole($rbac['expenses'] ?? ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'financials' && !hasAnyRole($rbac['financials'] ?? [])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'internal-messages' && !hasAnyRole($rbac['internal-messages'] ?? [])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'warehouse-stock' && !hasAnyRole($rbac['warehouse-stock'] ?? [])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'procurement-drafts' && !hasAnyRole($rbac['procurement-drafts'] ?? [])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'business-settings' && !hasAnyRole($rbac['business-settings'] ?? [])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'customer-portal-tokens' && !hasAnyRole($rbac['customer-portal-tokens'] ?? [])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'design-attachments' && !hasAnyRole($rbac['design-attachments'] ?? [])) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;

@@ -23,6 +23,7 @@ require 'includes/layout.php';
             <th>Thumbnail</th>
             <th>ID</th>
             <th>Description</th>
+            <th>Alert</th>
             <th>CBM</th>
             <th>Weight</th>
             <th>Pcs/Carton</th>
@@ -74,7 +75,16 @@ require 'includes/layout.php';
             <div class="col-12 col-md-4 mb-2"><label class="form-label">Pieces per carton</label><input type="number" min="1" class="form-control" id="productPiecesPerCarton" placeholder="e.g. 24"></div>
             <div class="col-12 col-md-4 mb-2"><label class="form-label">Unit price (per piece)</label><input type="number" step="0.0001" class="form-control" id="productUnitPrice" placeholder="e.g. 0.50"><small class="text-muted">Carton total: <span id="productCartonTotal">—</span></small></div>
           </div>
+          <div class="row form-row-responsive">
+            <div class="col-12 col-md-4 mb-2"><label class="form-label">Buy price (internal)</label><input type="number" step="0.0001" class="form-control" id="productBuyPrice" placeholder="Cost"></div>
+            <div class="col-12 col-md-4 mb-2"><label class="form-label">Sell price (customer-facing)</label><input type="number" step="0.0001" class="form-control" id="productSellPrice" placeholder="Falls back to unit price"></div>
+          </div>
           <div class="mb-2"><label class="form-label">Packaging</label><input type="text" class="form-control" id="productPackaging"></div>
+          <div class="mb-2">
+            <label class="form-label">High Alert Note</label>
+            <textarea class="form-control product-alert-note" id="productHighAlertNote" rows="2" placeholder="Special color, shape, packaging, fragile handling, or other critical production details"></textarea>
+            <small class="text-muted">This is surfaced as an operational alert when the product is selected in orders and related workflows.</small>
+          </div>
           <div class="mb-2">
             <label class="form-label">Supplier</label>
             <input type="text" class="form-control" id="productSupplier" placeholder="Type to search supplier..." autocomplete="off">
@@ -88,6 +98,15 @@ require 'includes/layout.php';
               <span class="ms-2 text-muted small">camera or gallery</span>
             </div>
             <div id="productImagesPreview" class="d-flex flex-wrap gap-2 mt-2"></div>
+          </div>
+          <div class="mb-2" id="productDesignAttachmentsSection">
+            <label class="form-label">Design attachments</label>
+            <p class="text-muted small mb-1">Drawings, specs, images, or PDFs. Save product first to add attachments.</p>
+            <div id="productDesignAttachmentsList" class="mb-2"></div>
+            <div id="productDesignAttachmentsAdd" class="d-none">
+              <input type="file" class="d-none" id="productDesignAttachmentInput" accept="image/*,application/pdf,.pdf">
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="productAddDesignBtn" onclick="document.getElementById('productDesignAttachmentInput').click()">+ Add design file</button>
+            </div>
           </div>
         </form>
       </div>

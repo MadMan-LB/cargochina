@@ -62,6 +62,23 @@ require 'includes/layout.php';
               <label class="form-label">Payment Terms</label>
               <input type="text" class="form-control" id="customerPaymentTerms" placeholder="e.g. 30 days, T/T">
             </div>
+            <div class="col-md-4">
+              <label class="form-label">Priority Level</label>
+              <select class="form-select" id="customerPriorityLevel">
+                <option value="normal">Normal</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Default Shipping Code</label>
+              <input type="text" class="form-control" id="customerDefaultShippingCode" placeholder="Auto-fill into new order items">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Priority Note</label>
+              <input type="text" class="form-control" id="customerPriorityNote" placeholder="Reason / special handling">
+            </div>
             <div class="col-12">
               <label class="form-label">Payment Links & Descriptions</label>
               <small class="text-muted d-block mb-1">e.g. weeecha, xxx xx xxxx xx — add name and value for each payment method</small>
@@ -165,6 +182,60 @@ require 'includes/layout.php';
     </div>
   </div>
 </div>
+<!-- Portal Link Modal -->
+<div class="modal fade" id="portalModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Portal Link — <span id="portalCustomerName"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small">One-time link for customer to view order status. Valid 24 hours.</p>
+        <div class="mb-2">
+          <label class="form-label small">Hours valid</label>
+          <select class="form-select form-select-sm" id="portalHours">
+            <option value="24">24</option>
+            <option value="48">48</option>
+            <option value="72">72</option>
+            <option value="168">168 (1 week)</option>
+          </select>
+        </div>
+        <div id="portalLinkResult" class="d-none">
+          <label class="form-label small">Copy and send to customer:</label>
+          <div class="input-group">
+            <input type="text" class="form-control form-control-sm" id="portalLinkInput" readonly>
+            <button class="btn btn-outline-secondary btn-sm" type="button" onclick="copyPortalLink()">Copy</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-primary" id="portalGenBtn" onclick="doGeneratePortalLink()">Generate Link</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Internal Messages Modal -->
+<div class="modal fade" id="messagesModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Messages — <span id="messagesCustomerName"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="messagesList" class="mb-3" style="max-height:300px;overflow-y:auto;"></div>
+        <div class="input-group">
+          <input type="text" class="form-control" id="messageBody" placeholder="Type message...">
+          <button class="btn btn-primary" type="button" id="messageSendBtn" onclick="sendMessage()">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Orders & Shipments Modal -->
 <div class="modal fade" id="ordersModal" tabindex="-1">
   <div class="modal-dialog modal-xl">
