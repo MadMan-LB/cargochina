@@ -11,6 +11,7 @@ $isBuyer = in_array('ChinaAdmin', $userRoles) || in_array('ChinaEmployee', $user
 $isFieldStaff = in_array('FieldStaff', $userRoles) || $isSuperAdmin;
 $basePath = '/cargochina';
 $breadcrumbs = $breadcrumbs ?? [];
+$layoutCssVersion = @filemtime(__DIR__ . '/../frontend/css/style.css') ?: time();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -23,7 +24,7 @@ $breadcrumbs = $breadcrumbs ?? [];
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="<?= $basePath ?>/frontend/css/style.css">
+  <link rel="stylesheet" href="<?= $basePath ?>/frontend/css/style.css?v=<?= $layoutCssVersion ?>">
 </head>
 
 <body>
@@ -31,7 +32,7 @@ $breadcrumbs = $breadcrumbs ?? [];
   <aside class="clms-sidebar" id="sidebar">
     <div class="sidebar-brand">
       <a href="<?= $basePath ?>/index.php">CLMS</a>
-      <button class="sidebar-close d-lg-none" id="sidebarClose" aria-label="Close">&times;</button>
+      <button class="sidebar-close" id="sidebarClose" aria-label="Close sidebar">&times;</button>
     </div>
     <nav class="sidebar-nav">
       <div class="sidebar-section-label">Main</div>

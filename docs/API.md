@@ -5,7 +5,8 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 **Authentication:** Session-based. Login via `POST /auth/login`. All endpoints except `auth` require an active session.
 
 ## Audit Log (SuperAdmin, ChinaAdmin)
-- `GET /audit-log?entity_type=&entity_id=&user_id=&date_from=&date_to=&limit=&offset=` — List audit entries with filters.
+- `GET /audit-log?entity_type=&entity_id=&user_id=&action=&date_from=&date_to=&limit=&offset=` — List audit entries with filters.
+- `GET /audit-log/users` — List users (id, email, full_name) for filter dropdown.
 
 ## Authentication
 - `POST /auth/login` — `{email, password}` — Returns `{user_id, name, roles}`. **Public.**
@@ -105,6 +106,8 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 ## Users (SuperAdmin only)
 - `GET /users` — List all users with roles
 - `GET /users/{id}` — Get one user with roles and departments
+- `GET /users/{id}/activity?entity_type=&action=&date_from=&date_to=&limit=&offset=` — User activity: audit_log entries, customer_confirmations (admin confirmations), and created_by/uploaded_by synthetic events (orders, expenses, procurement_drafts, order_templates, customer_deposits, supplier_interactions, customer_portal_tokens, design_attachments). Filters apply to all sources.
+- `POST /users` — Create user. Body: `{email, full_name, password, roles[], department_ids?}`. At least one role required.
 - `PUT /users/{id}` — Update roles, departments, is_active
 - `POST /users/{id}/reset-password` — Reset password. Body: `{password}` (min 6 chars). Returns `{new_password}` once for sharing with user.
 

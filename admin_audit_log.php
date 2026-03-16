@@ -14,10 +14,15 @@ require 'includes/layout.php';
     <div class="row g-2 align-items-end">
       <div class="col-auto">
         <label class="form-label small mb-0">Entity type</label>
-        <select class="form-select form-select-sm" id="filterEntityType" style="width:140px">
+        <select class="form-select form-select-sm" id="filterEntityType" style="width:160px">
           <option value="">— All —</option>
           <option value="order">Order</option>
           <option value="shipment_draft">Shipment draft</option>
+          <option value="user">User</option>
+          <option value="system_config">System config</option>
+          <option value="internal_message">Internal message</option>
+          <option value="procurement_draft">Procurement draft</option>
+          <option value="customer_portal_token">Customer portal token</option>
         </select>
       </div>
       <div class="col-auto">
@@ -25,8 +30,22 @@ require 'includes/layout.php';
         <input type="number" class="form-control form-control-sm" id="filterEntityId" placeholder="ID" style="width:80px">
       </div>
       <div class="col-auto">
-        <label class="form-label small mb-0">User ID</label>
-        <input type="number" class="form-control form-control-sm" id="filterUserId" placeholder="ID" style="width:80px">
+        <label class="form-label small mb-0">User</label>
+        <select class="form-select form-select-sm" id="filterUserId" style="width:180px">
+          <option value="">— All —</option>
+        </select>
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-0">Action</label>
+        <select class="form-select form-select-sm" id="filterAction" style="width:120px">
+          <option value="">— All —</option>
+          <option value="create">Create</option>
+          <option value="update">Update</option>
+          <option value="submit">Submit</option>
+          <option value="approve">Approve</option>
+          <option value="receive">Receive</option>
+          <option value="confirm">Confirm</option>
+        </select>
       </div>
       <div class="col-auto">
         <label class="form-label small mb-0">Date from</label>
@@ -65,5 +84,5 @@ require 'includes/layout.php';
     </div>
   </div>
 </div>
-<?php $pageScript = 'frontend/js/admin_audit_log.js';
+<?php $pageScript = '/cargochina/frontend/js/admin_audit_log.js?v=' . @filemtime(__DIR__ . '/frontend/js/admin_audit_log.js');
 require 'includes/footer.php'; ?>

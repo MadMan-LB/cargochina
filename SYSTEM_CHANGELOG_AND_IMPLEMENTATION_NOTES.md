@@ -802,3 +802,56 @@ High-confidence completed items after this review pass:
   - Typing `96` in the HS Code Tax estimator now starts with `9601.10`, `9601.90`, `9603.10`, ... rather than unrelated `...96` codes.
   - Typing `85` in the Products HS filter now starts with `8501.10`, `8501.31`, `8501.33`, ... rather than unrelated `...85` codes.
   - The HS Code Tax catalog table now reports what it is showing, for example: `Showing 1 match for "8501.10". Showing HS code matches from the first digits.`
+
+## 2026-03-16 Tablet Landscape Sidebar Shell Fix
+
+- Reproduced the layout issue in a real browser at `1024x768`: the shared sidebar shell treated tablet landscape as desktop collapsed mode, leaving a thin dark rail with clipped labels instead of properly hiding the sidebar.
+- Root cause: the shared sidebar breakpoint logic was split around Bootstrap's `lg` breakpoint (`992px`), so widths like `1024px` still used the desktop collapsed-rail behavior. The close button in `includes/layout.php` also used `d-lg-none`, which hid the close control exactly where the tablet overlay behavior was needed.
+- Fix applied:
+  - `frontend/js/sidebar.js` now switches the shell to overlay-sidebar mode below `1200px`, keeps full desktop collapse behavior above that breakpoint, updates `aria-expanded` / `aria-hidden`, supports `Esc` to close, and locks body scroll while the overlay is open.
+  - `frontend/css/style.css` now styles overlay mode through the shared `body.sidebar-overlay-mode` class so tablet landscape and smaller screens get a true off-canvas drawer with full-width content behind it instead of the clipped desktop rail.
+  - `includes/layout.php` removes the Bootstrap-only `d-lg-none` dependency from the shared close button and cache-busts the shared layout stylesheet.
+  - `includes/footer.php` cache-busts the shared sidebar script so the fix reaches every page immediately.
+- Downstream impact review:
+  - Verified all root pages using `includes/layout.php` inherit the change: dashboard, orders, receiving, confirmations, pipeline, consolidation, containers, assign to container, expenses, financials, HS Code Tax, calendar, warehouse stock, procurement drafts, suppliers, customers, products, notifications, preferences, and superadmin pages.
+  - No backend handlers, DB queries, totals, exports, notifications, or permissions required updates because this is a shared presentation-shell fix, not a workflow/data change.
+- Verification:
+  - At `1024x768`, the sidebar now hides completely and the page content uses the full width.
+  - Opening the sidebar at `1024x768` now shows a proper overlay drawer with backdrop and a visible close button.
+  - At `1366x768`, the normal desktop collapsed sidebar still works as before.
+  - Browser verification passed on the dashboard and orders page with no console errors.
+
+## 2026-03-16 Desktop Collapsed Sidebar Follow-up
+
+- Follow-up issue reproduced on `admin_users.php` at full desktop width after the tablet fix: the desktop collapsed rail still showed clipped label text (`Exp...`, `Fin...`, `HS...`) because most sidebar links in `includes/layout.php` use raw text nodes instead of wrapped label spans.
+- Root cause: the existing collapsed CSS only hid `.sidebar-link span`, `.badge`, and `.sidebar-user-name`, so plain link text and the `CLMS` brand text remained visible and leaked outside the intended icon-only rail.
+- Fix applied in the shared shell CSS:
+  - `frontend/css/style.css` now zeroes desktop collapsed link text with `font-size: 0`, preserving the icons while preventing text-node bleed.
+  - The collapsed brand area now centers and renders a compact `C` monogram instead of leaving the full `CLMS` text clipped in the narrow rail.
+- Downstream impact review:
+  - The fix applies to every internal page using the shared layout, including admin pages such as `admin_users.php`, because the sidebar is rendered once in `includes/layout.php`.
+  - No backend, DB, export, notification, or permission logic changed because this is still a shared presentation-shell correction only.
+- Verification:
+  - At `1920x1080`, `admin_users.php` now collapses to a clean icon rail with no clipped text.
+  - At `1024x768`, the overlay sidebar behavior from the tablet fix still works correctly after the desktop follow-up.
+
+## 2026-03-16 User Management System (UMS)
+
+- **Create User:** POST /users with email, full_name, password, roles[], department_ids[]. + Create User button and modal on admin_users.php.
+- **User Activity:** GET /users/{id}/activity — filterable audit_log entries for a user. Activity panel on admin_users.php (collapsible, filters: entity_type, action, date).
+- **Migration 043:** idx_audit_user on audit_log (user_id) for efficient user filtering.
+- **Audit Log enhancements:** action filter; GET /audit-log/users for user dropdown; expanded entity_type options (user, system_config, internal_message, procurement_draft, customer_portal_token).
+- **Downstream:** RBAC unchanged (users, audit-log); docs/API.md updated; admin_audit_log.php user dropdown and action filter.
+
+## 2026-03-16 UMS Phase 4: Activity Sources & created_by
+
+- **customer_confirmations:** Admin confirmations (confirmed_by = user_id) now appear in user activity as order+confirm events. Audit_log order+confirm rows excluded to avoid duplicates.
+- **created_by/uploaded_by synthetic events:** Orders, expenses, supplier_interactions, procurement_drafts, order_templates, customer_deposits, customer_portal_tokens, design_attachments — rows where created_by or uploaded_by = user_id appear as action=create in the activity feed. Shown when entity_type/action filters allow (e.g. entity_type=order, action=create).
+- **Activity panel:** Entity type filter extended with expense, order_template, customer_deposit, supplier_interaction. Entity links added for all types (orders.php, expenses.php, procurement_drafts.php, financials.php, suppliers.php).
+- **Downstream:** docs/API.md updated; no RBAC, migration, or export changes.
+
+## 2026-03-16 UMS Create User Button Fix
+
+- **Issue:** "+ Create User" button did not respond to clicks on admin_users.php.
+- **Root cause:** Page script used relative path `frontend/js/admin_users.js`, which could 404 or load from wrong base in some deployments; no cache busting caused stale script.
+- **Fix:** Use absolute path `/cargochina/frontend/js/admin_users.js` with filemtime cache busting; attach click handler via `addEventListener` in DOMContentLoaded instead of inline onclick for reliability. Same pattern applied to admin_audit_log.js.

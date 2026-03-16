@@ -2,7 +2,7 @@
 
 /**
  * Audit Log API - list with filters (SuperAdmin, ChinaAdmin)
- * GET /audit-log?entity_type=&entity_id=&user_id=&date_from=&date_to=&limit=&offset=
+ * GET /audit-log?entity_type=&entity_id=&user_id=&action=&date_from=&date_to=&limit=&offset=
  */
 
 require_once __DIR__ . '/../helpers.php';
@@ -14,9 +14,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     requireRole(['SuperAdmin', 'ChinaAdmin']);
 
     $pdo = getDb();
+
+    if ($id === 'users') {
+        $stmt = $pdo->query("SELECT id, email, full_name FROM users WHERE is_active = 1 ORDER BY full_name, email");
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        jsonResponse(['data' => $rows]);
+    }
     $entityType = trim($_GET['entity_type'] ?? '');
     $entityId = $_GET['entity_id'] ?? null;
     $userId = $_GET['user_id'] ?? null;
+    $actionFilter = trim($_GET['action'] ?? '');
     $dateFrom = trim($_GET['date_from'] ?? '');
     $dateTo = trim($_GET['date_to'] ?? '');
     $limit = min(100, max(1, (int) ($_GET['limit'] ?? 50)));
@@ -39,6 +46,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     if ($userId !== null && $userId !== '') {
         $sql .= " AND a.user_id = ?";
         $params[] = $userId;
+    }
+    if ($actionFilter !== '') {
+        $sql .= " AND a.action = ?";
+        $params[] = $actionFilter;
     }
     if ($dateFrom !== '') {
         $sql .= " AND DATE(a.created_at) >= ?";

@@ -63,6 +63,28 @@ body {
   width: var(--sidebar-collapsed-width);
 }
 
+.clms-sidebar.collapsed .sidebar-brand {
+  justify-content: center;
+  padding-inline: 12px;
+}
+
+.clms-sidebar.collapsed .sidebar-brand a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  font-size: 0;
+}
+
+.clms-sidebar.collapsed .sidebar-brand a::after {
+  content: "C";
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+
 .sidebar-brand {
   display: flex;
   align-items: center;
@@ -89,6 +111,7 @@ body {
   cursor: pointer;
   padding: 0;
   line-height: 1;
+  display: none;
 }
 
 .sidebar-close:hover {
@@ -171,6 +194,7 @@ body {
   margin: 0;
   justify-content: center;
   padding: 10px;
+  font-size: 0;
 }
 
 .sidebar-footer {
@@ -829,38 +853,43 @@ body {
   color: var(--text-secondary) !important;
 }
 
-/* ── Mobile ─────────────────────────────────────────────── */
-@media (max-width: 991.98px) {
-  .clms-sidebar {
-    transform: translateX(-100%);
-    width: var(--sidebar-width) !important;
-  }
-
-  .clms-sidebar.open {
-    transform: translateX(0);
-  }
-
-  .clms-main {
-    margin-left: 0 !important;
-  }
-
-  .clms-content {
-    padding: 16px;
-  }
-
-  .clms-topbar {
-    padding: 0 16px;
-  }
-
-  .sidebar-close {
-    display: block;
-  }
+/* ── Overlay sidebar mode (tablet landscape + smaller) ─── */
+body.sidebar-overlay-mode {
+  overflow-x: hidden;
 }
 
-@media (min-width: 992px) {
-  .sidebar-close {
-    display: none;
-  }
+body.sidebar-overlay-active {
+  overflow: hidden;
+}
+
+body.sidebar-overlay-mode .clms-sidebar {
+  transform: translateX(calc(-100% - 16px));
+  width: min(var(--sidebar-width), calc(100vw - 48px)) !important;
+  box-shadow: var(--shadow-lg);
+}
+
+body.sidebar-overlay-mode .clms-sidebar.open {
+  transform: translateX(0);
+}
+
+body.sidebar-overlay-mode .clms-main {
+  margin-left: 0 !important;
+}
+
+body.sidebar-overlay-mode .clms-content {
+  padding: 16px;
+}
+
+body.sidebar-overlay-mode .clms-topbar {
+  padding: 0 16px;
+}
+
+body.sidebar-overlay-mode .sidebar-close {
+  display: block;
+}
+
+body:not(.sidebar-overlay-mode) .sidebar-close {
+  display: none;
 }
 
 @media (max-width: 768px) {

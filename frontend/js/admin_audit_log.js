@@ -4,6 +4,26 @@
 let offset = 0;
 const limit = 50;
 
+async function loadAuditUsers() {
+    try {
+        const res = await api("GET", "/audit-log/users");
+        const users = res.data || [];
+        const sel = document.getElementById("filterUserId");
+        if (!sel) return;
+        sel.innerHTML =
+            '<option value="">— All —</option>' +
+            users
+                .map(
+                    (u) =>
+                        `<option value="${u.id}">${escapeHtml(u.full_name || u.email)} (#${u.id})</option>`,
+                )
+                .join("");
+    } catch (_) {
+        document.getElementById("filterUserId").innerHTML =
+            '<option value="">— All —</option>';
+    }
+}
+
 async function loadAuditLog(reset = true) {
     if (reset) offset = 0;
     const params = new URLSearchParams();
@@ -12,11 +32,13 @@ async function loadAuditLog(reset = true) {
     const entityType = document.getElementById("filterEntityType")?.value;
     const entityId = document.getElementById("filterEntityId")?.value?.trim();
     const userId = document.getElementById("filterUserId")?.value?.trim();
+    const action = document.getElementById("filterAction")?.value;
     const dateFrom = document.getElementById("filterDateFrom")?.value;
     const dateTo = document.getElementById("filterDateTo")?.value;
     if (entityType) params.set("entity_type", entityType);
     if (entityId) params.set("entity_id", entityId);
     if (userId) params.set("user_id", userId);
+    if (action) params.set("action", action);
     if (dateFrom) params.set("date_from", dateFrom);
     if (dateTo) params.set("date_to", dateTo);
 
@@ -42,7 +64,10 @@ async function loadAuditLog(reset = true) {
             let details = "";
             if (r.new_value) {
                 try {
-                    const v = typeof r.new_value === "string" ? JSON.parse(r.new_value) : r.new_value;
+                    const v =
+                        typeof r.new_value === "string"
+                            ? JSON.parse(r.new_value)
+                            : r.new_value;
                     details = Object.keys(v || {})
                         .slice(0, 3)
                         .map((k) => `${k}: ${String(v[k]).substring(0, 30)}`)
@@ -61,7 +86,10 @@ async function loadAuditLog(reset = true) {
             tbody.appendChild(tr);
         });
 
-        emptyEl?.classList.toggle("d-none", tbody.children.length > 0 || !reset);
+        emptyEl?.classList.toggle(
+            "d-none",
+            tbody.children.length > 0 || !reset,
+        );
         loadMoreBtn.style.display = res.has_more ? "inline-block" : "none";
         offset += rows.length;
     } catch (e) {
@@ -73,4 +101,7 @@ function loadMore() {
     loadAuditLog(false);
 }
 
-document.addEventListener("DOMContentLoaded", () => loadAuditLog());
+document.addEventListener("DOMContentLoaded", async () => {
+    await loadAuditUsers();
+    loadAuditLog();
+});

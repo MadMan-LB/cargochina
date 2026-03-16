@@ -3,7 +3,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/cargochina/frontend/js/upload-utils.js"></script>
     <script src="/cargochina/frontend/js/app.js"></script>
-    <script src="/cargochina/frontend/js/sidebar.js"></script>
+    <script src="/cargochina/frontend/js/sidebar.js?v=<?= @filemtime(__DIR__ . '/../frontend/js/sidebar.js') ?: time() ?>"></script>
     <script>
       (function() {
         var lang = typeof localStorage !== 'undefined' ? (localStorage.getItem('clms_desc_lang') || 'en') : 'en';
