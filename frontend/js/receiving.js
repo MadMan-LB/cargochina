@@ -2,11 +2,181 @@ let receivePhotoPaths = [];
 let receiveOrderItems = [];
 let receiveItemPhotos = {};
 let warehouseQueueData = [];
+let warehouseQueueSourceData = [];
 let calMonth = new Date().getMonth();
 let calYear = new Date().getFullYear();
+const RECEIVING_DEFAULT_STATUSES = ["Approved", "InTransitToWarehouse"];
+
+function setReceivingMetric(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+}
+
+function orderHasPriority(order) {
+    return (
+        order?.customer_priority_level &&
+        String(order.customer_priority_level).toLowerCase() !== "normal"
+    );
+}
+
+function itemHasReceivingAlert(item) {
+    return (
+        (item?.product_required_design &&
+            String(item.product_required_design) !== "0") ||
+        String(item?.product_high_alert_note || "").trim() !== ""
+    );
+}
+
+function orderHasReceivingAlert(order) {
+    if (String(order?.high_alert_notes || "").trim()) return true;
+    return (order?.items || []).some(itemHasReceivingAlert);
+}
+
+function getSelectedReceivingStatuses() {
+    return Array.from(
+        document.querySelectorAll(".receiving-status-filter:checked"),
+    ).map((el) => el.value);
+}
+
+function isDefaultReceivingStatusSelection(
+    statuses = getSelectedReceivingStatuses(),
+) {
+    if (statuses.length !== RECEIVING_DEFAULT_STATUSES.length) return false;
+    const selected = new Set(statuses.map(String));
+    return RECEIVING_DEFAULT_STATUSES.every((status) => selected.has(status));
+}
+
+function setReceivingStatusFilter(statuses = RECEIVING_DEFAULT_STATUSES) {
+    const selected = new Set((statuses || []).map(String));
+    document.querySelectorAll(".receiving-status-filter").forEach((el) => {
+        el.checked = selected.has(el.value);
+    });
+}
+
+function getReceivingFocusFilters() {
+    return {
+        priorityOnly: !!document.getElementById("filterPriorityOnly")?.checked,
+        alertsOnly: !!document.getElementById("filterAlertsOnly")?.checked,
+    };
+}
+
+function updateReceivingStatusSummary() {
+    const summaryEl = document.getElementById("receiveStatusSummary");
+    if (!summaryEl) return;
+
+    const statuses = getSelectedReceivingStatuses();
+    const { priorityOnly, alertsOnly } = getReceivingFocusFilters();
+    const focus = [];
+    if (priorityOnly) focus.push("priority accounts only");
+    if (alertsOnly) focus.push("high-alert orders only");
+
+    let text;
+    if (!statuses.length) {
+        text = "No intake statuses selected.";
+    } else {
+        const labels = statuses
+            .map((status) =>
+                typeof statusLabel === "function" ? statusLabel(status) : status,
+            )
+            .join(", ");
+        text = isDefaultReceivingStatusSelection(statuses)
+            ? `Core intake statuses: ${labels}.`
+            : `Statuses: ${labels}.`;
+    }
+
+    if (focus.length) {
+        text += ` Focus: ${focus.join(", ")}.`;
+    }
+
+    summaryEl.textContent = text;
+}
+
+function countActiveReceivingFilters() {
+    let count = [
+        document.getElementById("filterSupplierId")?.value,
+        document.getElementById("filterCustomerId")?.value,
+        document.getElementById("filterDateFrom")?.value,
+        document.getElementById("filterDateTo")?.value,
+        document.getElementById("filterShippingCode")?.value?.trim(),
+    ].filter(Boolean).length;
+
+    if (!isDefaultReceivingStatusSelection()) count += 1;
+    const { priorityOnly, alertsOnly } = getReceivingFocusFilters();
+    if (priorityOnly) count += 1;
+    if (alertsOnly) count += 1;
+    return count;
+}
+
+function updateReceivingOverview() {
+    const rows = warehouseQueueData || [];
+    const visibleCount = rows.length;
+    const priorityCount = rows.filter(orderHasPriority).length;
+    const totalCartons = rows.reduce(
+        (sum, order) =>
+            sum +
+            (order.items || []).reduce(
+                (itemSum, item) => itemSum + (parseInt(item.cartons, 10) || 0),
+                0,
+            ),
+        0,
+    );
+    const totalCbm = rows.reduce(
+        (sum, order) => sum + (parseFloat(order.declared_cbm) || 0),
+        0,
+    );
+    const alertCount = rows.filter(orderHasReceivingAlert).length;
+    const uniqueSuppliers = new Set(
+        rows.map((order) => order.supplier_name).filter(Boolean),
+    ).size;
+    const uniqueDates = new Set(
+        rows.map((order) => order.expected_ready_date).filter(Boolean),
+    ).size;
+    const activeFilters = countActiveReceivingFilters();
+
+    setReceivingMetric("receiveVisibleCount", String(visibleCount));
+    setReceivingMetric("receivePriorityCount", String(priorityCount));
+    setReceivingMetric("receiveCartonCount", String(totalCartons));
+    setReceivingMetric("receiveAlertCount", String(alertCount));
+
+    setReceivingMetric(
+        "receiveVisibleDetail",
+        visibleCount
+            ? `${uniqueSuppliers} suppliers across ${uniqueDates} planned dates.`
+            : "No orders match the current filters.",
+    );
+    setReceivingMetric(
+        "receivePriorityDetail",
+        priorityCount
+            ? `${priorityCount} orders come from flagged customer accounts.`
+            : "No priority customers in the current queue.",
+    );
+    setReceivingMetric(
+        "receiveCartonDetail",
+        visibleCount
+            ? `${totalCbm.toFixed(2)} declared CBM across the visible queue.`
+            : "Carton totals will appear once orders are visible.",
+    );
+    setReceivingMetric(
+        "receiveAlertDetail",
+        alertCount
+            ? `${alertCount} orders need extra handling attention.`
+            : "No high-alert receiving notes in this view.",
+    );
+    setReceivingMetric(
+        "receiveFilterSummary",
+        visibleCount
+            ? `Showing ${visibleCount} order(s) with ${totalCartons} cartons${activeFilters ? ` after ${activeFilters} active filter(s)` : ""}.`
+            : activeFilters
+              ? "No orders match the active receiving filters."
+              : "Showing the full inbound receiving queue.",
+    );
+}
 
 document.addEventListener("DOMContentLoaded", () => {
     setupFilterAutocomplete();
+    setupReceivingFilterControls();
+    setReceivingStatusFilter(RECEIVING_DEFAULT_STATUSES);
+    updateReceivingStatusSummary();
     loadReceivingConfig();
     applyFilters();
     const handleReceiveClick = (e) => {
@@ -54,6 +224,33 @@ document.addEventListener("DOMContentLoaded", () => {
     );
     setupReceiveOrderSearch();
 });
+
+function setupReceivingFilterControls() {
+    document.querySelectorAll(".receiving-status-filter").forEach((el) => {
+        el.addEventListener("change", () => {
+            updateReceivingStatusSummary();
+            applyFilters();
+        });
+    });
+    document.querySelectorAll(".receiving-focus-filter").forEach((el) => {
+        el.addEventListener("change", () => {
+            updateReceivingStatusSummary();
+            applyLocalReceivingFilters();
+        });
+    });
+    ["filterDateFrom", "filterDateTo"].forEach((id) => {
+        document.getElementById(id)?.addEventListener("change", applyFilters);
+    });
+    document
+        .getElementById("filterShippingCode")
+        ?.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                applyFilters();
+            }
+        });
+}
+
 function setupReceiveOrderSearch() {
     const searchEl = document.getElementById("receiveOrderSearch");
     const idEl = document.getElementById("receiveOrderId");
@@ -106,7 +303,8 @@ function setupReceiveDimensionInputs() {
         const w = parseFloat(wEl.value) || 0;
         const h = parseFloat(hEl.value) || 0;
         if (l > 0 && w > 0 && h > 0) {
-            cbmEl.value = ((l * w * h) / 1000000).toFixed(4);
+            const cbm = Math.round(((l * w * h) / 1000000) * 1e6) / 1e6;
+            cbmEl.value = cbm.toFixed(6);
             updateVariancePhotoAlert();
         }
     };
@@ -214,6 +412,7 @@ function setupFilterAutocomplete() {
         placeholder: "Type to search supplier...",
         onSelect: (item) => {
             if (supId) supId.value = item.id;
+            applyFilters();
         },
     });
     supInput.addEventListener("input", () => {
@@ -228,6 +427,7 @@ function setupFilterAutocomplete() {
                 .trim() || `#${c.id}`,
         onSelect: (item) => {
             if (custId) custId.value = item.id;
+            applyFilters();
         },
     });
     custInput.addEventListener("input", () => {
@@ -242,6 +442,12 @@ function getFilterParams() {
     const df = document.getElementById("filterDateFrom")?.value;
     const dt = document.getElementById("filterDateTo")?.value;
     const sc = document.getElementById("filterShippingCode")?.value?.trim();
+    const statuses = getSelectedReceivingStatuses();
+    if (statuses.length) {
+        statuses.forEach((status) => params.append("status[]", status));
+    } else {
+        params.append("status[]", "__none__");
+    }
     if (s) params.set("supplier_id", s);
     if (c) params.set("customer_id", c);
     if (df) params.set("date_from", df);
@@ -250,28 +456,73 @@ function getFilterParams() {
     return params.toString();
 }
 
+function applyLocalReceivingFilters() {
+    const { priorityOnly, alertsOnly } = getReceivingFocusFilters();
+    warehouseQueueData = (warehouseQueueSourceData || []).filter((order) => {
+        if (priorityOnly && !orderHasPriority(order)) return false;
+        if (alertsOnly && !orderHasReceivingAlert(order)) return false;
+        return true;
+    });
+
+    renderWarehouseList();
+    renderReceiveDropdown();
+    renderCalendar();
+    renderSchedule();
+    updateReceivingOverview();
+    document
+        .getElementById("warehouseListEmpty")
+        ?.classList.toggle("d-none", warehouseQueueData.length > 0);
+}
+
 async function applyFilters() {
     const listEl = document.getElementById("warehouseList");
-    const emptyEl = document.getElementById("warehouseListEmpty");
     const applyBtn = document.getElementById("applyFiltersBtn");
     try {
         if (listEl) listEl.classList.add("opacity-50");
         if (applyBtn) applyBtn.disabled = true;
         const qs = getFilterParams();
         const res = await api("GET", "/receiving/queue?" + qs);
-        warehouseQueueData = res.data || [];
+        warehouseQueueSourceData = res.data || [];
+        applyLocalReceivingFilters();
+    } catch (e) {
+        warehouseQueueSourceData = [];
+        warehouseQueueData = [];
         renderWarehouseList();
-        renderReceiveDropdown();
         renderCalendar();
         renderSchedule();
-        if (emptyEl)
-            emptyEl.classList.toggle("d-none", warehouseQueueData.length > 0);
-    } catch (e) {
+        updateReceivingOverview();
+        document
+            .getElementById("warehouseListEmpty")
+            ?.classList.remove("d-none");
         showToast(e.message, "danger");
     } finally {
         if (listEl) listEl.classList.remove("opacity-50");
         if (applyBtn) applyBtn.disabled = false;
     }
+}
+
+function clearReceivingFilters() {
+    [
+        "filterSupplier",
+        "filterCustomer",
+        "filterDateFrom",
+        "filterDateTo",
+        "filterShippingCode",
+    ].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = "";
+    });
+    ["filterSupplierId", "filterCustomerId"].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = "";
+    });
+    setReceivingStatusFilter(RECEIVING_DEFAULT_STATUSES);
+    ["filterPriorityOnly", "filterAlertsOnly"].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.checked = false;
+    });
+    updateReceivingStatusSummary();
+    applyFilters();
 }
 
 function exportReceivingCsv() {
@@ -316,7 +567,7 @@ function exportReceivingCsv() {
                     o.status || "",
                     '"' + (shippingCodes || "").replace(/"/g, '""') + '"',
                     totalCartons,
-                    parseFloat(o.declared_cbm || 0).toFixed(4),
+                    parseFloat(o.declared_cbm || 0).toFixed(6),
                     parseFloat(o.declared_weight || 0).toFixed(2),
                     '"' + (itemsSummary || "").replace(/"/g, '""') + '"',
                 ].join(","),
@@ -347,12 +598,14 @@ function renderWarehouseList() {
             const shippingCodes = [
                 ...new Set(items.map((i) => i.shipping_code).filter(Boolean)),
             ].join(", ");
+            function itemAlertText(it) {
+                return (
+                    (it.product_required_design ? "Required design. " : "") +
+                    (it.product_high_alert_note || "")
+                ).trim();
+            }
             const productAlerts = [
-                ...new Set(
-                    items
-                        .map((i) => (i.product_high_alert_note || "").trim())
-                        .filter(Boolean),
-                ),
+                ...new Set(items.map((i) => itemAlertText(i)).filter(Boolean)),
             ];
             const totalCartons = items.reduce(
                 (s, i) => s + (parseInt(i.cartons) || 0),
@@ -380,9 +633,9 @@ function renderWarehouseList() {
                 <dt class="col-5">Supplier phone</dt><dd class="col-7">${escapeHtml(o.supplier_phone || "-")}</dd>
                 <dt class="col-5">Shipping code</dt><dd class="col-7">${escapeHtml(shippingCodes || "-")}</dd>
                 <dt class="col-5">Cartons</dt><dd class="col-7">${totalCartons}</dd>
-                <dt class="col-5">CBM / Weight</dt><dd class="col-7">${parseFloat(o.declared_cbm || 0).toFixed(4)} / ${parseFloat(o.declared_weight || 0)} kg</dd>
+                <dt class="col-5">CBM / Weight</dt><dd class="col-7">${parseFloat(o.declared_cbm || 0).toFixed(6)} / ${parseFloat(o.declared_weight || 0)} kg</dd>
               </dl>
-              ${items.length ? `<div class="mt-2 pt-2 border-top"><small class="text-muted">Items:</small> ${items.map((it) => `<span class="badge bg-light text-dark me-1">${escapeHtml(it.shipping_code || "—")} ${it.cartons || 0}ctn ${it.qty_per_carton || ""}/ctn HS:${escapeHtml(it.hs_code || "-")}${it.product_high_alert_note ? " ALERT" : ""}</span>`).join("")}</div>` : ""}
+              ${items.length ? `<div class="mt-2 pt-2 border-top"><small class="text-muted">Items:</small> ${items.map((it) => `<span class="badge bg-light text-dark me-1">${escapeHtml(it.shipping_code || "—")} ${it.cartons || 0}ctn ${it.qty_per_carton || ""}/ctn HS:${escapeHtml(it.hs_code || "-")}${it.product_high_alert_note || it.product_required_design ? " ALERT" : ""}</span>`).join("")}</div>` : ""}
               <div class="mt-2 pt-2">
                 <button type="button" class="btn btn-sm btn-primary js-receive-btn" data-order-id="${o.id}">Receive</button>
               </div>
@@ -474,13 +727,19 @@ function renderCalendar() {
     });
     let html =
         "<div class='cal-day-header'>Sun</div><div class='cal-day-header'>Mon</div><div class='cal-day-header'>Tue</div><div class='cal-day-header'>Wed</div><div class='cal-day-header'>Thu</div><div class='cal-day-header'>Fri</div><div class='cal-day-header'>Sat</div>";
+    const today = new Date();
+    const todayYear = today.getFullYear();
+    const todayMonth = today.getMonth();
+    const todayDate = today.getDate();
     for (let i = 0; i < startPad; i++) {
         const d = prevDays - startPad + i + 1;
         html += `<div class="cal-day other-month"><span class="cal-day-num">${d}</span></div>`;
     }
     for (let d = 1; d <= daysInMonth; d++) {
         const orders = byDate[d] || [];
-        html += `<div class="cal-day"><span class="cal-day-num">${d}</span>${orders.map((o) => `<div class="cal-order" title="#${o.id} ${o.customer_name}">#${o.id} ${escapeHtml(o.customer_name)}</div>`).join("")}</div>`;
+        const isToday =
+            calYear === todayYear && calMonth === todayMonth && d === todayDate;
+        html += `<div class="cal-day${isToday ? " today" : ""}"><span class="cal-day-num">${d}</span>${orders.map((o) => `<div class="cal-order" title="#${o.id} ${o.customer_name}">#${o.id} ${escapeHtml(o.customer_name)}</div>`).join("")}</div>`;
     }
     const remaining = 42 - startPad - daysInMonth;
     for (let i = 0; i < remaining; i++) {
@@ -501,26 +760,51 @@ function renderSchedule() {
     const dates = Object.keys(byDate).sort();
     container.innerHTML = dates.length
         ? dates
-              .map(
-                  (d) => `
-      <div class="mb-3">
-        <h6 class="text-primary border-bottom pb-1">${d}</h6>
-        ${byDate[d]
-            .map(
-                (o) => `
-          <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
-            <div class="small">#${o.id} — ${escapeHtml(o.customer_name)}</div>
-            <div class="small text-muted">${escapeHtml(o.supplier_name || "-")} · ${parseFloat(o.declared_cbm || 0).toFixed(2)} CBM</div>
-            <button type="button" class="btn btn-sm btn-outline-primary js-receive-btn" data-order-id="${o.id}">Receive</button>
+              .map((d) => {
+                  const dayOrders = byDate[d];
+                  const dayCartons = dayOrders.reduce(
+                      (sum, order) =>
+                          sum +
+                          (order.items || []).reduce(
+                              (itemSum, item) =>
+                                  itemSum + (parseInt(item.cartons, 10) || 0),
+                              0,
+                          ),
+                      0,
+                  );
+                  const dayCbm = dayOrders.reduce(
+                      (sum, order) =>
+                          sum + (parseFloat(order.declared_cbm) || 0),
+                      0,
+                  );
+                  return `
+      <div class="filter-toolbar-card">
+        <div class="filter-toolbar-head">
+          <div>
+            <h6>${d}</h6>
+            <div class="filter-toolbar-subtext">${dayOrders.length} order(s) · ${dayCartons} cartons · ${dayCbm.toFixed(2)} CBM</div>
           </div>
-        `,
-            )
-            .join("")}
-      </div>
-    `,
+        </div>
+        <div class="stack-card-list">
+          ${dayOrders
+              .map(
+                  (o) => `
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 border rounded-3 px-3 py-2 bg-white">
+              <div>
+                <div class="fw-semibold">#${o.id} — ${escapeHtml(o.customer_name)}</div>
+                <div class="small text-muted">${escapeHtml(o.supplier_name || "-")} · ${parseFloat(o.declared_cbm || 0).toFixed(2)} CBM</div>
+              </div>
+              <button type="button" class="btn btn-sm btn-outline-primary js-receive-btn" data-order-id="${o.id}">Receive</button>
+            </div>
+          `,
               )
+              .join("")}
+        </div>
+      </div>
+    `;
+              })
               .join("")
-        : '<p class="text-muted">No shipments in filtered range.</p>';
+        : '<div class="filter-toolbar-card"><p class="text-muted mb-0">No shipments in the filtered range.</p></div>';
 }
 
 async function loadReceivableOrders() {
@@ -573,7 +857,7 @@ function updateDeclaredSummary(order) {
                 `${i.shipping_code || "-"} ${i.cartons || 0}ctn ${i.qty_per_carton || ""}/ctn`,
         )
         .join("; ");
-    el.textContent = `${cartons} cartons, ${cbm.toFixed(4)} CBM, ${weight.toFixed(2)} kg. Items: ${itemsStr || "—"}`;
+    el.textContent = `${cartons} cartons, ${cbm.toFixed(6)} CBM, ${weight.toFixed(2)} kg. Items: ${itemsStr || "—"}`;
 
     // Set declared values as placeholders on Actual inputs so user can verify before entering
     const ac = document.getElementById("actualCartons");
@@ -581,7 +865,7 @@ function updateDeclaredSummary(order) {
     const aw = document.getElementById("actualWeight");
     if (ac) ac.placeholder = String(cartons || "");
     if (acbm)
-        acbm.placeholder = cbm > 0 ? cbm.toFixed(4) : "Direct or from L×W×H";
+        acbm.placeholder = cbm > 0 ? cbm.toFixed(6) : "Direct or from L×W×H";
     if (aw) aw.placeholder = weight > 0 ? weight.toFixed(2) : "";
 }
 
@@ -598,10 +882,10 @@ async function loadOrderForReceive(orderId) {
             .map(
                 (it, i) => `
           <tr data-order-item-id="${it.id}">
-            <td>${escapeHtml((typeof descText === "function" ? descText(it) : it.description_en || it.description_cn || "Item " + (i + 1)).substring(0, 40))}${it.product_high_alert_note ? `<div class="product-alert-badge mt-1" title="${escapeHtml(it.product_high_alert_note)}">Alert</div>` : ""}</td>
+            <td>${escapeHtml((typeof descText === "function" ? descText(it) : it.description_en || it.description_cn || "Item " + (i + 1)).substring(0, 40))}${it.product_high_alert_note || it.product_required_design ? `<div class="product-alert-badge mt-1" title="${escapeHtml((it.product_required_design ? "Required design. " : "") + (it.product_high_alert_note || ""))}">Alert</div>` : ""}</td>
             <td>${it.declared_cbm || 0} CBM / ${it.declared_weight || 0} kg</td>
             <td><input type="number" class="form-control form-control-sm item-actual-cartons" min="0" placeholder="0"></td>
-            <td><input type="number" step="0.0001" class="form-control form-control-sm item-actual-cbm" min="0" placeholder="0"></td>
+            <td><input type="number" step="0.000001" class="form-control form-control-sm item-actual-cbm" min="0" placeholder="0"></td>
             <td><input type="number" step="0.0001" class="form-control form-control-sm item-actual-weight" min="0" placeholder="0"></td>
             <td><select class="form-select form-select-sm item-condition"><option value="good">Good</option><option value="damaged">Damaged</option><option value="partial">Partial</option></select></td>
             <td><input type="file" class="d-none item-photo-input" accept="image/*" multiple data-order-item-id="${it.id}"><button type="button" class="btn btn-sm btn-outline-secondary item-add-photo">+</button><div class="item-photo-preview d-inline"></div></td>

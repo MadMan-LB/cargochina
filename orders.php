@@ -87,16 +87,16 @@ require 'includes/layout.php';
         <div class="filter-toolbar-head">
           <div>
             <div class="title">Search & Actions</div>
-            <div class="filter-toolbar-subtext">Find by customer, phone, shipping code, supplier, or item details.</div>
+            <div class="filter-toolbar-subtext">Find by customer, phone, shipping code, supplier, or item details. Suggestions appear as you type.</div>
           </div>
         </div>
         <div class="input-group input-group-sm">
-          <input type="text" class="form-control" id="orderSearch" placeholder="Customer, phone, shipping code, items…" onkeydown="if(event.key==='Enter'){event.preventDefault();loadOrders();}">
+          <input type="text" class="form-control" id="orderSearch" placeholder="Customer, phone, shipping code, items...">
           <button class="btn btn-outline-primary" type="button" onclick="loadOrders()" title="Search">Search</button>
-          <button class="btn btn-outline-secondary" type="button" onclick="document.getElementById('orderSearch').value='';loadOrders();" title="Clear">Clear</button>
+          <button class="btn btn-outline-secondary" type="button" onclick="clearOrderSearch()" title="Clear">Clear</button>
         </div>
         <div class="filter-summary-row">
-          <small class="summary-text">Tip: you can combine the search box with the status chips above.</small>
+          <small class="summary-text">Tip: use the dropdown to jump to the right order faster, then combine it with the status chips above.</small>
         </div>
       </div>
     </div>
@@ -286,6 +286,6 @@ require 'includes/layout.php';
     </div>
   </div>
 </div>
-<?php $pageScripts = ['frontend/js/autocomplete.js'];
-$pageScript = 'frontend/js/orders.js';
+<?php $pageScripts = ['frontend/js/autocomplete.js?v=' . filemtime(__DIR__ . '/frontend/js/autocomplete.js')];
+$pageScript = 'frontend/js/orders.js?v=' . filemtime(__DIR__ . '/frontend/js/orders.js');
 require 'includes/footer.php'; ?>

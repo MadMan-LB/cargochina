@@ -198,18 +198,28 @@ class OrderExcelService
             $cartons    = $it['cartons'] ?? '';
             $qtyCtn     = $it['qty_per_carton'] ?? '';
             $unitPrice  = $it['sell_price'] ?? $it['unit_price'] ?? '';
-            $cbmPer     = $it['declared_cbm']
-                ? round((float) $it['declared_cbm'] / max(1, (float) ($it['cartons'] ?: 1)), 6)
+            $scope      = strtolower(trim((string) ($it['product_dimensions_scope'] ?? $it['dimensions_scope'] ?? 'piece')));
+            $cartonsNum = (float) ($it['cartons'] ?? 0);
+            $qtyPerCtn  = (float) ($it['qty_per_carton'] ?? 0);
+            $qtyNum     = ($cartonsNum > 0 && $qtyPerCtn > 0)
+                ? $cartonsNum * $qtyPerCtn
+                : (float) ($it['quantity'] ?? 0);
+            $denom      = ($scope === 'carton' && $cartonsNum > 0)
+                ? $cartonsNum
+                : ($qtyNum > 0 ? $qtyNum : 0);
+            $cbmPer     = ($it['declared_cbm'] && $denom > 0)
+                ? round((float) $it['declared_cbm'] / $denom, 6)
                 : '';
-            $gwKg       = $it['declared_weight']
-                ? round((float) $it['declared_weight'] / max(1, (float) ($it['quantity'] ?: 1)), 4)
+            $gwKg       = ($it['declared_weight'] && $denom > 0)
+                ? round((float) $it['declared_weight'] / $denom, 4)
                 : '';
 
             // Calculated columns use Excel formulas so Lebanon-side edits auto-update totals:
             //   H (TOTAL QTY)    = TOTAL CTNS (F) × QTY/CTN (G)
             //   J (TOTAL AMOUNT) = TOTAL QTY (H)  × UNIT PRICE (I)
-            //   L (TOTAL CBM)    = CBM/CTN (K)    × TOTAL CTNS (F)
-            //   N (TOTAL GW)     = TOTAL CTNS (F) × GWKG (M)
+            //   L (TOTAL CBM)    = per-unit (K) × multiplier (F for carton scope, H for piece scope)
+            //   N (TOTAL GW)     = per-unit (M) × multiplier (F for carton scope, H for piece scope)
+            $multCol = ($scope === 'carton') ? 'F' : 'H';
             $data = [
                 'C' => $itemNo,
                 'D' => $it['supplier_name'] ?? '',
@@ -220,9 +230,9 @@ class OrderExcelService
                 'I' => $unitPrice,
                 'J' => "=H{$row}*I{$row}",
                 'K' => $cbmPer,
-                'L' => "=K{$row}*F{$row}",
+                'L' => "=K{$row}*{$multCol}{$row}",
                 'M' => $gwKg,
-                'N' => "=F{$row}*M{$row}",
+                'N' => "={$multCol}{$row}*M{$row}",
             ];
 
             foreach ($data as $col => $val) {

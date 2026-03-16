@@ -57,3 +57,4 @@ Draft → Submitted → Approved → ReceivedAtWarehouse
 - [ ] Preferences toggled (6)
 - [ ] Diagnostics page loads
 - [ ] Config health reflects settings
+- [ ] Expenses: add expense with new category (type name not in list); verify category created, filter dropdown refreshed, expense appears

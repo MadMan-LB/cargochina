@@ -18,6 +18,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $dateTo = $_GET['date_to'] ?? null;
     $customerId = $_GET['customer_id'] ?? null;
     $supplierId = $_GET['supplier_id'] ?? null;
+    $statusParam = $_GET['status'] ?? null;
+    $statuses = is_array($statusParam) ? array_values(array_filter($statusParam)) : ($statusParam ? [$statusParam] : []);
+    $statusMode = strtolower(trim((string) ($_GET['status_mode'] ?? 'include')));
+    $statusMode = $statusMode === 'exclude' ? 'exclude' : 'include';
+    $defaultExcludedStatuses = ['Draft', 'CustomerDeclined'];
 
     if ($id === 'balances') {
         $customers = [];
@@ -103,8 +108,24 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             FROM orders o
             JOIN customers c ON o.customer_id = c.id
             LEFT JOIN suppliers s ON o.supplier_id = s.id
-            WHERE o.status NOT IN ('Draft','CustomerDeclined')";
+            WHERE 1=1";
         $params = [];
+        if ($statuses) {
+            if ($statusMode === 'exclude') {
+                $excludedStatuses = array_values(array_unique(array_merge($defaultExcludedStatuses, $statuses)));
+                $placeholders = implode(',', array_fill(0, count($excludedStatuses), '?'));
+                $sql .= " AND o.status NOT IN ($placeholders)";
+                $params = array_merge($params, $excludedStatuses);
+            } else {
+                $placeholders = implode(',', array_fill(0, count($statuses), '?'));
+                $sql .= " AND o.status IN ($placeholders)";
+                $params = array_merge($params, $statuses);
+            }
+        } else {
+            $placeholders = implode(',', array_fill(0, count($defaultExcludedStatuses), '?'));
+            $sql .= " AND o.status NOT IN ($placeholders)";
+            $params = array_merge($params, $defaultExcludedStatuses);
+        }
         if ($dateFrom) {
             $sql .= " AND o.expected_ready_date >= ?";
             $params[] = $dateFrom;

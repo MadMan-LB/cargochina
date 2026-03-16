@@ -66,6 +66,19 @@ document.addEventListener("DOMContentLoaded", () => {
         const docInput = document.getElementById("draftDocInput");
         if (docInput)
             docInput.onchange = () => handleDraftDocUpload(docInput.files);
+        const countryInput = el("containerEditDestCountry");
+        if (
+            countryInput &&
+            canCreateContainers() &&
+            typeof Autocomplete !== "undefined"
+        ) {
+            Autocomplete.init(countryInput, {
+                resource: "countries",
+                displayValue: (c) => c.code || "",
+                renderItem: (c) => (c.name ? `${c.name} (${c.code})` : c.code),
+                placeholder: "Type country name or code (e.g. LB, Lebanon)",
+            });
+        }
     } catch (e) {
         console.error("Consolidation init:", e);
         if (typeof showToast === "function")
@@ -320,20 +333,6 @@ function applyContainerPreset(code, maxCbm, maxWeight) {
     document.getElementById("containerMaxWeight").value = maxWeight;
 }
 
-let etaOffsets = null;
-
-async function loadEtaOffsets() {
-    if (etaOffsets) return etaOffsets;
-    try {
-        const r = await api("GET", "/config/eta-offsets");
-        etaOffsets = r.data || {};
-        return etaOffsets;
-    } catch (_) {
-        etaOffsets = {};
-        return etaOffsets;
-    }
-}
-
 async function openContainerEditModal(containerId) {
     if (!canCreateContainers()) return;
     try {
@@ -370,18 +369,9 @@ async function saveContainerEdit() {
     }
 }
 
-async function suggestEtaFromOffsets() {
-    const country =
-        el("containerEditDestCountry").value.trim().toUpperCase() || "DEFAULT";
-    const offsets = await loadEtaOffsets();
-    const countryOffsets = offsets[country] ||
-        offsets.DEFAULT || { groupage: 0, full_container: 0 };
-    const days = countryOffsets.groupage ?? countryOffsets.full_container ?? 0;
-    if (days <= 0) {
-        showToast("No offset for " + country + "; using today", "info");
-    }
+function suggestEtaFromOffsets() {
     const d = new Date();
-    d.setDate(d.getDate() + (days || 0));
+    d.setDate(d.getDate() + 70);
     el("containerEditEtaDate").value = d.toISOString().slice(0, 10);
 }
 

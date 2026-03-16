@@ -6,40 +6,119 @@ $currentPage = 'receiving';
 $pageTitle = 'Warehouse Receiving';
 require 'includes/layout.php';
 ?>
-<h1 class="mb-4">Warehouse Receiving</h1>
+<div class="card page-hero-card mb-4">
+  <div class="card-body d-flex flex-wrap justify-content-between align-items-start gap-3">
+    <div>
+      <h1 class="mb-2">Warehouse Receiving</h1>
+      <p class="text-muted mb-0">Review inbound orders, spot special handling early, and record actual warehouse measurements with evidence before the next workflow step.</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      <button type="button" class="btn btn-primary" onclick="document.getElementById('receiveOrderSearch')?.focus()">Quick Receive</button>
+      <button type="button" class="btn btn-outline-secondary" onclick="exportReceivingCsv()" title="Export queue to CSV">Export Queue</button>
+    </div>
+  </div>
+</div>
 
-<!-- Filters -->
-<div class="card mb-3">
-  <div class="card-body py-3">
-    <div class="row g-2 align-items-end flex-wrap">
-      <div class="col-12 col-md-6 col-lg-2">
+<div class="metric-card-grid mb-4">
+  <div class="metric-card">
+    <div class="eyebrow">Visible Orders</div>
+    <div class="value" id="receiveVisibleCount">0</div>
+    <div class="detail" id="receiveVisibleDetail">Orders matching the current filters.</div>
+  </div>
+  <div class="metric-card">
+    <div class="eyebrow">Priority Accounts</div>
+    <div class="value" id="receivePriorityCount">0</div>
+    <div class="detail" id="receivePriorityDetail">Customers that need closer handling.</div>
+  </div>
+  <div class="metric-card">
+    <div class="eyebrow">Cartons In View</div>
+    <div class="value" id="receiveCartonCount">0</div>
+    <div class="detail" id="receiveCartonDetail">Total cartons across the current queue.</div>
+  </div>
+  <div class="metric-card">
+    <div class="eyebrow">Orders With Alerts</div>
+    <div class="value" id="receiveAlertCount">0</div>
+    <div class="detail" id="receiveAlertDetail">High-alert notes or product-level warnings.</div>
+  </div>
+</div>
+
+<div class="filter-toolbar-grid mb-4">
+  <div class="filter-toolbar-card soft">
+    <div class="filter-toolbar-head">
+      <div>
+        <div class="title">Statuses & Focus</div>
+        <div class="filter-toolbar-subtext">Keep the intake queue tight, then pull urgent or sensitive work to the top.</div>
+      </div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label small mb-2 d-block">Statuses</label>
+      <div class="filter-chip-grid" id="receivingStatusList">
+        <div class="form-check filter-chip">
+          <input class="form-check-input receiving-status-filter" type="checkbox" value="Approved" id="receiveStatusApproved">
+          <label class="form-check-label" for="receiveStatusApproved">Approved</label>
+        </div>
+        <div class="form-check filter-chip">
+          <input class="form-check-input receiving-status-filter" type="checkbox" value="InTransitToWarehouse" id="receiveStatusInTransit">
+          <label class="form-check-label" for="receiveStatusInTransit">In Transit</label>
+        </div>
+      </div>
+    </div>
+    <div>
+      <label class="form-label small mb-2 d-block">Quick focus</label>
+      <div class="filter-chip-grid">
+        <div class="form-check filter-chip">
+          <input class="form-check-input receiving-focus-filter" type="checkbox" value="priority" id="filterPriorityOnly">
+          <label class="form-check-label" for="filterPriorityOnly">Priority accounts only</label>
+        </div>
+        <div class="form-check filter-chip">
+          <input class="form-check-input receiving-focus-filter" type="checkbox" value="alerts" id="filterAlertsOnly">
+          <label class="form-check-label" for="filterAlertsOnly">High-alert orders only</label>
+        </div>
+      </div>
+    </div>
+    <div class="filter-summary-row">
+      <div class="summary-text" id="receiveStatusSummary">Core intake statuses: Approved, In Transit.</div>
+    </div>
+  </div>
+  <div class="filter-toolbar-card soft">
+    <div class="filter-toolbar-head">
+      <div>
+        <h6>Filter The Queue</h6>
+        <div class="filter-toolbar-subtext">Search by supplier, customer, dates, or shipping code before switching between list, calendar, and schedule views.</div>
+      </div>
+      <button type="button" class="btn btn-outline-secondary btn-sm" onclick="clearReceivingFilters()">Clear</button>
+    </div>
+    <div class="row g-3 align-items-end">
+      <div class="col-12 col-md-6 col-xl-2">
         <label class="form-label small mb-0">Supplier</label>
-        <input type="text" class="form-control form-control-sm" id="filterSupplier" placeholder="Type to search..." autocomplete="off">
+        <input type="text" class="form-control form-control-sm" id="filterSupplier" placeholder="Type to search supplier..." autocomplete="off">
         <input type="hidden" id="filterSupplierId">
       </div>
-      <div class="col-12 col-md-6 col-lg-2">
+      <div class="col-12 col-md-6 col-xl-2">
         <label class="form-label small mb-0">Customer</label>
-        <input type="text" class="form-control form-control-sm" id="filterCustomer" placeholder="Type to search..." autocomplete="off">
+        <input type="text" class="form-control form-control-sm" id="filterCustomer" placeholder="Type to search customer..." autocomplete="off">
         <input type="hidden" id="filterCustomerId">
       </div>
-      <div class="col-12 col-md-6 col-lg-2">
+      <div class="col-12 col-md-6 col-xl-2">
         <label class="form-label small mb-0">Date from</label>
         <input type="date" class="form-control form-control-sm" id="filterDateFrom">
       </div>
-      <div class="col-12 col-md-6 col-lg-2">
+      <div class="col-12 col-md-6 col-xl-2">
         <label class="form-label small mb-0">Date to</label>
         <input type="date" class="form-control form-control-sm" id="filterDateTo">
       </div>
-      <div class="col-12 col-md-6 col-lg-2">
+      <div class="col-12 col-md-6 col-xl-2">
         <label class="form-label small mb-0">Shipping code</label>
         <input type="text" class="form-control form-control-sm" id="filterShippingCode" placeholder="e.g. DUM_C003">
       </div>
-      <div class="col-12 col-md-6 col-lg-2">
-        <button type="button" class="btn btn-primary btn-sm w-100" id="applyFiltersBtn" onclick="applyFilters()">Apply</button>
+      <div class="col-12 col-md-6 col-xl-2 d-grid gap-2">
+        <button type="button" class="btn btn-primary btn-sm" id="applyFiltersBtn" onclick="applyFilters()">Apply</button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="exportReceivingCsv()" title="Export queue to CSV">Export CSV</button>
       </div>
-      <div class="col-12 col-md-6 col-lg-2">
-        <button type="button" class="btn btn-outline-secondary btn-sm w-100" onclick="exportReceivingCsv()" title="Export queue to CSV">Export CSV</button>
-      </div>
+    </div>
+    <div class="filter-summary-row">
+      <div class="summary-text" id="receiveFilterSummary">Showing the full inbound receiving queue.</div>
+      <div class="summary-text">Tip: the calendar helps spot clustered arrival days, while the schedule keeps the day-by-day receiving plan compact.</div>
     </div>
   </div>
 </div>
@@ -75,7 +154,7 @@ require 'includes/layout.php';
     <div class="card">
       <div class="card-body">
         <h6 class="mb-3">Warehouse activity by date</h6>
-        <div id="scheduleList"></div>
+        <div id="scheduleList" class="stack-card-list"></div>
       </div>
     </div>
   </div>
@@ -163,6 +242,9 @@ require 'includes/layout.php';
     </div>
   </div>
 </div>
-<?php $pageScripts = ['frontend/js/photo_uploader.js', 'frontend/js/autocomplete.js'];
-$pageScript = 'frontend/js/receiving.js';
+<?php $pageScripts = [
+  'frontend/js/photo_uploader.js?v=' . filemtime(__DIR__ . '/frontend/js/photo_uploader.js'),
+  'frontend/js/autocomplete.js?v=' . filemtime(__DIR__ . '/frontend/js/autocomplete.js'),
+];
+$pageScript = 'frontend/js/receiving.js?v=' . filemtime(__DIR__ . '/frontend/js/receiving.js');
 require 'includes/footer.php'; ?>

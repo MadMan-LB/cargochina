@@ -35,6 +35,17 @@ function updateContainerOverview(rows) {
         "containersAssignedOrders",
         list.reduce((sum, c) => sum + (parseInt(c.order_count, 10) || 0), 0),
     );
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const in7 = new Date(today);
+    in7.setDate(in7.getDate() + 7);
+    const launchingSoon = list.filter((c) => {
+        const sd = c.expected_ship_date;
+        if (!sd) return false;
+        const d = new Date(sd + "T00:00:00");
+        return !isNaN(d.getTime()) && d >= today && d <= in7;
+    }).length;
+    setText("containersLaunchingSoon", launchingSoon);
 }
 
 function getSelectedContainerStatuses() {
@@ -90,7 +101,7 @@ async function loadContainers() {
     const label = document.getElementById("containerCountLabel");
     if (!tbody) return;
     tbody.innerHTML =
-        '<tr><td colspan="9" class="text-center text-muted py-4">Loading…</td></tr>';
+        '<tr><td colspan="10" class="text-center text-muted py-4">Loading…</td></tr>';
 
     const q = document.getElementById("containerSearch")?.value?.trim() || "";
     const statuses = getSelectedContainerStatuses();
@@ -117,7 +128,7 @@ async function loadContainers() {
         applyClientFilters();
     } catch (e) {
         updateContainerOverview([]);
-        tbody.innerHTML = `<tr><td colspan="9" class="text-center text-danger py-4">${escHtml(e.message)}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" class="text-center text-danger py-4">${escHtml(e.message)}</td></tr>`;
     }
 }
 
@@ -149,6 +160,16 @@ function applyClientFilters() {
             if (fill === "partial") return pct > 0 && pct < 85;
             if (fill === "almost") return pct >= 85 && pct < 100;
             if (fill === "full") return pct >= 100;
+            if (fill === "launching_soon") {
+                const sd = c.expected_ship_date;
+                if (!sd) return false;
+                const d = new Date(sd + "T00:00:00");
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const in7 = new Date(today);
+                in7.setDate(in7.getDate() + 7);
+                return !isNaN(d.getTime()) && d >= today && d <= in7;
+            }
             return true;
         });
     }
@@ -158,7 +179,7 @@ function applyClientFilters() {
 
     if (rows.length === 0) {
         tbody.innerHTML =
-            '<tr><td colspan="9" class="text-center text-muted py-4">No containers match the current filters.</td></tr>';
+            '<tr><td colspan="10" class="text-center text-muted py-4">No containers match the current filters.</td></tr>';
         return;
     }
 
@@ -181,6 +202,11 @@ function applyClientFilters() {
                 `<div style="height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;"><div style="height:100%;width:${Math.min(100, p)}%;background:${barC(p)};border-radius:3px;"></div></div><small class="text-muted">${parseFloat(c.used_weight || 0).toFixed(0)}/${c.max_weight} kg</small>`;
             const destination = c.destination || c.destination_country || "";
             const eta = c.eta_date || "";
+            const shipDate = c.expected_ship_date || "";
+            const vessel = c.vessel_name || "";
+            const shipCell = shipDate
+                ? `<button class="btn btn-link btn-sm p-0 text-start js-edit-container" data-id="${c.id}" data-code="${escHtml(c.code || "")}" title="Edit schedule">${escHtml(shipDate)}</button>${vessel ? `<div class="small text-muted">${escHtml(vessel)}</div>` : ""}`
+                : `<button class="btn btn-link btn-sm p-0 text-muted js-edit-container" data-id="${c.id}" data-code="${escHtml(c.code || "")}" title="Set ship date">Set</button>`;
             return `<tr>
             <td>${c.id}</td>
             <td>
@@ -195,6 +221,7 @@ function applyClientFilters() {
               <span class="badge ${st.cls} me-1">${escHtml(st.label)}</span>
               <button class="btn btn-link btn-sm p-0 text-muted js-status-btn" data-id="${c.id}" title="Change status">✎</button>
             </td>
+            <td class="small">${shipCell}</td>
             <td>${c.order_count || 0}</td>
             <td style="min-width:100px">${bar(pct)}</td>
             <td style="min-width:100px">${wBar(wPct)}</td>
@@ -223,6 +250,14 @@ function applyClientFilters() {
     tbody.querySelectorAll(".js-assign-btn").forEach((btn) => {
         btn.addEventListener("click", () => openAssignOrdersModal(btn.dataset));
     });
+    tbody.querySelectorAll(".js-edit-container").forEach((btn) => {
+        btn.addEventListener("click", () =>
+            openContainerEditModal(
+                parseInt(btn.dataset.id, 10),
+                btn.dataset.code || "",
+            ),
+        );
+    });
 }
 
 function openStatusModal(containerId) {
@@ -230,6 +265,98 @@ function openStatusModal(containerId) {
     bootstrap.Modal.getOrCreateInstance(
         document.getElementById("statusModal"),
     ).show();
+}
+
+async function openContainerEditModal(id, code) {
+    document.getElementById("containerEditId").value = id;
+    const modal = bootstrap.Modal.getOrCreateInstance(
+        document.getElementById("containerEditModal"),
+    );
+    document.getElementById("containerEditShipDate").value = "";
+    document.getElementById("containerEditEta").value = "";
+    document.getElementById("containerEditActualDep").value = "";
+    document.getElementById("containerEditActualArr").value = "";
+    document.getElementById("containerEditVessel").value = "";
+    document.getElementById("containerEditDestCountry").value = "";
+    document.getElementById("containerEditDest").value = "";
+    document.getElementById("containerEditNotes").value = "";
+    modal.show();
+    try {
+        const res = await fetch(CONTAINERS_API_BASE + "/containers/" + id, {
+            credentials: "same-origin",
+        });
+        if (!res.ok) throw new Error("Failed to load");
+        const data = (await res.json()).data || {};
+        document.getElementById("containerEditShipDate").value =
+            data.expected_ship_date || "";
+        document.getElementById("containerEditEta").value = data.eta_date || "";
+        document.getElementById("containerEditActualDep").value =
+            data.actual_departure_date || "";
+        document.getElementById("containerEditActualArr").value =
+            data.actual_arrival_date || "";
+        document.getElementById("containerEditVessel").value =
+            data.vessel_name || "";
+        document.getElementById("containerEditDestCountry").value =
+            data.destination_country || "";
+        document.getElementById("containerEditDest").value =
+            data.destination || "";
+        document.getElementById("containerEditNotes").value = data.notes || "";
+    } catch (e) {
+        if (typeof showToast === "function") {
+            showToast(e.message || "Failed to load", "danger");
+        } else {
+            alert("Error: " + e.message);
+        }
+    }
+}
+
+async function saveContainerEdit() {
+    const id = parseInt(document.getElementById("containerEditId").value, 10);
+    if (!id) return;
+    const btn = document.getElementById("containerEditSaveBtn");
+    const v = (id) => document.getElementById(id)?.value?.trim() || null;
+    const payload = {
+        expected_ship_date: v("containerEditShipDate") || null,
+        eta_date: v("containerEditEta") || null,
+        actual_departure_date: v("containerEditActualDep") || null,
+        actual_arrival_date: v("containerEditActualArr") || null,
+        vessel_name: v("containerEditVessel") || null,
+        destination_country: v("containerEditDestCountry") || null,
+        destination: v("containerEditDest") || null,
+        notes: v("containerEditNotes") || null,
+    };
+    try {
+        if (btn) btn.disabled = true;
+        const res = await fetch(CONTAINERS_API_BASE + "/containers/" + id, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+            const j = await res.json().catch(() => ({}));
+            throw new Error(j.message || "Failed to save");
+        }
+        bootstrap.Modal.getOrCreateInstance(
+            document.getElementById("containerEditModal"),
+        ).hide();
+        const c = _allContainers.find((x) => x.id == id);
+        if (c) {
+            Object.assign(c, payload);
+        }
+        applyClientFilters();
+        if (typeof showToast === "function") {
+            showToast("Container schedule updated");
+        }
+    } catch (e) {
+        if (typeof showToast === "function") {
+            showToast(e.message || "Failed to save", "danger");
+        } else {
+            alert("Error: " + e.message);
+        }
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 }
 
 async function setContainerStatus(status) {
@@ -303,8 +430,13 @@ async function viewContainer(id, code) {
             label: container.status || "—",
             cls: "bg-secondary",
         };
+        const shipInfo = container.expected_ship_date
+            ? `Ship: ${container.expected_ship_date}${container.vessel_name ? ` • ${container.vessel_name}` : ""}`
+            : "";
+        const etaInfo = container.eta_date ? `ETA: ${container.eta_date}` : "";
+        const extra = [shipInfo, etaInfo].filter(Boolean).join(" | ");
         if (subtitleEl)
-            subtitleEl.innerHTML = `<span class="badge ${st.cls}">${escHtml(st.label)}</span>`;
+            subtitleEl.innerHTML = `<span class="badge ${st.cls}">${escHtml(st.label)}</span>${extra ? ` <span class="text-muted ms-2">${escHtml(extra)}</span>` : ""}`;
 
         if (orders.length === 0) {
             if (bodyEl)

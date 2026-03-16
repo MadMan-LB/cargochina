@@ -53,7 +53,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $chkProductAlert = @$pdo->query("SHOW COLUMNS FROM products LIKE 'high_alert_note'");
+        $chkRequiredDesign = @$pdo->query("SHOW COLUMNS FROM products LIKE 'required_design'");
         $itemAlertCol = ($chkProductAlert && $chkProductAlert->rowCount() > 0) ? ", p.high_alert_note as product_high_alert_note" : "";
+        if ($chkRequiredDesign && $chkRequiredDesign->rowCount() > 0) $itemAlertCol .= ", p.required_design as product_required_design";
         foreach ($rows as &$r) {
             $items = $pdo->prepare("SELECT oi.id, oi.shipping_code, oi.cartons, oi.declared_cbm, oi.declared_weight$itemAlertCol FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?");
             $items->execute([$r['id']]);
@@ -119,7 +121,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $chkProductAlert = @$pdo->query("SHOW COLUMNS FROM products LIKE 'high_alert_note'");
+        $chkRequiredDesign = @$pdo->query("SHOW COLUMNS FROM products LIKE 'required_design'");
         $itemAlertCol = ($chkProductAlert && $chkProductAlert->rowCount() > 0) ? ", p.high_alert_note as product_high_alert_note" : "";
+        if ($chkRequiredDesign && $chkRequiredDesign->rowCount() > 0) $itemAlertCol .= ", p.required_design as product_required_design";
         foreach ($rows as &$r) {
             $items = $pdo->prepare("SELECT oi.id, oi.shipping_code, oi.cartons, oi.qty_per_carton, oi.declared_cbm, oi.declared_weight, oi.item_length, oi.item_width, oi.item_height, oi.description_cn, oi.description_en, p.hs_code$itemAlertCol FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?");
             $items->execute([$r['id']]);

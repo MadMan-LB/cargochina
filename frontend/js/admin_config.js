@@ -1,4 +1,10 @@
-document.addEventListener("DOMContentLoaded", loadConfig);
+document.addEventListener("DOMContentLoaded", () => {
+    loadConfig();
+    loadHsCatalogFiles();
+    document
+        .getElementById("hsCatalogImportBtn")
+        ?.addEventListener("click", runHsCatalogImport);
+});
 
 function toggleWhatsAppSections() {
     const provider =
@@ -91,6 +97,48 @@ async function loadConfig() {
         document.getElementById("appUrl").value = c.app_url ?? "";
     } catch (e) {
         showToast(e.message, "danger");
+    }
+}
+
+async function loadHsCatalogFiles() {
+    const sel = document.getElementById("hsCatalogFile");
+    if (!sel) return;
+    try {
+        const res = await api("GET", "/hs-code-catalog/files");
+        const files = res.data || [];
+        sel.innerHTML =
+            '<option value="">lebanon_customs_tariffs.csv (default)</option>';
+        files.forEach((f) => {
+            const opt = document.createElement("option");
+            opt.value = f.name;
+            opt.textContent =
+                f.name + (f.size ? ` (${(f.size / 1024).toFixed(1)} KB)` : "");
+            sel.appendChild(opt);
+        });
+    } catch (e) {
+        sel.innerHTML =
+            '<option value="">lebanon_customs_tariffs.csv (default)</option>';
+    }
+}
+
+async function runHsCatalogImport() {
+    const btn = document.getElementById("hsCatalogImportBtn");
+    const status = document.getElementById("hsCatalogImportStatus");
+    if (!btn || !status) return;
+    const sel = document.getElementById("hsCatalogFile");
+    const source = sel?.value?.trim() || "";
+    btn.disabled = true;
+    status.textContent = "Importing…";
+    try {
+        const res = await api("POST", "/hs-code-catalog/import", { source });
+        const d = res.data || {};
+        status.textContent = `Imported ${d.imported ?? 0} rows from ${d.file ?? "file"}.`;
+        showToast(`HS catalog: ${d.imported ?? 0} rows imported`);
+    } catch (e) {
+        status.textContent = "Error: " + (e.message || "Import failed");
+        showToast(e.message, "danger");
+    } finally {
+        btn.disabled = false;
     }
 }
 

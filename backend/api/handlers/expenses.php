@@ -7,6 +7,57 @@
 
 require_once __DIR__ . '/../helpers.php';
 
+/**
+ * Find expense category by name, or create it if not found.
+ * Returns category id. Throws on failure.
+ * Handles race: if concurrent request creates same category, retries SELECT.
+ */
+function findOrCreateExpenseCategory(PDO $pdo, string $name, ?int $userId = null): int
+{
+    $name = trim($name);
+    if ($name === '') {
+        throw new InvalidArgumentException('Category name cannot be empty');
+    }
+    $stmt = $pdo->prepare("SELECT id FROM expense_categories WHERE TRIM(name) = ? AND is_active = 1 LIMIT 1");
+    $stmt->execute([$name]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($row) {
+        return (int) $row['id'];
+    }
+    $code = preg_replace('/[^a-z0-9]+/', '-', strtolower($name));
+    $code = trim($code, '-') ?: 'custom-' . substr(md5($name), 0, 8);
+    $baseCode = $code;
+    $n = 0;
+    while (true) {
+        $tryCode = $n === 0 ? $code : $baseCode . '-' . $n;
+        $chk = $pdo->prepare("SELECT 1 FROM expense_categories WHERE code = ?");
+        $chk->execute([$tryCode]);
+        if ($chk->rowCount() === 0) {
+            $code = $tryCode;
+            break;
+        }
+        $n++;
+    }
+    try {
+        $pdo->prepare("INSERT INTO expense_categories (code, name, category_type) VALUES (?, ?, 'operational')")
+            ->execute([$code, $name]);
+        $id = (int) $pdo->lastInsertId();
+        if ($userId) {
+            logClms('expense_category_create', ['category_id' => $id, 'name' => $name, 'code' => $code, 'user_id' => $userId]);
+        }
+        return $id;
+    } catch (PDOException $e) {
+        if (strpos($e->getMessage(), 'Duplicate') !== false) {
+            $stmt->execute([$name]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row) {
+                return (int) $row['id'];
+            }
+        }
+        throw $e;
+    }
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
     $userId = getAuthUserId();
@@ -225,6 +276,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
         case 'POST':
             $categoryId = (int) ($input['category_id'] ?? 0);
+            $categoryName = trim($input['category_name'] ?? '');
             $amount = (float) ($input['amount'] ?? 0);
             $currency = trim($input['currency'] ?? 'USD');
             $expenseDate = trim($input['expense_date'] ?? date('Y-m-d'));
@@ -235,8 +287,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $customerId = !empty($input['customer_id']) ? (int) $input['customer_id'] : null;
             $supplierId = !empty($input['supplier_id']) ? (int) $input['supplier_id'] : null;
 
+            if (!$categoryId && $categoryName !== '') {
+                $categoryId = findOrCreateExpenseCategory($pdo, $categoryName, $userId);
+            }
             if (!$categoryId || $amount <= 0) {
-                jsonError('Category and amount are required', 400);
+                jsonError('Category and amount are required. Type a category name or select one from the search.', 400);
             }
             if (!in_array($currency, ['USD', 'RMB', 'EUR'], true)) {
                 $currency = 'USD';
@@ -265,6 +320,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $stmt->execute([$id]);
             if (!$stmt->fetch()) jsonError('Expense not found', 404);
 
+            $categoryId = array_key_exists('category_id', $input) ? (int) $input['category_id'] : null;
+            $categoryName = trim($input['category_name'] ?? '');
+            if ($categoryId !== null && !$categoryId && $categoryName !== '') {
+                $categoryId = findOrCreateExpenseCategory($pdo, $categoryName, $userId);
+                $input['category_id'] = $categoryId;
+            }
+
             $updates = [];
             $params = [];
             foreach (['category_id', 'amount', 'currency', 'expense_date', 'payee', 'notes', 'order_id', 'container_id', 'customer_id', 'supplier_id'] as $col) {
@@ -274,6 +336,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         if ($v <= 0) continue;
                     } elseif (in_array($col, ['order_id', 'container_id', 'customer_id', 'supplier_id'])) {
                         $v = !empty($input[$col]) ? (int) $input[$col] : null;
+                    } elseif ($col === 'category_id') {
+                        $v = (int) $input[$col];
+                        if ($v <= 0) continue;
                     } else {
                         $v = trim($input[$col] ?? '') ?: null;
                     }

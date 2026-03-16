@@ -287,16 +287,25 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $limit = max(1, min(200, (int) ($_GET['limit'] ?? 100)));
                 $sql = "SELECT * FROM hs_code_tax_rates WHERE 1=1";
                 $params = [];
+                $orderBy = " ORDER BY country_code ASC, CHAR_LENGTH(hs_code) DESC, hs_code ASC, effective_from DESC, id DESC LIMIT $limit";
                 if ($countryCode !== 'LB' || isset($_GET['country_code'])) {
                     $sql .= " AND country_code = ?";
                     $params[] = $countryCode;
                 }
                 if ($q !== '') {
-                    $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
-                    $sql .= " AND (hs_code LIKE ? OR country_code LIKE ? OR notes LIKE ?)";
-                    array_push($params, $like, $like, $like);
+                    $normalizedSearch = normalizeHsCodeValue($q);
+                    if ($normalizedSearch !== '' && preg_match('/^[0-9.\-\s]+$/', $q) === 1) {
+                        $normalizedRateSql = "REPLACE(REPLACE(REPLACE(UPPER(hs_code), '.', ''), '-', ''), ' ', '')";
+                        $sql .= " AND {$normalizedRateSql} LIKE ?";
+                        $params[] = $normalizedSearch . '%';
+                        $orderBy = " ORDER BY country_code ASC, CHAR_LENGTH({$normalizedRateSql}) ASC, hs_code ASC, effective_from DESC, id DESC LIMIT $limit";
+                    } else {
+                        $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+                        $sql .= " AND (hs_code LIKE ? OR country_code LIKE ? OR notes LIKE ?)";
+                        array_push($params, $like, $like, $like);
+                    }
                 }
-                $sql .= " ORDER BY country_code ASC, CHAR_LENGTH(hs_code) DESC, hs_code ASC, effective_from DESC, id DESC LIMIT $limit";
+                $sql .= $orderBy;
                 $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
                 if ($params) {
                     $stmt->execute($params);

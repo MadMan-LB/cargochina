@@ -34,14 +34,20 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 - `DELETE /suppliers/{id}` — Delete
 
 ## Products
-- `GET /products` — List all
+- `GET /products` — List all (filters: `q`, `supplier_id`, `hs_code`, `alert_filter`, `image_filter`)
 - `GET /products/search?q=...` — Search by description_cn/description_en/hs_code (top 10)
+- `GET /products/hs-codes?q=...` — Distinct HS codes from products (legacy; Products page uses hs-code-catalog)
 - `GET /products/{id}` — Get one
 - `GET /products/suggest?q=...` — Suggest by description/HS code (with similarity score)
 - `POST /products` — Create `{supplier_id?, cbm, weight, packaging?, hs_code?, description_entries?, pieces_per_carton?, unit_price?, image_paths?, force_create?}` — description_entries: `[{description_text, description_translated}]`; image_paths: array of paths from upload
 - `GET /products` — Returns `thumbnail_url` (first image) per product
 - `PUT /products/{id}` — Update
 - `DELETE /products/{id}` — Delete
+
+## HS Code Tariff Catalog (Lebanon customs reference)
+- `GET /hs-code-catalog?q=...&limit=...` — Search catalog for autocomplete and catalog lookup. Numeric HS-code queries match from the opening digits first (normalized to ignore dots/spaces), while text queries rank prefix matches before contains matches. Returns `{data: [{id, hs_code, name, category, tariff_rate, vat, section_name}], meta: {total, returned, limit, truncated, match_mode}}`. Used by Products page filter/HS field and HS Code Tax catalog/estimator fields.
+- `GET /hs-code-catalog/files` — List CSV files in `hs codes/` folder (SuperAdmin only)
+- `POST /hs-code-catalog/import` — Import `{source?: "filename.csv"}` from `hs codes/` folder. Default: lebanon_customs_tariffs.csv. Truncates and reloads. **SuperAdmin only.**
 
 ## Translations
 - `POST /translations` — Lookup/translate `{text, source_lang?, target_lang?}` — returns `{translated, cached}`
@@ -52,7 +58,7 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 - `GET /orders/{id}/export` — Export order as Template-style CSV (company header + GOOD DETAILS table: PHOTO, ITEM NO, DESCRIPTION, TOTAL CTNS, QTY/CTN, TOTAL QTY, UNIT PRICE, TOTAL AMOUNT, CBM, TOTAL CBM, GWKG, TOTAL GW). Uses supplier name/address/phone/fax for header.
 - `GET /orders/{id}` — Get one with items, attachments, receipt (when present), receipt.items, receipt.photos, customer_photo_visibility
 - `POST /orders` — Create `{customer_id, supplier_id, expected_ready_date, currency (USD|RMB), items}` — items: product_id?, item_no?, shipping_code?, cartons?, qty_per_carton?, quantity, unit, declared_cbm, declared_weight, item_length?, item_width?, item_height?, unit_price?, total_amount?, notes?, image_paths?, description_cn?, description_en? — Submit requires min 1 photo per item (configurable). CBM auto-calculated from L*W*H/1000000 on client.
-- `PUT /orders/{id}` — Update (Draft only)
+- `PUT /orders/{id}` — Update (any status)
 - `POST /orders/{id}/submit` — Draft → Submitted
 - `POST /orders/{id}/approve` — Submitted → Approved
 - `POST /orders/{id}/receive` — Record receipt `{actual_cartons, actual_cbm, actual_weight, condition, notes?, photo_paths?, items?}` — items: `[{order_item_id, actual_cartons?, actual_cbm?, actual_weight?, condition?, photo_paths?}]` for item-level receiving. Sum of items must match order-level. Evidence photos required when variance or damage.
@@ -106,6 +112,15 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 - `GET /diagnostics/notification-delivery-log` — List delivery log rows (filters: status, channel, date_from, date_to; limit, offset). Never returns tokens.
 - `GET /diagnostics/config-health` — Config readiness: `email_configured`, `whatsapp_configured`, `item_level_enabled`, `retry_configured`
 - `POST /diagnostics/retry-delivery/{logId}` — Retry failed email/WhatsApp delivery (skips if payload_hash already succeeded)
+
+## Expenses (ChinaAdmin, LebanonAdmin, SuperAdmin)
+- `GET /expenses` — List expenses with filters `?date_from=&date_to=&category_id=&order_id=&container_id=&customer_id=&supplier_id=&q=&limit=&offset=`
+- `GET /expenses/categories` — List active categories (optional `?q=` for search)
+- `GET /expenses/payee-suggestions?q=` — Payee autocomplete (expenses + suppliers)
+- `GET /expenses/{id}` — Get one expense
+- `POST /expenses` — Create `{category_id?, category_name?, amount, currency?, expense_date?, payee?, notes?, order_id?, container_id?, customer_id?, supplier_id?}` — Use `category_id` or `category_name`; if `category_name` is provided and no category is selected, a new category is created automatically
+- `PUT /expenses/{id}` — Update (same fields as POST; `category_name` creates category when `category_id` is 0)
+- `DELETE /expenses/{id}` — Delete
 
 ## Config
 - `GET /config` — Get system config (SuperAdmin only; tokens masked as ********)

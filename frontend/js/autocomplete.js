@@ -26,8 +26,12 @@ const Autocomplete = {
             opts.renderItem ||
             this.defaultRender[resource] ||
             ((i) => i.name || i.id);
+        const displayValue = opts.displayValue || renderItem;
         const onSelect = opts.onSelect || (() => {});
         const placeholder = opts.placeholder || "Type to search...";
+        const resultLimit = Number.isFinite(Number(opts.limit))
+            ? Math.max(1, parseInt(opts.limit, 10))
+            : null;
 
         inputEl.setAttribute("autocomplete", "off");
         inputEl.setAttribute("placeholder", placeholder);
@@ -52,7 +56,7 @@ const Autocomplete = {
             dropdown.className =
                 "autocomplete-dropdown list-group position-fixed";
             dropdown.style.cssText =
-                "max-height:200px;overflow-y:auto;z-index:9999;min-width:200px;box-shadow:0 4px 12px rgba(0,0,0,0.15);background:#fff";
+                "max-height:200px;overflow-y:auto;z-index:10600;min-width:200px;box-shadow:0 4px 12px rgba(0,0,0,0.15);background:#fff";
             items.forEach((item, i) => {
                 const el = document.createElement("button");
                 el.type = "button";
@@ -86,7 +90,7 @@ const Autocomplete = {
         const selectItem = (idx) => {
             const item = items[idx];
             if (item) {
-                inputEl.value = renderItem(item);
+                inputEl.value = displayValue(item);
                 inputEl.dataset.selectedId = String(item.id);
                 inputEl.dataset.selectedJson = JSON.stringify(item);
                 onSelect(item);
@@ -94,18 +98,21 @@ const Autocomplete = {
             hide();
         };
 
-        const searchPath = opts.searchPath || "/search";
+        const searchPath =
+            opts.searchPath !== undefined ? opts.searchPath : "/search";
         const fetchSearch = async (q) => {
             if (abortController) abortController.abort();
             abortController = new AbortController();
             try {
+                const params = new URLSearchParams({ q });
+                if (resultLimit) params.set("limit", String(resultLimit));
                 const res = await fetch(
                     AUTOCOMPLETE_API_BASE +
                         "/" +
                         resource +
                         searchPath +
-                        "?q=" +
-                        encodeURIComponent(q),
+                        "?" +
+                        params.toString(),
                     {
                         credentials: "same-origin",
                         signal: abortController.signal,
@@ -179,7 +186,7 @@ const Autocomplete = {
             },
             setValue: (item) => {
                 if (item) {
-                    inputEl.value = renderItem(item);
+                    inputEl.value = displayValue(item);
                     inputEl.dataset.selectedId = String(item.id);
                     inputEl.dataset.selectedJson = JSON.stringify(item);
                 } else {
@@ -210,6 +217,7 @@ const Autocomplete = {
             ) || `#${o.id}`,
         containers: (c) =>
             formatAutocompleteParts(c.code, `#${c.id}`, c.status) || `#${c.id}`,
+        countries: (c) => formatAutocompleteParts(c.name, c.code) || c.code,
         expenses: (p) => p.payee || p.name || String(p.id || ""),
     },
 };

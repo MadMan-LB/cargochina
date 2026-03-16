@@ -235,6 +235,56 @@
 - **Business settings page:** business_settings.php for ETA offsets, container CBM, arrival notify days
 - **Multi-status filter:** Orders API accepts status[] array for multiple statuses
 
+### Consolidation UX (Implemented)
+- **Migration 041:** `countries` table (id, code, name) with seed of 50+ ISO country codes for destination country dropdown
+- **Countries API:** GET /countries, GET /countries/search?q= for autocomplete; RBAC: ChinaAdmin, LebanonAdmin, SuperAdmin
+- **Consolidation Edit Container:** Suggest button sets ETA to 70 days from today; Destination Country uses type-to-search autocomplete from countries table (stores code for consistent filtering)
+
+### Expenses Category Create-on-Save (Implemented)
+- **Expenses API:** POST/PUT accept `category_name` when `category_id` is missing; new categories are auto-created in `expense_categories` (find-or-create by name, code slug, type operational)
+- **Filter refresh:** After save, category filter dropdown is refreshed so newly created categories appear immediately for filtering on the same page
+- **Audit:** `logClms('expense_category_create')` when a new category is created; race-condition handling (retry SELECT on duplicate code)
+- **Tests:** `tests/expense_test.php` — schema, create-on-save flow, code uniqueness
+- **API docs:** `docs/API.md` — Expenses section with `category_name` request/response
+- **Connections:** Financials API aggregates expenses by currency only (no category filter); Super Admin has no category management UI; Expenses page is the only consumer of category filter
+
+#### Impact Analysis (Expenses Category Create-on-Save)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | **Callers of findOrCreateExpenseCategory** | Only `backend/api/handlers/expenses.php` POST and PUT — no other callers |
+| 2 | **Related pages/forms/filters** | Expenses page: form (expenseCategory), filter (filterCategory), summary; Financials page: profitExpenseSummary (currency totals only); no exports/reports use category |
+| 3 | **Dependent logic** | GET /expenses/categories returns all active; list/summary JOIN expense_categories; filter uses category_id; Financials aggregates by currency — no change |
+| 4 | **Permissions** | RBAC unchanged: ChinaAdmin, LebanonAdmin, SuperAdmin; no customer-facing; no role visibility change |
+| 5 | **DB schema/migrations** | No migration; uses existing expense_categories; new rows get code, name, category_type=operational; seed data unchanged |
+| 6 | **Totals/balances/counts** | Expenses list summary (by currency) includes new categories; Financials profit summary unchanged; no derived values broken |
+| 7 | **Impacted files** | `backend/api/handlers/expenses.php` (findOrCreateExpenseCategory, POST, PUT), `frontend/js/expenses.js` (category_name, refreshFilterCategories), `expenses.php` (placeholder), `docs/API.md`, `tests/expense_test.php`, `run-tests.bat` |
+
+### HS Code Tariff Catalog (Implemented)
+- **Migration 042:** `hs_code_tariff_catalog` table (id, hs_code, name, category, tariff_rate, vat, parent_directory_*, section_*, source_file, imported_at)
+- **Data source:** `hs codes/lebanon_customs_tariffs.csv` (CSV chosen for compatibility; no extra PHP libs)
+- **API:** `GET /hs-code-catalog?q=` — search for Products page HS autocomplete; `GET /hs-code-catalog/files` — list CSV files; `POST /hs-code-catalog/import` — import from `hs codes/` folder (SuperAdmin only)
+- **Products page:** Filter and product form HS code fields use catalog autocomplete (hs_code + name); filter still sends `hs_code` to `GET /products`; products table `hs_code` unchanged
+- **Admin config:** HS Code Tariff Catalog section with file selector and Import/Update button
+- **RBAC:** read = ChinaAdmin, ChinaEmployee, LebanonAdmin, SuperAdmin; write/import = SuperAdmin
+- **Downstream:** `hs_code_tax` uses `hs_code_tax_rates` (manual rates); orders, receiving, procurement use `product.hs_code` from products; no exports changed
+- **HS Code Tax page:** Added "Lebanon Tariff Catalog" section — search imported catalog; Estimator HS Code and Add Rate HS Code fields use catalog autocomplete. Tax Rate Library remains for manual rates (`hs_code_tax_rates`); catalog data is separate
+
+#### Downstream Impact Review (HS Code Tariff Catalog)
+
+| Area | Status | Notes |
+|------|--------|-------|
+| **Products API** | Unchanged | `hs_code` filter on `GET /products` uses `products.hs_code`; `GET /products/hs-codes` legacy endpoint kept |
+| **Products page** | Updated | Filter + Add Product HS fields use catalog autocomplete; filter still sends `hs_code` to list API |
+| **HS Code Tax page** | Updated | Catalog search section; Estimator + Add Rate HS fields use catalog autocomplete |
+| **Orders, receiving, procurement** | Unchanged | Use `product.hs_code` from products; order_items has no hs_code column |
+| **Order/container export** | Unchanged | OrderExcelService Template.xlsx layout has no HS column; no change |
+| **Exports/reports** | None | No HS code exports found; no change |
+| **Permissions** | RBAC updated | `hs-code-catalog` read: ChinaAdmin, ChinaEmployee, LebanonAdmin, SuperAdmin; write/import: SuperAdmin |
+| **index.php** | No special case | Generic resource RBAC; handler enforces SuperAdmin for files/import |
+| **CODEX_CURSOR_HANDOFF** | Updated | Customs section + guardrails note tariff catalog support |
+| **Tests** | Added | smoke_test checks hs_code_tariff_catalog; hs_code_catalog_test schema + search |
+
 ---
 
 ## Phase 2A/2B/2C Completion Proof
@@ -605,7 +655,7 @@ Independent review pass completed on 2026-03-14. This section is the authoritati
 23. Editability of orders/products/containers
 - Status: Partially Complete
 - Evidence: Products and containers are editable; draft orders are editable; container/order actions are audited in several paths.
-- Problem: Order editability is intentionally restricted to `Draft`, and the system still lacks a dedicated full status-history table for richer auditability.
+- **Resolved:** Order editability extended to all statuses (PUT /orders/{id} and editOrder() no longer restrict to Draft). Audit trail remains via audit_log.
 - Action taken: Kept the draft-only guardrail, re-checked container write permissions, and preserved audit-log writes on key mutations.
 - Manual QA needed: Attempt edits at each major status boundary and confirm blocked states fail safely without corrupting linked data.
 
@@ -726,3 +776,29 @@ High-confidence completed items after this review pass:
 2. Extend the new HS code tax module with landed-cost rules per destination country once the business confirms the customs valuation method and tariff maintenance process.
 3. Replace the current one-time portal page with a short-lived signed session portal if customers are expected to revisit status multiple times before shipment completion.
 4. Introduce true item-level shipment allocation tables before expanding split-shipment operations. This is the most important remaining structural workflow gap.
+
+## 2026-03-16 HS Code Tariff Catalog Fix
+
+- Reproduced the failure end-to-end: Admin Config import succeeded, but Products page HS code autocomplete and HS Code Tax catalog search both failed with `500 Internal Server Error` on `GET /api/v1/hs-code-catalog/search?q=...`.
+- Root cause 1: `backend/api/handlers/hs-code-catalog.php` was binding `LIMIT ?` as a normal execute parameter, which MariaDB rejected and logged as a SQL syntax error.
+- Root cause 2: `frontend/js/autocomplete.js` treated `searchPath: ""` as falsy and silently changed HS catalog lookups to `/search`, even though the intended contract is `GET /hs-code-catalog?q=...`.
+- Fix applied: the HS catalog handler now safely supports both `/hs-code-catalog` and `/hs-code-catalog/search` for backward compatibility and uses a validated integer `LIMIT` in SQL; the shared autocomplete helper now honors an explicitly empty `searchPath`.
+- Downstream consistency updates: `admin_config.php` now states the importer feeds both Products and HS Code Tax, `hs_code_tax.php` now cache-busts the shared autocomplete and page script, and UI smoke coverage now imports the catalog then verifies autocomplete on both Products and HS Code Tax.
+- Verification: imported `6131` rows from `hs codes/lebanon_customs_tariffs.csv`, then verified autocomplete results for `0101` on Products and HS Code Tax after the fix.
+
+## 2026-03-16 HS Code Catalog Prefix-Matching Follow-up
+
+- Reproduced the ranking issue after the import fix: short numeric queries such as `96`, `85`, and `59` were still using broad `LIKE %query%` matching, so the dropdowns were filled with unrelated codes like `0304.96` or `0302.59` before the actual `96xx` / `85xx` / `59xx` chapters.
+- Root cause: `backend/api/handlers/hs-code-catalog.php` still searched `hs_code`, `name`, and `category` with generic contains matching and then limited early, so relevant prefix matches were pushed out of view.
+- Fix applied: the shared HS catalog endpoint now detects numeric HS-code searches, normalizes codes by removing dots/spaces/hyphens, and returns prefix matches from the opening digits first. Text searches now rank prefix matches ahead of contains matches. The response also returns `meta.total`, `meta.returned`, `meta.limit`, `meta.truncated`, and `meta.match_mode`.
+- Downstream updates from the impact review:
+  - `frontend/js/autocomplete.js` now supports per-field result limits so HS-code consumers can request deeper dropdowns without changing every autocomplete in the system.
+  - `frontend/js/products.js` now requests deeper HS catalog result sets for both the Products filter and the Add Product modal.
+  - `backend/api/handlers/products.php` now applies prefix-style HS filtering for numeric HS-code filters so the Products list behaves consistently when a user types a code fragment and clicks Apply without selecting from the dropdown first.
+  - `backend/api/handlers/hs-code-tax.php` now applies the same prefix-first rule to the Tax Rate Library HS-code search, so the two search surfaces on the HS Code Tax page no longer disagree.
+  - `hs_code_tax.php` and `frontend/js/hs_code_tax.js` now show a catalog-search summary and request a much larger result window for the table view, so users can see whether results are truncated instead of silently missing matches.
+  - `docs/API.md`, `tests/hs_code_catalog_test.php`, and `scripts/ui_smoke_checks.mjs` were updated to reflect and guard the new prefix-first behavior.
+- Verification:
+  - Typing `96` in the HS Code Tax estimator now starts with `9601.10`, `9601.90`, `9603.10`, ... rather than unrelated `...96` codes.
+  - Typing `85` in the Products HS filter now starts with `8501.10`, `8501.31`, `8501.33`, ... rather than unrelated `...85` codes.
+  - The HS Code Tax catalog table now reports what it is showing, for example: `Showing 1 match for "8501.10". Showing HS code matches from the first digits.`

@@ -31,7 +31,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 jsonResponse(['data' => $rows]);
             }
             if ($id && $action === 'orders') {
-                $stmt = $pdo->prepare("SELECT id, code, max_cbm, max_weight, status, notes FROM containers WHERE id = ?");
+                $stmt = $pdo->prepare("SELECT * FROM containers WHERE id = ?");
                 $stmt->execute([$id]);
                 $container = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$container) jsonError('Container not found', 404);
@@ -224,6 +224,29 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $sets[] = 'eta_date = ?';
                 $params[] = ($v && preg_match('/^\d{4}-\d{2}-\d{2}$/', $v)) ? $v : null;
             }
+            $chkShip = @$pdo->query("SHOW COLUMNS FROM containers LIKE 'expected_ship_date'");
+            if ($chkShip && $chkShip->rowCount() > 0 && array_key_exists('expected_ship_date', $input)) {
+                $v = $input['expected_ship_date'];
+                $sets[] = 'expected_ship_date = ?';
+                $params[] = ($v && preg_match('/^\d{4}-\d{2}-\d{2}$/', $v)) ? $v : null;
+            }
+            $chkDep = @$pdo->query("SHOW COLUMNS FROM containers LIKE 'actual_departure_date'");
+            if ($chkDep && $chkDep->rowCount() > 0 && array_key_exists('actual_departure_date', $input)) {
+                $v = $input['actual_departure_date'];
+                $sets[] = 'actual_departure_date = ?';
+                $params[] = ($v && preg_match('/^\d{4}-\d{2}-\d{2}$/', $v)) ? $v : null;
+            }
+            $chkArr = @$pdo->query("SHOW COLUMNS FROM containers LIKE 'actual_arrival_date'");
+            if ($chkArr && $chkArr->rowCount() > 0 && array_key_exists('actual_arrival_date', $input)) {
+                $v = $input['actual_arrival_date'];
+                $sets[] = 'actual_arrival_date = ?';
+                $params[] = ($v && preg_match('/^\d{4}-\d{2}-\d{2}$/', $v)) ? $v : null;
+            }
+            $chkVessel = @$pdo->query("SHOW COLUMNS FROM containers LIKE 'vessel_name'");
+            if ($chkVessel && $chkVessel->rowCount() > 0 && array_key_exists('vessel_name', $input)) {
+                $sets[] = 'vessel_name = ?';
+                $params[] = trim((string) ($input['vessel_name'] ?? '')) ?: null;
+            }
             $chkDest = @$pdo->query("SHOW COLUMNS FROM containers LIKE 'destination_country'");
             if ($chkDest && $chkDest->rowCount() > 0 && array_key_exists('destination_country', $input)) {
                 $sets[] = 'destination_country = ?';
@@ -355,8 +378,17 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             $status = in_array($input['status'] ?? '', ['planning', 'to_go', 'on_route', 'arrived', 'available'])
                 ? $input['status'] : 'planning';
-            $pdo->prepare("INSERT INTO containers (code, max_cbm, max_weight, status) VALUES (?,?,?,?)")
-                ->execute([$code, $maxCbm, $maxWeight, $status]);
+            $expectedShip = isset($input['expected_ship_date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $input['expected_ship_date']) ? $input['expected_ship_date'] : null;
+            $chkShip = @$pdo->query("SHOW COLUMNS FROM containers LIKE 'expected_ship_date'");
+            $cols = ['code', 'max_cbm', 'max_weight', 'status'];
+            $vals = [$code, $maxCbm, $maxWeight, $status];
+            if ($chkShip && $chkShip->rowCount() > 0) {
+                $cols[] = 'expected_ship_date';
+                $vals[] = $expectedShip;
+            }
+            $ph = implode(',', array_fill(0, count($vals), '?'));
+            $pdo->prepare("INSERT INTO containers (" . implode(',', $cols) . ") VALUES ($ph)")
+                ->execute($vals);
             $newId = (int) $pdo->lastInsertId();
             $stmt = $pdo->prepare("SELECT * FROM containers WHERE id = ?");
             $stmt->execute([$newId]);

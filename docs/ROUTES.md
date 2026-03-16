@@ -74,6 +74,7 @@ Base path: `/cargochina/`
 | `/cargochina/suppliers.php` | Suppliers |
 | `/cargochina/products.php` | Products |
 | `/cargochina/receiving.php` | Receiving |
+| `/cargochina/expenses.php` | Expenses (ChinaAdmin, LebanonAdmin, SuperAdmin) |
 | `/cargochina/consolidation.php` | Consolidation |
 | `/cargochina/notifications.php` | Notifications |
 | `/cargochina/notification_preferences.php` | Notification preferences |

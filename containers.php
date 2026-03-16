@@ -31,6 +31,11 @@ require 'includes/layout.php';
     <div class="value" id="containersAssignedOrders">0</div>
     <div class="detail">Orders currently packed into visible containers</div>
   </div>
+  <div class="metric-card">
+    <div class="eyebrow">Launching Soon</div>
+    <div class="value" id="containersLaunchingSoon">0</div>
+    <div class="detail">Ship date within next 7 days</div>
+  </div>
 </div>
 
 <!-- Search & Filter bar -->
@@ -56,13 +61,15 @@ require 'includes/layout.php';
           <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" onclick="clearContainerStatusFilter()">Clear</button>
         </div>
         <div class="filter-chip-grid" id="containerStatusFilterList">
-          <?php foreach ([
-            'planning' => 'Planning',
-            'to_go' => 'To Go',
-            'on_route' => 'On Route',
-            'arrived' => 'Arrived',
-            'available' => 'Available',
-          ] as $statusValue => $statusLabel): ?>
+          <?php foreach (
+            [
+              'planning' => 'Planning',
+              'to_go' => 'To Go',
+              'on_route' => 'On Route',
+              'arrived' => 'Arrived',
+              'available' => 'Available',
+            ] as $statusValue => $statusLabel
+          ): ?>
             <div class="form-check filter-chip">
               <input class="form-check-input container-status-filter" type="checkbox" value="<?= htmlspecialchars($statusValue) ?>" id="containerStatus<?= htmlspecialchars($statusValue) ?>" onchange="updateContainerStatusFilterSummary();loadContainers()">
               <label class="form-check-label" for="containerStatus<?= htmlspecialchars($statusValue) ?>"><?= htmlspecialchars($statusLabel) ?></label>
@@ -93,6 +100,7 @@ require 'includes/layout.php';
           <option value="partial">Partial (1–84%)</option>
           <option value="almost">Almost Full (≥85%)</option>
           <option value="full">Full (100%)</option>
+          <option value="launching_soon">Launching in 7 days</option>
         </select>
         <div class="filter-summary-row">
           <button class="btn btn-outline-secondary btn-sm" onclick="resetFilters()">Clear All Filters</button>
@@ -115,6 +123,7 @@ require 'includes/layout.php';
             <th>ID</th>
             <th>Code</th>
             <th>Status</th>
+            <th>Ship Date</th>
             <th>Orders</th>
             <th>CBM Fill</th>
             <th>Weight Fill</th>
@@ -209,6 +218,60 @@ require 'includes/layout.php';
     </div>
   </div>
 </div>
+<!-- Container Edit Modal (dates, vessel, destination) -->
+<div class="modal fade" id="containerEditModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">Edit Container Schedule</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="containerEditId">
+        <div class="row g-3">
+          <div class="col-12 col-md-6">
+            <label class="form-label small">Expected Ship Date</label>
+            <input type="date" class="form-control form-control-sm" id="containerEditShipDate" placeholder="When to load onto cargo ship">
+            <small class="text-muted">Planned launch / upload to ship</small>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label small">ETA (Arrival)</label>
+            <input type="date" class="form-control form-control-sm" id="containerEditEta" placeholder="Expected arrival">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label small">Actual Departure</label>
+            <input type="date" class="form-control form-control-sm" id="containerEditActualDep" placeholder="When it left">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label small">Actual Arrival</label>
+            <input type="date" class="form-control form-control-sm" id="containerEditActualArr" placeholder="When it arrived">
+          </div>
+          <div class="col-12">
+            <label class="form-label small">Vessel / Ship Name</label>
+            <input type="text" class="form-control form-control-sm" id="containerEditVessel" placeholder="e.g. COSCO SHIPPING">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label small">Destination Country</label>
+            <input type="text" class="form-control form-control-sm" id="containerEditDestCountry" placeholder="e.g. Lebanon">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label small">Destination (Port/City)</label>
+            <input type="text" class="form-control form-control-sm" id="containerEditDest" placeholder="e.g. Beirut Port">
+          </div>
+          <div class="col-12">
+            <label class="form-label small">Notes</label>
+            <textarea class="form-control form-control-sm" id="containerEditNotes" rows="2" placeholder="Internal notes"></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="containerEditSaveBtn" onclick="saveContainerEdit()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Status Change Modal -->
 <div class="modal fade" id="statusModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered modal-sm">

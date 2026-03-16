@@ -139,7 +139,7 @@ async function loadOrder() {
             <td>${escapeHtml((it.description_cn || it.description_en || "Item " + (i + 1)).substring(0, 40))}</td>
             <td>${it.declared_cbm || 0} / ${it.declared_weight || 0} kg</td>
             <td><input type="number" class="form-control form-control-sm item-actual-cartons" min="0" placeholder="0"></td>
-            <td><input type="number" step="0.0001" class="form-control form-control-sm item-actual-cbm" min="0" placeholder="0"></td>
+            <td><input type="number" step="0.000001" class="form-control form-control-sm item-actual-cbm" min="0" placeholder="0"></td>
             <td><input type="number" step="0.0001" class="form-control form-control-sm item-actual-weight" min="0" placeholder="0"></td>
             <td><select class="form-select form-select-sm item-condition"><option value="good">Good</option><option value="damaged">Damaged</option><option value="partial">Partial</option></select></td>
             <td><input type="file" class="d-none item-photo-input" accept="image/*" multiple><button type="button" class="btn btn-sm btn-outline-secondary item-add-photo">+</button><div class="item-photo-preview d-inline"></div></td>

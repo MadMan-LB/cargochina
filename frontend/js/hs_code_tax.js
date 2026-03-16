@@ -1,5 +1,6 @@
 const HS_CODE_TAX_API = window.API_BASE || "/cargochina/api/v1";
 let hsCodeTaxSearchTimer = null;
+let catalogSearchTimer = null;
 
 function hsCodeTaxNotify(message, variant = "success") {
     if (typeof showToast === "function") {
@@ -39,6 +40,13 @@ function formatHsAmount(value) {
         minimumFractionDigits: 2,
         maximumFractionDigits: 4,
     });
+}
+
+function setCatalogSearchSummary(message) {
+    const summaryEl = document.getElementById("catalogSearchSummary");
+    if (summaryEl) {
+        summaryEl.textContent = message;
+    }
 }
 
 function currentTaxRateQuery() {
@@ -110,8 +118,7 @@ window.openTaxRateForm = function (rate = null) {
     document.getElementById("taxRateHsCode").value = rate?.hs_code || "";
     document.getElementById("taxRateCountryCode").value =
         rate?.country_code || "LB";
-    document.getElementById("taxRatePercent").value =
-        rate?.rate_percent ?? "";
+    document.getElementById("taxRatePercent").value = rate?.rate_percent ?? "";
     document.getElementById("taxRateEffectiveFrom").value =
         rate?.effective_from || "";
     document.getElementById("taxRateNotes").value = rate?.notes || "";
@@ -142,7 +149,11 @@ window.saveTaxRate = async function () {
             document.getElementById("taxRateEffectiveFrom").value || null,
         notes: document.getElementById("taxRateNotes").value.trim() || null,
     };
-    if (!payload.hs_code || !payload.country_code || payload.rate_percent === "") {
+    if (
+        !payload.hs_code ||
+        !payload.country_code ||
+        payload.rate_percent === ""
+    ) {
         hsCodeTaxNotify("HS code, country, and rate are required.", "danger");
         return;
     }
@@ -246,7 +257,7 @@ function renderEstimate(data) {
           </tr>`,
         )
         .join("");
-};
+}
 
 window.runHsTaxEstimate = async function () {
     try {
@@ -258,6 +269,90 @@ window.runHsTaxEstimate = async function () {
     }
 };
 
+async function loadCatalogSearch() {
+    const tbody = document.getElementById("catalogTableBody");
+    if (!tbody) return;
+    const q = document.getElementById("catalogSearch")?.value?.trim() || "";
+    if (q.length < 1) {
+        setCatalogSearchSummary(
+            "Search by the opening digits of an HS code or by the start of a name/category.",
+        );
+        tbody.innerHTML =
+            '<tr><td colspan="6" class="text-muted text-center py-4">Type to search the imported tariff catalog.</td></tr>';
+        return;
+    }
+    setCatalogSearchSummary("Searching the imported tariff catalog...");
+    tbody.innerHTML =
+        '<tr><td colspan="6" class="text-muted text-center py-4">Loading...</td></tr>';
+    try {
+        const res = await hsCodeTaxApi(
+            "GET",
+            "/hs-code-catalog?q=" + encodeURIComponent(q) + "&limit=500",
+        );
+        const rows = res.data || [];
+        const meta = res.meta || {};
+        const total = Number(meta.total || rows.length || 0);
+        const returned = Number(meta.returned || rows.length || 0);
+        const prefixNote =
+            meta.match_mode === "hs_code_prefix"
+                ? "Showing HS code matches from the first digits."
+                : "Showing name/category matches with prefix results first.";
+        if (!rows.length) {
+            setCatalogSearchSummary(
+                `No catalog entries found for "${q}". Import data from Admin → Configuration → HS Code Tariff Catalog if needed.`,
+            );
+            tbody.innerHTML =
+                '<tr><td colspan="6" class="text-muted text-center py-4">No catalog entries found. Import data from Admin → Configuration → HS Code Tariff Catalog.</td></tr>';
+            return;
+        }
+        setCatalogSearchSummary(
+            meta.truncated
+                ? `Showing ${returned} of ${total} matches for "${q}". ${prefixNote}`
+                : `Showing ${returned} match${returned === 1 ? "" : "es"} for "${q}". ${prefixNote}`,
+        );
+        tbody.innerHTML = rows
+            .map(
+                (r) => `
+          <tr>
+            <td><code>${escapeHsHtml(r.hs_code)}</code></td>
+            <td>${escapeHsHtml(r.name || "—")}</td>
+            <td>${escapeHsHtml(r.category || "—")}</td>
+            <td>${escapeHsHtml(r.tariff_rate || "—")}</td>
+            <td>${escapeHsHtml(r.vat || "—")}</td>
+            <td>${escapeHsHtml(r.section_name || "—")}</td>
+          </tr>`,
+            )
+            .join("");
+    } catch (error) {
+        tbody.innerHTML = `<tr><td colspan="6" class="text-danger text-center py-4">${escapeHsHtml(error.message)}</td></tr>`;
+    }
+}
+
+function debounceCatalogSearch() {
+    clearTimeout(catalogSearchTimer);
+    catalogSearchTimer = setTimeout(loadCatalogSearch, 220);
+}
+
+function setupHsCodeCatalogAutocomplete(inputId, extraOnSelect) {
+    const el = document.getElementById(inputId);
+    if (!el || typeof Autocomplete === "undefined") return;
+    Autocomplete.init(el, {
+        resource: "hs-code-catalog",
+        searchPath: "",
+        limit: 50,
+        placeholder: "Start typing HS code or tariff name...",
+        renderItem: (item) =>
+            [item.hs_code, item.name].filter(Boolean).join(" — ") ||
+            item.id ||
+            "",
+        displayValue: (item) => item.hs_code || item.id || "",
+        onSelect: (item) => {
+            el.value = item.hs_code || item.id || "";
+            if (typeof extraOnSelect === "function") extraOnSelect(item);
+        },
+    });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
     document
         .getElementById("taxRateSearch")
@@ -265,8 +360,10 @@ document.addEventListener("DOMContentLoaded", () => {
     document
         .getElementById("taxRateCountryFilter")
         ?.addEventListener("input", debounceTaxRateSearch);
-
     if (typeof Autocomplete !== "undefined") {
+        setupHsCodeCatalogAutocomplete("catalogSearch", () =>
+            loadCatalogSearch(),
+        );
         Autocomplete.init(document.getElementById("estimateProductSearch"), {
             resource: "products",
             placeholder: "Search product...",
@@ -276,6 +373,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 document.getElementById("estimateProductId").value = item.id;
             },
         });
+        setupHsCodeCatalogAutocomplete("estimateHsCode");
+        setupHsCodeCatalogAutocomplete("taxRateHsCode");
     }
     document
         .getElementById("estimateProductSearch")

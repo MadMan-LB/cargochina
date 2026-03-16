@@ -6,6 +6,82 @@ let filterCustomerAc, filterSupplierAc, filterOrderAc;
 
 let filterDebounce = null;
 
+function setConfirmMetric(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+}
+
+function countActiveConfirmFilters() {
+    return [
+        document.getElementById("filterSearch")?.value?.trim(),
+        document.getElementById("filterDateFrom")?.value,
+        document.getElementById("filterDateTo")?.value,
+        filterOrderAc?.getSelectedId?.() ||
+            document.getElementById("filterOrderId")?.value?.trim(),
+        filterCustomerAc?.getSelectedId?.() ||
+            document.getElementById("filterCustomer")?.value?.trim(),
+        filterSupplierAc?.getSelectedId?.() ||
+            document.getElementById("filterSupplier")?.value?.trim(),
+    ].filter(Boolean).length;
+}
+
+function parseExpectedDate(value) {
+    if (!value) return null;
+    const date = new Date(value + "T00:00:00");
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function updateConfirmOverview(rows) {
+    const safeRows = rows || [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dueCutoff = new Date(today);
+    dueCutoff.setDate(dueCutoff.getDate() + 7);
+    const priorityCount = safeRows.filter(
+        (row) =>
+            row.customer_priority_level &&
+            String(row.customer_priority_level).toLowerCase() !== "normal",
+    ).length;
+    const dueSoonCount = safeRows.filter((row) => {
+        const date = parseExpectedDate(row.expected_ready_date);
+        return date && date >= today && date <= dueCutoff;
+    }).length;
+    const activeFilters = countActiveConfirmFilters();
+    const uniqueCustomers = new Set(
+        safeRows.map((row) => row.customer_name).filter(Boolean),
+    ).size;
+
+    setConfirmMetric("confirmQueueCount", String(safeRows.length));
+    setConfirmMetric("confirmPriorityCount", String(priorityCount));
+    setConfirmMetric("confirmDueSoonCount", String(dueSoonCount));
+    setConfirmMetric(
+        "confirmQueueDetail",
+        safeRows.length
+            ? `${uniqueCustomers} customers in the current review queue.`
+            : "No orders are waiting for confirmation.",
+    );
+    setConfirmMetric(
+        "confirmPriorityDetail",
+        priorityCount
+            ? `${priorityCount} orders belong to flagged customer accounts.`
+            : "No priority customers in the visible queue.",
+    );
+    setConfirmMetric(
+        "confirmDueSoonDetail",
+        dueSoonCount
+            ? `${dueSoonCount} orders have expected-ready dates within 7 days.`
+            : "Nothing due in the next 7 days.",
+    );
+    setConfirmMetric(
+        "confirmFilterSummary",
+        safeRows.length
+            ? `Showing ${safeRows.length} awaiting order(s)${activeFilters ? ` after ${activeFilters} active filter(s)` : ""}.`
+            : activeFilters
+              ? "No awaiting orders match the active confirmation filters."
+              : "Showing the full confirmation queue.",
+    );
+}
+
 document.addEventListener("DOMContentLoaded", function () {
     filterOrderAc = Autocomplete.init(
         document.getElementById("filterOrderId"),
@@ -111,7 +187,27 @@ function syncFiltersToUrl() {
 function updateBulkConfirmBtn() {
     const checked = document.querySelectorAll(".confirm-cb:checked");
     const btn = document.getElementById("bulkConfirmBtn");
-    if (btn) btn.disabled = checked.length === 0;
+    const selectedCount = checked.length;
+    if (btn) {
+        btn.disabled = selectedCount === 0;
+        btn.textContent =
+            selectedCount > 0
+                ? `Confirm Selected (${selectedCount})`
+                : "Confirm Selected";
+    }
+    setConfirmMetric("confirmSelectedCount", String(selectedCount));
+    setConfirmMetric(
+        "confirmSelectedDetail",
+        selectedCount
+            ? "Ready for a single bulk confirmation action."
+            : "Orders picked for bulk confirmation.",
+    );
+    setConfirmMetric(
+        "confirmSelectionHint",
+        selectedCount
+            ? `${selectedCount} order(s) selected for bulk confirmation.`
+            : "No orders selected yet.",
+    );
 }
 
 function getSelectedOrderIds() {
@@ -187,10 +283,13 @@ async function loadConfirmations() {
         document.querySelectorAll(".confirm-cb").forEach((cb) => {
             cb.addEventListener("change", updateBulkConfirmBtn);
         });
+        updateConfirmOverview(rows);
         updateBulkConfirmBtn();
         const selectAll = document.getElementById("selectAllConfirm");
         if (selectAll) selectAll.checked = false;
     } catch (e) {
+        updateConfirmOverview([]);
+        updateBulkConfirmBtn();
         showToast(e.message || "Failed to load", "danger");
     }
 }

@@ -6,14 +6,123 @@ $currentPage = 'products';
 $pageTitle = 'Products';
 require 'includes/layout.php';
 ?>
-<h1 class="mb-4">Products</h1>
+<div class="card page-hero-card mb-4">
+  <div class="card-body">
+    <div class="d-flex flex-column flex-xl-row justify-content-between align-items-xl-center gap-3">
+      <div>
+        <h1 class="mb-2">Products</h1>
+        <p class="text-muted mb-0">Search quickly by description, supplier, HS code, packaging, or operational alert so the catalog is easier to manage.</p>
+      </div>
+      <div class="d-flex gap-2 flex-wrap">
+        <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#importModal" onclick="openImportModal('products')">Import CSV</button>
+        <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#productModal" onclick="openProductForm()">+ Add Product</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="metric-card-grid mb-4">
+  <div class="metric-card">
+    <div class="eyebrow">Visible Products</div>
+    <div class="value" id="productsVisibleCount">0</div>
+    <div class="detail" id="productsVisibleDetail">Products matching the current filters.</div>
+  </div>
+  <div class="metric-card">
+    <div class="eyebrow">High Alert</div>
+    <div class="value" id="productsAlertCount">0</div>
+    <div class="detail" id="productsAlertDetail">Products with alert notes or required design.</div>
+  </div>
+  <div class="metric-card">
+    <div class="eyebrow">With Images</div>
+    <div class="value" id="productsImageCount">0</div>
+    <div class="detail" id="productsImageDetail">Products that already have thumbnails or image sets.</div>
+  </div>
+  <div class="metric-card">
+    <div class="eyebrow">With Supplier</div>
+    <div class="value" id="productsSupplierCount">0</div>
+    <div class="detail" id="productsSupplierDetail">Products linked to a supplier record.</div>
+  </div>
+</div>
+
+<div class="balanced-panels mb-4">
+  <div class="filter-toolbar-card soft">
+    <div class="filter-toolbar-head">
+      <div>
+        <h6>Filter Catalog</h6>
+        <div class="filter-toolbar-subtext">Use searchable fields so you can find products fast without scrolling through the full list.</div>
+      </div>
+      <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" onclick="clearProductFilters()">Clear</button>
+    </div>
+    <div class="row g-3">
+      <div class="col-md-4">
+        <label class="form-label small">Search</label>
+        <input type="text" class="form-control form-control-sm" id="productSearch" placeholder="ID, description, packaging, supplier, HS code…">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label small">Supplier</label>
+        <input type="text" class="form-control form-control-sm" id="productFilterSupplierSearch" placeholder="Type to search supplier..." autocomplete="off">
+        <input type="hidden" id="productFilterSupplierId">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label small">HS Code</label>
+        <input type="text" class="form-control form-control-sm" id="productFilterHsCode" placeholder="Type to search HS code..." autocomplete="off">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small">Alert</label>
+        <select class="form-select form-select-sm" id="productAlertFilter">
+          <option value="">All products</option>
+          <option value="with">Alert only</option>
+          <option value="without">Without alert</option>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small">Images</label>
+        <select class="form-select form-select-sm" id="productImageFilter">
+          <option value="">All products</option>
+          <option value="with">With images</option>
+          <option value="without">Without images</option>
+        </select>
+      </div>
+      <div class="col-md-3 d-flex align-items-end">
+        <button class="btn btn-primary btn-sm w-100" type="button" onclick="loadProducts()">Apply Filters</button>
+      </div>
+      <div class="col-md-3 d-flex align-items-end">
+        <button class="btn btn-outline-secondary btn-sm w-100" type="button" onclick="clearProductFilters()">Reset View</button>
+      </div>
+    </div>
+    <div class="filter-summary-row">
+      <div class="summary-text" id="productsFilterSummary">Showing the full product catalog.</div>
+    </div>
+  </div>
+
+  <div class="filter-toolbar-card">
+    <div class="filter-toolbar-head">
+      <div>
+        <h6>Quick Reading Guide</h6>
+        <div class="filter-toolbar-subtext">Keep the important product signals visible while filtering.</div>
+      </div>
+    </div>
+    <div class="stack-card-list">
+      <div class="finance-callout">
+        <strong>Search box</strong>
+        <div class="text-muted small">Matches ID, description, packaging, supplier, and HS code in one place.</div>
+      </div>
+      <div class="finance-callout">
+        <strong>Alert filter</strong>
+        <div class="text-muted small">Includes both required-design products and products with high-alert notes.</div>
+      </div>
+      <div class="finance-callout">
+        <strong>Current result</strong>
+        <div class="text-muted small" id="productsGuideSummary">No product data loaded yet.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="card">
   <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-    <span>Product List</span>
-    <div class="d-flex gap-2">
-      <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#importModal" onclick="openImportModal('products')">Import CSV</button>
-      <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#productModal" onclick="openProductForm()">+ Add Product</button>
-    </div>
+    <span>Product List <span class="text-muted fw-normal" id="productsCountLabel"></span></span>
+    <small class="text-muted" id="productsTableSummary">Waiting for data…</small>
   </div>
   <div class="card-body">
     <div id="productsTable" class="table-responsive">
@@ -23,6 +132,7 @@ require 'includes/layout.php';
             <th>Thumbnail</th>
             <th>ID</th>
             <th>Description</th>
+            <th>Supplier</th>
             <th>Alert</th>
             <th>CBM</th>
             <th>Weight</th>
@@ -70,6 +180,20 @@ require 'includes/layout.php';
             </div>
             <div class="col-12 col-md-4 mb-2"><label class="form-label">Weight *</label><input type="number" step="0.0001" class="form-control" id="productWeight" required></div>
           </div>
+          <div class="mb-2">
+            <label class="form-label">Dimensions apply to</label>
+            <div class="d-flex gap-3">
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="productDimensionsScope" id="productDimensionsPiece" value="piece" checked>
+                <label class="form-check-label" for="productDimensionsPiece">Piece</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="productDimensionsScope" id="productDimensionsCarton" value="carton">
+                <label class="form-check-label" for="productDimensionsCarton">Carton</label>
+              </div>
+            </div>
+            <small class="text-muted">CBM, L×W×H, and weight above are stored per piece or per carton accordingly.</small>
+          </div>
           <div class="row form-row-responsive">
             <div class="col-12 col-md-4 mb-2"><label class="form-label">HS Code</label><input type="text" class="form-control" id="productHsCode"></div>
             <div class="col-12 col-md-4 mb-2"><label class="form-label">Pieces per carton</label><input type="number" min="1" class="form-control" id="productPiecesPerCarton" placeholder="e.g. 24"></div>
@@ -79,7 +203,15 @@ require 'includes/layout.php';
             <div class="col-12 col-md-4 mb-2"><label class="form-label">Buy price (internal)</label><input type="number" step="0.0001" class="form-control" id="productBuyPrice" placeholder="Cost"></div>
             <div class="col-12 col-md-4 mb-2"><label class="form-label">Sell price (customer-facing)</label><input type="number" step="0.0001" class="form-control" id="productSellPrice" placeholder="Falls back to unit price"></div>
           </div>
+          <small class="text-muted d-block mb-2">Buy price, sell price, unit price, and HS code are always per piece.</small>
           <div class="mb-2"><label class="form-label">Packaging</label><input type="text" class="form-control" id="productPackaging"></div>
+          <div class="mb-2">
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" id="productRequiredDesign" value="1">
+              <label class="form-check-label" for="productRequiredDesign">Required design — design must be approved before production</label>
+            </div>
+            <small class="text-muted d-block mb-1">When checked, a high alert is shown in orders, receiving, confirmations, and all related workflows for double-checking.</small>
+          </div>
           <div class="mb-2">
             <label class="form-label">High Alert Note</label>
             <textarea class="form-control product-alert-note" id="productHighAlertNote" rows="2" placeholder="Special color, shape, packaging, fragile handling, or other critical production details"></textarea>
@@ -138,6 +270,9 @@ require 'includes/layout.php';
     </div>
   </div>
 </div>
-<?php $pageScripts = ['frontend/js/photo_uploader.js', 'frontend/js/autocomplete.js'];
-$pageScript = 'frontend/js/products.js';
+<?php $pageScripts = [
+  'frontend/js/photo_uploader.js?v=' . filemtime(__DIR__ . '/frontend/js/photo_uploader.js'),
+  'frontend/js/autocomplete.js?v=' . filemtime(__DIR__ . '/frontend/js/autocomplete.js'),
+];
+$pageScript = 'frontend/js/products.js?v=' . filemtime(__DIR__ . '/frontend/js/products.js');
 require 'includes/footer.php'; ?>

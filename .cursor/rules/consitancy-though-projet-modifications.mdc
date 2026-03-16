@@ -1,0 +1,10 @@
+---
+alwaysApply: true
+---
+
+When making any change to this codebase, ensure system-wide consistency:
+1. Trace the full flow: Customer → Supplier → Product → Order → Order items → Templates → Receiving → Confirmation → Container → Financials → Export.
+2. Update all touchpoints that use the changed data: API handlers, frontend (forms/tables/modals), services (Excel, PDF), migrations.
+3. For new fields (e.g. dimensions_scope, required_design): verify Product form, Product search, Order item selection, Order create/edit/load, Receiving, Confirmations, Containers, Excel export, and Templates all handle the field correctly.
+4. Re-test end-to-end: create customer/supplier/product → create order with items → save/edit/copy → load template → submit → receive → confirm → assign container → export → check financials.
+5. Before finishing, grep for the new column/field name and related calculation patterns across the repo to catch missed touchpoints.

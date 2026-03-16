@@ -273,11 +273,16 @@
             categoryVal && /^\d+$/.test(String(categoryVal))
                 ? parseInt(categoryVal, 10)
                 : 0;
+        const categoryName =
+            document.getElementById("expenseCategory").value?.trim() || "";
         const payeeSel = formPayeeAc?.getSelected?.() || null;
         const supplierIdFromPayee =
             payeeSel?.supplier_id != null ? payeeSel.supplier_id : null;
         const body = {
             category_id: categoryId,
+            ...(categoryId === 0 && categoryName
+                ? { category_name: categoryName }
+                : {}),
             amount: parseFloat(document.getElementById("expenseAmount").value),
             currency: document.getElementById("expenseCurrency").value,
             expense_date: document.getElementById("expenseDate").value,
@@ -295,9 +300,9 @@
             notes:
                 document.getElementById("expenseNotes").value?.trim() || null,
         };
-        if (!body.category_id || body.amount <= 0) {
+        if ((!body.category_id && !categoryName) || body.amount <= 0) {
             alert(
-                "Category and amount are required. Please select a category from the search.",
+                "Category and amount are required. Type a category name or select one from the search.",
             );
             return;
         }
@@ -310,6 +315,7 @@
             bootstrap.Modal.getInstance(
                 document.getElementById("expenseModal"),
             ).hide();
+            await refreshFilterCategories();
             loadExpenses();
         } catch (e) {
             alert(e.message || "Failed to save expense");
@@ -403,6 +409,26 @@
         }
     }
 
+    async function refreshFilterCategories() {
+        const sel = document.getElementById("filterCategory");
+        if (!sel) return;
+        const catRes = await api("GET", "/expenses/categories").catch(() => ({
+            data: [],
+        }));
+        const currentVal = sel.value;
+        sel.innerHTML =
+            '<option value="">All</option>' +
+            (catRes.data || [])
+                .map(
+                    (c) =>
+                        `<option value="${c.id}">${escapeHtml(c.name)} (${c.category_type})</option>`,
+                )
+                .join("");
+        if (currentVal && sel.querySelector(`option[value="${currentVal}"]`)) {
+            sel.value = currentVal;
+        }
+    }
+
     function restoreFiltersFromStorage() {
         try {
             const raw = localStorage.getItem(FILTER_KEY);
@@ -440,20 +466,7 @@
     // Load categories and expenses on init
     (async function init() {
         setupExpenseAutocompletes();
-        const catRes = await api("GET", "/expenses/categories").catch(() => ({
-            data: [],
-        }));
-        const sel = document.getElementById("filterCategory");
-        if (sel) {
-            sel.innerHTML =
-                '<option value="">All</option>' +
-                (catRes.data || [])
-                    .map(
-                        (c) =>
-                            `<option value="${c.id}">${escapeHtml(c.name)} (${c.category_type})</option>`,
-                    )
-                    .join("");
-        }
+        await refreshFilterCategories();
         restoreFiltersFromStorage();
 
         loadExpenses();

@@ -27,9 +27,16 @@ return [
         'read' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'],
         'write' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'],
     ],
+    'hs-code-catalog' => [
+        'read' => ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'SuperAdmin'],
+        'write' => ['SuperAdmin'],
+    ],
     'containers' => [
         'read' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'],
         'write' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'],
+    ],
+    'countries' => [
+        'read' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'],
     ],
     'shipment-drafts' => [
         'create' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'],

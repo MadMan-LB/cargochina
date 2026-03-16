@@ -1,5 +1,11 @@
 let itemIndex = 0;
-let orderCustomerAc, orderSupplierAc;
+let orderCustomerAc, orderSupplierAc, orderSearchAc;
+
+/** Round CBM to 6 decimals to avoid floating-point drift (e.g. 0.2 → 0.2 not 0.20000000000000004). */
+function roundCbm6(val) {
+    const n = parseFloat(val);
+    return Number.isNaN(n) ? 0 : Math.round(n * 1e6) / 1e6;
+}
 const RECENT_KEY_CUSTOMERS = "cargochina_recent_customers";
 const RECENT_KEY_SUPPLIERS = "cargochina_recent_suppliers";
 const RECENT_MAX = 8;
@@ -100,6 +106,12 @@ function setItemSupplierValue(card, supplierId, supplierName) {
     if (supplierInput) supplierInput.value = supplierName || "";
 }
 
+function productAlertTextFromItem(it) {
+    const req = it?.product_required_design || it?.required_design;
+    const note = it?.product_high_alert_note || it?.high_alert_note || "";
+    return (req ? "Required design. " : "") + (note || "");
+}
+
 function renderProductAlertHint(card, note) {
     if (!card) return;
     const slot = card.querySelector(".product-alert-slot");
@@ -151,8 +163,25 @@ function getItemQuantityFromData(it) {
 
 function getItemWeightPerQty(it) {
     const totalWeight = parseFloat(it?.declared_weight ?? 0) || 0;
+    const denom = getItemPerUnitDenom(it);
+    return totalWeight > 0 && denom > 0 ? (totalWeight / denom).toFixed(4) : "";
+}
+
+/** Returns denominator for per-unit CBM/weight when loading item. Uses dimensions_scope when available. */
+function getItemPerUnitDenom(it) {
+    const scope = (
+        it?.product_dimensions_scope ||
+        it?.dimensions_scope ||
+        "piece"
+    )
+        .toString()
+        .toLowerCase();
+    const cartons = parseFloat(it?.cartons ?? 0) || 0;
     const qty = getItemQuantityFromData(it);
-    return totalWeight > 0 && qty > 0 ? (totalWeight / qty).toFixed(4) : "";
+    if (scope === "carton" && cartons > 0) return cartons;
+    if (qty > 0) return qty;
+    if (cartons > 0) return cartons;
+    return 1;
 }
 
 function getOrderSupplierDisplay(order) {
@@ -176,6 +205,50 @@ function getSelectedOrderStatuses() {
 
 function orderStatusDisplay(status) {
     return typeof statusLabel === "function" ? statusLabel(status) : status;
+}
+
+function truncateOrderSearchText(text, maxLen = 32) {
+    const value = String(text || "").trim();
+    if (!value) return "";
+    return value.length > maxLen ? value.slice(0, maxLen - 3) + "..." : value;
+}
+
+function getOrderSearchSupplierText(order) {
+    const itemSuppliers = String(order?.item_supplier_names || "").trim();
+    if (itemSuppliers) return itemSuppliers;
+    return String(order?.supplier_name || "").trim();
+}
+
+function renderOrderSearchMatch(order) {
+    const parts = [`#${order.id}`, order.customer_name || ""];
+    const supplier = truncateOrderSearchText(getOrderSearchSupplierText(order));
+    const shippingCode = String(order?.shipping_codes || "")
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean)[0];
+    const itemPreview = truncateOrderSearchText(order?.item_preview || "", 26);
+
+    if (supplier) parts.push(supplier);
+    if (shippingCode) {
+        parts.push(`SC ${shippingCode}`);
+    } else if (itemPreview) {
+        parts.push(itemPreview);
+    }
+    if (order.expected_ready_date)
+        parts.push(`Ready ${order.expected_ready_date}`);
+    if (order.status) parts.push(orderStatusDisplay(order.status));
+
+    return parts.filter(Boolean).join(" — ");
+}
+
+function getOrderSearchDisplayValue(order) {
+    const parts = [order.id, order.customer_name || ""];
+    const shippingCode = String(order?.shipping_codes || "")
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean)[0];
+    if (shippingCode) parts.push(shippingCode);
+    return parts.filter(Boolean).join(" ");
 }
 
 function updateOrderOverview(rows) {
@@ -208,7 +281,8 @@ function updateOrderStatusFilterSummary() {
     const summaryEl = document.getElementById("filterStatusSummary");
     if (!summaryEl) return;
     const selected = getSelectedOrderStatuses();
-    const mode = document.getElementById("filterStatusMode")?.value || "include";
+    const mode =
+        document.getElementById("filterStatusMode")?.value || "include";
     if (!selected.length) {
         summaryEl.textContent = "All statuses";
         return;
@@ -245,6 +319,16 @@ window.clearOrderStatusFilter = function () {
     loadOrders();
 };
 
+window.clearOrderSearch = function () {
+    if (orderSearchAc) {
+        orderSearchAc.setValue(null);
+    } else {
+        const searchEl = document.getElementById("orderSearch");
+        if (searchEl) searchEl.value = "";
+    }
+    loadOrders();
+};
+
 document.addEventListener("DOMContentLoaded", () => {
     orderCustomerAc = Autocomplete.init(
         document.getElementById("orderCustomer"),
@@ -270,10 +354,26 @@ document.addEventListener("DOMContentLoaded", () => {
     );
     const orderSearchEl = document.getElementById("orderSearch");
     if (orderSearchEl) {
+        orderSearchAc = Autocomplete.init(orderSearchEl, {
+            resource: "orders",
+            placeholder: "Customer, phone, shipping code, items...",
+            renderItem: renderOrderSearchMatch,
+            displayValue: getOrderSearchDisplayValue,
+            onSelect: () => loadOrders(),
+        });
         let searchDebounce;
         orderSearchEl.addEventListener("input", () => {
             clearTimeout(searchDebounce);
             searchDebounce = setTimeout(loadOrders, 200);
+        });
+        orderSearchEl.addEventListener("keydown", (event) => {
+            const dropdownVisible = !!document.querySelector(
+                ".autocomplete-dropdown",
+            );
+            if (event.key === "Enter" && !dropdownVisible) {
+                event.preventDefault();
+                loadOrders();
+            }
         });
     }
     const curSel = document.getElementById("orderCurrency");
@@ -341,7 +441,7 @@ async function loadOrders() {
         <td>${escapeHtml(r.customer_name)}${r.customer_priority_level && r.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(r.customer_priority_note || "")}">${escapeHtml(r.customer_priority_level)}</span>` : ""}</td>
         <td>${escapeHtml(suppDisplay)}</td>
         <td>${r.expected_ready_date}</td>
-        <td><span class="badge ${typeof statusBadgeClass === "function" ? statusBadgeClass(r.status) : "bg-secondary"}">${escapeHtml(typeof statusLabel === "function" ? statusLabel(r.status) : r.status)}</span>${r.high_alert_notes ? ' <span class="badge bg-warning text-dark" title="' + escapeHtml(r.high_alert_notes) + '">⚠️</span>' : ""}</td>
+        <td><span class="badge ${typeof statusBadgeClass === "function" ? statusBadgeClass(r.status) : "bg-secondary"}">${escapeHtml(typeof statusLabel === "function" ? statusLabel(r.status) : r.status)}</span>${r.high_alert_notes ? ' <span class="badge bg-warning text-dark" title="' + escapeHtml(r.high_alert_notes) + '">⚠️</span>' : ""}${r.container_code || r.container_eta ? ' <span class="badge bg-info text-dark ms-1" title="Container ' + escapeHtml(r.container_code || "—") + (r.container_eta ? ", ETA " + escapeHtml(r.container_eta) : "") + '">📦 ' + escapeHtml(r.container_code || "—") + (r.container_eta ? " · " + escapeHtml(r.container_eta) : "") + "</span>" : ""}</td>
         <td class="table-actions">
           <button class="btn btn-sm btn-outline-info" onclick="showOrderInfo(${r.id})" title="View order details">ℹ</button>
           <button class="btn btn-sm btn-outline-primary" onclick="editOrder(${r.id})">Edit</button>
@@ -486,10 +586,10 @@ async function loadOrderTemplate(id) {
             const qty =
                 it.quantity ??
                 (cartons > 0 && qtyPerCtn > 0 ? cartons * qtyPerCtn : 0);
-            const denom = cartons > 0 ? cartons : (qty || 0) > 0 ? qty : 1;
+            const denom = getItemPerUnitDenom(it);
             const cbmPerUnit =
                 denom > 0 && it.declared_cbm
-                    ? (parseFloat(it.declared_cbm) / denom).toFixed(4)
+                    ? roundCbm6(parseFloat(it.declared_cbm) / denom).toFixed(6)
                     : "";
             last.querySelector(".item-product-id").value = it.product_id || "";
             if (it.supplier_id) {
@@ -511,7 +611,14 @@ async function loadOrderTemplate(id) {
             last.querySelector(".item-w").value = it.item_width ?? "";
             last.querySelector(".item-h").value = it.item_height ?? "";
             last.querySelector(".item-weight").value = getItemWeightPerQty(it);
-            renderProductAlertHint(last, it.product_high_alert_note || "");
+            last.dataset.dimensionsScope = (
+                it.product_dimensions_scope ||
+                it.dimensions_scope ||
+                "piece"
+            )
+                .toString()
+                .toLowerCase();
+            renderProductAlertHint(last, productAlertTextFromItem(it));
             updateItemComputed(last.dataset.idx);
         }
         updateOrderTotals();
@@ -974,11 +1081,14 @@ function addOrderItem() {
             searchPath: "/search",
             placeholder: "Product description — type to search products",
             renderItem: (p) =>
-                `${p.description_cn || p.description_en || ""}${p.high_alert_note ? " — Alert" : ""} — ${p.hs_code || ""}`
+                `${p.description_cn || p.description_en || ""}${p.high_alert_note || p.required_design ? " — Alert" : ""} — ${p.hs_code || ""}`
                     .replace(/^ — | — $/g, "")
                     .trim() || `#${p.id}`,
             onSelect: (p) => {
                 if (productIdInput) productIdInput.value = p.id || "";
+                card.dataset.dimensionsScope = (p.dimensions_scope || "piece")
+                    .toString()
+                    .toLowerCase();
                 const desc = (
                     p.description_cn ||
                     p.description_en ||
@@ -1016,7 +1126,7 @@ function addOrderItem() {
                     suggest.textContent = p.hs_code
                         ? `From product (HS: ${p.hs_code}) — review and confirm values above.`
                         : "From product — review and confirm values above.";
-                renderProductAlertHint(card, p.high_alert_note || "");
+                renderProductAlertHint(card, productAlertTextFromItem(p));
                 const photosContainer = card.querySelector(".item-photos");
                 if (photosContainer) {
                     photosContainer
@@ -1056,6 +1166,7 @@ function addOrderItem() {
     }
     descInput?.addEventListener("input", () => {
         if (productIdInput) productIdInput.value = "";
+        delete card.dataset.dimensionsScope;
         renderProductAlertHint(card, "");
     });
     card.querySelector(".item-photo-input").addEventListener("change", (e) =>
@@ -1084,7 +1195,7 @@ function addOrderItem() {
                 const w = parseFloat(card.querySelector(".item-w")?.value) || 0;
                 const h = parseFloat(card.querySelector(".item-h")?.value) || 0;
                 if (l > 0 && w > 0 && h > 0) {
-                    const cbm = (l * w * h) / 1000000;
+                    const cbm = roundCbm6((l * w * h) / 1000000);
                     card.querySelector(".item-cbm").value = cbm.toFixed(6);
                 }
                 updateItemComputed(idx);
@@ -1149,14 +1260,22 @@ function updateItemComputed(idx) {
     const w = parseFloat(tr.querySelector(".item-w")?.value) || 0;
     const h = parseFloat(tr.querySelector(".item-h")?.value) || 0;
     if (cbmPerUnit <= 0 && l > 0 && w > 0 && h > 0) {
-        cbmPerUnit = (l * w * h) / 1000000;
+        cbmPerUnit = roundCbm6((l * w * h) / 1000000);
     }
-    const totalCbm =
-        cbmPerUnit * (cartons > 0 ? cartons : totalQty > 0 ? totalQty : 1);
+    const scope = (tr.dataset.dimensionsScope || "piece").toLowerCase();
+    const scopeMultiplier =
+        scope === "carton"
+            ? cartons > 0
+                ? cartons
+                : 0
+            : totalQty > 0
+              ? totalQty
+              : 0;
+    const totalCbm = roundCbm6(cbmPerUnit * scopeMultiplier);
     tr.querySelector(".item-total-cbm").textContent = totalCbm.toFixed(6);
 
     const weightPc = parseFloat(tr.querySelector(".item-weight")?.value || 0);
-    const totalGw = weightPc * (totalQty > 0 ? totalQty : 0);
+    const totalGw = weightPc * scopeMultiplier;
     tr.querySelector(".item-total-gw").textContent = totalGw.toFixed(0);
 
     updateOrderTotals();
@@ -1326,21 +1445,23 @@ async function copyOrder(id) {
             last.querySelector(".item-unit-price").value = it.unit_price ?? "";
             const sellPriceEl = last.querySelector(".item-sell-price");
             if (sellPriceEl) sellPriceEl.value = it.sell_price ?? "";
-            const denom =
-                (it.cartons || 0) > 0
-                    ? it.cartons
-                    : (it.quantity || 0) > 0
-                      ? it.quantity
-                      : 1;
+            const denom = getItemPerUnitDenom(it);
             last.querySelector(".item-cbm").value =
                 denom > 0
-                    ? ((it.declared_cbm || 0) / denom).toFixed(4)
+                    ? roundCbm6((it.declared_cbm || 0) / denom).toFixed(6)
                     : (it.declared_cbm ?? "");
             last.querySelector(".item-l").value = it.item_length ?? "";
             last.querySelector(".item-w").value = it.item_width ?? "";
             last.querySelector(".item-h").value = it.item_height ?? "";
             last.querySelector(".item-weight").value = getItemWeightPerQty(it);
-            renderProductAlertHint(last, it.product_high_alert_note || "");
+            last.dataset.dimensionsScope = (
+                it.product_dimensions_scope ||
+                it.dimensions_scope ||
+                "piece"
+            )
+                .toString()
+                .toLowerCase();
+            renderProductAlertHint(last, productAlertTextFromItem(it));
             updateItemComputed(last.dataset.idx);
             (it.image_paths || []).forEach((path) => {
                 const div = document.createElement("div");
@@ -1361,10 +1482,6 @@ async function editOrder(id) {
     try {
         const res = await api("GET", "/orders/" + id);
         const o = res.data;
-        if (o.status !== "Draft") {
-            showToast("Only draft orders can be edited", "danger");
-            return;
-        }
         document.getElementById("orderId").value = o.id;
         orderCustomerAc?.setValue({
             id: o.customer_id,
@@ -1407,21 +1524,23 @@ async function editOrder(id) {
             last.querySelector(".item-unit-price").value = it.unit_price ?? "";
             const sellPriceEl = last.querySelector(".item-sell-price");
             if (sellPriceEl) sellPriceEl.value = it.sell_price ?? "";
-            const denom =
-                (it.cartons || 0) > 0
-                    ? it.cartons
-                    : (it.quantity || 0) > 0
-                      ? it.quantity
-                      : 1;
+            const denom = getItemPerUnitDenom(it);
             last.querySelector(".item-cbm").value =
                 denom > 0
-                    ? ((it.declared_cbm || 0) / denom).toFixed(4)
+                    ? roundCbm6((it.declared_cbm || 0) / denom).toFixed(6)
                     : (it.declared_cbm ?? "");
             last.querySelector(".item-l").value = it.item_length ?? "";
             last.querySelector(".item-w").value = it.item_width ?? "";
             last.querySelector(".item-h").value = it.item_height ?? "";
             last.querySelector(".item-weight").value = getItemWeightPerQty(it);
-            renderProductAlertHint(last, it.product_high_alert_note || "");
+            last.dataset.dimensionsScope = (
+                it.product_dimensions_scope ||
+                it.dimensions_scope ||
+                "piece"
+            )
+                .toString()
+                .toLowerCase();
+            renderProductAlertHint(last, productAlertTextFromItem(it));
             updateItemComputed(last.dataset.idx);
             (it.image_paths || []).forEach((path) => {
                 const div = document.createElement("div");
@@ -1827,22 +1946,27 @@ async function showOrderInfo(id) {
                     it.description_en || it.description_cn || "—",
                 );
                 const supplier = escapeHtml(it.supplier_name || "—");
-                const productAlert = it.product_high_alert_note
-                    ? `<div class="product-alert-badge mt-1" title="${escapeHtml(it.product_high_alert_note)}">Alert</div>`
+                const productAlert = productAlertTextFromItem(it)
+                    ? `<div class="product-alert-badge mt-1" title="${escapeHtml(productAlertTextFromItem(it))}">Alert</div>`
                     : "";
+                const scope = (
+                    it.product_dimensions_scope ||
+                    it.dimensions_scope ||
+                    "piece"
+                )
+                    .toString()
+                    .toLowerCase();
+                const denom =
+                    scope === "carton" && (it.cartons || 0) > 0
+                        ? parseFloat(it.cartons) || 1
+                        : getItemQuantityFromData(it) || 1;
                 const cbmPer =
-                    it.declared_cbm && it.cartons
-                        ? (
-                              parseFloat(it.declared_cbm) /
-                              Math.max(1, parseInt(it.cartons) || 1)
-                          ).toFixed(4)
+                    it.declared_cbm && denom > 0
+                        ? (parseFloat(it.declared_cbm) / denom).toFixed(4)
                         : "—";
                 const gwPer =
-                    it.declared_weight && it.quantity
-                        ? (
-                              parseFloat(it.declared_weight) /
-                              Math.max(1, parseInt(it.quantity) || 1)
-                          ).toFixed(4)
+                    it.declared_weight && denom > 0
+                        ? (parseFloat(it.declared_weight) / denom).toFixed(4)
                         : "—";
                 return `<tr>
               <td>${thumb}</td>
@@ -1869,6 +1993,22 @@ async function showOrderInfo(id) {
               <div class="col-6 col-md-3"><div class="order-info-stat-card"><div class="label">Condition</div><div class="value">${escapeHtml(receipt.receipt_condition || "—")}</div></div></div>
             </div>
             ${receipt.photos?.length ? `<div class="d-flex gap-2 flex-wrap mt-2">${receipt.photos.map((p) => `<img src="${imgBase}/backend/${escapeHtml(p)}" class="order-info-thumb" style="width:72px;height:72px">`).join("")}</div>` : ""}
+          </div>`
+            : "";
+
+        const container = o.container;
+        const containerHtml = container
+            ? `
+          <div class="mt-3 border rounded p-3 bg-light">
+            <h6 class="fw-semibold mb-2">Assigned Container</h6>
+            <div class="row g-2 mb-2">
+              <div class="col-6 col-md-4"><div class="order-info-stat-card"><div class="label">Container</div><div class="value fw-semibold">${escapeHtml(container.code || "—")}</div></div></div>
+              <div class="col-6 col-md-4"><div class="order-info-stat-card"><div class="label">Expected Arrival (ETA)</div><div class="value text-primary">${container.eta_date ? escapeHtml(container.eta_date) : "—"}</div></div></div>
+              <div class="col-6 col-md-4"><div class="order-info-stat-card"><div class="label">Status</div><div class="value">${escapeHtml(container.status || "—")}</div></div></div>
+              <div class="col-6 col-md-4"><div class="order-info-stat-card"><div class="label">Expected Ship Date</div><div class="value">${container.expected_ship_date ? escapeHtml(container.expected_ship_date) : "—"}</div></div></div>
+              <div class="col-6 col-md-4"><div class="order-info-stat-card"><div class="label">Vessel</div><div class="value">${escapeHtml(container.vessel_name || "—")}</div></div></div>
+              <div class="col-6 col-md-4"><div class="order-info-stat-card"><div class="label">Destination</div><div class="value">${escapeHtml([container.destination_country, container.destination].filter(Boolean).join(" ") || "—")}</div></div></div>
+            </div>
           </div>`
             : "";
 
@@ -1911,6 +2051,7 @@ async function showOrderInfo(id) {
             </table>
           </div>
           ${receiptHtml}
+          ${containerHtml}
           <div class="d-flex gap-2 mt-3">
             <button class="btn btn-sm btn-outline-primary" onclick="bootstrap.Modal.getOrCreateInstance(document.getElementById('orderInfoModal')).hide(); editOrder(${id})">Edit Order</button>
             <a class="btn btn-sm btn-outline-success" href="${window.API_BASE || "/cargochina/api/v1"}/orders/${id}/export" download>Export Excel</a>

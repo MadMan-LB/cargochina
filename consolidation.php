@@ -100,12 +100,12 @@ require 'includes/layout.php';
                             <label class="form-label">ETA Date</label>
                             <div class="d-flex gap-2 align-items-center">
                                 <input type="date" class="form-control" id="containerEditEtaDate">
-                                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="suggestEtaFromOffsets()" title="Suggest from Business Settings offsets">Suggest</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="suggestEtaFromOffsets()" title="Set ETA to 70 days from today">Suggest</button>
                             </div>
                         </div>
                         <div class="mb-2">
-                            <label class="form-label">Destination Country (e.g. LB)</label>
-                            <input type="text" class="form-control" id="containerEditDestCountry" placeholder="LB" maxlength="10">
+                            <label class="form-label">Destination Country</label>
+                            <input type="text" class="form-control" id="containerEditDestCountry" placeholder="Type country name or code (e.g. LB, Lebanon)" autocomplete="off">
                         </div>
                         <div class="mb-2">
                             <label class="form-label">Destination</label>
@@ -288,5 +288,6 @@ require 'includes/layout.php';
         <p class="text-muted small mt-3 mb-0">Container creation is limited to SuperAdmin. Consolidation users can still assign existing containers.</p>
     <?php endif; ?>
 </div>
-<?php $pageScript = '/cargochina/frontend/js/consolidation.js?v=' . filemtime(__DIR__ . '/frontend/js/consolidation.js');
+<?php $pageScripts = ['/cargochina/frontend/js/autocomplete.js'];
+$pageScript = '/cargochina/frontend/js/consolidation.js?v=' . filemtime(__DIR__ . '/frontend/js/consolidation.js');
 require 'includes/footer.php'; ?>

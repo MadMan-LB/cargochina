@@ -42,6 +42,12 @@ try {
         throw new Exception('customers missing payment_links (run migration 026)');
     }
     echo "OK: customers.payment_links\n";
+    $pdo->query("SELECT 1 FROM expense_categories LIMIT 1");
+    echo "OK: expense_categories\n";
+    $pdo->query("SELECT 1 FROM expenses LIMIT 1");
+    echo "OK: expenses\n";
+    $pdo->query("SELECT 1 FROM hs_code_tariff_catalog LIMIT 1");
+    echo "OK: hs_code_tariff_catalog\n";
     echo "Smoke test passed.\n";
 } catch (Exception $e) {
     echo "FAIL: " . $e->getMessage() . "\n";

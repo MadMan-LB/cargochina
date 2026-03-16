@@ -60,7 +60,7 @@ require 'includes/layout.php';
       <div class="modal-body">
         <form id="expenseForm">
           <input type="hidden" id="expenseId">
-          <div class="mb-3"><label class="form-label">Category *</label><input type="text" class="form-control" id="expenseCategory" placeholder="Type to search category…" autocomplete="off" required></div>
+          <div class="mb-3"><label class="form-label">Category *</label><input type="text" class="form-control" id="expenseCategory" placeholder="Type to search or enter a new category…" autocomplete="off" required></div>
           <div class="row mb-3">
             <div class="col-8"><label class="form-label">Amount *</label><input type="number" step="0.01" class="form-control" id="expenseAmount" required></div>
             <div class="col-4"><label class="form-label">Currency</label><select class="form-select" id="expenseCurrency">

@@ -126,13 +126,14 @@
     function initDraftProductAutocomplete(row, initialProduct = null) {
         const inputEl = row.querySelector(".draft-product-search");
         const hiddenEl = row.querySelector(".draft-product");
-        if (!inputEl || !hiddenEl || typeof Autocomplete === "undefined") return;
+        if (!inputEl || !hiddenEl || typeof Autocomplete === "undefined")
+            return;
         const ac = Autocomplete.init(inputEl, {
             resource: "products",
             searchPath: "/search",
             placeholder: "Type to search product...",
             renderItem: (item) =>
-                `${item.description_en || item.description_cn || "Product"}${item.high_alert_note ? " — Alert" : ""}${item.hs_code ? ` — HS ${item.hs_code}` : ""}`,
+                `${item.description_en || item.description_cn || "Product"}${item.high_alert_note || item.required_design ? " — Alert" : ""}${item.hs_code ? ` — HS ${item.hs_code}` : ""}`,
             onSelect: (item) => {
                 hiddenEl.value = item.id || "";
             },
@@ -199,7 +200,8 @@
             const r = d.data;
             document.getElementById("draftId").value = r.id;
             document.getElementById("draftName").value = r.name || "";
-            document.getElementById("draftSupplierId").value = r.supplier_id || "";
+            document.getElementById("draftSupplierId").value =
+                r.supplier_id || "";
             if (draftSupplierAc?.setValue) {
                 draftSupplierAc.setValue(
                     r.supplier_id && r.supplier_name

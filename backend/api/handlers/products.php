@@ -53,6 +53,24 @@ function ensureProductHighAlertColumn(PDO $pdo): bool
     return $available;
 }
 
+function buildProductSearchSql(string $query, array &$params, string $productAlias = 'p', string $supplierAlias = 's'): string
+{
+    $terms = preg_split('/\s+/', trim($query)) ?: [];
+    $terms = array_values(array_filter($terms, fn($term) => $term !== ''));
+    if (!$terms) {
+        return '1=1';
+    }
+
+    $clauses = [];
+    foreach ($terms as $term) {
+        $like = '%' . $term . '%';
+        $clauses[] = "(CAST($productAlias.id AS CHAR) LIKE ? OR $productAlias.description_cn LIKE ? OR $productAlias.description_en LIKE ? OR COALESCE($productAlias.packaging, '') LIKE ? OR COALESCE($productAlias.hs_code, '') LIKE ? OR COALESCE($supplierAlias.name, '') LIKE ?)";
+        array_push($params, $like, $like, $like, $like, $like, $like);
+    }
+
+    return implode(' AND ', $clauses);
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
     $hasHighAlertColumn = ensureProductHighAlertColumn($pdo);
@@ -72,13 +90,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if (strlen($q) < 1) {
                     jsonResponse(['data' => []]);
                 }
-                $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
-                $searchCols = "p.id, p.description_cn, p.description_en, p.hs_code, p.cbm, p.weight, p.length_cm, p.width_cm, p.height_cm, p.pieces_per_carton, p.unit_price, p.image_paths, p.supplier_id, s.name as supplier_name";
+                $searchCols = "p.id, p.description_cn, p.description_en, p.hs_code, p.cbm, p.weight, p.length_cm, p.width_cm, p.height_cm, p.pieces_per_carton, p.unit_price, p.image_paths, p.packaging, p.supplier_id, s.name as supplier_name";
                 if ($hasHighAlertColumn) {
                     $searchCols .= ", p.high_alert_note";
                 }
-                $stmt = $pdo->prepare("SELECT $searchCols FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id WHERE p.description_cn LIKE ? OR p.description_en LIKE ? OR p.hs_code LIKE ? ORDER BY p.id DESC LIMIT 10");
-                $stmt->execute([$like, $like, $like]);
+                if (productHasColumn($pdo, 'dimensions_scope')) $searchCols .= ", p.dimensions_scope";
+                if (productHasColumn($pdo, 'required_design')) $searchCols .= ", p.required_design";
+                $params = [];
+                $where = buildProductSearchSql($q, $params, 'p', 's');
+                $stmt = $pdo->prepare("SELECT $searchCols FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id WHERE $where ORDER BY p.id DESC LIMIT 10");
+                $stmt->execute($params);
                 jsonResponse(['data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
             }
             if ($id === 'suggest') {
@@ -108,7 +129,59 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 jsonResponse(['data' => array_slice($scored, 0, 10)]);
             }
             if ($id === null) {
-                $stmt = $pdo->query("SELECT p.*, s.name as supplier_name FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id ORDER BY p.id DESC");
+                $q = trim($_GET['q'] ?? '');
+                $supplierId = isset($_GET['supplier_id']) && $_GET['supplier_id'] !== '' ? (int) $_GET['supplier_id'] : null;
+                $hsCode = trim($_GET['hs_code'] ?? '');
+                $alertFilter = trim($_GET['alert_filter'] ?? '');
+                $imageFilter = trim($_GET['image_filter'] ?? '');
+
+                $where = [];
+                $params = [];
+
+                if ($q !== '') {
+                    $where[] = buildProductSearchSql($q, $params, 'p', 's');
+                }
+                if ($supplierId) {
+                    $where[] = "p.supplier_id = ?";
+                    $params[] = $supplierId;
+                }
+                if ($hsCode !== '') {
+                    $normalizedHsCode = preg_replace('/[^A-Z0-9]/', '', strtoupper($hsCode));
+                    if ($normalizedHsCode !== '' && preg_match('/^[0-9.\-\s]+$/', $hsCode) === 1) {
+                        $where[] = "REPLACE(REPLACE(REPLACE(UPPER(COALESCE(p.hs_code, '')), '.', ''), '-', ''), ' ', '') LIKE ?";
+                        $params[] = $normalizedHsCode . '%';
+                    } else {
+                        $where[] = "COALESCE(p.hs_code, '') LIKE ?";
+                        $params[] = '%' . preg_replace('/\s+/', '%', $hsCode) . '%';
+                    }
+                }
+
+                $alertClauses = [];
+                if ($hasHighAlertColumn) {
+                    $alertClauses[] = "(p.high_alert_note IS NOT NULL AND TRIM(p.high_alert_note) <> '')";
+                }
+                if (productHasColumn($pdo, 'required_design')) {
+                    $alertClauses[] = "COALESCE(p.required_design, 0) = 1";
+                }
+                if ($alertFilter === 'with' && $alertClauses) {
+                    $where[] = '(' . implode(' OR ', $alertClauses) . ')';
+                } elseif ($alertFilter === 'without' && $alertClauses) {
+                    $where[] = 'NOT (' . implode(' OR ', $alertClauses) . ')';
+                }
+
+                if ($imageFilter === 'with') {
+                    $where[] = "(p.image_paths IS NOT NULL AND p.image_paths <> '' AND p.image_paths <> '[]')";
+                } elseif ($imageFilter === 'without') {
+                    $where[] = "(p.image_paths IS NULL OR p.image_paths = '' OR p.image_paths = '[]')";
+                }
+
+                $sql = "SELECT p.*, s.name as supplier_name FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id";
+                if ($where) {
+                    $sql .= ' WHERE ' . implode(' AND ', $where);
+                }
+                $sql .= " ORDER BY p.id DESC";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute($params);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 foreach ($rows as &$r) {
                     $r['image_paths'] = $r['image_paths'] ? json_decode($r['image_paths'], true) : [];
@@ -278,8 +351,18 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $buyPrice = isset($input['buy_price']) ? (float) $input['buy_price'] : null;
             $sellPrice = isset($input['sell_price']) ? (float) $input['sell_price'] : null;
             $highAlertNote = isset($input['high_alert_note']) ? trim((string) $input['high_alert_note']) : null;
+            $dimensionsScope = in_array($input['dimensions_scope'] ?? '', ['piece', 'carton'], true) ? $input['dimensions_scope'] : 'piece';
+            $requiredDesign = isset($input['required_design']) ? (int) (bool) $input['required_design'] : 0;
             $cols = ['supplier_id', 'cbm', 'weight', 'length_cm', 'width_cm', 'height_cm', 'packaging', 'hs_code', 'description_cn', 'description_en', 'image_paths'];
             $vals = [$supplierId, $cbm, $weight, $lengthCm, $widthCm, $heightCm, $packaging, $hsCode, $descriptionCn, $descriptionEn, $imagePaths];
+            if (productHasColumn($pdo, 'dimensions_scope')) {
+                $cols[] = 'dimensions_scope';
+                $vals[] = $dimensionsScope;
+            }
+            if (productHasColumn($pdo, 'required_design')) {
+                $cols[] = 'required_design';
+                $vals[] = $requiredDesign;
+            }
             if ($hasPpc) {
                 $cols[] = 'pieces_per_carton';
                 $vals[] = $piecesPerCarton;
@@ -389,8 +472,18 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $buyPrice = isset($input['buy_price']) ? (float) $input['buy_price'] : null;
             $sellPrice = isset($input['sell_price']) ? (float) $input['sell_price'] : null;
             $highAlertNote = isset($input['high_alert_note']) ? trim((string) $input['high_alert_note']) : null;
+            $dimensionsScope = in_array($input['dimensions_scope'] ?? '', ['piece', 'carton'], true) ? $input['dimensions_scope'] : 'piece';
+            $requiredDesign = isset($input['required_design']) ? (int) (bool) $input['required_design'] : 0;
             $sets = ['supplier_id=?', 'cbm=?', 'weight=?', 'length_cm=?', 'width_cm=?', 'height_cm=?', 'packaging=?', 'hs_code=?', 'description_cn=?', 'description_en=?', 'image_paths=?'];
             $vals = [$supplierId, $cbm, $weight, $lengthCm, $widthCm, $heightCm, $packaging, $hsCode, $descriptionCn, $descriptionEn, $imagePaths];
+            if (productHasColumn($pdo, 'dimensions_scope')) {
+                $sets[] = 'dimensions_scope=?';
+                $vals[] = $dimensionsScope;
+            }
+            if (productHasColumn($pdo, 'required_design')) {
+                $sets[] = 'required_design=?';
+                $vals[] = $requiredDesign;
+            }
             if ($hasPpc) {
                 $sets[] = 'pieces_per_carton=?';
                 $vals[] = $piecesPerCarton;

@@ -16,14 +16,142 @@ function normalizeOrderItems(array $items): array
     return $items;
 }
 
+function orderTableHasColumn(PDO $pdo, string $table, string $column): bool
+{
+    static $cache = [];
+
+    $key = $table . '.' . $column;
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+
+    try {
+        $stmt = $pdo->prepare("SHOW COLUMNS FROM `$table` LIKE ?");
+        $stmt->execute([$column]);
+        $cache[$key] = (bool) $stmt->rowCount();
+    } catch (Throwable $e) {
+        $cache[$key] = false;
+    }
+
+    return $cache[$key];
+}
+
+function buildOrderSearchSql(PDO $pdo, string $query, array &$params, string $orderAlias = 'o', string $customerAlias = 'c', string $supplierAlias = 's'): string
+{
+    $terms = preg_split('/\s+/', trim($query)) ?: [];
+    $terms = array_values(array_filter(array_map(
+        static fn($term) => ltrim((string) $term, '#'),
+        $terms
+    ), static fn($term) => $term !== ''));
+
+    if (!$terms) {
+        return '1=1';
+    }
+
+    $hasCustomerCode = orderTableHasColumn($pdo, 'customers', 'code');
+    $hasCustomerPhone = orderTableHasColumn($pdo, 'customers', 'phone');
+    $hasSupplierCode = orderTableHasColumn($pdo, 'suppliers', 'code');
+    $hasSupplierStoreId = orderTableHasColumn($pdo, 'suppliers', 'store_id');
+    $hasSupplierPhone = orderTableHasColumn($pdo, 'suppliers', 'phone');
+    $hasOrderItemSupplier = orderTableHasColumn($pdo, 'order_items', 'supplier_id');
+    $hasShippingCode = orderTableHasColumn($pdo, 'order_items', 'shipping_code');
+    $hasItemNo = orderTableHasColumn($pdo, 'order_items', 'item_no');
+    $hasDescriptionCn = orderTableHasColumn($pdo, 'order_items', 'description_cn');
+    $hasDescriptionEn = orderTableHasColumn($pdo, 'order_items', 'description_en');
+
+    $clauses = [];
+    foreach ($terms as $term) {
+        $like = '%' . $term . '%';
+        $termClauses = [
+            "CAST($orderAlias.id AS CHAR) LIKE ?",
+            "$customerAlias.name LIKE ?",
+            "COALESCE($supplierAlias.name, '') LIKE ?",
+        ];
+        array_push($params, $like, $like, $like);
+
+        if ($hasCustomerCode) {
+            $termClauses[] = "COALESCE($customerAlias.code, '') LIKE ?";
+            $params[] = $like;
+        }
+        if ($hasCustomerPhone) {
+            $termClauses[] = "COALESCE($customerAlias.phone, '') LIKE ?";
+            $params[] = $like;
+        }
+        if ($hasSupplierCode) {
+            $termClauses[] = "COALESCE($supplierAlias.code, '') LIKE ?";
+            $params[] = $like;
+        } elseif ($hasSupplierStoreId) {
+            $termClauses[] = "COALESCE($supplierAlias.store_id, '') LIKE ?";
+            $params[] = $like;
+        }
+        if ($hasSupplierPhone) {
+            $termClauses[] = "COALESCE($supplierAlias.phone, '') LIKE ?";
+            $params[] = $like;
+        }
+
+        $itemClauses = [];
+        if ($hasShippingCode) {
+            $itemClauses[] = "COALESCE(oi.shipping_code, '') LIKE ?";
+            $params[] = $like;
+        }
+        if ($hasItemNo) {
+            $itemClauses[] = "COALESCE(oi.item_no, '') LIKE ?";
+            $params[] = $like;
+        }
+        if ($hasDescriptionCn) {
+            $itemClauses[] = "COALESCE(oi.description_cn, '') LIKE ?";
+            $params[] = $like;
+        }
+        if ($hasDescriptionEn) {
+            $itemClauses[] = "COALESCE(oi.description_en, '') LIKE ?";
+            $params[] = $like;
+        }
+        if ($hasOrderItemSupplier) {
+            $itemClauses[] = "COALESCE(sis.name, '') LIKE ?";
+            $params[] = $like;
+            if ($hasSupplierCode) {
+                $itemClauses[] = "COALESCE(sis.code, '') LIKE ?";
+                $params[] = $like;
+            } elseif ($hasSupplierStoreId) {
+                $itemClauses[] = "COALESCE(sis.store_id, '') LIKE ?";
+                $params[] = $like;
+            }
+            if ($hasSupplierPhone) {
+                $itemClauses[] = "COALESCE(sis.phone, '') LIKE ?";
+                $params[] = $like;
+            }
+        }
+        if ($itemClauses) {
+            $itemSql = "EXISTS (SELECT 1 FROM order_items oi";
+            if ($hasOrderItemSupplier) {
+                $itemSql .= " LEFT JOIN suppliers sis ON oi.supplier_id = sis.id";
+            }
+            $itemSql .= " WHERE oi.order_id = $orderAlias.id AND (" . implode(' OR ', $itemClauses) . '))';
+            $termClauses[] = $itemSql;
+        }
+
+        $clauses[] = '(' . implode(' OR ', $termClauses) . ')';
+    }
+
+    return implode(' AND ', $clauses);
+}
+
 function fetchOrderItems(PDO $pdo, int $orderId): array
 {
     $chk = @$pdo->query("SHOW COLUMNS FROM order_items LIKE 'supplier_id'");
     $hasSupplier = $chk && $chk->rowCount() > 0;
     $chkProductAlert = @$pdo->query("SHOW COLUMNS FROM products LIKE 'high_alert_note'");
+    $chkRequiredDesign = @$pdo->query("SHOW COLUMNS FROM products LIKE 'required_design'");
+    $chkDimensionsScope = @$pdo->query("SHOW COLUMNS FROM products LIKE 'dimensions_scope'");
     $productAlertCol = ($chkProductAlert && $chkProductAlert->rowCount() > 0)
         ? ", p.high_alert_note as product_high_alert_note"
         : "";
+    if ($chkRequiredDesign && $chkRequiredDesign->rowCount() > 0) {
+        $productAlertCol .= ", p.required_design as product_required_design";
+    }
+    if ($chkDimensionsScope && $chkDimensionsScope->rowCount() > 0) {
+        $productAlertCol .= ", p.dimensions_scope as product_dimensions_scope";
+    }
     $sql = $hasSupplier
         ? "SELECT oi.*, s.name as supplier_name$productAlertCol FROM order_items oi LEFT JOIN suppliers s ON oi.supplier_id = s.id LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?"
         : "SELECT oi.*$productAlertCol FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?";
@@ -233,35 +361,58 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if (strlen($q) < 1) {
                     jsonResponse(['data' => []]);
                 }
-                $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
                 $custCols = 'c.name as customer_name';
-                $chkPrio = @$pdo->query("SHOW COLUMNS FROM customers LIKE 'priority_level'");
-                if ($chkPrio && $chkPrio->rowCount() > 0) $custCols .= ', c.priority_level as customer_priority_level';
-                $conds = [];
+                if (orderTableHasColumn($pdo, 'customers', 'priority_level')) {
+                    $custCols .= ', c.priority_level as customer_priority_level';
+                }
+                if (orderTableHasColumn($pdo, 'customers', 'phone')) {
+                    $custCols .= ', c.phone as customer_phone';
+                }
+                $searchCols = "$custCols, s.name as supplier_name";
+                if (orderTableHasColumn($pdo, 'order_items', 'shipping_code')) {
+                    $searchCols .= ", (
+                        SELECT GROUP_CONCAT(DISTINCT oi.shipping_code ORDER BY oi.shipping_code SEPARATOR ', ')
+                        FROM order_items oi
+                        WHERE oi.order_id = o.id
+                          AND COALESCE(oi.shipping_code, '') != ''
+                    ) as shipping_codes";
+                }
+                $itemPreviewCandidates = [];
+                if (orderTableHasColumn($pdo, 'order_items', 'description_en')) {
+                    $itemPreviewCandidates[] = "NULLIF(oi.description_en, '')";
+                }
+                if (orderTableHasColumn($pdo, 'order_items', 'description_cn')) {
+                    $itemPreviewCandidates[] = "NULLIF(oi.description_cn, '')";
+                }
+                if (orderTableHasColumn($pdo, 'order_items', 'item_no')) {
+                    $itemPreviewCandidates[] = "NULLIF(oi.item_no, '')";
+                }
+                if ($itemPreviewCandidates) {
+                    $searchCols .= ", (
+                        SELECT GROUP_CONCAT(
+                            DISTINCT COALESCE(" . implode(', ', $itemPreviewCandidates) . ")
+                            ORDER BY oi.id SEPARATOR ', '
+                        )
+                        FROM order_items oi
+                        WHERE oi.order_id = o.id
+                    ) as item_preview";
+                }
+                if (orderTableHasColumn($pdo, 'order_items', 'supplier_id')) {
+                    $searchCols .= ", (
+                        SELECT GROUP_CONCAT(DISTINCT sis.name ORDER BY sis.name SEPARATOR ', ')
+                        FROM order_items oi
+                        LEFT JOIN suppliers sis ON oi.supplier_id = sis.id
+                        WHERE oi.order_id = o.id
+                          AND COALESCE(sis.name, '') != ''
+                    ) as item_supplier_names";
+                }
                 $params = [];
-                if (is_numeric($q)) {
-                    $conds[] = 'o.id = ?';
-                    $params[] = (int) $q;
-                }
-                $conds[] = 'c.name LIKE ?';
-                $params[] = $like;
-                $conds[] = 'c.code LIKE ?';
-                $params[] = $like;
-                $conds[] = 's.name LIKE ?';
-                $params[] = $like;
-                $conds[] = 's.code LIKE ?';
-                $params[] = $like;
-                $chkDesc = @$pdo->query("SHOW COLUMNS FROM order_items LIKE 'description_cn'");
-                if ($chkDesc && $chkDesc->rowCount() > 0) {
-                    $conds[] = 'EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND (oi.description_cn LIKE ? OR oi.description_en LIKE ?))';
-                    $params[] = $like;
-                    $params[] = $like;
-                }
-                $sql = "SELECT o.id, o.status, o.expected_ready_date, $custCols, s.name as supplier_name
+                $where = buildOrderSearchSql($pdo, $q, $params, 'o', 'c', 's');
+                $sql = "SELECT o.id, o.status, o.expected_ready_date, $searchCols
                     FROM orders o
                     JOIN customers c ON o.customer_id = c.id
                     LEFT JOIN suppliers s ON o.supplier_id = s.id
-                    WHERE (" . implode(' OR ', $conds) . ")
+                    WHERE $where
                     ORDER BY o.id DESC LIMIT 20";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute($params);
@@ -297,7 +448,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $custCols = 'c.name as customer_name';
                 $chkPrio = @$pdo->query("SHOW COLUMNS FROM customers LIKE 'priority_level'");
                 if ($chkPrio && $chkPrio->rowCount() > 0) $custCols .= ', c.priority_level as customer_priority_level, c.priority_note as customer_priority_note';
-                $sql = "SELECT o.*, $custCols, s.name as supplier_name FROM orders o
+                $sql = "SELECT o.*, $custCols, s.name as supplier_name,
+                    (SELECT c.code FROM containers c JOIN shipment_drafts sd ON sd.container_id = c.id JOIN shipment_draft_orders sdo ON sdo.shipment_draft_id = sd.id WHERE sdo.order_id = o.id LIMIT 1) as container_code,
+                    (SELECT c.eta_date FROM containers c JOIN shipment_drafts sd ON sd.container_id = c.id JOIN shipment_draft_orders sdo ON sdo.shipment_draft_id = sd.id WHERE sdo.order_id = o.id LIMIT 1) as container_eta
+                    FROM orders o
                     JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id WHERE 1=1";
                 $params = [];
                 if (!empty($statuses)) {
@@ -332,34 +486,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $params[] = '%' . $shippingCode . '%';
                 }
                 if ($q !== '') {
-                    $like = '%' . $q . '%';
-                    $chkSupp = $pdo->query("SHOW COLUMNS FROM suppliers LIKE 'phone'");
-                    $hasSuppPhone = $chkSupp && $chkSupp->rowCount() > 0;
-                    $chkCust = $pdo->query("SHOW COLUMNS FROM customers LIKE 'phone'");
-                    $hasCustPhone = $chkCust && $chkCust->rowCount() > 0;
-                    $sql .= " AND (c.name LIKE ? OR c.code LIKE ?";
-                    $params[] = $like;
-                    $params[] = $like;
-                    if ($hasCustPhone) {
-                        $sql .= " OR c.phone LIKE ?";
-                        $params[] = $like;
-                    }
-                    $sql .= " OR s.name LIKE ?";
-                    $params[] = $like;
-                    if ($hasSuppPhone) {
-                        $sql .= " OR s.phone LIKE ?";
-                        $params[] = $like;
-                    }
-                    if (is_numeric($q)) {
-                        $sql .= " OR o.id = ?";
-                        $params[] = (int) $q;
-                    }
-                    $sql .= " OR EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND (oi.shipping_code LIKE ? OR oi.item_no LIKE ? OR oi.description_cn LIKE ? OR oi.description_en LIKE ?))";
-                    $params[] = $like;
-                    $params[] = $like;
-                    $params[] = $like;
-                    $params[] = $like;
-                    $sql .= ")";
+                    $sql .= " AND " . buildOrderSearchSql($pdo, $q, $params, 'o', 'c', 's');
                 }
                 $sql .= " ORDER BY o.expected_ready_date ASC, o.created_at DESC";
                 $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
@@ -395,6 +522,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $config = require dirname(__DIR__, 2) . '/config/config.php';
                 $row['customer_photo_visibility'] = $config['customer_photo_visibility'] ?? 'internal-only';
             }
+            $stmt = $pdo->prepare("SELECT c.id, c.code, c.status, c.eta_date, c.expected_ship_date, c.actual_departure_date, c.actual_arrival_date, c.vessel_name, c.destination_country, c.destination, c.notes
+                FROM containers c
+                JOIN shipment_drafts sd ON sd.container_id = c.id
+                JOIN shipment_draft_orders sdo ON sdo.shipment_draft_id = sd.id
+                WHERE sdo.order_id = ? LIMIT 1");
+            $stmt->execute([$id]);
+            $container = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($container) {
+                $row['container'] = $container;
+            }
             jsonResponse(['data' => $row]);
             break;
 
@@ -404,9 +541,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $stmt->execute([$id]);
             $order = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$order) jsonError('Order not found', 404);
-            if ($order['status'] !== 'Draft') {
-                jsonError('Only Draft orders can be edited', 400);
-            }
             $customerId = (int) ($input['customer_id'] ?? $order['customer_id']);
             $supplierId = isset($input['supplier_id']) ? ($input['supplier_id'] ? (int) $input['supplier_id'] : null) : ($order['supplier_id'] ?? null);
             $expectedReady = $input['expected_ready_date'] ?? $order['expected_ready_date'];

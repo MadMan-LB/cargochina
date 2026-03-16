@@ -43,7 +43,9 @@ require 'includes/layout.php';
               </tr>
             </thead>
             <tbody id="taxRatesTableBody">
-              <tr><td colspan="6" class="text-muted text-center py-4">Loading...</td></tr>
+              <tr>
+                <td colspan="6" class="text-muted text-center py-4">Loading...</td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -80,7 +82,7 @@ require 'includes/layout.php';
             </div>
             <div class="col-12 estimate-context" data-context="hs_code">
               <label class="form-label">HS Code</label>
-              <input type="text" class="form-control text-uppercase" id="estimateHsCode" placeholder="e.g. 940320">
+              <input type="text" class="form-control text-uppercase" id="estimateHsCode" placeholder="Type to search Lebanon tariff catalog..." autocomplete="off">
             </div>
             <div class="col-12 estimate-context d-none" data-context="product">
               <label class="form-label">Product</label>
@@ -122,7 +124,46 @@ require 'includes/layout.php';
               </tr>
             </thead>
             <tbody id="estimateResultsBody">
-              <tr><td colspan="5" class="text-muted text-center py-4">No estimate run yet.</td></tr>
+              <tr>
+                <td colspan="5" class="text-muted text-center py-4">No estimate run yet.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4 mt-2">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">Lebanon Tariff Catalog (imported from hs codes/)</div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">Search the imported Lebanon customs tariff data. Use results to copy HS codes into the Estimator or Add Rate form.</p>
+        <div class="row g-2 mb-3">
+          <div class="col-12 col-md-6">
+            <label class="form-label small">Search catalog</label>
+            <input type="text" class="form-control form-control-sm" id="catalogSearch" placeholder="Start with HS digits, name, or category..." autocomplete="off">
+            <div class="form-text" id="catalogSearchSummary">Search by the opening digits of an HS code or by the start of a name/category.</div>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-hover table-striped table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th>HS Code</th>
+                <th>Name</th>
+                <th>Category</th>
+                <th>Tariff</th>
+                <th>VAT</th>
+                <th>Section</th>
+              </tr>
+            </thead>
+            <tbody id="catalogTableBody">
+              <tr>
+                <td colspan="6" class="text-muted text-center py-4">Type to search the imported tariff catalog.</td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -143,7 +184,7 @@ require 'includes/layout.php';
           <input type="hidden" id="taxRateId">
           <div class="mb-3">
             <label class="form-label">HS Code *</label>
-            <input type="text" class="form-control text-uppercase" id="taxRateHsCode" required>
+            <input type="text" class="form-control text-uppercase" id="taxRateHsCode" placeholder="Type to search Lebanon tariff catalog..." required autocomplete="off">
           </div>
           <div class="row g-3">
             <div class="col-6">
@@ -173,5 +214,8 @@ require 'includes/layout.php';
   </div>
 </div>
 
-<?php $pageScripts = ['frontend/js/autocomplete.js', 'frontend/js/hs_code_tax.js'];
+<?php $pageScripts = [
+  'frontend/js/autocomplete.js?v=' . filemtime(__DIR__ . '/frontend/js/autocomplete.js'),
+  'frontend/js/hs_code_tax.js?v=' . filemtime(__DIR__ . '/frontend/js/hs_code_tax.js'),
+];
 require 'includes/footer.php'; ?>

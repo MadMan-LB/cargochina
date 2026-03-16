@@ -203,7 +203,7 @@ Before benchmarking, state what must not be disrupted:
 
 **What CargoWise provides:** Automated HS code classification, tariff lookups, country-by-country customs declaration templates, bonded warehouse support, permit tracking, automatic document generation (HBL, MBL, AWB, BOL), and compliance workflow automation across 193 countries.
 
-**CLMS status:** HS codes are stored per product (`hs_code` column). Shipping codes per order item are captured. Shipment draft documents (BOL, booking confirmation, invoice) can be attached via file upload. No automated customs declarations, no HS validation, no tariff management.
+**CLMS status:** HS codes are stored per product (`hs_code` column). Shipping codes per order item are captured. Shipment draft documents (BOL, booking confirmation, invoice) can be attached via file upload. **Lebanon tariff catalog** (`hs_code_tariff_catalog`) can be imported from `hs codes/` folder; Products page and HS Code Tax page use catalog search for HS code autocomplete. Manual tax rates remain in `hs_code_tax_rates`. No automated customs declarations.
 
 **Recommendation:** **Ignore for now, defer selectively.** Salameh is a China-to-Lebanon forwarder, not a customs broker. The carrier handles declarations. CLMS should continue to capture HS codes as metadata for the tracking push, but should not build customs automation. The one genuine gap is structured document attachment to shipments (BOL, packing list, commercial invoice as labeled types). This is already partially implemented via `shipment_draft_documents` and should be made more visible in the UI — this is a "now" improvement, not a customs automation project.
 
@@ -393,7 +393,7 @@ State these explicitly so no future implementation pass ignores them:
 
 - **Do not replace tracking.** CLMS is the upstream preparation layer. The existing tracking platform is the customer-facing layer. CLMS pushes to it; it does not absorb it.
 - **Do not build public marketplace features.** No RFQ marketplace, no supplier discovery portal, no public product catalog. Alibaba is a reference, not a blueprint.
-- **Do not overbuild customs/rate management** unless the CEO explicitly approves Salameh entering customs brokerage or freight rate negotiation as a core business service. Capturing HS codes as metadata is sufficient.
+- **Do not overbuild customs/rate management** unless the CEO explicitly approves Salameh entering customs brokerage or freight rate negotiation as a core business service. Capturing HS codes as metadata is sufficient. Tariff catalog import (Lebanon reference data for HS search/autocomplete) is supported; full customs automation is not.
 - **Do not copy CargoWise enterprise ERP complexity.** CargoWise's HR module, full AR/AP automation, and multi-modal carrier booking are not relevant to a China-to-Lebanon upstream operations team.
 - **Do not import Alibaba marketplace concepts** (buyer/seller ratings, public storefronts, escrow payment rails) into CLMS. The internal equivalents (supplier interaction log, payment ledger, receipt confirmation) are the correct abstractions.
 
@@ -579,6 +579,7 @@ This ledger should be maintained over time so both Codex and Cursor can see exec
 - [x] 2026-03-13: Completed Playwright MCP click-through across main root pages and area entry points (superadmin/admin/buyers/warehouse), plus desktop/tablet/mobile overflow checks on core operational pages.
 - [x] 2026-03-13: Fixed UI JS runtime error on containers page (`Identifier 'API_BASE' has already been declared`) by renaming local constant in `frontend/js/containers.js`.
 - [x] 2026-03-13: Fixed Composer runtime mismatch blocking exports on PHP 8.2 by pinning `maennchen/zipstream-php` to `^2.4` (lockfile + vendor updated), removing the PHP 8.3 platform gate.
+- [x] 2026-03-14: HS Code Tariff Catalog — migration 042, `hs_code_tariff_catalog` table, import from `hs codes/` CSV, Products + HS Code Tax pages use catalog autocomplete, Admin config importer, RBAC read/write, full downstream impact review.
 
 ### In Progress
 - [ ] User creation flow (SuperAdmin)

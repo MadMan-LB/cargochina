@@ -1,0 +1,34 @@
+---
+alwaysApply: true
+---
+
+Before making any code change, do full impact analysis.
+
+Rules for every change:
+- Do not make isolated edits.
+- First understand the current behavior, the business logic, and all dependencies.
+- Trace the full impact of the requested change across:
+  - all callers/usages
+  - related pages
+  - includes/partials
+  - forms
+  - API handlers / backend actions
+  - database queries
+  - calculations / totals / balances
+  - filters / search / status logic
+  - exports / PDF / Excel / print views
+  - notifications
+  - permissions / role visibility
+  - customer-facing vs internal-facing views
+  - legacy pages and duplicate flows
+- After changing anything, update every affected area so the system stays consistent.
+- Do not mark the task complete if only the direct function/page was edited.
+- Verify downstream effects, edge cases, and compatibility with existing data.
+- If a change affects statuses, quantities, prices, totals, or workflow logic, re-check all dependent calculations and UI states.
+- If a change affects a field, function, or status, search for all references and also inspect indirect usage, not only exact text matches.
+- Prefer safe and consistent architecture over quick patches.
+- At the end, report:
+  1. what was changed
+  2. what other files/pages/functions were impacted
+  3. what was updated because of the impact
+  4. any risks or manual QA still needed

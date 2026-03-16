@@ -1,8 +1,13 @@
 let productImagePaths = [];
 let productDescEntries = [];
 let productSupplierAutocomplete = null;
+let productFilterSupplierAutocomplete = null;
+let productFilterHsCodeAutocomplete = null;
+let productSearchAutocomplete = null;
+let productSearchTimer = null;
 
 document.addEventListener("DOMContentLoaded", () => {
+    setupProductFilters();
     loadProducts();
     setupProductImageUpload();
     setupProductDimensionInputs();
@@ -12,6 +17,119 @@ document.addEventListener("DOMContentLoaded", () => {
     setupProductPricing();
     setupProductDesignAttachments();
 });
+
+function setProductText(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+}
+
+function setupProductFilters() {
+    const searchEl = document.getElementById("productSearch");
+    const alertEl = document.getElementById("productAlertFilter");
+    const imageEl = document.getElementById("productImageFilter");
+    const supplierInputEl = document.getElementById(
+        "productFilterSupplierSearch",
+    );
+    const supplierHiddenEl = document.getElementById("productFilterSupplierId");
+    const hsInputEl = document.getElementById("productFilterHsCode");
+
+    if (searchEl) {
+        if (typeof Autocomplete !== "undefined") {
+            productSearchAutocomplete = Autocomplete.init(searchEl, {
+                resource: "products",
+                searchPath: "/search",
+                placeholder: "ID, description, packaging, supplier, HS code…",
+                renderItem: (item) => {
+                    const desc =
+                        mergedDescription(item) || `Product #${item.id}`;
+                    const parts = [
+                        `#${item.id}`,
+                        desc,
+                        item.supplier_name || "",
+                        item.packaging || "",
+                        item.hs_code ? `HS ${item.hs_code}` : "",
+                    ].filter(Boolean);
+                    const alertText = productAlertText(item);
+                    return parts.join(" — ") + (alertText ? " — Alert" : "");
+                },
+                displayValue: (item) => {
+                    const desc =
+                        item.description_en ||
+                        item.description_cn ||
+                        `Product ${item.id}`;
+                    return `${item.id} ${desc}`.trim();
+                },
+                onSelect: () => {
+                    clearTimeout(productSearchTimer);
+                    loadProducts();
+                },
+            });
+        }
+        searchEl.addEventListener("input", () => {
+            clearTimeout(productSearchTimer);
+            productSearchTimer = setTimeout(loadProducts, 220);
+        });
+        searchEl.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                clearTimeout(productSearchTimer);
+                loadProducts();
+            }
+        });
+    }
+
+    [alertEl, imageEl].forEach((el) => {
+        el?.addEventListener("change", loadProducts);
+    });
+
+    if (
+        supplierInputEl &&
+        supplierHiddenEl &&
+        typeof Autocomplete !== "undefined"
+    ) {
+        productFilterSupplierAutocomplete = Autocomplete.init(supplierInputEl, {
+            resource: "suppliers",
+            placeholder: "Type to search supplier...",
+            onSelect: (item) => {
+                supplierHiddenEl.value = item.id || "";
+                loadProducts();
+            },
+        });
+        supplierInputEl.addEventListener("input", () => {
+            supplierHiddenEl.value = "";
+        });
+        supplierInputEl.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                loadProducts();
+            }
+        });
+    }
+
+    if (hsInputEl && typeof Autocomplete !== "undefined") {
+        productFilterHsCodeAutocomplete = Autocomplete.init(hsInputEl, {
+            resource: "hs-code-catalog",
+            searchPath: "",
+            limit: 50,
+            placeholder: "Start typing HS code prefix...",
+            renderItem: (item) =>
+                [item.hs_code, item.name].filter(Boolean).join(" — ") ||
+                item.id ||
+                "",
+            displayValue: (item) => item.hs_code || item.id || "",
+            onSelect: (item) => {
+                hsInputEl.value = item.hs_code || item.id || "";
+                loadProducts();
+            },
+        });
+        hsInputEl.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                loadProducts();
+            }
+        });
+    }
+}
 
 function setupProductPricing() {
     const unitPriceEl = document.getElementById("productUnitPrice");
@@ -199,10 +317,15 @@ function setupProductHsCodeAutocomplete() {
     if (!inputEl) return;
     if (typeof Autocomplete === "undefined") return;
     Autocomplete.init(inputEl, {
-        resource: "products",
-        searchPath: "/hs-codes",
-        placeholder: "Type to search HS codes...",
-        renderItem: (item) => item.hs_code || item.id || "",
+        resource: "hs-code-catalog",
+        searchPath: "",
+        limit: 50,
+        placeholder: "Start typing HS code prefix...",
+        renderItem: (item) =>
+            [item.hs_code, item.name].filter(Boolean).join(" — ") ||
+            item.id ||
+            "",
+        displayValue: (item) => item.hs_code || item.id || "",
         onSelect: (item) => {
             inputEl.value = item.hs_code || item.id || "";
         },
@@ -221,7 +344,8 @@ function setupProductDimensionInputs() {
         const w = parseFloat(wEl.value) || 0;
         const h = parseFloat(hEl.value) || 0;
         if (l > 0 && w > 0 && h > 0) {
-            cbmEl.value = ((l * w * h) / 1000000).toFixed(4);
+            const cbm = Math.round(((l * w * h) / 1000000) * 1e6) / 1e6;
+            cbmEl.value = cbm.toFixed(6);
         }
     };
     [lEl, wEl, hEl].forEach((el) =>
@@ -309,16 +433,125 @@ function mergedDescription(row) {
     return row.description_en || row.description_cn || "-";
 }
 
-function renderProductAlertBadge(note) {
-    if (!note) return '<span class="text-muted">—</span>';
-    return `<span class="product-alert-badge" title="${escapeHtml(note)}">Alert</span>`;
+function productAlertText(item) {
+    const req = item?.product_required_design || item?.required_design;
+    const note = item?.product_high_alert_note || item?.high_alert_note || "";
+    return (req ? "Required design. " : "") + (note || "");
+}
+
+function renderProductAlertBadge(item) {
+    const text = typeof item === "object" ? productAlertText(item) : item || "";
+    if (!text) return '<span class="text-muted">—</span>';
+    return `<span class="product-alert-badge" title="${escapeHtml(text)}">Alert</span>`;
+}
+
+function getProductFilters() {
+    return {
+        q: document.getElementById("productSearch")?.value.trim() || "",
+        supplierId:
+            document.getElementById("productFilterSupplierId")?.value || "",
+        supplierName:
+            document
+                .getElementById("productFilterSupplierSearch")
+                ?.value.trim() || "",
+        hsCode:
+            document.getElementById("productFilterHsCode")?.value.trim() || "",
+        alertFilter: document.getElementById("productAlertFilter")?.value || "",
+        imageFilter: document.getElementById("productImageFilter")?.value || "",
+    };
+}
+
+function updateProductsOverview(rows) {
+    const list = rows || [];
+    const filters = getProductFilters();
+    const filterParts = [];
+    if (filters.q) filterParts.push(`Search: ${filters.q}`);
+    if (filters.supplierName)
+        filterParts.push(`Supplier: ${filters.supplierName}`);
+    if (filters.hsCode) filterParts.push(`HS: ${filters.hsCode}`);
+    if (filters.alertFilter === "with") filterParts.push("Alert only");
+    if (filters.alertFilter === "without") filterParts.push("Without alert");
+    if (filters.imageFilter === "with") filterParts.push("With images");
+    if (filters.imageFilter === "without") filterParts.push("Without images");
+
+    const withAlert = list.filter((item) => !!productAlertText(item)).length;
+    const withImages = list.filter(
+        (item) =>
+            Array.isArray(item.image_paths) && item.image_paths.length > 0,
+    ).length;
+    const withSupplier = list.filter((item) => !!item.supplier_id).length;
+
+    setProductText("productsVisibleCount", String(list.length));
+    setProductText(
+        "productsVisibleDetail",
+        list.length === 1
+            ? "1 product matches the current filters."
+            : `${list.length} products match the current filters.`,
+    );
+    setProductText("productsAlertCount", String(withAlert));
+    setProductText(
+        "productsAlertDetail",
+        withAlert
+            ? `${withAlert} product(s) need extra operational attention.`
+            : "No alert-tagged products in the visible result.",
+    );
+    setProductText("productsImageCount", String(withImages));
+    setProductText(
+        "productsImageDetail",
+        withImages
+            ? `${withImages} product(s) already have images attached.`
+            : "No images in the visible result.",
+    );
+    setProductText("productsSupplierCount", String(withSupplier));
+    setProductText(
+        "productsSupplierDetail",
+        withSupplier
+            ? `${withSupplier} product(s) are linked to suppliers.`
+            : "No supplier-linked products in the visible result.",
+    );
+    setProductText(
+        "productsFilterSummary",
+        filterParts.length
+            ? filterParts.join(" | ")
+            : "Showing the full product catalog.",
+    );
+    setProductText(
+        "productsGuideSummary",
+        list.length
+            ? `${list.length} visible | ${withAlert} alerts | ${withImages} with images | ${withSupplier} with supplier links.`
+            : "No product data matches the current filters.",
+    );
+    setProductText("productsCountLabel", list.length ? `(${list.length})` : "");
+    setProductText(
+        "productsTableSummary",
+        list.length
+            ? `${list.length} product${list.length === 1 ? "" : "s"} in view`
+            : "No matching products",
+    );
 }
 
 async function loadProducts() {
     try {
-        const res = await api("GET", "/products");
-        const rows = res.data || [];
+        const filters = getProductFilters();
+        const params = new URLSearchParams();
+        if (filters.q) params.set("q", filters.q);
+        if (filters.supplierId) params.set("supplier_id", filters.supplierId);
+        if (filters.hsCode) params.set("hs_code", filters.hsCode);
+        if (filters.alertFilter)
+            params.set("alert_filter", filters.alertFilter);
+        if (filters.imageFilter)
+            params.set("image_filter", filters.imageFilter);
         const tbody = document.querySelector("#productsTable tbody");
+        if (tbody) {
+            tbody.innerHTML =
+                '<tr><td colspan="11" class="text-center text-muted py-4">Loading products…</td></tr>';
+        }
+        const res = await api(
+            "GET",
+            "/products" + (params.toString() ? "?" + params.toString() : ""),
+        );
+        const rows = res.data || [];
+        updateProductsOverview(rows);
         tbody.innerHTML =
             rows
                 .map(
@@ -326,8 +559,12 @@ async function loadProducts() {
       <tr>
         <td>${r.thumbnail_url ? `<img src="${r.thumbnail_url}" class="img-thumbnail img-thumbnail-sm" alt="">` : "—"}</td>
         <td>${r.id}</td>
-        <td class="text-truncate" style="max-width:200px" title="${escapeHtml(mergedDescription(r))}">${escapeHtml(mergedDescription(r))}</td>
-        <td>${renderProductAlertBadge(r.high_alert_note)}</td>
+        <td style="min-width:220px">
+          <div class="fw-semibold text-truncate" style="max-width:260px" title="${escapeHtml(mergedDescription(r))}">${escapeHtml(mergedDescription(r))}</div>
+          <div class="small text-muted text-truncate" style="max-width:260px">${escapeHtml(r.packaging || "No packaging note")}</div>
+        </td>
+        <td>${escapeHtml(r.supplier_name || "—")}</td>
+        <td>${renderProductAlertBadge(r)}</td>
         <td>${r.cbm}</td>
         <td>${r.weight}</td>
         <td>${r.pieces_per_carton ?? "—"}</td>
@@ -341,11 +578,36 @@ async function loadProducts() {
     `,
                 )
                 .join("") ||
-            '<tr><td colspan="10" class="text-muted">No products yet.</td></tr>';
+            '<tr><td colspan="11" class="text-center text-muted py-4">No products match the current filters.</td></tr>';
     } catch (e) {
+        updateProductsOverview([]);
+        const tbody = document.querySelector("#productsTable tbody");
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="11" class="text-center text-danger py-4">${escapeHtml(e.message || "Failed to load products")}</td></tr>`;
+        }
         showToast(e.message, "danger");
     }
 }
+
+window.clearProductFilters = function () {
+    const searchEl = document.getElementById("productSearch");
+    const supplierHiddenEl = document.getElementById("productFilterSupplierId");
+    const hsCodeEl = document.getElementById("productFilterHsCode");
+    const alertEl = document.getElementById("productAlertFilter");
+    const imageEl = document.getElementById("productImageFilter");
+
+    if (searchEl) searchEl.value = "";
+    productSearchAutocomplete?.setValue?.(null);
+    if (supplierHiddenEl) supplierHiddenEl.value = "";
+    productFilterSupplierAutocomplete?.setValue?.(null);
+    if (hsCodeEl) hsCodeEl.value = "";
+    if (productFilterHsCodeAutocomplete?.setValue) {
+        productFilterHsCodeAutocomplete.setValue(null);
+    }
+    if (alertEl) alertEl.value = "";
+    if (imageEl) imageEl.value = "";
+    loadProducts();
+};
 
 function openProductForm() {
     document.getElementById("productForm").reset();
@@ -359,6 +621,10 @@ function openProductForm() {
     if (productSupplierAutocomplete && productSupplierAutocomplete.setValue)
         productSupplierAutocomplete.setValue(null);
     document.getElementById("productHighAlertNote").value = "";
+    const pieceRadio = document.getElementById("productDimensionsPiece");
+    if (pieceRadio) pieceRadio.checked = true;
+    const reqDesignCb = document.getElementById("productRequiredDesign");
+    if (reqDesignCb) reqDesignCb.checked = false;
     const cartonTotalEl = document.getElementById("productCartonTotal");
     if (cartonTotalEl) cartonTotalEl.textContent = "—";
     renderProductDesignAttachments([]);
@@ -406,10 +672,20 @@ async function editProduct(id) {
         document.getElementById("productWidth").value = d.width_cm ?? "";
         document.getElementById("productHeight").value = d.height_cm ?? "";
         document.getElementById("productWeight").value = d.weight;
+        const scope = (d.dimensions_scope || "piece").toLowerCase();
+        const pieceRadio = document.getElementById("productDimensionsPiece");
+        const cartonRadio = document.getElementById("productDimensionsCarton");
+        if (pieceRadio) pieceRadio.checked = scope === "piece";
+        if (cartonRadio) cartonRadio.checked = scope === "carton";
         document.getElementById("productHsCode").value = d.hs_code || "";
         document.getElementById("productPackaging").value = d.packaging || "";
         document.getElementById("productHighAlertNote").value =
             d.high_alert_note || "";
+        const reqDesignCb = document.getElementById("productRequiredDesign");
+        if (reqDesignCb)
+            reqDesignCb.checked = !!(
+                d.required_design && d.required_design !== 0
+            );
         document.getElementById("productPiecesPerCarton").value =
             d.pieces_per_carton ?? "";
         document.getElementById("productUnitPrice").value = d.unit_price ?? "";
@@ -474,12 +750,20 @@ async function saveProduct() {
         width_cm: w > 0 ? w : null,
         height_cm: h > 0 ? h : null,
         weight: parseFloat(document.getElementById("productWeight").value) || 0,
+        dimensions_scope:
+            document.querySelector(
+                'input[name="productDimensionsScope"]:checked',
+            )?.value || "piece",
         hs_code: document.getElementById("productHsCode").value.trim() || null,
         packaging:
             document.getElementById("productPackaging").value.trim() || null,
         high_alert_note:
             document.getElementById("productHighAlertNote").value.trim() ||
             null,
+        required_design: document.getElementById("productRequiredDesign")
+            ?.checked
+            ? 1
+            : 0,
         supplier_id: document.getElementById("productSupplierId").value || null,
         pieces_per_carton: document.getElementById("productPiecesPerCarton")
             .value
