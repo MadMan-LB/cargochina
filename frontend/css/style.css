@@ -1138,7 +1138,7 @@ body.d-flex {
   overflow: hidden;
 }
 
-.capacity-meter > span {
+.capacity-meter>span {
   display: block;
   height: 100%;
   border-radius: inherit;
@@ -1392,6 +1392,7 @@ body.d-flex {
 }
 
 @media (max-width: 1200px) {
+
   .metric-card-grid,
   .pipeline-stage-grid,
   .finance-summary-grid {
@@ -1416,6 +1417,7 @@ body.d-flex {
 }
 
 @media (max-width: 640px) {
+
   .metric-card-grid,
   .pipeline-stage-grid,
   .calendar-board,
@@ -1598,4 +1600,27 @@ body.d-flex {
   font-weight: 700;
   color: var(--text-primary);
   margin-top: .1rem;
+}
+
+/* ── User Activity panel ────────────────────────────────── */
+.activity-filters .form-select,
+.activity-filters .form-control {
+  min-width: 140px;
+}
+
+.activity-content .table td {
+  vertical-align: middle;
+}
+
+.activity-content .table tbody tr:hover {
+  background-color: rgba(37, 99, 235, 0.04);
+}
+
+.activity-content .table a {
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.activity-content .table a:hover {
+  text-decoration: underline;
 }

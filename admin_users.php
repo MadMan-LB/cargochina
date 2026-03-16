@@ -36,71 +36,88 @@ require 'includes/layout.php';
   </div>
 </div>
 
-<div class="card mt-4" id="activityPanel" style="display:none">
-  <div class="card-header d-flex justify-content-between align-items-center">
-    <h5 class="mb-0" id="activityPanelTitle">User Activity</h5>
-    <button type="button" class="btn-close" onclick="hideActivityPanel()" aria-label="Close"></button>
+<div class="card mt-4 shadow-sm" id="activityPanel" style="display:none">
+  <div class="card-header d-flex justify-content-between align-items-center py-3 bg-light">
+    <div class="d-flex align-items-center gap-2">
+      <button type="button" class="btn btn-sm btn-outline-secondary" onclick="hideActivityPanel()" aria-label="Close">
+        <span aria-hidden="true">←</span> Back
+      </button>
+      <span class="text-muted">|</span>
+      <h5 class="mb-0" id="activityPanelTitle">User Activity</h5>
+    </div>
   </div>
-  <div class="card-body py-2">
-    <div class="row g-2 align-items-end mb-3">
-      <div class="col-auto">
-        <label class="form-label small mb-0">Entity type</label>
-        <select class="form-select form-select-sm" id="activityEntityType" style="width:160px">
-          <option value="">— All —</option>
-          <option value="order">Order</option>
-          <option value="shipment_draft">Shipment draft</option>
-          <option value="expense">Expense</option>
-          <option value="procurement_draft">Procurement draft</option>
-          <option value="order_template">Order template</option>
-          <option value="customer_deposit">Customer deposit</option>
-          <option value="supplier_interaction">Supplier interaction</option>
-          <option value="customer_portal_token">Customer portal token</option>
-          <option value="design_attachment">Design attachment</option>
-          <option value="user">User</option>
-          <option value="system_config">System config</option>
-          <option value="internal_message">Internal message</option>
-        </select>
-      </div>
-      <div class="col-auto">
-        <label class="form-label small mb-0">Action</label>
-        <select class="form-select form-select-sm" id="activityAction" style="width:120px">
-          <option value="">— All —</option>
-          <option value="create">Create</option>
-          <option value="update">Update</option>
-          <option value="submit">Submit</option>
-          <option value="approve">Approve</option>
-          <option value="receive">Receive</option>
-          <option value="confirm">Confirm</option>
-        </select>
-      </div>
-      <div class="col-auto">
-        <label class="form-label small mb-0">Date from</label>
-        <input type="date" class="form-control form-control-sm" id="activityDateFrom">
-      </div>
-      <div class="col-auto">
-        <label class="form-label small mb-0">Date to</label>
-        <input type="date" class="form-control form-control-sm" id="activityDateTo">
-      </div>
-      <div class="col-auto">
-        <button type="button" class="btn btn-primary btn-sm" onclick="loadUserActivity()">Apply</button>
+  <div class="card-body">
+    <div class="activity-filters bg-light rounded-3 p-3 mb-4">
+      <div class="row g-3 align-items-end flex-wrap">
+        <div class="col-12 col-sm-6 col-md-auto">
+          <label class="form-label small mb-0 fw-medium">Entity type</label>
+          <select class="form-select form-select-sm" id="activityEntityType">
+            <option value="">All types</option>
+            <option value="order">Order</option>
+            <option value="shipment_draft">Shipment draft</option>
+            <option value="expense">Expense</option>
+            <option value="procurement_draft">Procurement draft</option>
+            <option value="order_template">Order template</option>
+            <option value="customer_deposit">Customer deposit</option>
+            <option value="supplier_interaction">Supplier interaction</option>
+            <option value="customer_portal_token">Customer portal token</option>
+            <option value="design_attachment">Design attachment</option>
+            <option value="user">User</option>
+            <option value="system_config">System config</option>
+            <option value="internal_message">Internal message</option>
+          </select>
+        </div>
+        <div class="col-12 col-sm-6 col-md-auto">
+          <label class="form-label small mb-0 fw-medium">Action</label>
+          <select class="form-select form-select-sm" id="activityAction">
+            <option value="">All actions</option>
+            <option value="create">Create</option>
+            <option value="update">Update</option>
+            <option value="submit">Submit</option>
+            <option value="approve">Approve</option>
+            <option value="receive">Receive</option>
+            <option value="confirm">Confirm</option>
+          </select>
+        </div>
+        <div class="col-12 col-sm-6 col-md-auto">
+          <label class="form-label small mb-0 fw-medium">Date from</label>
+          <input type="date" class="form-control form-control-sm" id="activityDateFrom">
+        </div>
+        <div class="col-12 col-sm-6 col-md-auto">
+          <label class="form-label small mb-0 fw-medium">Date to</label>
+          <input type="date" class="form-control form-control-sm" id="activityDateTo">
+        </div>
+        <div class="col-12 col-md-auto d-flex gap-2">
+          <button type="button" class="btn btn-primary btn-sm" onclick="loadUserActivity()">Apply</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" onclick="clearActivityFilters()">Clear</button>
+        </div>
       </div>
     </div>
-    <div class="table-responsive">
-      <table class="table table-hover table-sm mb-0">
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Entity</th>
-            <th>Action</th>
-            <th>Details</th>
-          </tr>
-        </thead>
-        <tbody id="activityBody"></tbody>
-      </table>
+    <div id="activityLoading" class="text-center py-5 d-none">
+      <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading…</span></div>
+      <p class="text-muted small mt-2 mb-0">Loading activity…</p>
     </div>
-    <div id="activityEmpty" class="text-center py-4 text-muted d-none">No activity found.</div>
-    <div class="p-2 text-end">
-      <button type="button" class="btn btn-outline-secondary btn-sm" id="activityLoadMoreBtn" onclick="loadMoreActivity()" style="display:none">Load more</button>
+    <div id="activityContent" class="activity-content">
+      <div class="table-responsive">
+        <table class="table table-hover table-sm align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th class="text-nowrap">Time</th>
+              <th>Entity</th>
+              <th class="text-nowrap">Action</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody id="activityBody"></tbody>
+        </table>
+      </div>
+      <div id="activityEmpty" class="text-center py-5 text-muted d-none">
+        <p class="mb-1 fw-medium">No activity found</p>
+        <p class="small mb-0 opacity-75">Try adjusting filters or date range.</p>
+      </div>
+      <div class="d-flex justify-content-center py-3">
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="activityLoadMoreBtn" onclick="loadMoreActivity()" style="display:none">Load more</button>
+      </div>
     </div>
   </div>
 </div>

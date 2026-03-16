@@ -270,7 +270,9 @@ function showUserActivity(userId) {
     const name = u ? u.full_name || u.email || "User" : "User";
     document.getElementById("activityPanelTitle").textContent =
         `Activity: ${name} (#${userId})`;
-    document.getElementById("activityPanel").style.display = "block";
+    const panel = document.getElementById("activityPanel");
+    panel.style.display = "block";
+    panel.scrollIntoView({ behavior: "smooth", block: "start" });
     document.getElementById("activityEntityType").value = "";
     document.getElementById("activityAction").value = "";
     document.getElementById("activityDateFrom").value = "";
@@ -281,6 +283,26 @@ function showUserActivity(userId) {
 function hideActivityPanel() {
     document.getElementById("activityPanel").style.display = "none";
     activityUserId = null;
+}
+
+function clearActivityFilters() {
+    document.getElementById("activityEntityType").value = "";
+    document.getElementById("activityAction").value = "";
+    document.getElementById("activityDateFrom").value = "";
+    document.getElementById("activityDateTo").value = "";
+    loadUserActivity(true);
+}
+
+function getActivityBadgeClass(action) {
+    const map = {
+        create: "bg-success",
+        update: "bg-info text-dark",
+        submit: "bg-primary",
+        approve: "bg-primary",
+        receive: "bg-warning text-dark",
+        confirm: "bg-success",
+    };
+    return map[action] || "bg-secondary";
 }
 
 function getActivityEntityLink(entityType, entityId) {
@@ -325,6 +347,13 @@ async function loadUserActivity(reset = true) {
     if (dateFrom) params.set("date_from", dateFrom);
     if (dateTo) params.set("date_to", dateTo);
 
+    const loadingEl = document.getElementById("activityLoading");
+    const contentEl = document.getElementById("activityContent");
+    if (loadingEl && contentEl) {
+        loadingEl.classList.remove("d-none");
+        contentEl.classList.add("d-none");
+    }
+
     try {
         const res = await api(
             "GET",
@@ -334,6 +363,11 @@ async function loadUserActivity(reset = true) {
         const tbody = document.getElementById("activityBody");
         const emptyEl = document.getElementById("activityEmpty");
         const loadMoreBtn = document.getElementById("activityLoadMoreBtn");
+
+        if (loadingEl && contentEl) {
+            loadingEl.classList.add("d-none");
+            contentEl.classList.remove("d-none");
+        }
 
         if (reset) tbody.innerHTML = "";
 
@@ -358,11 +392,13 @@ async function loadUserActivity(reset = true) {
                     details = String(r.new_value).substring(0, 80);
                 }
             }
+            const badgeClass = getActivityBadgeClass(r.action);
+            const timeStr = (r.created_at || "").replace(" ", " ");
             tr.innerHTML = `
-                <td><small>${escapeHtml((r.created_at || "").replace(" ", " "))}</small></td>
+                <td class="text-nowrap"><small class="text-muted">${escapeHtml(timeStr)}</small></td>
                 <td>${entityLink}</td>
-                <td><span class="badge bg-secondary">${escapeHtml(r.action)}</span></td>
-                <td><small class="text-muted">${escapeHtml(details || "—")}</small></td>
+                <td><span class="badge ${badgeClass}">${escapeHtml(r.action)}</span></td>
+                <td><small class="text-muted text-break">${escapeHtml(details || "—")}</small></td>
             `;
             tbody.appendChild(tr);
         });
@@ -374,6 +410,10 @@ async function loadUserActivity(reset = true) {
         loadMoreBtn.style.display = res.has_more ? "inline-block" : "none";
         activityOffset += rows.length;
     } catch (e) {
+        if (loadingEl && contentEl) {
+            loadingEl.classList.add("d-none");
+            contentEl.classList.remove("d-none");
+        }
         showToast(e.message, "danger");
     }
 }
