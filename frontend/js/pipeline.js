@@ -39,6 +39,8 @@ const PIPELINE_STAGE_CONFIG = [
 
 document.addEventListener("DOMContentLoaded", loadPipeline);
 
+const PIPELINE_STAGE_PREVIEW_LIMIT = 3;
+
 async function fetchOrdersByStatuses(statuses) {
     const params = new URLSearchParams();
     statuses.forEach((status) => params.append("status[]", status));
@@ -60,14 +62,12 @@ function renderTaskList(tasks) {
     el.innerHTML = tasks
         .map(
             (task) => `
-        <a class="pipeline-stage-item mb-2" href="${task.url}">
-          <div class="d-flex justify-content-between align-items-start gap-2">
-            <div>
-              <div class="fw-semibold">${escapeHtml(task.label)}</div>
-              <div class="meta">Open the live queue for action.</div>
-            </div>
-            <span class="badge bg-primary">${task.count}</span>
+        <a class="pipeline-focus-item" href="${task.url}">
+          <div class="pipeline-focus-copy">
+            <div class="pipeline-focus-title">${escapeHtml(task.label)}</div>
+            <div class="pipeline-focus-meta">Open the live queue for action.</div>
           </div>
+          <span class="pipeline-focus-count">${task.count}</span>
         </a>`,
         )
         .join("");
@@ -78,32 +78,56 @@ function renderStageBoard(stagePayloads) {
     if (!board) return;
     board.innerHTML = stagePayloads
         .map((stage) => {
-            const preview = (stage.orders || []).slice(0, 5);
+            const preview = (stage.orders || []).slice(0, PIPELINE_STAGE_PREVIEW_LIMIT);
+            const hiddenCount = Math.max((stage.count || 0) - preview.length, 0);
             const listHtml = preview.length
                 ? preview
                       .map(
                           (order) => `
                 <a class="pipeline-stage-item" href="/cargochina/orders.php?id=${order.id}">
-                  <div class="d-flex justify-content-between align-items-start gap-2 mb-1">
-                    <div class="fw-semibold">#${order.id} ${escapeHtml(order.customer_name || "")}</div>
-                    <span class="badge ${statusBadgeClass(order.status)}">${escapeHtml(statusLabel(order.status))}</span>
+                  <div class="pipeline-stage-item-head">
+                    <div class="pipeline-stage-order-ref">#${order.id}</div>
+                    <span class="badge ${statusBadgeClass(order.status)} pipeline-stage-status">${escapeHtml(statusLabel(order.status))}</span>
                   </div>
-                  <div class="meta">${escapeHtml(order.supplier_name || "No supplier")}</div>
-                  <div class="meta">Expected ready: ${escapeHtml(order.expected_ready_date || "-")}</div>
+                  <div class="pipeline-stage-primary">${escapeHtml(order.customer_name || "Unnamed customer")}</div>
+                  <div class="pipeline-stage-secondary">${escapeHtml(order.supplier_name || "No supplier linked yet")}</div>
+                  <div class="pipeline-stage-meta-row">
+                    <span>Expected ready</span>
+                    <strong>${escapeHtml(order.expected_ready_date || "-")}</strong>
+                  </div>
                 </a>`,
                       )
                       .join("")
                 : '<div class="text-muted small">Nothing in this queue right now.</div>';
             return `
           <div class="pipeline-stage-card">
-            <div class="stage-head" style="border-top:4px solid ${stage.accent}">
-              <div class="small text-uppercase text-muted fw-semibold">${escapeHtml(stage.title)}</div>
-              <div class="stage-count" style="color:${stage.accent}">${stage.count}</div>
-              <div class="small text-muted mt-2">${escapeHtml(stage.subtitle)}</div>
+            <div class="stage-head" style="--stage-accent:${stage.accent}">
+              <div class="pipeline-stage-topline">
+                <div>
+                  <div class="small text-uppercase text-muted fw-semibold">${escapeHtml(stage.title)}</div>
+                  <div class="small text-muted mt-2">${escapeHtml(stage.subtitle)}</div>
+                </div>
+                <div class="stage-count-pill">${stage.count}</div>
+              </div>
+              <div class="pipeline-stage-inline-metrics">
+                <div class="pipeline-stage-inline-metric">
+                  <span class="label">Previewing</span>
+                  <strong>${preview.length}</strong>
+                </div>
+                <div class="pipeline-stage-inline-metric">
+                  <span class="label">Still waiting</span>
+                  <strong>${hiddenCount}</strong>
+                </div>
+              </div>
             </div>
             <div class="stage-body">
-              <div class="pipeline-stage-list mb-3">${listHtml}</div>
-              <a href="${stage.url}" class="btn btn-outline-secondary btn-sm w-100">Open Queue</a>
+              <div class="pipeline-stage-list">${listHtml}</div>
+              ${
+                  hiddenCount
+                      ? `<div class="pipeline-stage-more">${hiddenCount} more order${hiddenCount === 1 ? "" : "s"} are waiting in the full queue.</div>`
+                      : ""
+              }
+              <a href="${stage.url}" class="btn btn-outline-secondary btn-sm w-100 pipeline-stage-cta">Open Queue</a>
             </div>
           </div>`;
         })

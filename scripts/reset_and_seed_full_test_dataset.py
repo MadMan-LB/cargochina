@@ -125,6 +125,18 @@ def chunked(items: list[Any], size: int) -> Iterable[list[Any]]:
         yield items[idx : idx + size]
 
 
+def parse_decimalish(value: str | int | float | None) -> float:
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    cleaned = re.sub(r"[^0-9.\\-]+", "", str(value))
+    try:
+        return float(cleaned or 0)
+    except ValueError:
+        return 0.0
+
+
 def make_pdf_bytes(text: str) -> bytes:
     safe = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
     stream = f"BT /F1 18 Tf 50 760 Td ({safe}) Tj ET".encode("latin-1", errors="replace")
@@ -370,8 +382,8 @@ def fetch_hs_catalog_entries(db: DbClient, count: int = 60) -> list[dict[str, An
                 "hs_code": hs_code,
                 "name": name,
                 "category_name": category_name or "General",
-                "tariff_rate": float(tariff_rate or 0),
-                "vat": float(vat or 0),
+                "tariff_rate": parse_decimalish(tariff_rate),
+                "vat": parse_decimalish(vat),
                 "chapter": normalized[:2],
             }
         )
@@ -746,3 +758,715 @@ def make_order_specs(customers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if len(specs) != 30:
         raise RuntimeError(f"Expected 30 order specs, got {len(specs)}")
     return specs
+
+def create_containers_and_drafts(
+    db: DbClient,
+    assets: dict[str, list[str]],
+    today: date,
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    container_specs = [
+        {"key": "CTR-FULL-01", "code": f"{SEED_TAG}-CTR-001", "max_cbm": 28.0, "max_weight": 28200.0, "status": "on_route", "notes": "Full 20HQ container already finalized and en route to Beirut.", "destination_country": "LB", "destination": "Beirut", "expected_ship_date": (today - timedelta(days=12)).isoformat(), "actual_departure_date": (today - timedelta(days=9)).isoformat(), "eta_date": (today + timedelta(days=6)).isoformat(), "vessel_name": "Mediterranean Cedar 1"},
+        {"key": "CTR-FULL-02", "code": f"{SEED_TAG}-CTR-002", "max_cbm": 28.0, "max_weight": 28200.0, "status": "on_route", "notes": "Second 20HQ consolidated and pushed to tracking.", "destination_country": "LB", "destination": "Tripoli", "expected_ship_date": (today - timedelta(days=10)).isoformat(), "actual_departure_date": (today - timedelta(days=8)).isoformat(), "eta_date": (today + timedelta(days=7)).isoformat(), "vessel_name": "Tripoli Link 8"},
+        {"key": "CTR-FULL-03", "code": f"{SEED_TAG}-CTR-003", "max_cbm": 67.7, "max_weight": 26800.0, "status": "on_route", "notes": "40HQ multi-customer finalized draft en route to Jounieh.", "destination_country": "LB", "destination": "Jounieh", "expected_ship_date": (today - timedelta(days=9)).isoformat(), "actual_departure_date": (today - timedelta(days=6)).isoformat(), "eta_date": (today + timedelta(days=5)).isoformat(), "vessel_name": "Levant Star 4"},
+        {"key": "CTR-FULL-04", "code": f"{SEED_TAG}-CTR-004", "max_cbm": 67.7, "max_weight": 26800.0, "status": "on_route", "notes": "High-value 40HQ container with finalized tracking push.", "destination_country": "AE", "destination": "Dubai", "expected_ship_date": (today - timedelta(days=7)).isoformat(), "actual_departure_date": (today - timedelta(days=5)).isoformat(), "eta_date": (today + timedelta(days=11)).isoformat(), "vessel_name": "Gulf Horizon 9"},
+        {"key": "CTR-TOGO-01", "code": f"{SEED_TAG}-CTR-005", "max_cbm": 28.0, "max_weight": 28200.0, "status": "to_go", "notes": "Almost full 20HQ - waiting for final carton top-up.", "destination_country": "LB", "destination": "Beirut", "expected_ship_date": (today + timedelta(days=4)).isoformat(), "actual_departure_date": None, "eta_date": (today + timedelta(days=19)).isoformat(), "vessel_name": "Ready Queue 1"},
+        {"key": "CTR-TOGO-02", "code": f"{SEED_TAG}-CTR-006", "max_cbm": 28.0, "max_weight": 28200.0, "status": "to_go", "notes": "Almost full 20HQ for north route.", "destination_country": "LB", "destination": "Tripoli", "expected_ship_date": (today + timedelta(days=5)).isoformat(), "actual_departure_date": None, "eta_date": (today + timedelta(days=20)).isoformat(), "vessel_name": "Ready Queue 2"},
+        {"key": "CTR-TOGO-03", "code": f"{SEED_TAG}-CTR-007", "max_cbm": 67.7, "max_weight": 26800.0, "status": "to_go", "notes": "Large almost-filled 40HQ awaiting booking confirmation.", "destination_country": "IQ", "destination": "Basra", "expected_ship_date": (today + timedelta(days=6)).isoformat(), "actual_departure_date": None, "eta_date": (today + timedelta(days=24)).isoformat(), "vessel_name": "Ready Queue 3"},
+        {"key": "CTR-PLAN-01", "code": f"{SEED_TAG}-CTR-008", "max_cbm": 28.0, "max_weight": 28200.0, "status": "planning", "notes": "New 20HQ planning batch with early assignments.", "destination_country": "LB", "destination": "Saida", "expected_ship_date": (today + timedelta(days=13)).isoformat(), "actual_departure_date": None, "eta_date": (today + timedelta(days=31)).isoformat(), "vessel_name": "Planning Board 1"},
+        {"key": "CTR-PLAN-02", "code": f"{SEED_TAG}-CTR-009", "max_cbm": 67.7, "max_weight": 26800.0, "status": "planning", "notes": "Large planning container starting to collect cargo.", "destination_country": "JO", "destination": "Aqaba", "expected_ship_date": (today + timedelta(days=15)).isoformat(), "actual_departure_date": None, "eta_date": (today + timedelta(days=35)).isoformat(), "vessel_name": "Planning Board 2"},
+    ]
+
+    containers: dict[str, dict[str, Any]] = {}
+    for spec in container_specs:
+        container_id = db.insert(
+            "containers",
+            {
+                "code": spec["code"],
+                "max_cbm": spec["max_cbm"],
+                "max_weight": spec["max_weight"],
+                "status": spec["status"],
+                "notes": spec["notes"],
+                "destination_country": spec["destination_country"],
+                "destination": spec["destination"],
+                "eta_date": spec["eta_date"],
+                "actual_arrival_date": None,
+                "expected_ship_date": spec["expected_ship_date"],
+                "actual_departure_date": spec["actual_departure_date"],
+                "vessel_name": spec["vessel_name"],
+            },
+        )
+        spec["id"] = container_id
+        containers[spec["key"]] = spec
+
+    draft_specs = [
+        ("CTR-FULL-01", "finalized"),
+        ("CTR-FULL-02", "finalized"),
+        ("CTR-FULL-03", "finalized"),
+        ("CTR-FULL-04", "finalized"),
+        ("CTR-TOGO-01", "draft"),
+        ("CTR-TOGO-02", "draft"),
+        ("CTR-TOGO-03", "draft"),
+        ("CTR-PLAN-01", "draft"),
+        ("CTR-PLAN-02", "draft"),
+        ("CTR-DRAFT-ONLY", "draft"),
+    ]
+    drafts: dict[str, dict[str, Any]] = {}
+    document_rows: list[dict[str, Any]] = []
+    for idx, (container_key, status) in enumerate(draft_specs, start=1):
+        container_id = containers[container_key]["id"] if container_key in containers else None
+        draft_id = db.insert(
+            "shipment_drafts",
+            {
+                "container_id": container_id,
+                "container_number": containers[container_key]["code"] if container_key in containers else None,
+                "booking_number": f"{SEED_TAG}-BOOK-{idx:03d}",
+                "tracking_url": f"https://tracking.example.test/shipments/{SEED_TAG.lower()}-{idx:03d}",
+                "status": status,
+            },
+        )
+        drafts[container_key] = {"id": draft_id, "container_id": container_id, "status": status, "booking_number": f"{SEED_TAG}-BOOK-{idx:03d}"}
+        document_rows.append({"shipment_draft_id": draft_id, "file_path": assets["documents"][idx % len(assets["documents"])], "doc_type": "booking_confirmation" if idx % 2 else "invoice"})
+        if status == "finalized":
+            document_rows.append({"shipment_draft_id": draft_id, "file_path": assets["documents"][(idx + 1) % len(assets["documents"])], "doc_type": "bol"})
+    db.insert_many("shipment_draft_documents", document_rows)
+    return containers, drafts
+
+
+def create_order_items_for_target(
+    spec: dict[str, Any],
+    order_id: int,
+    order_index: int,
+    products_for_order: list[dict[str, Any]],
+    customer: dict[str, Any],
+    assets: dict[str, list[str]],
+) -> list[dict[str, Any]]:
+    item_rows: list[dict[str, Any]] = []
+    target_cbm = spec["target_cbm"]
+    item_targets = [target_cbm * 0.56, target_cbm * 0.44]
+    for line_index, (product, item_target) in enumerate(zip(products_for_order, item_targets), start=1):
+        qty_per_carton = int(product["pieces_per_carton"] or 12)
+        order_qty_per_carton = qty_per_carton
+        if (order_index + line_index) % 4 == 0:
+            order_qty_per_carton = max(4, qty_per_carton + (2 if line_index % 2 else -2))
+        if product["dimensions_scope"] == "carton":
+            cartons = max(1, int(round(item_target / max(float(product["cbm"]), 0.01))))
+            quantity = cartons * order_qty_per_carton
+            declared_cbm = round(cartons * float(product["cbm"]), 6)
+            declared_weight = round(cartons * float(product["weight"]), 4)
+        else:
+            per_piece_cbm = max(float(product["cbm"]), 0.0001)
+            quantity = max(order_qty_per_carton, int(round(item_target / per_piece_cbm)))
+            cartons = max(1, int(round(quantity / max(order_qty_per_carton, 1))))
+            quantity = cartons * order_qty_per_carton
+            declared_cbm = round(quantity * per_piece_cbm, 6)
+            declared_weight = round(quantity * float(product["weight"]), 4)
+
+        sell_price = round(float(product["sell_price"]) * (1 + (line_index - 1) * 0.02), 4)
+        buy_price = round(float(product["buy_price"]) * (1 + (line_index - 1) * 0.015), 4)
+        shipping_code = f"{customer['default_shipping_code']}-{order_index:02d}-{line_index}"
+        notes = f"Seed line {line_index} for {spec['label']}."
+        if product["high_alert_note"]:
+            notes += " High-alert product selected."
+        image_paths = json.dumps(
+            [
+                assets["order_images"][(order_index + line_index) % len(assets["order_images"])],
+                assets["product_images"][(product["seed_index"] + line_index) % len(assets["product_images"])],
+            ],
+            ensure_ascii=False,
+        )
+        row = {
+            "order_id": order_id,
+            "product_id": product["id"],
+            "supplier_id": product["supplier_id"],
+            "item_no": f"{spec['label']}-IT{line_index:02d}",
+            "shipping_code": shipping_code,
+            "cartons": cartons,
+            "qty_per_carton": qty_per_carton,
+            "unit_price": sell_price,
+            "total_amount": round(quantity * sell_price, 4),
+            "buy_price": buy_price,
+            "sell_price": sell_price,
+            "order_cartons": cartons,
+            "order_qty_per_carton": order_qty_per_carton,
+            "notes": notes,
+            "image_paths": image_paths,
+            "quantity": quantity,
+            "unit": "pieces",
+            "declared_cbm": declared_cbm,
+            "declared_weight": declared_weight,
+            "item_length": product["length_cm"],
+            "item_width": product["width_cm"],
+            "item_height": product["height_cm"],
+            "description_cn": product["description_cn"],
+            "description_en": product["description_en"],
+        }
+        item_rows.append(row)
+    return item_rows
+
+
+def seed_orders_and_items(
+    db: DbClient,
+    order_specs: list[dict[str, Any]],
+    customers: list[dict[str, Any]],
+    products: list[dict[str, Any]],
+    drafts: dict[str, dict[str, Any]],
+    assets: dict[str, list[str]],
+    created_by: int,
+    today: date,
+    uploader_id: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    orders: list[dict[str, Any]] = []
+    all_items: list[dict[str, Any]] = []
+    product_cursor = 0
+    order_attachment_rows: list[dict[str, Any]] = []
+    design_attachment_rows: list[dict[str, Any]] = []
+    for idx, spec in enumerate(order_specs, start=1):
+        customer = customers[spec["customer_idx"]]
+        selected_products = products[product_cursor : product_cursor + 2]
+        if len(selected_products) != 2:
+            raise RuntimeError("Not enough products to seed the planned orders")
+        product_cursor += 2
+        supplier_ids = {p["supplier_id"] for p in selected_products if p.get("supplier_id")}
+        order_supplier_id = next(iter(supplier_ids)) if len(supplier_ids) == 1 else None
+        confirm_token = None
+        if spec["status"] == "AwaitingCustomerConfirmation":
+            confirm_token = hashlib.sha256(f"{SEED_TAG}-confirm-{idx}".encode("utf-8")).hexdigest()[:40]
+
+        created_at = datetime.combine(today - timedelta(days=46 - idx), datetime.min.time()) + timedelta(hours=9 + (idx % 6))
+        ready_date = (
+            today - timedelta(days=max(2, 30 - idx))
+            if spec["status"] in {"FinalizedAndPushedToTracking", "AssignedToContainer", "ConsolidatedIntoShipmentDraft"}
+            else today + timedelta(days=(idx % 7) + 2)
+        )
+        order_id = db.insert(
+            "orders",
+            {
+                "customer_id": customer["id"],
+                "supplier_id": order_supplier_id,
+                "expected_ready_date": ready_date.isoformat(),
+                "currency": "USD",
+                "status": spec["status"],
+                "confirmation_token": confirm_token,
+                "high_alert_notes": spec["high_alert_notes"],
+                "order_type": spec["order_type"],
+                "created_by": created_by,
+                "created_at": created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            },
+        )
+        spec["id"] = order_id
+        spec["confirmation_token"] = confirm_token
+        spec["customer_id"] = customer["id"]
+        spec["customer_name"] = customer["name"]
+        spec["supplier_id"] = order_supplier_id
+        spec["created_at"] = created_at.strftime("%Y-%m-%d %H:%M:%S")
+        spec["expected_ready_date"] = ready_date.isoformat()
+
+        item_rows = create_order_items_for_target(spec, order_id, idx, selected_products, customer, assets)
+        created_item_ids: list[int] = []
+        for row in item_rows:
+            item_id = db.insert("order_items", row)
+            row["id"] = item_id
+            created_item_ids.append(item_id)
+            all_items.append(row)
+        spec["item_ids"] = created_item_ids
+        spec["items"] = item_rows
+        orders.append(spec)
+
+        order_attachment_rows.append({"order_id": spec["id"], "file_path": assets["documents"][idx % len(assets["documents"])], "type": "invoice"})
+        order_attachment_rows.append({"order_id": spec["id"], "file_path": assets["order_images"][idx % len(assets["order_images"])], "type": "photo"})
+        if spec["high_alert_notes"]:
+            design_attachment_rows.append(
+                {
+                    "entity_type": "order_item",
+                    "entity_id": created_item_ids[0],
+                    "file_path": assets["documents"][(idx + 1) % len(assets["documents"])],
+                    "file_type": "application/pdf",
+                    "uploaded_by": uploader_id,
+                    "internal_note": f"Special handling note for {spec['label']}",
+                }
+            )
+
+    sdo_rows = []
+    for spec in orders:
+        if spec["draft_key"]:
+            sdo_rows.append({"shipment_draft_id": drafts[spec["draft_key"]]["id"], "order_id": spec["id"]})
+    db.insert_many("shipment_draft_orders", sdo_rows)
+    db.insert_many("order_attachments", order_attachment_rows)
+    db.insert_many("design_attachments", design_attachment_rows)
+    return orders, all_items
+
+def seed_receipts_and_confirmations(
+    db: DbClient,
+    orders: list[dict[str, Any]],
+    assets: dict[str, list[str]],
+    received_by: int,
+    today: date,
+) -> dict[str, Any]:
+    receipt_photo_rows: list[dict[str, Any]] = []
+    receipt_item_photo_rows: list[dict[str, Any]] = []
+    confirmation_rows: list[dict[str, Any]] = []
+    confirm_manifest: dict[str, str] = {}
+
+    for idx, order in enumerate(orders, start=1):
+        if not order["needs_receipt"]:
+            continue
+        declared_cartons = sum(int(item["cartons"] or 0) for item in order["items"])
+        declared_cbm = sum(float(item["declared_cbm"] or 0) for item in order["items"])
+        declared_weight = sum(float(item["declared_weight"] or 0) for item in order["items"])
+        variance_mode = order["status"] in {"AwaitingCustomerConfirmation", "CustomerDeclined", "Confirmed"}
+        actual_factor = 1.08 if order["status"] == "AwaitingCustomerConfirmation" else 0.92 if order["status"] == "CustomerDeclined" else 1.03 if order["status"] == "Confirmed" else 1.0
+        actual_cartons = max(1, int(round(declared_cartons * (1.04 if variance_mode else 1.0))))
+        actual_cbm = round(declared_cbm * actual_factor, 6)
+        actual_weight = round(declared_weight * (1.02 if variance_mode else 1.0), 4)
+        receipt_condition = "partial" if order["status"] == "CustomerDeclined" else "damaged" if order["status"] == "AwaitingCustomerConfirmation" else "good"
+        received_at = datetime.combine(today - timedelta(days=max(1, 28 - idx)), datetime.min.time()) + timedelta(hours=11 + (idx % 4))
+        receipt_id = db.insert(
+            "warehouse_receipts",
+            {
+                "order_id": order["id"],
+                "actual_cartons": actual_cartons,
+                "actual_cbm": actual_cbm,
+                "actual_weight": actual_weight,
+                "receipt_condition": receipt_condition,
+                "notes": "Variance flagged for customer review." if variance_mode else "Warehouse receipt recorded from seeded inbound workflow.",
+                "received_by": received_by,
+                "received_at": received_at.strftime("%Y-%m-%d %H:%M:%S"),
+            },
+        )
+        receipt_photo_rows.append({"receipt_id": receipt_id, "file_path": assets["receipt_images"][idx % len(assets["receipt_images"])]})
+
+        for line_no, item in enumerate(order["items"], start=1):
+            item_variance = variance_mode and line_no == 1
+            factor = 1.12 if order["status"] == "AwaitingCustomerConfirmation" and line_no == 1 else 0.88 if order["status"] == "CustomerDeclined" and line_no == 1 else 1.02 if order["status"] == "Confirmed" and line_no == 1 else 1.0
+            receipt_item_id = db.insert(
+                "warehouse_receipt_items",
+                {
+                    "receipt_id": receipt_id,
+                    "order_item_id": item["id"],
+                    "actual_cartons": max(1, int(round((item["cartons"] or 0) * (1.05 if item_variance else 1.0)))),
+                    "actual_cbm": round(float(item["declared_cbm"] or 0) * factor, 6),
+                    "actual_weight": round(float(item["declared_weight"] or 0) * (1.03 if item_variance else 1.0), 4),
+                    "receipt_condition": receipt_condition if item_variance else "good",
+                    "variance_detected": 1 if item_variance else 0,
+                    "notes": "Line variance seeded for QA." if item_variance else "Matches declared values.",
+                },
+            )
+            if line_no == 1:
+                receipt_item_photo_rows.append({"receipt_item_id": receipt_item_id, "file_path": assets["receipt_images"][(idx + line_no) % len(assets["receipt_images"])]})
+
+        if order["status"] == "AwaitingCustomerConfirmation" and order["confirmation_token"]:
+            confirm_manifest[f"order_{order['id']}"] = f"{APP_BASE_URL}/confirm.php?token={order['confirmation_token']}"
+        elif order["status"] == "Confirmed" or order.get("has_confirmation_record"):
+            confirmation_rows.append(
+                {
+                    "order_id": order["id"],
+                    "confirmed_by": None,
+                    "confirmed_at": (received_at + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S"),
+                    "declined_at": None,
+                    "decline_reason": None,
+                    "accepted_actuals": json.dumps({"actual_cbm": actual_cbm, "actual_weight": actual_weight, "actual_cartons": actual_cartons}),
+                }
+            )
+        elif order["status"] == "CustomerDeclined":
+            decline_time = (received_at + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+            confirmation_rows.append(
+                {
+                    "order_id": order["id"],
+                    "confirmed_by": None,
+                    "confirmed_at": decline_time,
+                    "declined_at": decline_time,
+                    "decline_reason": "Seeded decline: customer rejected carton variance and requested recount.",
+                    "accepted_actuals": None,
+                }
+            )
+    db.insert_many("warehouse_receipt_photos", receipt_photo_rows)
+    db.insert_many("warehouse_receipt_item_photos", receipt_item_photo_rows)
+    db.insert_many("customer_confirmations", confirmation_rows)
+    return {"confirmation_links": confirm_manifest}
+
+
+def seed_portal_tokens(
+    db: DbClient,
+    customers: list[dict[str, Any]],
+    created_by: int,
+) -> list[dict[str, str]]:
+    manifest_rows: list[dict[str, str]] = []
+    for idx, customer in enumerate(customers[:5], start=1):
+        raw_token = f"{SEED_TAG.lower()}-portal-{customer['code'].lower()}-{idx:02d}"
+        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        expires_at = (datetime.now() + timedelta(days=15 + idx)).strftime("%Y-%m-%d %H:%M:%S")
+        db.insert(
+            "customer_portal_tokens",
+            {
+                "customer_id": customer["id"],
+                "token_hash": token_hash,
+                "expires_at": expires_at,
+                "used_at": None,
+                "created_by": created_by,
+            },
+        )
+        manifest_rows.append(
+            {
+                "customer": customer["name"],
+                "customer_code": customer["code"],
+                "token": raw_token,
+                "url": f"{APP_BASE_URL}/customer_portal.php?token={raw_token}",
+            }
+        )
+    return manifest_rows
+
+
+def seed_finance_and_supporting(
+    db: DbClient,
+    orders: list[dict[str, Any]],
+    customers: list[dict[str, Any]],
+    suppliers: list[dict[str, Any]],
+    products: list[dict[str, Any]],
+    containers: dict[str, dict[str, Any]],
+    drafts: dict[str, dict[str, Any]],
+    expense_categories: dict[str, int],
+    user_ids: dict[str, int],
+) -> None:
+    superadmin = user_ids.get("admin@salameh.com", next(iter(user_ids.values())))
+    lebanon_admin = user_ids.get("qa.lebanonadmin@salameh.local", superadmin)
+    china_admin = user_ids.get("qa.chinaadmin@salameh.local", superadmin)
+    warehouse_user = user_ids.get("qa.warehouse@salameh.local", superadmin)
+    employee = user_ids.get("qa.employee@salameh.local", superadmin)
+    container_values = list(containers.values())
+
+    deposit_rows = []
+    for idx, customer in enumerate(customers[:10], start=1):
+        deposit_rows.append(
+            {
+                "customer_id": customer["id"],
+                "amount": round(1200 + idx * 275.5, 4),
+                "currency": "USD" if idx % 3 else "RMB",
+                "payment_method": "bank_transfer" if idx % 2 else "cash",
+                "reference_no": f"DEP-{SEED_TAG}-{idx:03d}",
+                "notes": f"Seed deposit for {customer['name']}",
+                "created_by": superadmin,
+                "created_at": (datetime.now() - timedelta(days=20 - idx)).strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
+    db.insert_many("customer_deposits", deposit_rows)
+
+    payable_orders = [order for order in orders if order["status"] not in {"Draft", "Submitted"}]
+    payment_rows = []
+    for idx, supplier in enumerate(suppliers, start=1):
+        order = payable_orders[(idx - 1) % len(payable_orders)]
+        invoice_amount = round(sum(float(item["buy_price"]) * float(item["quantity"]) for item in order["items"]), 4)
+        amount = round(invoice_amount * (0.65 if idx % 3 else 1.0), 4)
+        payment_rows.append(
+            {
+                "supplier_id": supplier["id"],
+                "order_id": order["id"],
+                "amount": amount,
+                "invoice_amount": invoice_amount,
+                "discount_amount": round(15 + idx * 2.5, 4) if idx % 4 == 0 else 0,
+                "marked_full_payment": 1 if idx % 3 == 0 else 0,
+                "marked_by": lebanon_admin,
+                "currency": "USD",
+                "payment_type": "full" if idx % 3 == 0 else "partial",
+                "notes": f"Seed supplier payment for {supplier['name']}",
+                "created_at": (datetime.now() - timedelta(days=16 - idx)).strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
+    db.insert_many("supplier_payments", payment_rows)
+
+    expense_rows = []
+    expense_names = [name for name in expense_categories.keys() if name.lower() != "testing"]
+    for idx in range(1, 29):
+        category_name = expense_names[(idx - 1) % len(expense_names)]
+        order = orders[(idx - 1) % len(orders)]
+        container = container_values[(idx - 1) % len(container_values)] if idx % 2 else None
+        supplier = suppliers[(idx - 1) % len(suppliers)] if idx % 3 == 0 else None
+        customer = customers[(idx - 1) % len(customers)] if idx % 4 == 0 else None
+        expense_rows.append(
+            {
+                "category_id": expense_categories[category_name],
+                "amount": round(55 + idx * 23.75, 4),
+                "currency": "USD",
+                "expense_date": (date.today() - timedelta(days=30 - idx)).isoformat(),
+                "payee": f"{category_name} Vendor {idx:02d}",
+                "notes": f"Seeded {category_name.lower()} expense for QA finance coverage.",
+                "order_id": order["id"] if idx % 5 else None,
+                "container_id": container["id"] if container and idx % 2 else None,
+                "customer_id": customer["id"] if customer else None,
+                "supplier_id": supplier["id"] if supplier else None,
+                "created_by": china_admin if idx % 2 else lebanon_admin,
+                "created_at": (datetime.now() - timedelta(days=30 - idx)).strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
+    db.insert_many("expenses", expense_rows)
+
+    interaction_rows = []
+    interaction_types = ["visit", "quote", "note"]
+    for idx, supplier in enumerate(suppliers, start=1):
+        for offset in range(2):
+            interaction_rows.append(
+                {
+                    "supplier_id": supplier["id"],
+                    "interaction_type": interaction_types[(idx + offset) % len(interaction_types)],
+                    "content": json.dumps({"summary": f"Seed interaction {offset + 1} with {supplier['name']}", "specialization": supplier["specialization"], "action_owner": "China buying team" if offset == 0 else "Lebanon consolidation"}),
+                    "created_by": china_admin if offset == 0 else employee,
+                    "created_at": (datetime.now() - timedelta(days=12 - idx + offset)).strftime("%Y-%m-%d %H:%M:%S"),
+                }
+            )
+    db.insert_many("supplier_interactions", interaction_rows)
+
+    template_item_rows = []
+    for idx in range(1, 7):
+        template_id = db.insert("order_templates", {"name": f"{SEED_TAG} Template {idx:02d}", "created_by": china_admin, "created_at": (datetime.now() - timedelta(days=idx)).strftime("%Y-%m-%d %H:%M:%S")})
+        source_order = orders[(idx - 1) * 2]
+        for sort_order, item in enumerate(source_order["items"], start=1):
+            template_item_rows.append(
+                {
+                    "template_id": template_id,
+                    "sort_order": sort_order,
+                    "item_no": item["item_no"],
+                    "shipping_code": item["shipping_code"],
+                    "product_id": item["product_id"],
+                    "supplier_id": item["supplier_id"],
+                    "description_cn": item["description_cn"],
+                    "description_en": item["description_en"],
+                    "cartons": item["cartons"],
+                    "qty_per_carton": item["qty_per_carton"],
+                    "quantity": item["quantity"],
+                    "unit": "pieces",
+                    "declared_cbm": item["declared_cbm"],
+                    "declared_weight": item["declared_weight"],
+                    "item_length": item["item_length"],
+                    "item_width": item["item_width"],
+                    "item_height": item["item_height"],
+                    "unit_price": item["unit_price"],
+                    "total_amount": item["total_amount"],
+                    "notes": f"Template seeded from {source_order['label']}",
+                }
+            )
+    db.insert_many("order_template_items", template_item_rows)
+
+    converted_order = next(order for order in orders if order["order_type"] == "draft_procurement")
+    procurement_statuses = ["draft", "pending_review", "sent_to_supplier", "converted", "cancelled"]
+    procurement_item_rows = []
+    for idx, status in enumerate(procurement_statuses, start=1):
+        supplier = suppliers[(idx - 1) % len(suppliers)]
+        draft_id = db.insert(
+            "procurement_drafts",
+            {
+                "name": f"{SEED_TAG} Procurement Draft {idx:02d}",
+                "supplier_id": supplier["id"],
+                "status": status,
+                "created_by": china_admin,
+                "created_at": (datetime.now() - timedelta(days=idx + 2)).strftime("%Y-%m-%d %H:%M:%S"),
+                "updated_at": (datetime.now() - timedelta(days=idx)).strftime("%Y-%m-%d %H:%M:%S"),
+                "converted_order_id": converted_order["id"] if status == "converted" else None,
+            },
+        )
+        seed_products = [orders[(idx + offset) % len(orders)]["items"][0]["product_id"] for offset in range(3)]
+        for sort_order, product_id in enumerate(seed_products, start=1):
+            procurement_item_rows.append({"draft_id": draft_id, "product_id": product_id, "quantity": round(24 + idx * 3 + sort_order * 2, 4), "notes": f"Seed procurement line {sort_order} for status {status}", "sort_order": sort_order})
+    db.insert_many("procurement_draft_items", procurement_item_rows)
+    message_rows = []
+    for idx, order in enumerate(orders[:18], start=1):
+        message_rows.append(
+            {
+                "customer_id": order["customer_id"],
+                "order_id": order["id"],
+                "container_id": drafts[order["draft_key"]]["container_id"] if order["draft_key"] and drafts[order["draft_key"]]["container_id"] else None,
+                "sender_id": warehouse_user if idx % 2 else lebanon_admin,
+                "body": f"Seed internal note for {order['label']}: verify receiving status and next workflow owner.",
+                "read_at": None if idx % 3 else datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "created_at": (datetime.now() - timedelta(days=10 - idx % 5)).strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
+    db.insert_many("internal_messages", message_rows)
+
+    notification_rows = []
+    for idx, user_id in enumerate({superadmin, china_admin, lebanon_admin, warehouse_user, employee}, start=1):
+        notification_rows.append({"user_id": user_id, "type": "shipment_finalized", "channel": "dashboard", "title": f"Seed notification {idx}: shipment finalized", "body": "A seeded shipment draft is finalized and available for QA verification.", "read_at": None if idx % 2 else datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "created_at": (datetime.now() - timedelta(hours=idx * 3)).strftime("%Y-%m-%d %H:%M:%S")})
+        notification_rows.append({"user_id": user_id, "type": "variance_confirmation", "channel": "dashboard", "title": f"Seed notification {idx}: variance needs review", "body": "Awaiting customer confirmation exists in the seeded dataset.", "read_at": None, "created_at": (datetime.now() - timedelta(hours=idx * 2)).strftime("%Y-%m-%d %H:%M:%S")})
+    db.insert_many("notifications", notification_rows)
+    notification_ids = [int(row.split("\t")[0]) for row in db.run("SELECT id FROM notifications ORDER BY id")]
+    delivery_rows = []
+    for idx, notification_id in enumerate(notification_ids[-10:], start=1):
+        delivery_rows.append(
+            {
+                "notification_id": notification_id,
+                "channel": "email" if idx % 2 else "whatsapp",
+                "payload_hash": hashlib.sha256(f"{notification_id}-{idx}".encode("utf-8")).hexdigest(),
+                "status": "sent" if idx % 4 else "failed",
+                "attempts": 1 if idx % 4 else 2,
+                "last_error": None if idx % 4 else "Simulated provider timeout",
+                "external_id": f"seed-ext-{notification_id}",
+                "created_at": (datetime.now() - timedelta(hours=idx)).strftime("%Y-%m-%d %H:%M:%S"),
+                "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
+    db.insert_many("notification_delivery_log", delivery_rows)
+
+    tax_rate_rows = []
+    for idx, product in enumerate(products[:18], start=1):
+        tax_rate_rows.append(
+            {
+                "hs_code": product["hs_code"],
+                "country_code": "LB" if idx % 3 else "AE",
+                "rate_percent": round(max(float(product["tariff_rate"]), 5) + (idx % 4) * 0.75, 4),
+                "effective_from": (date.today() - timedelta(days=120 - idx * 3)).isoformat(),
+                "notes": f"Seed tax rate {idx}",
+            }
+        )
+    db.insert_many("hs_code_tax_rates", tax_rate_rows)
+
+    arrival_rows = []
+    on_route = [container for container in container_values if container["status"] == "on_route"]
+    for idx, container in enumerate(on_route, start=1):
+        arrival_rows.append({"container_id": container["id"], "days_before": 3 if idx % 2 else 7, "notified_at": (datetime.now() - timedelta(days=idx)).strftime("%Y-%m-%d %H:%M:%S")})
+    db.insert_many("container_arrival_notifications", arrival_rows)
+
+    push_rows = []
+    finalized_drafts = [drafts[key] for key in drafts if drafts[key]["status"] == "finalized"]
+    for idx, draft in enumerate(finalized_drafts, start=1):
+        push_rows.append(
+            {
+                "entity_type": "shipment_draft",
+                "entity_id": draft["id"],
+                "idempotency_key": f"clms-seed-draft-{draft['id']}",
+                "status": "success",
+                "request_payload": json.dumps({"shipment_draft_id": draft["id"], "seeded": True}),
+                "response_code": 200,
+                "response_body": json.dumps({"status": "ok", "external_shipment_id": f"TRK-{draft['id']:04d}"}),
+                "external_id": f"TRK-{draft['id']:04d}",
+                "attempt_count": 1,
+                "last_error": None,
+                "created_at": (datetime.now() - timedelta(days=idx)).strftime("%Y-%m-%d %H:%M:%S"),
+                "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
+    db.insert_many("tracking_push_log", push_rows)
+
+    audit_rows = []
+    for idx, order in enumerate(orders[:20], start=1):
+        audit_rows.append(
+            {
+                "entity_type": "order",
+                "entity_id": order["id"],
+                "action": "seed_create",
+                "old_value": None,
+                "new_value": json.dumps({"status": order["status"], "customer_id": order["customer_id"], "draft_key": order["draft_key"]}),
+                "user_id": superadmin if idx % 2 else china_admin,
+                "created_at": (datetime.now() - timedelta(days=5, hours=idx)).strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
+    for key, draft in drafts.items():
+        audit_rows.append(
+            {
+                "entity_type": "shipment_draft",
+                "entity_id": draft["id"],
+                "action": "seed_create",
+                "old_value": None,
+                "new_value": json.dumps({"status": draft["status"], "key": key}),
+                "user_id": lebanon_admin,
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
+    db.insert_many("audit_log", audit_rows)
+
+
+def summarize_counts(db: DbClient, tables: list[str]) -> dict[str, int]:
+    result: dict[str, int] = {}
+    for table in tables:
+        result[table] = int(db.scalar(f"SELECT COUNT(*) FROM `{table}`") or 0)
+    return result
+
+
+def build_manifest(
+    root_dir: Path,
+    backup_info: dict[str, str],
+    customers: list[dict[str, Any]],
+    suppliers: list[dict[str, Any]],
+    products: list[dict[str, Any]],
+    orders: list[dict[str, Any]],
+    containers: dict[str, dict[str, Any]],
+    drafts: dict[str, dict[str, Any]],
+    portal_links: list[dict[str, str]],
+    confirm_links: dict[str, str],
+    counts: dict[str, int],
+) -> Path:
+    manifest_dir = root_dir / "output" / "seed_manifests"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    container_summary = [{"code": container["code"], "status": container["status"], "destination": container["destination"], "eta_date": container["eta_date"]} for container in containers.values()]
+    order_status_counts: dict[str, int] = {}
+    for order in orders:
+        order_status_counts[order["status"]] = order_status_counts.get(order["status"], 0) + 1
+    manifest = {
+        "seed_tag": SEED_TAG,
+        "generated_at": datetime.now().isoformat(),
+        "backup": backup_info,
+        "preserved_tables": sorted(PRESERVE_TABLES),
+        "counts": counts,
+        "order_status_counts": order_status_counts,
+        "customers": [{"id": row["id"], "code": row["code"], "name": row["name"], "shipping_code": row["default_shipping_code"]} for row in customers],
+        "suppliers": [{"id": row["id"], "code": row["code"], "name": row["name"], "commission_type": row["commission_type"], "commission_rate": row["commission_rate"]} for row in suppliers],
+        "containers": container_summary,
+        "shipment_drafts": [{"key": key, "id": value["id"], "status": value["status"]} for key, value in drafts.items()],
+        "portal_links": portal_links,
+        "confirmation_links": confirm_links,
+        "sample_products": [{"id": product["id"], "description_en": product["description_en"], "supplier_name": product["supplier_name"], "hs_code": product["hs_code"]} for product in products[:12]],
+    }
+    manifest_path = manifest_dir / f"full_test_dataset_manifest_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    return manifest_path
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Reset CLMS business data and seed a full QA dataset")
+    parser.add_argument("--skip-backup", action="store_true", help="Skip SQL/uploads backup (not recommended)")
+    args = parser.parse_args()
+
+    root_dir = Path(__file__).resolve().parents[1]
+    env = parse_env(root_dir / ".env")
+    mysql_path, mysqldump_path = locate_mysql_tools()
+    db = DbClient(mysql_path=mysql_path, db_name=env.get("DB_NAME", "clms"), db_user=env.get("DB_USER", "root"), db_pass=env.get("DB_PASS", ""))
+
+    user_ids = fetch_active_user_ids(db)
+    superadmin = user_ids.get("admin@salameh.com", next(iter(user_ids.values())))
+    china_admin = choose_user(user_ids, "qa.chinaadmin@salameh.local", superadmin)
+    warehouse_user = choose_user(user_ids, "qa.warehouse@salameh.local", superadmin)
+    lebanon_admin = choose_user(user_ids, "qa.lebanonadmin@salameh.local", superadmin)
+
+    backup_info = {"backup_dir": "", "database_dump": "", "uploads_archive": ""}
+    if not args.skip_backup:
+        backup_info = create_backup(root_dir, mysqldump_path, env)
+
+    clean_uploads(root_dir)
+    assets = write_seed_assets(root_dir)
+    reset_business_tables(db)
+
+    rng = random.Random(20260316)
+    today = date.today()
+    expense_categories = fetch_expense_categories(db)
+    hs_entries = fetch_hs_catalog_entries(db, count=60)
+
+    customers = seed_customers(db)
+    suppliers = seed_suppliers(db)
+    products = seed_products(db, suppliers, hs_entries, assets, rng, uploader_id=superadmin)
+    containers, drafts = create_containers_and_drafts(db, assets, today=today)
+    order_specs = make_order_specs(customers)
+    orders, order_items = seed_orders_and_items(db, order_specs, customers, products, drafts, assets, created_by=china_admin, today=today, uploader_id=lebanon_admin)
+    receipt_info = seed_receipts_and_confirmations(db, orders, assets, received_by=warehouse_user, today=today)
+    portal_links = seed_portal_tokens(db, customers, created_by=superadmin)
+    seed_finance_and_supporting(db, orders, customers, suppliers, products, containers, drafts, expense_categories, user_ids)
+
+    counts = summarize_counts(db, ["customers", "suppliers", "products", "orders", "order_items", "containers", "shipment_drafts", "warehouse_receipts", "expenses", "customer_deposits", "supplier_payments", "procurement_drafts", "order_templates", "notifications", "customer_portal_tokens"])
+    manifest_path = build_manifest(root_dir, backup_info, customers, suppliers, products, orders, containers, drafts, portal_links, receipt_info["confirmation_links"], counts)
+
+    print("Full QA dataset reset/seed completed.")
+    print(json.dumps(counts, indent=2))
+    print(f"Manifest: {manifest_path}")
+    if backup_info["backup_dir"]:
+        print(f"Backup: {backup_info['backup_dir']}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -45,9 +45,17 @@ require 'includes/layout.php';
   </div>
 </div>
 
-<div class="balanced-panels mb-4">
+<div class="balanced-panels mb-4 pipeline-layout-panels">
   <div class="card">
-    <div class="card-header">Stage Board</div>
+    <div class="card-header">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+        <div>
+          <div>Stage Board</div>
+          <div class="small text-muted fw-normal mt-1">Each lane previews the next few orders, while the queue button opens the full working list.</div>
+        </div>
+        <span class="pipeline-header-chip">Desktop-optimized overview</span>
+      </div>
+    </div>
     <div class="card-body">
       <div id="pipelineStageBoard" class="pipeline-stage-grid">
         <div class="text-muted">Loading pipeline stages…</div>
@@ -57,14 +65,24 @@ require 'includes/layout.php';
 
   <div class="stack-card-list">
     <div class="card">
-      <div class="card-header">My Focus</div>
+      <div class="card-header">
+        <div>
+          <div>My Focus</div>
+          <div class="small text-muted fw-normal mt-1">Direct shortcuts to the queues that usually need the fastest follow-up.</div>
+        </div>
+      </div>
       <div class="card-body" id="pipelineTasksList">
         <div class="text-muted">Loading tasks…</div>
       </div>
     </div>
 
     <div class="card">
-      <div class="card-header">Exceptions & Shipping</div>
+      <div class="card-header">
+        <div>
+          <div>Exceptions & Shipping</div>
+          <div class="small text-muted fw-normal mt-1">Keep stalled confirmations and container movement visible without opening multiple pages.</div>
+        </div>
+      </div>
       <div class="card-body">
         <div class="mb-3">
           <div class="small text-uppercase text-muted fw-semibold mb-1">Stale Items</div>
@@ -87,7 +105,12 @@ require 'includes/layout.php';
 </div>
 
 <div class="card">
-  <div class="card-header">Stage Summary</div>
+  <div class="card-header">
+    <div>
+      <div>Stage Summary</div>
+      <div class="small text-muted fw-normal mt-1">A compact count table for every tracked workflow checkpoint.</div>
+    </div>
+  </div>
   <div class="card-body">
     <div class="table-responsive">
       <table class="table table-sm mb-0">
@@ -103,5 +126,5 @@ require 'includes/layout.php';
     </div>
   </div>
 </div>
-<?php $pageScript = 'frontend/js/pipeline.js';
+<?php $pageScript = 'frontend/js/pipeline.js?v=' . (@filemtime(__DIR__ . '/frontend/js/pipeline.js') ?: time());
 require 'includes/footer.php'; ?>

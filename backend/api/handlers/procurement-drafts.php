@@ -86,6 +86,50 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         jsonResponse(['data' => ['order' => $order, 'converted_order_id' => $orderId]], 201);
     }
 
+    if ($method === 'GET' && $id && $action === 'export') {
+        $stmt = $pdo->prepare("SELECT pd.*, s.name as supplier_name FROM procurement_drafts pd LEFT JOIN suppliers s ON pd.supplier_id = s.id WHERE pd.id = ?");
+        $stmt->execute([$id]);
+        $draft = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$draft) jsonError('Draft not found', 404);
+        $chk = $pdo->query("SHOW COLUMNS FROM products LIKE 'image_paths'");
+        $imgCol = ($chk && $chk->rowCount() > 0) ? 'p.image_paths,' : '';
+        $chkDim = $pdo->query("SHOW COLUMNS FROM products LIKE 'dimensions_scope'");
+        $dimCol = ($chkDim && $chkDim->rowCount() > 0) ? 'p.dimensions_scope,' : '';
+        $itemsStmt = $pdo->prepare("SELECT pdi.*, p.description_cn, p.description_en, p.cbm, p.weight, p.unit_price, $imgCol $dimCol p.pieces_per_carton FROM procurement_draft_items pdi LEFT JOIN products p ON pdi.product_id = p.id WHERE pdi.draft_id = ? ORDER BY pdi.sort_order, pdi.id");
+        $itemsStmt->execute([$id]);
+        $draftItems = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+        $orderLike = ['id' => $draft['id'], 'supplier_name' => $draft['supplier_name'] ?? ''];
+        $excelItems = [];
+        foreach ($draftItems as $i => $it) {
+            $qty = (float) ($it['quantity'] ?? 0);
+            $cbm = (float) ($it['cbm'] ?? 0);
+            $weight = (float) ($it['weight'] ?? 0);
+            $unitPrice = (float) ($it['unit_price'] ?? 0);
+            $desc = trim($it['description_en'] ?? $it['description_cn'] ?? $it['notes'] ?? '');
+            $excelItems[] = [
+                'item_no'               => 'PD-' . $draft['id'] . '-L' . ($i + 1),
+                'description_en'        => $desc,
+                'description_cn'        => $it['description_cn'] ?? '',
+                'quantity'              => $qty,
+                'cartons'               => 1,
+                'qty_per_carton'        => $qty,
+                'declared_cbm'          => $qty > 0 ? round($cbm * $qty, 6) : 0,
+                'declared_weight'       => $qty > 0 ? round($weight * $qty, 4) : 0,
+                'unit_price'            => $unitPrice,
+                'sell_price'             => $unitPrice,
+                'supplier_name'          => $orderLike['supplier_name'],
+                'image_paths'            => !empty($it['image_paths']) ? (is_string($it['image_paths']) ? json_decode($it['image_paths'], true) : $it['image_paths']) : [],
+                'dimensions_scope'      => $it['dimensions_scope'] ?? 'piece',
+                'product_dimensions_scope' => $it['dimensions_scope'] ?? 'piece',
+            ];
+        }
+        require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
+        $safeName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $draft['name'] ?? 'draft');
+        $filename = 'procurement_draft_' . $draft['id'] . '_' . $safeName . '.xlsx';
+        (new OrderExcelService())->exportOrder($orderLike, $excelItems, $filename);
+        exit;
+    }
+
     switch ($method) {
         case 'GET':
             if ($id === null) {

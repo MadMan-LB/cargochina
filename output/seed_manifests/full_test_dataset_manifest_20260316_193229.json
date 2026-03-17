@@ -1,0 +1,449 @@
+{
+  "seed_tag": "FULLQA",
+  "generated_at": "2026-03-16T19:32:29.453313",
+  "backup": {
+    "backup_dir": "C:\\xampp\\htdocs\\cargochina\\output\\reset_seed_backups\\20260316_193224",
+    "database_dump": "C:\\xampp\\htdocs\\cargochina\\output\\reset_seed_backups\\20260316_193224\\clms_before_full_seed.sql",
+    "uploads_archive": "C:\\xampp\\htdocs\\cargochina\\output\\reset_seed_backups\\20260316_193224\\uploads_before_full_seed.zip"
+  },
+  "preserved_tables": [
+    "_migrations",
+    "business_settings",
+    "countries",
+    "departments",
+    "expense_categories",
+    "hs_code_tariff_catalog",
+    "roles",
+    "system_config",
+    "user_departments",
+    "user_notification_preferences",
+    "user_roles",
+    "users"
+  ],
+  "counts": {
+    "customers": 15,
+    "suppliers": 12,
+    "products": 60,
+    "orders": 30,
+    "order_items": 60,
+    "containers": 9,
+    "shipment_drafts": 10,
+    "warehouse_receipts": 26,
+    "expenses": 28,
+    "customer_deposits": 10,
+    "supplier_payments": 12,
+    "procurement_drafts": 5,
+    "order_templates": 6,
+    "notifications": 10,
+    "customer_portal_tokens": 5
+  },
+  "order_status_counts": {
+    "FinalizedAndPushedToTracking": 10,
+    "AssignedToContainer": 10,
+    "ConsolidatedIntoShipmentDraft": 1,
+    "Draft": 1,
+    "Submitted": 1,
+    "Approved": 1,
+    "InTransitToWarehouse": 1,
+    "ReceivedAtWarehouse": 1,
+    "AwaitingCustomerConfirmation": 1,
+    "Confirmed": 1,
+    "ReadyForConsolidation": 1,
+    "CustomerDeclined": 1
+  },
+  "customers": [
+    {
+      "id": 1,
+      "code": "FULLQA-C01",
+      "name": "Cedar Beirut Retail",
+      "shipping_code": "CEDAR-BEY"
+    },
+    {
+      "id": 2,
+      "code": "FULLQA-C02",
+      "name": "Cedar Metro Wholesale",
+      "shipping_code": "CEDAR-MET"
+    },
+    {
+      "id": 3,
+      "code": "FULLQA-C03",
+      "name": "North Port Trading",
+      "shipping_code": "NORTH-PORT"
+    },
+    {
+      "id": 4,
+      "code": "FULLQA-C04",
+      "name": "Bekaa Bulk Market",
+      "shipping_code": "BEKAA-BULK"
+    },
+    {
+      "id": 5,
+      "code": "FULLQA-C05",
+      "name": "South Hub Merchants",
+      "shipping_code": "SOUTH-HUB"
+    },
+    {
+      "id": 6,
+      "code": "FULLQA-C06",
+      "name": "Mount Line Lifestyle",
+      "shipping_code": "MOUNT-LINE"
+    },
+    {
+      "id": 7,
+      "code": "FULLQA-C07",
+      "name": "Air Direct Boutique",
+      "shipping_code": "AIR-DIRECT"
+    },
+    {
+      "id": 8,
+      "code": "FULLQA-C08",
+      "name": "Warehouse Direct Client",
+      "shipping_code": "WAREHOUSE-DIRECT"
+    },
+    {
+      "id": 9,
+      "code": "FULLQA-C09",
+      "name": "Family Mart Lebanon",
+      "shipping_code": "FAMILY-MART"
+    },
+    {
+      "id": 10,
+      "code": "FULLQA-C10",
+      "name": "Pet Nest Stores",
+      "shipping_code": "PET-NEST"
+    },
+    {
+      "id": 11,
+      "code": "FULLQA-C11",
+      "name": "Active Sport House",
+      "shipping_code": "ACTIVE-SPORT"
+    },
+    {
+      "id": 12,
+      "code": "FULLQA-C12",
+      "name": "Gift Corner Group",
+      "shipping_code": "GIFT-CORNER"
+    },
+    {
+      "id": 13,
+      "code": "FULLQA-C13",
+      "name": "Office Supply Hub",
+      "shipping_code": "OFFICE-SUPPLY"
+    },
+    {
+      "id": 14,
+      "code": "FULLQA-C14",
+      "name": "Home Lab Collection",
+      "shipping_code": "HOME-LAB"
+    },
+    {
+      "id": 15,
+      "code": "FULLQA-C15",
+      "name": "Kids World Market",
+      "shipping_code": "KIDS-WORLD"
+    }
+  ],
+  "suppliers": [
+    {
+      "id": 1,
+      "code": "FULLQA-S01",
+      "name": "Yiwu Master Packaging",
+      "commission_type": "percentage",
+      "commission_rate": 1.7
+    },
+    {
+      "id": 2,
+      "code": "FULLQA-S02",
+      "name": "Guangzhou Kitchen Source",
+      "commission_type": "percentage",
+      "commission_rate": 2.15
+    },
+    {
+      "id": 3,
+      "code": "FULLQA-S03",
+      "name": "Foshan Decor Works",
+      "commission_type": "percentage",
+      "commission_rate": 2.6
+    },
+    {
+      "id": 4,
+      "code": "FULLQA-S04",
+      "name": "Shenzhen Light Electronics",
+      "commission_type": "fixed",
+      "commission_rate": 55.0
+    },
+    {
+      "id": 5,
+      "code": "FULLQA-S05",
+      "name": "Ningbo Textile Source",
+      "commission_type": "percentage",
+      "commission_rate": 3.5
+    },
+    {
+      "id": 6,
+      "code": "FULLQA-S06",
+      "name": "Hangzhou Hardware Pro",
+      "commission_type": "percentage",
+      "commission_rate": 3.95
+    },
+    {
+      "id": 7,
+      "code": "FULLQA-S07",
+      "name": "Suzhou Beauty Lab",
+      "commission_type": "percentage",
+      "commission_rate": 4.4
+    },
+    {
+      "id": 8,
+      "code": "FULLQA-S08",
+      "name": "Quanzhou Baby Products",
+      "commission_type": "fixed",
+      "commission_rate": 85.0
+    },
+    {
+      "id": 9,
+      "code": "FULLQA-S09",
+      "name": "Xiamen Outdoor Supply",
+      "commission_type": "percentage",
+      "commission_rate": 5.3
+    },
+    {
+      "id": 10,
+      "code": "FULLQA-S10",
+      "name": "Qingdao Pet Utility",
+      "commission_type": "percentage",
+      "commission_rate": 5.75
+    },
+    {
+      "id": 11,
+      "code": "FULLQA-S11",
+      "name": "Wenzhou Stationery House",
+      "commission_type": "percentage",
+      "commission_rate": 6.2
+    },
+    {
+      "id": 12,
+      "code": "FULLQA-S12",
+      "name": "Jinhua Gift Creations",
+      "commission_type": "fixed",
+      "commission_rate": 115.0
+    }
+  ],
+  "containers": [
+    {
+      "code": "FULLQA-CTR-001",
+      "status": "on_route",
+      "destination": "Beirut",
+      "eta_date": "2026-03-22"
+    },
+    {
+      "code": "FULLQA-CTR-002",
+      "status": "on_route",
+      "destination": "Tripoli",
+      "eta_date": "2026-03-23"
+    },
+    {
+      "code": "FULLQA-CTR-003",
+      "status": "on_route",
+      "destination": "Jounieh",
+      "eta_date": "2026-03-21"
+    },
+    {
+      "code": "FULLQA-CTR-004",
+      "status": "on_route",
+      "destination": "Dubai",
+      "eta_date": "2026-03-27"
+    },
+    {
+      "code": "FULLQA-CTR-005",
+      "status": "to_go",
+      "destination": "Beirut",
+      "eta_date": "2026-04-04"
+    },
+    {
+      "code": "FULLQA-CTR-006",
+      "status": "to_go",
+      "destination": "Tripoli",
+      "eta_date": "2026-04-05"
+    },
+    {
+      "code": "FULLQA-CTR-007",
+      "status": "to_go",
+      "destination": "Basra",
+      "eta_date": "2026-04-09"
+    },
+    {
+      "code": "FULLQA-CTR-008",
+      "status": "planning",
+      "destination": "Saida",
+      "eta_date": "2026-04-16"
+    },
+    {
+      "code": "FULLQA-CTR-009",
+      "status": "planning",
+      "destination": "Aqaba",
+      "eta_date": "2026-04-20"
+    }
+  ],
+  "shipment_drafts": [
+    {
+      "key": "CTR-FULL-01",
+      "id": 1,
+      "status": "finalized"
+    },
+    {
+      "key": "CTR-FULL-02",
+      "id": 2,
+      "status": "finalized"
+    },
+    {
+      "key": "CTR-FULL-03",
+      "id": 3,
+      "status": "finalized"
+    },
+    {
+      "key": "CTR-FULL-04",
+      "id": 4,
+      "status": "finalized"
+    },
+    {
+      "key": "CTR-TOGO-01",
+      "id": 5,
+      "status": "draft"
+    },
+    {
+      "key": "CTR-TOGO-02",
+      "id": 6,
+      "status": "draft"
+    },
+    {
+      "key": "CTR-TOGO-03",
+      "id": 7,
+      "status": "draft"
+    },
+    {
+      "key": "CTR-PLAN-01",
+      "id": 8,
+      "status": "draft"
+    },
+    {
+      "key": "CTR-PLAN-02",
+      "id": 9,
+      "status": "draft"
+    },
+    {
+      "key": "CTR-DRAFT-ONLY",
+      "id": 10,
+      "status": "draft"
+    }
+  ],
+  "portal_links": [
+    {
+      "customer": "Cedar Beirut Retail",
+      "customer_code": "FULLQA-C01",
+      "token": "fullqa-portal-fullqa-c01-01",
+      "url": "http://localhost/cargochina/customer_portal.php?token=fullqa-portal-fullqa-c01-01"
+    },
+    {
+      "customer": "Cedar Metro Wholesale",
+      "customer_code": "FULLQA-C02",
+      "token": "fullqa-portal-fullqa-c02-02",
+      "url": "http://localhost/cargochina/customer_portal.php?token=fullqa-portal-fullqa-c02-02"
+    },
+    {
+      "customer": "North Port Trading",
+      "customer_code": "FULLQA-C03",
+      "token": "fullqa-portal-fullqa-c03-03",
+      "url": "http://localhost/cargochina/customer_portal.php?token=fullqa-portal-fullqa-c03-03"
+    },
+    {
+      "customer": "Bekaa Bulk Market",
+      "customer_code": "FULLQA-C04",
+      "token": "fullqa-portal-fullqa-c04-04",
+      "url": "http://localhost/cargochina/customer_portal.php?token=fullqa-portal-fullqa-c04-04"
+    },
+    {
+      "customer": "South Hub Merchants",
+      "customer_code": "FULLQA-C05",
+      "token": "fullqa-portal-fullqa-c05-05",
+      "url": "http://localhost/cargochina/customer_portal.php?token=fullqa-portal-fullqa-c05-05"
+    }
+  ],
+  "confirmation_links": {
+    "order_27": "http://localhost/cargochina/confirm.php?token=f57aa960ee845a6e31f4b9594f1220e798c87400"
+  },
+  "sample_products": [
+    {
+      "id": 1,
+      "description_en": "Mailer Carton - Packaging & Print",
+      "supplier_name": "Yiwu Master Packaging",
+      "hs_code": "0101.21"
+    },
+    {
+      "id": 2,
+      "description_en": "Display Tray - Packaging & Print",
+      "supplier_name": "Yiwu Master Packaging",
+      "hs_code": "0101.29"
+    },
+    {
+      "id": 3,
+      "description_en": "Printed Gift Box - Packaging & Print",
+      "supplier_name": "Yiwu Master Packaging",
+      "hs_code": "0101.30"
+    },
+    {
+      "id": 4,
+      "description_en": "Paper Bag Set - Packaging & Print",
+      "supplier_name": "Yiwu Master Packaging",
+      "hs_code": "0101.90"
+    },
+    {
+      "id": 5,
+      "description_en": "Sleeve Pack - Packaging & Print",
+      "supplier_name": "Yiwu Master Packaging",
+      "hs_code": "0102.21"
+    },
+    {
+      "id": 6,
+      "description_en": "Glass Jar - Kitchen & Dining",
+      "supplier_name": "Guangzhou Kitchen Source",
+      "hs_code": "0201.10"
+    },
+    {
+      "id": 7,
+      "description_en": "Lunch Box - Kitchen & Dining",
+      "supplier_name": "Guangzhou Kitchen Source",
+      "hs_code": "0201.20"
+    },
+    {
+      "id": 8,
+      "description_en": "Storage Canister - Kitchen & Dining",
+      "supplier_name": "Guangzhou Kitchen Source",
+      "hs_code": "0201.30"
+    },
+    {
+      "id": 9,
+      "description_en": "Utensil Set - Kitchen & Dining",
+      "supplier_name": "Guangzhou Kitchen Source",
+      "hs_code": "0202.10"
+    },
+    {
+      "id": 10,
+      "description_en": "Serving Tray - Kitchen & Dining",
+      "supplier_name": "Guangzhou Kitchen Source",
+      "hs_code": "0202.20"
+    },
+    {
+      "id": 11,
+      "description_en": "Wall Basket - Home Decor",
+      "supplier_name": "Foshan Decor Works",
+      "hs_code": "0301.11"
+    },
+    {
+      "id": 12,
+      "description_en": "Storage Crate - Home Decor",
+      "supplier_name": "Foshan Decor Works",
+      "hs_code": "0301.19"
+    }
+  ]
+}

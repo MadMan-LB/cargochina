@@ -1219,11 +1219,15 @@ body.d-flex {
 
 .pipeline-stage-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
+  align-items: start;
 }
 
 .pipeline-stage-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
@@ -1232,19 +1236,68 @@ body.d-flex {
 }
 
 .pipeline-stage-card .stage-head {
-  padding: 1rem 1rem 0.75rem;
+  padding: 1rem 1rem 0.95rem;
+  border-top: 4px solid var(--stage-accent, #2563eb);
   border-bottom: 1px solid rgba(226, 232, 240, 0.8);
 }
 
-.pipeline-stage-card .stage-count {
-  font-size: 1.75rem;
+.pipeline-stage-topline {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.85rem;
+}
+
+.stage-count-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.9rem;
+  padding: 0.4rem 0.8rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--stage-accent, #2563eb) 12%, #ffffff);
+  border: 1px solid color-mix(in srgb, var(--stage-accent, #2563eb) 28%, #dbeafe);
+  color: var(--stage-accent, #2563eb);
+  font-size: 1.2rem;
   line-height: 1;
   font-weight: 800;
-  margin-top: 0.25rem;
+}
+
+.pipeline-stage-inline-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.9rem;
+}
+
+.pipeline-stage-inline-metric {
+  padding: 0.58rem 0.7rem;
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.85);
+  border: 1px solid rgba(226, 232, 240, 0.85);
+}
+
+.pipeline-stage-inline-metric .label {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 700;
+  margin-bottom: 0.2rem;
+}
+
+.pipeline-stage-inline-metric strong {
+  font-size: 1rem;
+  color: var(--text-primary);
 }
 
 .pipeline-stage-card .stage-body {
-  padding: 0.9rem 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.95rem 1rem 1rem;
+  flex: 1 1 auto;
 }
 
 .pipeline-stage-list {
@@ -1255,9 +1308,9 @@ body.d-flex {
 
 .pipeline-stage-item {
   display: block;
-  padding: 0.7rem 0.8rem;
+  padding: 0.82rem 0.88rem;
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: 14px;
   background: #fff;
   color: inherit;
   text-decoration: none;
@@ -1271,9 +1324,146 @@ body.d-flex {
   text-decoration: none;
 }
 
-.pipeline-stage-item .meta {
+.pipeline-stage-item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin-bottom: 0.45rem;
+}
+
+.pipeline-stage-order-ref {
+  color: #1d4ed8;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+
+.pipeline-stage-status {
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.pipeline-stage-primary {
+  font-size: 1.02rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text-primary);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.pipeline-stage-secondary {
+  margin-top: 0.18rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.pipeline-stage-meta-row {
+  margin-top: 0.55rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
   color: var(--text-secondary);
   font-size: 0.78rem;
+}
+
+.pipeline-stage-meta-row strong {
+  color: var(--text-primary);
+  font-size: 0.8rem;
+}
+
+.pipeline-stage-more {
+  padding: 0.72rem 0.85rem;
+  border-radius: 12px;
+  border: 1px dashed #cbd5e1;
+  background: #f8fafc;
+  color: var(--text-secondary);
+  font-size: 0.81rem;
+}
+
+.pipeline-stage-cta {
+  margin-top: auto;
+}
+
+.pipeline-focus-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.8rem;
+  padding: 0.92rem 1rem;
+  margin-bottom: 0.7rem;
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color var(--transition), box-shadow var(--transition), transform var(--transition);
+}
+
+.pipeline-focus-item:last-child {
+  margin-bottom: 0;
+}
+
+.pipeline-focus-item:hover {
+  border-color: #93c5fd;
+  box-shadow: var(--shadow);
+  transform: translateY(-1px);
+  text-decoration: none;
+}
+
+.pipeline-focus-title {
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--text-primary);
+}
+
+.pipeline-focus-meta,
+.pipeline-stage-item .meta {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.pipeline-focus-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  height: 2rem;
+  padding: 0 0.55rem;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.pipeline-layout-panels .card-header {
+  background: #fff;
+}
+
+.pipeline-header-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.38rem 0.7rem;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  font-size: 0.76rem;
+  font-weight: 700;
 }
 
 .product-alert-note {
@@ -1394,7 +1584,6 @@ body.d-flex {
 @media (max-width: 1200px) {
 
   .metric-card-grid,
-  .pipeline-stage-grid,
   .finance-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1403,6 +1592,10 @@ body.d-flex {
   .filter-toolbar-grid,
   .filter-toolbar-grid.compact {
     grid-template-columns: 1fr;
+  }
+
+  .pipeline-stage-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1432,6 +1625,18 @@ body.d-flex {
   .filter-chip {
     width: 100%;
     justify-content: flex-start;
+  }
+
+  .pipeline-stage-topline,
+  .pipeline-stage-meta-row,
+  .pipeline-focus-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .stage-count-pill,
+  .pipeline-focus-count {
+    align-self: flex-start;
   }
 }
 

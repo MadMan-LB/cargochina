@@ -92,15 +92,22 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $hasSell = $chkSell && $chkSell->rowCount() > 0;
         $chkBuy = @$pdo->query("SHOW COLUMNS FROM order_items LIKE 'buy_price'");
         $hasBuy = $chkBuy && $chkBuy->rowCount() > 0;
+        $chkItemSupp = @$pdo->query("SHOW COLUMNS FROM order_items LIKE 'supplier_id'");
+        $hasItemSupplier = $chkItemSupp && $chkItemSupp->rowCount() > 0;
+        $chkComm = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'commission_rate'");
+        $hasCommission = $chkComm && $chkComm->rowCount() > 0;
+
         $sellExpr = $hasSell
             ? "(SELECT SUM(CASE WHEN oi.sell_price IS NOT NULL THEN oi.quantity * oi.sell_price ELSE COALESCE(oi.total_amount, oi.quantity * COALESCE(oi.unit_price, 0)) END) FROM order_items oi WHERE oi.order_id = o.id)"
             : "(SELECT SUM(COALESCE(oi.total_amount, oi.quantity * COALESCE(oi.unit_price, 0))) FROM order_items oi WHERE oi.order_id = o.id)";
         $buyExpr = $hasBuy
             ? "(SELECT SUM(oi.quantity * COALESCE(oi.buy_price, oi.unit_price)) FROM order_items oi WHERE oi.order_id = o.id)"
             : "(SELECT SUM(oi.quantity * COALESCE(oi.unit_price, 0)) FROM order_items oi WHERE oi.order_id = o.id)";
+
         $suppCols = 's.name as supplier_name';
-        $chkComm = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'commission_rate'");
-        if ($chkComm && $chkComm->rowCount() > 0) $suppCols .= ', s.commission_rate, s.commission_type, s.commission_applied_on';
+        if ($hasCommission && !$hasItemSupplier) {
+            $suppCols .= ', s.commission_rate, s.commission_type, s.commission_applied_on';
+        }
         $sql = "SELECT o.id, o.customer_id, o.supplier_id, o.currency, o.status, o.expected_ready_date,
             c.name as customer_name, $suppCols,
             $sellExpr as order_total,
@@ -139,13 +146,68 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $params[] = $customerId;
         }
         if ($supplierId) {
-            $sql .= " AND o.supplier_id = ?";
-            $params[] = $supplierId;
+            if ($hasItemSupplier) {
+                $sql .= " AND (o.supplier_id = ? OR EXISTS (SELECT 1 FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = o.id AND COALESCE(oi.supplier_id, p.supplier_id) = ?))";
+                $params[] = $supplierId;
+                $params[] = $supplierId;
+            } else {
+                $sql .= " AND o.supplier_id = ?";
+                $params[] = $supplierId;
+            }
         }
         $sql .= " ORDER BY o.expected_ready_date DESC";
         $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
         if ($params) $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $orderCommissions = [];
+        if ($hasCommission && $hasItemSupplier && !empty($rows)) {
+            $orderIds = array_column($rows, 'id');
+            $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
+            $itemSql = "SELECT oi.order_id, oi.quantity, oi.buy_price, oi.sell_price, oi.unit_price,
+                COALESCE(oi.supplier_id, p.supplier_id) as eff_supplier_id,
+                s.commission_rate, s.commission_type, s.commission_applied_on
+                FROM order_items oi
+                LEFT JOIN products p ON oi.product_id = p.id
+                LEFT JOIN suppliers s ON s.id = COALESCE(oi.supplier_id, p.supplier_id)
+                WHERE oi.order_id IN ($placeholders)";
+            $itemStmt = $pdo->prepare($itemSql);
+            $itemStmt->execute($orderIds);
+            $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($items as $it) {
+                $oid = (int) $it['order_id'];
+                $sid = $it['eff_supplier_id'] ? (int) $it['eff_supplier_id'] : null;
+                $rate = (float) ($it['commission_rate'] ?? 0);
+                $type = $it['commission_type'] ?? 'percentage';
+                $appliedOn = $it['commission_applied_on'] ?? 'buy_value';
+                if (!$rate || !$sid) continue;
+                $buyVal = (float) ($it['quantity'] ?? 0) * (float) ($it['buy_price'] ?? $it['unit_price'] ?? 0);
+                $sellVal = (float) ($it['quantity'] ?? 0) * (float) ($it['sell_price'] ?? $it['unit_price'] ?? 0);
+                $base = $appliedOn === 'sell_value' ? $sellVal : $buyVal;
+                if ($type === 'fixed') {
+                    if (!isset($orderCommissions[$oid])) $orderCommissions[$oid] = ['pct' => 0, 'fixed' => []];
+                    if (!isset($orderCommissions[$oid]['fixed'][$sid])) $orderCommissions[$oid]['fixed'][$sid] = $rate;
+                } else {
+                    if (!isset($orderCommissions[$oid])) $orderCommissions[$oid] = ['pct' => 0, 'fixed' => []];
+                    $orderCommissions[$oid]['pct'] += $base * $rate / 100;
+                }
+            }
+        } elseif ($hasCommission && !empty($rows)) {
+            foreach ($rows as $r) {
+                $oid = (int) $r['id'];
+                $rate = (float) ($r['commission_rate'] ?? 0);
+                if (!$rate) continue;
+                $type = $r['commission_type'] ?? 'percentage';
+                $appliedOn = $r['commission_applied_on'] ?? 'buy_value';
+                $base = $appliedOn === 'sell_value' ? (float) ($r['order_total'] ?? 0) : (float) ($r['buy_total'] ?? 0);
+                if ($type === 'fixed') {
+                    $orderCommissions[$oid] = ['pct' => 0, 'fixed' => [0 => $rate]];
+                } else {
+                    $orderCommissions[$oid] = ['pct' => $base * $rate / 100, 'fixed' => []];
+                }
+            }
+        }
+
         $totalSell = 0;
         $totalBuy = 0;
         $totalCommission = 0;
@@ -153,10 +215,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $r['order_total'] = (float) ($r['order_total'] ?? 0);
             $r['buy_total'] = (float) ($r['buy_total'] ?? $r['order_total']);
             $commission = 0.0;
-            if (!empty($r['commission_rate']) && (float) $r['commission_rate'] > 0) {
-                $rate = (float) $r['commission_rate'];
-                $base = ($r['commission_applied_on'] ?? 'buy_value') === 'sell_value' ? $r['order_total'] : $r['buy_total'];
-                $commission = (($r['commission_type'] ?? 'percentage') === 'fixed') ? $rate : ($base * $rate / 100);
+            $oid = (int) $r['id'];
+            if (isset($orderCommissions[$oid])) {
+                $commission = $orderCommissions[$oid]['pct'] ?? 0;
+                $commission += isset($orderCommissions[$oid]['fixed']) ? array_sum($orderCommissions[$oid]['fixed']) : 0;
             }
             $r['commission'] = round($commission, 4);
             $r['margin'] = $r['order_total'] - $r['buy_total'] - $r['commission'];

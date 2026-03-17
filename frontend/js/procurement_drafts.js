@@ -50,6 +50,8 @@
                     ${r.status === "draft" || r.status === "pending_review" ? `<button class="btn btn-sm btn-outline-success" onclick="convertDraft(${r.id})">Convert</button>` : ""}
                     ${r.status === "draft" || r.status === "pending_review" ? `<button class="btn btn-sm btn-outline-primary" onclick="editDraft(${r.id})">Edit</button>` : ""}
                     ${r.status === "draft" || r.status === "cancelled" ? `<button class="btn btn-sm btn-outline-danger" onclick="deleteDraft(${r.id})">Delete</button>` : ""}
+                    <a href="${API}/procurement-drafts/${r.id}/export" class="btn btn-sm btn-outline-secondary" download title="Download as Excel">Excel</a>
+                    <a href="/cargochina/procurement_draft_print.php?id=${r.id}" class="btn btn-sm btn-outline-secondary" target="_blank" rel="noopener" title="Print or save as PDF">Print</a>
                 </td>
             </tr>
         `,

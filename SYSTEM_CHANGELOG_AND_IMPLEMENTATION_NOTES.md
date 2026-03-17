@@ -855,3 +855,82 @@ High-confidence completed items after this review pass:
 - **Issue:** "+ Create User" button did not respond to clicks on admin_users.php.
 - **Root cause:** Page script used relative path `frontend/js/admin_users.js`, which could 404 or load from wrong base in some deployments; no cache busting caused stale script.
 - **Fix:** Use absolute path `/cargochina/frontend/js/admin_users.js` with filemtime cache busting; attach click handler via `addEventListener` in DOMContentLoaded instead of inline onclick for reliability. Same pattern applied to admin_audit_log.js.
+
+## 2026-03-16 Full QA Reset + Seed Dataset
+
+- Implemented a new safe reset-and-seed tool at `scripts/reset_and_seed_full_test_dataset.py`.
+- The tool does a full downstream-safe reseed instead of an isolated table patch:
+  - creates a SQL backup with `mysqldump`
+  - archives `backend/uploads`
+  - preserves auth/system/reference tables only: `users`, `roles`, `user_roles`, `departments`, `user_departments`, `user_notification_preferences`, `_migrations`, `system_config`, `business_settings`, `countries`, `expense_categories`, `hs_code_tariff_catalog`
+  - wipes business/workflow data and repopulates realistic test records
+- Seeded dataset coverage:
+  - `15` customers with priority levels, notes, contacts, addresses, payment links, and default shipping codes
+  - `12` suppliers with commissions, contacts, additional IDs, and notes
+  - `60` products with varied dimensions, measurement scopes, packaging, buy/sell pricing, HS codes, images, alerts, description entries, and design attachments
+  - `30` orders spanning every important workflow status
+  - `9` containers:
+    - `4` full/on-route
+    - `3` almost filled / `to_go`
+    - `2` planning / early fill
+  - `10` shipment drafts, `26` warehouse receipts, `5` procurement drafts, `6` order templates
+  - finance coverage via expenses, customer deposits, supplier payments
+  - customer-facing coverage via portal tokens and confirmation links
+  - internal coverage via notifications, delivery logs, internal messages, supplier interactions, audit rows, tax rates, arrival notifications, and tracking push logs
+- Seed verification after run:
+  - `customers=15`
+  - `suppliers=12`
+  - `products=60`
+  - `orders=30`
+  - `order_items=60`
+  - `containers=9`
+  - `shipment_drafts=10`
+  - `warehouse_receipts=26`
+  - `expenses=28`
+  - `customer_deposits=10`
+  - `supplier_payments=12`
+  - `procurement_drafts=5`
+  - `order_templates=6`
+  - `notifications=10`
+  - `customer_portal_tokens=5`
+- Workflow distribution after run:
+  - `FinalizedAndPushedToTracking=10`
+  - `AssignedToContainer=10`
+  - `ConsolidatedIntoShipmentDraft=1`
+  - `Draft=1`
+  - `Submitted=1`
+  - `Approved=1`
+  - `InTransitToWarehouse=1`
+  - `ReceivedAtWarehouse=1`
+  - `AwaitingCustomerConfirmation=1`
+  - `Confirmed=1`
+  - `ReadyForConsolidation=1`
+  - `CustomerDeclined=1`
+- Container fill verification after run:
+  - `FULLQA-CTR-001` `94.5%`
+  - `FULLQA-CTR-002` `88.6%`
+  - `FULLQA-CTR-003` `90.2%`
+  - `FULLQA-CTR-004` `87.7%`
+  - `FULLQA-CTR-005` `86.0%`
+  - `FULLQA-CTR-006` `82.7%`
+  - `FULLQA-CTR-007` `79.8%`
+  - `FULLQA-CTR-008` `28.2%`
+  - `FULLQA-CTR-009` `21.4%`
+- Generated outputs:
+  - backup directory under `output/reset_seed_backups/`
+  - manifest under `output/seed_manifests/` with raw portal links and confirmation links for manual QA
+- Validation:
+  - `npm run smoke:ui` passed after reseeding
+  - portal token flow and public confirmation flow were manually verified in-browser using the generated manifest links
+
+## 2026-03-16 Item-Level Commission Calculation (Multi-Supplier Orders)
+
+- **Requirement:** Commission is received from suppliers. Orders can have multiple products and multiple suppliers with different commission rates; some suppliers have no commission.
+- **Change:** Financials API now calculates commission at **item level** instead of order level:
+  - For each order_item: effective supplier = COALESCE(oi.supplier_id, p.supplier_id)
+  - Base value = buy_value (quantity × buy_price) or sell_value (quantity × sell_price) per supplier's commission_applied_on
+  - Percentage: commission = base × rate / 100 per item
+  - Fixed: commission added once per supplier per order (no per-item multiplication)
+- **Supplier filter:** When filtering by supplier_id, orders are included if they have at least one item from that supplier (item-level or product-level supplier_id).
+- **Fallback:** When order_items has no supplier_id column (legacy), commission falls back to order-level supplier (o.supplier_id).
+- **Affected:** `backend/api/handlers/financials.php` — profit endpoint. Financials page, filters, and summary cards unchanged (API contract preserved).

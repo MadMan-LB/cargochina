@@ -36,7 +36,7 @@ class OrderExcelService
     // Public API
     // -------------------------------------------------------------------------
 
-    public function exportOrder(array $order, array $items): void
+    public function exportOrder(array $order, array $items, ?string $filename = null): void
     {
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
@@ -47,7 +47,8 @@ class OrderExcelService
         $row++;
         $this->writeItems($sheet, $items, $row);
 
-        $this->outputXlsx($spreadsheet, 'order_' . (int) ($order['id'] ?? 0) . '_goods_details.xlsx');
+        $outName = $filename ?? ('order_' . (int) ($order['id'] ?? 0) . '_goods_details.xlsx');
+        $this->outputXlsx($spreadsheet, $outName);
     }
 
     public function exportOrders(array $ordersWithItems, string $filename = 'container_orders.xlsx'): void
