@@ -134,17 +134,61 @@ function setupProductFilters() {
 function setupProductPricing() {
     const unitPriceEl = document.getElementById("productUnitPrice");
     const piecesEl = document.getElementById("productPiecesPerCarton");
+    const cbmEl = document.getElementById("productCbm");
+    const weightEl = document.getElementById("productWeight");
     const totalEl = document.getElementById("productCartonTotal");
+    const cbmTotalEl = document.getElementById("productCartonCbm");
+    const weightTotalEl = document.getElementById("productCartonWeight");
     if (!unitPriceEl || !piecesEl) return;
-    const updateTotal = () => {
+
+    const updateCartonTotals = () => {
         const price = parseFloat(unitPriceEl.value) || 0;
         const pieces = parseInt(piecesEl.value, 10) || 0;
+        const cbm = parseFloat(cbmEl?.value) || 0;
+        const weight = parseFloat(weightEl?.value) || 0;
+        const scope = document.querySelector(
+            'input[name="productDimensionsScope"]:checked',
+        )?.value || "carton";
+
         if (totalEl)
             totalEl.textContent =
                 price > 0 && pieces > 0 ? (price * pieces).toFixed(2) : "—";
+
+        const cartonCbm =
+            scope === "piece" && pieces > 0
+                ? cbm * pieces
+                : scope === "carton"
+                  ? cbm
+                  : null;
+        if (cbmTotalEl)
+            cbmTotalEl.textContent =
+                cartonCbm != null && cartonCbm > 0
+                    ? cartonCbm.toFixed(4)
+                    : "—";
+
+        const cartonWeight =
+            scope === "piece" && pieces > 0
+                ? weight * pieces
+                : scope === "carton"
+                  ? weight
+                  : null;
+        if (weightTotalEl)
+            weightTotalEl.textContent =
+                cartonWeight != null && cartonWeight > 0
+                    ? cartonWeight.toFixed(4)
+                    : "—";
     };
-    unitPriceEl.addEventListener("input", updateTotal);
-    piecesEl.addEventListener("input", updateTotal);
+
+    [unitPriceEl, piecesEl].forEach((el) =>
+        el.addEventListener("input", updateCartonTotals),
+    );
+    [cbmEl, weightEl].forEach((el) => {
+        if (el) el.addEventListener("input", updateCartonTotals);
+    });
+    document
+        .querySelectorAll('input[name="productDimensionsScope"]')
+        .forEach((el) => el.addEventListener("change", updateCartonTotals));
+    updateCartonTotals();
 }
 
 function setupProductDesignAttachments() {
@@ -180,17 +224,34 @@ function setupProductDesignAttachments() {
 }
 
 async function loadProductDesignAttachments(productId) {
-    if (!productId) return;
+    if (!productId) return [];
     try {
         const res = await api(
             "GET",
             "/design-attachments?entity_type=product&entity_id=" + productId,
         );
-        renderProductDesignAttachments(res.data || []);
+        const list = res.data || [];
+        renderProductDesignAttachments(list);
+        return list;
     } catch (e) {
         renderProductDesignAttachments([]);
+        return [];
     }
 }
+
+window.toggleProductDesignAttachments = function toggleProductDesignAttachments() {
+    const section = document.getElementById("productDesignAttachmentsSection");
+    const addWrap = document.getElementById("productDesignAttachmentsAdd");
+    const checkbox = document.getElementById("productShowDesignAttachments");
+    if (!section || !checkbox) return;
+    if (checkbox.checked) {
+        section.classList.remove("d-none");
+        if (addWrap) addWrap.classList.remove("d-none");
+    } else {
+        section.classList.add("d-none");
+        if (addWrap) addWrap.classList.add("d-none");
+    }
+};
 
 function renderProductDesignAttachments(list) {
     const el = document.getElementById("productDesignAttachmentsList");
@@ -346,6 +407,7 @@ function setupProductDimensionInputs() {
         if (l > 0 && w > 0 && h > 0) {
             const cbm = Math.round(((l * w * h) / 1000000) * 1e6) / 1e6;
             cbmEl.value = cbm.toFixed(6);
+            cbmEl.dispatchEvent(new Event("input"));
         }
     };
     [lEl, wEl, hEl].forEach((el) =>
@@ -359,12 +421,23 @@ function setupProductDimensionInputs() {
     });
 }
 
+let productPhotoSource = "attach";
+
+window.productTakePhoto = function productTakePhoto() {
+    const input = document.getElementById("productImagesInput");
+    if (!input || typeof PHOTO_UPLOADER === "undefined") return;
+    productPhotoSource = "camera";
+    PHOTO_UPLOADER.pickPhotos(input, { capture: "environment" });
+}
+
 function setupProductImageUpload() {
     const input = document.getElementById("productImagesInput");
     const dropZone = document.getElementById("productImagesDropZone");
     if (!input || !dropZone) return;
 
-    input.onchange = () => handleProductFiles(input.files);
+    input.onchange = () => {
+        handleProductFiles(input.files);
+    };
     dropZone.ondragover = (e) => {
         e.preventDefault();
         dropZone.classList.add("border-primary");
@@ -373,6 +446,7 @@ function setupProductImageUpload() {
     dropZone.ondrop = (e) => {
         e.preventDefault();
         dropZone.classList.remove("border-primary");
+        productPhotoSource = "attach";
         if (e.dataTransfer.files.length)
             handleProductFiles(e.dataTransfer.files);
     };
@@ -400,7 +474,11 @@ async function handleProductFiles(files) {
         showToast("Upload failed: " + (e.message || "Unknown error"), "danger");
     } finally {
         setLoading(btn, false);
-        if (btn) btn.textContent = "Add Photo";
+        if (btn) {
+            btn.textContent =
+                btn.id === "productTakePhotoBtn" ? "Take Photo" : "Attach";
+        }
+        productPhotoSource = "attach";
     }
 }
 
@@ -622,15 +700,24 @@ function openProductForm() {
         productSupplierAutocomplete.setValue(null);
     document.getElementById("productHighAlertNote").value = "";
     const pieceRadio = document.getElementById("productDimensionsPiece");
-    if (pieceRadio) pieceRadio.checked = true;
+    const cartonRadio = document.getElementById("productDimensionsCarton");
+    if (pieceRadio) pieceRadio.checked = false;
+    if (cartonRadio) cartonRadio.checked = true;
     const reqDesignCb = document.getElementById("productRequiredDesign");
     if (reqDesignCb) reqDesignCb.checked = false;
     const cartonTotalEl = document.getElementById("productCartonTotal");
+    const cartonCbmEl = document.getElementById("productCartonCbm");
+    const cartonWeightEl = document.getElementById("productCartonWeight");
     if (cartonTotalEl) cartonTotalEl.textContent = "—";
+    if (cartonCbmEl) cartonCbmEl.textContent = "—";
+    if (cartonWeightEl) cartonWeightEl.textContent = "—";
     renderProductDesignAttachments([]);
-    document
-        .getElementById("productDesignAttachmentsAdd")
-        .classList.add("d-none");
+    const showDesignCb = document.getElementById("productShowDesignAttachments");
+    const designSection = document.getElementById("productDesignAttachmentsSection");
+    const designAdd = document.getElementById("productDesignAttachmentsAdd");
+    if (showDesignCb) showDesignCb.checked = false;
+    if (designSection) designSection.classList.add("d-none");
+    if (designAdd) designAdd.classList.add("d-none");
 }
 
 async function editProduct(id) {
@@ -715,10 +802,19 @@ async function editProduct(id) {
             "Edit Product";
         productImagePaths = d.image_paths || [];
         renderProductImagesPreview();
-        document
-            .getElementById("productDesignAttachmentsAdd")
-            .classList.remove("d-none");
-        loadProductDesignAttachments(d.id);
+        const designAttachments = await loadProductDesignAttachments(d.id);
+        const showDesignCb = document.getElementById("productShowDesignAttachments");
+        const designSection = document.getElementById("productDesignAttachmentsSection");
+        const designAdd = document.getElementById("productDesignAttachmentsAdd");
+        if (designAttachments.length > 0 && showDesignCb) {
+            showDesignCb.checked = true;
+            if (designSection) designSection.classList.remove("d-none");
+            if (designAdd) designAdd.classList.remove("d-none");
+        } else {
+            if (showDesignCb) showDesignCb.checked = false;
+            if (designSection) designSection.classList.add("d-none");
+            if (designAdd) designAdd.classList.add("d-none");
+        }
         new bootstrap.Modal(document.getElementById("productModal")).show();
     } catch (e) {
         showToast(e.message, "danger");

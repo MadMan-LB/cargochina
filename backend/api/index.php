@@ -28,7 +28,7 @@ $parts = $path ? explode('/', $path) : [];
 
 $resource = $parts[0] ?? '';
 $id = $parts[1] ?? null;
-$action = $parts[2] ?? null;
+$action = count($parts) > 2 ? implode('/', array_slice($parts, 2)) : null;
 
 $handlerFile = __DIR__ . '/handlers/' . $resource . '.php';
 if (!file_exists($handlerFile)) {
@@ -186,6 +186,11 @@ if (!in_array($resource, $publicResources)) {
         exit;
     }
     if ($resource === 'design-attachments' && !hasAnyRole($rbac['design-attachments'] ?? [])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'draft-orders' && !hasAnyRole($rbac['draft-orders'] ?? [])) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;

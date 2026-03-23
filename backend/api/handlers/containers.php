@@ -20,9 +20,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     jsonResponse(['data' => []]);
                 }
                 $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+                $coll = 'COLLATE utf8mb4_unicode_ci';
                 $chkNotes = @$pdo->query("SHOW COLUMNS FROM containers LIKE 'notes'");
-                $notesCond = ($chkNotes && $chkNotes->rowCount() > 0) ? ' OR notes LIKE ?' : '';
-                $sql = "SELECT id, code, max_cbm, status FROM containers WHERE (code LIKE ? OR id = ?$notesCond) ORDER BY id DESC LIMIT 20";
+                $notesCond = ($chkNotes && $chkNotes->rowCount() > 0) ? " OR (notes $coll LIKE ?)" : '';
+                $sql = "SELECT id, code, max_cbm, max_weight, status FROM containers WHERE ((code $coll LIKE ?) OR id = ?$notesCond) ORDER BY id DESC LIMIT 20";
                 $stmt = $pdo->prepare($sql);
                 $execParams = [$like, is_numeric($q) ? (int) $q : 0];
                 if ($notesCond) $execParams[] = $like;
@@ -76,7 +77,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $container['used_weight'] = round($totalWeight,  2);
                 $container['fill_pct_cbm'] = $container['max_cbm'] > 0
                     ? round($totalCbm / $container['max_cbm'] * 100, 1) : 0;
-                jsonResponse(['data' => ['container' => $container, 'orders' => $orders]]);
+                $draftsStmt = $pdo->prepare(
+                    "SELECT sd.id, sd.status, sd.container_number, sd.booking_number, sd.tracking_url,
+                            (SELECT COUNT(*) FROM shipment_draft_orders WHERE shipment_draft_id = sd.id) as order_count
+                     FROM shipment_drafts sd WHERE sd.container_id = ? ORDER BY sd.id"
+                );
+                $draftsStmt->execute([$id]);
+                $drafts = $draftsStmt->fetchAll(PDO::FETCH_ASSOC);
+                jsonResponse(['data' => ['container' => $container, 'orders' => $orders, 'drafts' => $drafts]]);
             }
 
             if ($id && $action === 'export') {
@@ -145,20 +153,21 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $params = [];
                 if ($search !== '') {
                     $like = '%' . $search . '%';
-                    $innerCond = "cu2.name LIKE ? OR cu2.code LIKE ?";
+                    $coll = 'COLLATE utf8mb4_unicode_ci';
+                    $innerCond = "(cu2.name $coll LIKE ?) OR (cu2.code $coll LIKE ?)";
                     $innerParams = [$like, $like];
                     $chkCust = $pdo->query("SHOW COLUMNS FROM customers LIKE 'phone'");
                     if ($chkCust && $chkCust->rowCount() > 0) {
-                        $innerCond .= " OR cu2.phone LIKE ?";
+                        $innerCond .= " OR (cu2.phone $coll LIKE ?)";
                         $innerParams[] = $like;
                     }
-                    $innerCond .= " OR oi2.shipping_code LIKE ? OR oi2.item_no LIKE ? OR oi2.description_cn LIKE ? OR oi2.description_en LIKE ?";
+                    $innerCond .= " OR (oi2.shipping_code $coll LIKE ?) OR (oi2.item_no $coll LIKE ?) OR (oi2.description_cn $coll LIKE ?) OR (oi2.description_en $coll LIKE ?)";
                     $innerParams = array_merge($innerParams, [$like, $like, $like, $like]);
                     if (is_numeric($search)) {
                         $innerCond .= " OR o2.id = ?";
                         $innerParams[] = (int) $search;
                     }
-                    $sql .= " AND (c.code LIKE ? OR EXISTS (
+                    $sql .= " AND ((c.code $coll LIKE ?) OR EXISTS (
                         SELECT 1 FROM shipment_draft_orders sdo2
                         JOIN shipment_drafts sd2 ON sdo2.shipment_draft_id = sd2.id
                         JOIN orders o2 ON sdo2.order_id = o2.id
@@ -201,12 +210,42 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         // -------------------------------------------------------------------------
         case 'PUT':
             if (!$id) jsonError('Container ID required', 400);
-            $stmt = $pdo->prepare("SELECT id FROM containers WHERE id = ?");
+            $stmt = $pdo->prepare("SELECT * FROM containers WHERE id = ?");
             $stmt->execute([$id]);
-            if (!$stmt->fetch()) jsonError('Container not found', 404);
+            $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$existing) jsonError('Container not found', 404);
             $allowed_statuses = ['planning', 'to_go', 'on_route', 'arrived', 'available'];
             $sets = [];
             $params = [];
+            if (array_key_exists('code', $input)) {
+                $code = trim((string) ($input['code'] ?? ''));
+                if ($code === '') jsonError('Code cannot be empty', 400);
+                $chk = $pdo->prepare("SELECT id FROM containers WHERE code = ? AND id != ?");
+                $chk->execute([$code, $id]);
+                if ($chk->fetch()) jsonError('Code already in use by another container', 400);
+                $sets[] = 'code = ?';
+                $params[] = $code;
+            }
+            if (array_key_exists('max_cbm', $input)) {
+                $maxCbm = (float) $input['max_cbm'];
+                if ($maxCbm <= 0) jsonError('Max CBM must be positive', 400);
+                $stmt = $pdo->prepare("SELECT COALESCE(SUM(oi.declared_cbm),0) FROM shipment_draft_orders sdo JOIN shipment_drafts sd ON sdo.shipment_draft_id = sd.id JOIN order_items oi ON oi.order_id = sdo.order_id WHERE sd.container_id = ?");
+                $stmt->execute([$id]);
+                $usedCbm = (float) $stmt->fetchColumn();
+                if ($usedCbm > $maxCbm) jsonError('Max CBM cannot be less than used CBM (' . round($usedCbm, 2) . ')', 400);
+                $sets[] = 'max_cbm = ?';
+                $params[] = $maxCbm;
+            }
+            if (array_key_exists('max_weight', $input)) {
+                $maxWeight = (float) $input['max_weight'];
+                if ($maxWeight <= 0) jsonError('Max weight must be positive', 400);
+                $stmt = $pdo->prepare("SELECT COALESCE(SUM(oi.declared_weight),0) FROM shipment_draft_orders sdo JOIN shipment_drafts sd ON sdo.shipment_draft_id = sd.id JOIN order_items oi ON oi.order_id = sdo.order_id WHERE sd.container_id = ?");
+                $stmt->execute([$id]);
+                $usedWeight = (float) $stmt->fetchColumn();
+                if ($usedWeight > $maxWeight) jsonError('Max weight cannot be less than used weight (' . round($usedWeight, 2) . ' kg)', 400);
+                $sets[] = 'max_weight = ?';
+                $params[] = $maxWeight;
+            }
             if (isset($input['status'])) {
                 if (!in_array($input['status'], $allowed_statuses)) {
                     jsonError('Invalid status. Allowed: ' . implode(', ', $allowed_statuses), 400);

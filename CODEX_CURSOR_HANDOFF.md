@@ -55,6 +55,7 @@ This file was initially written by Codex as a shared collaboration and continuit
 - Suppliers: present now in root pages, buyers area pages, supplier payments/interactions schema, and `backend/api/handlers/suppliers.php`.
 - Products: present now in UI and `backend/api/handlers/products.php`, with translation-related support nearby.
 - Translation cache: present conceptually and in schema/service form via `translations` and `backend/services/TranslationService.php`.
+- Draft an Order builder: `procurement_drafts.php` now saves real `orders` with `order_type='draft_procurement'`; current builder behavior is one visible description input per item, with server-side CN/EN auto-fill via `TranslationService`, and `Custom design` staying off by default unless the saved draft item already had it enabled.
 - Orders: present now in UI, handlers, schema, and tests.
 - Order items: present now in schema and handlers, including item-level capture fields such as cartons, shipping code, pricing, notes, and image paths.
 - Attachments: present now via `order_attachments`, upload handling, and order-level file references.

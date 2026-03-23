@@ -156,88 +156,110 @@ require 'includes/layout.php';
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <form id="productForm">
+        <form id="productForm" class="product-form-compact">
           <input type="hidden" id="productId">
-          <div class="mb-2">
-            <label class="form-label">Description</label>
-            <small class="text-muted d-block mb-1">Type in Chinese or English — auto-translates Chinese to English. Press + to add another field.</small>
-            <div id="productDescFields" class="mb-1"></div>
-            <button type="button" class="btn btn-outline-secondary btn-sm" id="productDescAddBtn" title="Add another description field" onclick="addProductDescField&&addProductDescField()">+</button>
-          </div>
-          <div class="row form-row-responsive">
-            <div class="col-12 col-md-4 mb-2">
-              <label class="form-label">CBM</label>
-              <input type="number" step="0.0001" class="form-control" id="productCbm" placeholder="Direct entry or from L×W×H" title="Enter CBM directly, or use L/H/W below">
+          <div class="row g-2">
+            <div class="col-12 mb-1">
+              <label class="form-label form-label-sm">Supplier</label>
+              <input type="text" class="form-control form-control-sm" id="productSupplier" placeholder="Type to search supplier..." autocomplete="off">
+              <input type="hidden" id="productSupplierId">
             </div>
-            <div class="col-12 col-md-4 mb-2">
-              <label class="form-label">L / W / H (cm)</label>
+            <div class="col-12 mb-1">
+              <label class="form-label form-label-sm">Description</label>
+              <div id="productDescFields" class="mb-1"></div>
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="productDescAddBtn" title="Add another description field" onclick="addProductDescField&&addProductDescField()">+</button>
+            </div>
+            <div class="col-6 col-md-3 mb-1">
+              <label class="form-label form-label-sm">CBM</label>
+              <input type="number" step="0.0001" class="form-control form-control-sm" id="productCbm" placeholder="CBM">
+            </div>
+            <div class="col-12 col-md-3 mb-1">
+              <label class="form-label form-label-sm">L / W / H (cm)</label>
               <div class="input-group input-group-sm">
-                <input type="number" step="0.01" class="form-control" id="productLength" placeholder="L" title="Length cm">
-                <input type="number" step="0.01" class="form-control" id="productWidth" placeholder="W" title="Width cm">
-                <input type="number" step="0.01" class="form-control" id="productHeight" placeholder="H" title="Height cm">
+                <input type="number" step="0.01" class="form-control" id="productLength" placeholder="L">
+                <input type="number" step="0.01" class="form-control" id="productWidth" placeholder="W">
+                <input type="number" step="0.01" class="form-control" id="productHeight" placeholder="H">
               </div>
-              <small class="text-muted">Optional: auto-calculates CBM when all three filled</small>
             </div>
-            <div class="col-12 col-md-4 mb-2"><label class="form-label">Weight *</label><input type="number" step="0.0001" class="form-control" id="productWeight" required></div>
-          </div>
-          <div class="mb-2">
-            <label class="form-label">Dimensions apply to</label>
-            <div class="d-flex gap-3">
+            <div class="col-6 col-md-2 mb-1">
+              <label class="form-label form-label-sm">Weight *</label>
+              <input type="number" step="0.0001" class="form-control form-control-sm" id="productWeight" required>
+            </div>
+            <div class="col-6 col-md-2 mb-1">
+              <label class="form-label form-label-sm">Pieces per carton</label>
+              <input type="number" min="1" class="form-control form-control-sm" id="productPiecesPerCarton" placeholder="24">
+            </div>
+            <div class="col-6 col-md-2 mb-1">
+              <label class="form-label form-label-sm">Unit price</label>
+              <input type="number" step="0.0001" class="form-control form-control-sm" id="productUnitPrice" placeholder="0.50">
+            </div>
+            <div class="col-6 col-md-3 mb-1">
+              <label class="form-label form-label-sm">Buy price</label>
+              <input type="number" step="0.0001" class="form-control form-control-sm" id="productBuyPrice" placeholder="Cost">
+            </div>
+            <div class="col-6 col-md-3 mb-1">
+              <label class="form-label form-label-sm">Sell price</label>
+              <input type="number" step="0.0001" class="form-control form-control-sm" id="productSellPrice" placeholder="Sell">
+            </div>
+            <div class="col-6 col-md-3 mb-1">
+              <label class="form-label form-label-sm">HS Code</label>
+              <input type="text" class="form-control form-control-sm" id="productHsCode" placeholder="Start typing HS code...">
+            </div>
+            <div class="col-6 col-md-3 mb-1">
+              <label class="form-label form-label-sm">Packaging</label>
+              <input type="text" class="form-control form-control-sm" id="productPackaging" placeholder="Packaging">
+            </div>
+            <div class="col-12 mb-1">
               <div class="form-check">
-                <input class="form-check-input" type="radio" name="productDimensionsScope" id="productDimensionsPiece" value="piece" checked>
-                <label class="form-check-label" for="productDimensionsPiece">Piece</label>
+                <input class="form-check-input" type="checkbox" id="productRequiredDesign" value="1">
+                <label class="form-check-label" for="productRequiredDesign">Required design</label>
               </div>
+            </div>
+            <div class="col-12 mb-1">
+              <label class="form-label form-label-sm">Dimensions apply to</label>
+              <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+                <div class="d-flex gap-3">
+                  <div class="form-check">
+                    <input class="form-check-input" type="radio" name="productDimensionsScope" id="productDimensionsPiece" value="piece">
+                    <label class="form-check-label" for="productDimensionsPiece">Piece</label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="radio" name="productDimensionsScope" id="productDimensionsCarton" value="carton" checked>
+                    <label class="form-check-label" for="productDimensionsCarton">Carton</label>
+                  </div>
+                </div>
+                <div class="product-carton-totals text-muted small">
+                  <span>Price: <strong id="productCartonTotal">—</strong></span>
+                  <span class="ms-3">CBM: <strong id="productCartonCbm">—</strong></span>
+                  <span class="ms-3">Weight: <strong id="productCartonWeight">—</strong></span>
+                </div>
+              </div>
+            </div>
+            <div class="col-12 mb-1">
+              <label class="form-label form-label-sm">Images</label>
+              <div class="border rounded p-2 bg-light" id="productImagesDropZone">
+                <input type="file" class="d-none" id="productImagesInput" multiple accept="image/*">
+                <button type="button" class="btn btn-outline-secondary btn-sm me-1" id="productAddPhotoBtn" onclick="productPhotoSource='attach';document.getElementById('productImagesInput').click()">Attach</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="productTakePhotoBtn" onclick="productTakePhoto&&productTakePhoto()">Take Photo</button>
+              </div>
+              <div id="productImagesPreview" class="d-flex flex-wrap gap-1 mt-1"></div>
+            </div>
+            <div class="col-12 mb-1">
+              <label class="form-label form-label-sm">High Alert Note</label>
+              <textarea class="form-control form-control-sm product-alert-note" id="productHighAlertNote" rows="1" placeholder="Critical production details"></textarea>
+            </div>
+            <div class="col-12 mb-1">
               <div class="form-check">
-                <input class="form-check-input" type="radio" name="productDimensionsScope" id="productDimensionsCarton" value="carton">
-                <label class="form-check-label" for="productDimensionsCarton">Carton</label>
+                <input class="form-check-input" type="checkbox" id="productShowDesignAttachments" value="1" onchange="toggleProductDesignAttachments&&toggleProductDesignAttachments()">
+                <label class="form-check-label" for="productShowDesignAttachments">Add design attachments</label>
               </div>
-            </div>
-            <small class="text-muted">CBM, L×W×H, and weight above are stored per piece or per carton accordingly.</small>
-          </div>
-          <div class="row form-row-responsive">
-            <div class="col-12 col-md-4 mb-2"><label class="form-label">HS Code</label><input type="text" class="form-control" id="productHsCode"></div>
-            <div class="col-12 col-md-4 mb-2"><label class="form-label">Pieces per carton</label><input type="number" min="1" class="form-control" id="productPiecesPerCarton" placeholder="e.g. 24"></div>
-            <div class="col-12 col-md-4 mb-2"><label class="form-label">Unit price (per piece)</label><input type="number" step="0.0001" class="form-control" id="productUnitPrice" placeholder="e.g. 0.50"><small class="text-muted">Carton total: <span id="productCartonTotal">—</span></small></div>
-          </div>
-          <div class="row form-row-responsive">
-            <div class="col-12 col-md-4 mb-2"><label class="form-label">Buy price (internal)</label><input type="number" step="0.0001" class="form-control" id="productBuyPrice" placeholder="Cost"></div>
-            <div class="col-12 col-md-4 mb-2"><label class="form-label">Sell price (customer-facing)</label><input type="number" step="0.0001" class="form-control" id="productSellPrice" placeholder="Falls back to unit price"></div>
-          </div>
-          <small class="text-muted d-block mb-2">Buy price, sell price, unit price, and HS code are always per piece.</small>
-          <div class="mb-2"><label class="form-label">Packaging</label><input type="text" class="form-control" id="productPackaging"></div>
-          <div class="mb-2">
-            <div class="form-check mb-2">
-              <input class="form-check-input" type="checkbox" id="productRequiredDesign" value="1">
-              <label class="form-check-label" for="productRequiredDesign">Required design — design must be approved before production</label>
-            </div>
-            <small class="text-muted d-block mb-1">When checked, a high alert is shown in orders, receiving, confirmations, and all related workflows for double-checking.</small>
-          </div>
-          <div class="mb-2">
-            <label class="form-label">High Alert Note</label>
-            <textarea class="form-control product-alert-note" id="productHighAlertNote" rows="2" placeholder="Special color, shape, packaging, fragile handling, or other critical production details"></textarea>
-            <small class="text-muted">This is surfaced as an operational alert when the product is selected in orders and related workflows.</small>
-          </div>
-          <div class="mb-2">
-            <label class="form-label">Supplier</label>
-            <input type="text" class="form-control" id="productSupplier" placeholder="Type to search supplier..." autocomplete="off">
-            <input type="hidden" id="productSupplierId">
-          </div>
-          <div class="mb-2">
-            <label class="form-label">Images</label>
-            <div class="border rounded p-2 bg-light" id="productImagesDropZone">
-              <input type="file" class="d-none" id="productImagesInput" multiple accept="image/*">
-              <button type="button" class="btn btn-outline-secondary btn-sm" id="productAddPhotoBtn" onclick="document.getElementById('productImagesInput').click()">Add Photo</button>
-              <span class="ms-2 text-muted small">camera or gallery</span>
-            </div>
-            <div id="productImagesPreview" class="d-flex flex-wrap gap-2 mt-2"></div>
-          </div>
-          <div class="mb-2" id="productDesignAttachmentsSection">
-            <label class="form-label">Design attachments</label>
-            <p class="text-muted small mb-1">Drawings, specs, images, or PDFs. Save product first to add attachments.</p>
-            <div id="productDesignAttachmentsList" class="mb-2"></div>
-            <div id="productDesignAttachmentsAdd" class="d-none">
-              <input type="file" class="d-none" id="productDesignAttachmentInput" accept="image/*,application/pdf,.pdf">
-              <button type="button" class="btn btn-outline-secondary btn-sm" id="productAddDesignBtn" onclick="document.getElementById('productDesignAttachmentInput').click()">+ Add design file</button>
+              <div id="productDesignAttachmentsSection" class="d-none mt-2 ps-3 border-start">
+                <div id="productDesignAttachmentsList" class="mb-1"></div>
+                <div id="productDesignAttachmentsAdd" class="d-none">
+                  <input type="file" class="d-none" id="productDesignAttachmentInput" accept="image/*,application/pdf,.pdf">
+                  <button type="button" class="btn btn-outline-secondary btn-sm" id="productAddDesignBtn" onclick="document.getElementById('productDesignAttachmentInput').click()">Attach</button>
+                </div>
+              </div>
             </div>
           </div>
         </form>

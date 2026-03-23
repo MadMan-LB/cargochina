@@ -49,7 +49,7 @@ require 'includes/layout.php';
             <div class="filter-toolbar-subtext">Find by code, customer, phone, shipping code, or item description.</div>
           </div>
         </div>
-        <input type="text" id="containerSearch" class="form-control form-control-sm" placeholder="Code, customer, phone, shipping code, item description…" oninput="debounceSearch()">
+        <input type="text" id="containerSearch" class="form-control form-control-sm" placeholder="Code, customer, phone, shipping code, item description…" autocomplete="off" oninput="debounceSearch()">
       </div>
 
       <div class="filter-toolbar-card">
@@ -218,17 +218,30 @@ require 'includes/layout.php';
     </div>
   </div>
 </div>
-<!-- Container Edit Modal (dates, vessel, destination) -->
+<!-- Container Edit Modal (code, capacity, dates, vessel, destination) -->
 <div class="modal fade" id="containerEditModal" tabindex="-1">
-  <div class="modal-dialog modal-dialog-centered">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
     <div class="modal-content">
       <div class="modal-header">
-        <h6 class="modal-title">Edit Container Schedule</h6>
+        <h6 class="modal-title">Edit Container</h6>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="containerEditId">
         <div class="row g-3">
+          <div class="col-12 col-md-4">
+            <label class="form-label small">Code</label>
+            <input type="text" class="form-control form-control-sm" id="containerEditCode" placeholder="e.g. FULLQA-CTR-001" maxlength="50">
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label small">Max CBM</label>
+            <input type="number" step="0.01" min="0" class="form-control form-control-sm" id="containerEditMaxCbm" placeholder="67.7">
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label small">Max Weight (kg)</label>
+            <input type="number" step="0.01" min="0" class="form-control form-control-sm" id="containerEditMaxWeight" placeholder="26800">
+          </div>
+          <div class="col-12"><hr class="my-2"></div>
           <div class="col-12 col-md-6">
             <label class="form-label small">Expected Ship Date</label>
             <input type="date" class="form-control form-control-sm" id="containerEditShipDate" placeholder="When to load onto cargo ship">
@@ -266,7 +279,7 @@ require 'includes/layout.php';
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary btn-sm" id="containerEditSaveBtn" onclick="saveContainerEdit()">Save</button>
+        <button type="button" class="btn btn-primary" id="containerEditSaveBtn" onclick="saveContainerEdit()">Save</button>
       </div>
     </div>
   </div>
@@ -293,5 +306,8 @@ require 'includes/layout.php';
   </div>
 </div>
 
-<?php $pageScript = '/cargochina/frontend/js/containers.js?v=' . filemtime(__DIR__ . '/frontend/js/containers.js'); ?>
+<?php
+$pageScripts = ['/cargochina/frontend/js/autocomplete.js?v=' . filemtime(__DIR__ . '/frontend/js/autocomplete.js')];
+$pageScript = '/cargochina/frontend/js/containers.js?v=' . filemtime(__DIR__ . '/frontend/js/containers.js');
+?>
 <?php require 'includes/footer.php'; ?>

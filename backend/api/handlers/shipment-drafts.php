@@ -147,6 +147,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if (!empty($orderIds)) {
                     $ph = implode(',', array_fill(0, count($orderIds), '?'));
                     $pdo->prepare("UPDATE orders SET status='ConsolidatedIntoShipmentDraft' WHERE id IN ($ph)")->execute($orderIds);
+                    // If draft already has a container assigned, new orders must be AssignedToContainer for finalize to succeed
+                    $chk = $pdo->prepare("SELECT container_id FROM shipment_drafts WHERE id = ?");
+                    $chk->execute([$id]);
+                    if ($chk->fetchColumn()) {
+                        $pdo->prepare("UPDATE orders SET status='AssignedToContainer' WHERE id IN ($ph)")->execute($orderIds);
+                    }
                 }
                 $stmt = $pdo->prepare("SELECT * FROM shipment_drafts WHERE id = ?");
                 $stmt->execute([$id]);

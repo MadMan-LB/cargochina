@@ -73,6 +73,7 @@ Base path: `/cargochina/`
 | `/cargochina/customers.php` | Customers |
 | `/cargochina/suppliers.php` | Suppliers |
 | `/cargochina/products.php` | Products |
+| `/cargochina/procurement_drafts.php` | Draft an Order builder + legacy procurement draft migration queue |
 | `/cargochina/receiving.php` | Receiving |
 | `/cargochina/expenses.php` | Expenses (ChinaAdmin, LebanonAdmin, SuperAdmin) |
 | `/cargochina/consolidation.php` | Consolidation |
@@ -88,3 +89,8 @@ Base path: `/cargochina/`
 | Route | Description |
 |-------|-------------|
 | `/cargochina/api/v1/*` | REST API (see API.md) |
+
+## Draft Builder Deep Links
+
+- `/cargochina/procurement_drafts.php?order_id=X` — Open an existing real draft-procurement order in the Draft an Order builder
+- `/cargochina/procurement_drafts.php?supplier_id=X` — Open a new Draft an Order builder with the first supplier section preselected

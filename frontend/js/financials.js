@@ -7,11 +7,17 @@
     let profitSupplierAc = null;
     let balanceCustomerAc = null;
     let balanceSupplierAc = null;
+    let finDepOrderAc = null;
+    let finPayOrderAc = null;
     let balancesLoadedOnce = false;
     const PROFIT_DEFAULT_EXCLUDED_STATUSES = ["Draft", "CustomerDeclined"];
 
-    async function api(path) {
-        const r = await fetch(API + path, { credentials: "same-origin" });
+    async function api(path, opts = {}) {
+        const fetchOpts = { credentials: "same-origin", ...opts };
+        if (opts.method === "POST" && opts.body) {
+            fetchOpts.headers = { "Content-Type": "application/json" };
+        }
+        const r = await fetch(API + path, fetchOpts);
         const d = await r.json();
         if (!r.ok || d.error) throw new Error(d.message || "Request failed");
         return d;
@@ -283,12 +289,12 @@
         try {
             renderLoadingRows(
                 "customerBalancesBody",
-                4,
+                5,
                 "Loading customer balances…",
             );
             renderLoadingRows(
                 "supplierPayablesBody",
-                4,
+                5,
                 "Loading supplier payables…",
             );
             const d = await api(
@@ -332,6 +338,7 @@
         const supp = data?.suppliers || [];
         const custBody = document.getElementById("customerBalancesBody");
         const suppBody = document.getElementById("supplierPayablesBody");
+        const nameEsc = (s) => escapeHtml(s || "").replace(/'/g, "\\'");
         custBody.innerHTML = cust.length
             ? cust
                   .map(
@@ -341,11 +348,12 @@
                 <td>${formatNum(c.deposits)}</td>
                 <td>${formatNum(c.receivable)}</td>
                 <td class="${c.balance >= 0 ? "text-success" : "text-danger"}">${formatSignedNum(c.balance)}</td>
+                <td><button class="btn btn-sm btn-outline-primary" onclick="openFinDepositModal(${c.id}, '${nameEsc(c.name || c.code)}')">Record Deposit</button></td>
             </tr>
         `,
                   )
                   .join("")
-            : '<tr><td colspan="4" class="text-center text-muted">No customers.</td></tr>';
+            : '<tr><td colspan="5" class="text-center text-muted">No customers.</td></tr>';
         suppBody.innerHTML = supp.length
             ? supp
                   .map(
@@ -355,11 +363,12 @@
                 <td>${formatNum(s.invoiced)}</td>
                 <td>${formatNum(s.paid)}</td>
                 <td class="${s.payable > 0 ? "text-warning" : ""}">${formatNum(s.payable)}</td>
+                <td><button class="btn btn-sm btn-outline-success" onclick="openFinPaymentModal(${s.id}, '${nameEsc(s.name || s.code)}')">Record Payment</button></td>
             </tr>
         `,
                   )
                   .join("")
-            : '<tr><td colspan="4" class="text-center text-muted">No suppliers.</td></tr>';
+            : '<tr><td colspan="5" class="text-center text-muted">No suppliers.</td></tr>';
         updateBalanceOverview(cust, supp);
     }
 
@@ -480,6 +489,115 @@
         });
         return ac;
     }
+
+    window.openFinDepositModal = function (customerId, name) {
+        document.getElementById("finDepCustomerId").value = customerId;
+        document.getElementById("finDepCustomerName").textContent = name;
+        document.getElementById("finDepAmount").value = "";
+        document.getElementById("finDepMethod").value = "";
+        document.getElementById("finDepReference").value = "";
+        document.getElementById("finDepNotes").value = "";
+        const orderInput = document.getElementById("finDepOrderId");
+        if (orderInput) orderInput.value = "";
+        if (finDepOrderAc && typeof finDepOrderAc.setValue === "function") finDepOrderAc.setValue(null);
+        if (typeof Autocomplete !== "undefined" && orderInput) {
+            finDepOrderAc = Autocomplete.init(orderInput, {
+                resource: "orders",
+                searchPath: "/search",
+                placeholder: "Type to search order (optional)…",
+                extraParams: () => ({ customer_id: document.getElementById("finDepCustomerId")?.value || "" }),
+                minChars: 0,
+            });
+        }
+        new bootstrap.Modal(document.getElementById("finDepositModal")).show();
+    };
+
+    window.openFinPaymentModal = function (supplierId, name) {
+        document.getElementById("finPaySupplierId").value = supplierId;
+        document.getElementById("finPaySupplierName").textContent = name;
+        document.getElementById("finPayInvoiceAmount").value = "";
+        document.getElementById("finPayAmount").value = "";
+        document.getElementById("finPayMarkedFull").checked = false;
+        document.getElementById("finPayNotes").value = "";
+        const orderInput = document.getElementById("finPayOrderId");
+        if (orderInput) orderInput.value = "";
+        if (finPayOrderAc && typeof finPayOrderAc.setValue === "function") finPayOrderAc.setValue(null);
+        if (typeof Autocomplete !== "undefined" && orderInput) {
+            finPayOrderAc = Autocomplete.init(orderInput, {
+                resource: "orders",
+                searchPath: "/search",
+                placeholder: "Type to search order (optional)…",
+                extraParams: () => ({ supplier_id: document.getElementById("finPaySupplierId")?.value || "" }),
+                minChars: 0,
+            });
+        }
+        new bootstrap.Modal(document.getElementById("finPaymentModal")).show();
+    };
+
+    window.submitFinDeposit = async function () {
+        const customerId = document.getElementById("finDepCustomerId").value;
+        const amount = parseFloat(document.getElementById("finDepAmount").value || 0);
+        if (amount <= 0) {
+            alert("Amount must be positive");
+            return;
+        }
+        const orderVal = (finDepOrderAc?.getSelectedId?.() || document.getElementById("finDepOrderId").value?.trim() || "").replace(/^#/, "");
+        const orderId = orderVal && /^\d+$/.test(String(orderVal)) ? parseInt(orderVal, 10) : null;
+        const payload = {
+            amount,
+            currency: document.getElementById("finDepCurrency").value,
+            payment_method: document.getElementById("finDepMethod").value || null,
+            reference_no: document.getElementById("finDepReference").value || null,
+            notes: document.getElementById("finDepNotes").value || null,
+            order_id: orderId,
+        };
+        const btn = document.getElementById("finDepSubmitBtn");
+        try {
+            btn.disabled = true;
+            await api("/customers/" + customerId + "/deposits", { method: "POST", body: JSON.stringify(payload) });
+            if (typeof showToast === "function") showToast("Deposit recorded");
+            else alert("Deposit recorded");
+            bootstrap.Modal.getInstance(document.getElementById("finDepositModal")).hide();
+            loadBalances();
+        } catch (e) {
+            alert(e.message || "Failed to record deposit");
+        } finally {
+            btn.disabled = false;
+        }
+    };
+
+    window.submitFinPayment = async function () {
+        const supplierId = document.getElementById("finPaySupplierId").value;
+        const amount = parseFloat(document.getElementById("finPayAmount").value || 0);
+        if (amount <= 0) {
+            alert("Amount must be positive");
+            return;
+        }
+        const orderVal = (finPayOrderAc?.getSelectedId?.() || document.getElementById("finPayOrderId").value?.trim() || "").replace(/^#/, "");
+        const orderId = orderVal && /^\d+$/.test(String(orderVal)) ? parseInt(orderVal, 10) : null;
+        const invoiceAmount = document.getElementById("finPayInvoiceAmount").value?.trim();
+        const payload = {
+            amount,
+            currency: document.getElementById("finPayCurrency").value,
+            order_id: orderId,
+            notes: document.getElementById("finPayNotes").value || null,
+            marked_full_payment: document.getElementById("finPayMarkedFull").checked ? 1 : 0,
+        };
+        if (invoiceAmount) payload.invoice_amount = parseFloat(invoiceAmount);
+        const btn = document.getElementById("finPaySubmitBtn");
+        try {
+            btn.disabled = true;
+            await api("/suppliers/" + supplierId + "/payments", { method: "POST", body: JSON.stringify(payload) });
+            if (typeof showToast === "function") showToast("Payment recorded");
+            else alert("Payment recorded");
+            bootstrap.Modal.getInstance(document.getElementById("finPaymentModal")).hide();
+            loadBalances();
+        } catch (e) {
+            alert(e.message || "Failed to record payment");
+        } finally {
+            btn.disabled = false;
+        }
+    };
 
     function activateTabFromHash() {
         const hash = (window.location.hash || "").replace("#", "");

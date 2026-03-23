@@ -32,7 +32,7 @@ async function loadCustomers() {
                 .map(
                     (r) => `
       <tr>
-        <td>${esc(r.code)}</td>
+        <td>${esc(r.default_shipping_code || r.code || "-")}</td>
         <td>${esc(r.name)}${r.priority_level && r.priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${esc(r.priority_note || "")}">${esc(r.priority_level)}</span>` : ""}${r.default_shipping_code ? `<br><small class="text-muted">Ship code: ${esc(r.default_shipping_code)}</small>` : ""}</td>
         <td>${esc(r.phone || "-")}</td>
         <td class="text-truncate" style="max-width:180px" title="${esc(r.address || "")}">${esc((r.address || "-").substring(0, 50))}${(r.address || "").length > 50 ? "…" : ""}</td>
@@ -57,6 +57,7 @@ async function loadCustomers() {
 }
 
 let customerPaymentLinks = [];
+let customerCountryShipping = [];
 
 window.addCustomerPaymentLink = function addCustomerPaymentLink(
     name = "",
@@ -71,6 +72,71 @@ window.removeCustomerPaymentLink = function removeCustomerPaymentLink(id) {
     customerPaymentLinks = customerPaymentLinks.filter((p) => p.id !== id);
     renderCustomerPaymentLinks();
 };
+
+window.addCustomerCountryShipping = function addCustomerCountryShipping(countryId = null, countryName = "", countryCode = "", shippingCode = "") {
+    const id = Date.now() + Math.random();
+    customerCountryShipping.push({ id, country_id: countryId, country_name: countryName, country_code: countryCode, shipping_code: shippingCode });
+    renderCustomerCountryShipping();
+    setTimeout(initCountryShippingAutocompletes, 50);
+};
+
+window.removeCustomerCountryShipping = function removeCustomerCountryShipping(id) {
+    customerCountryShipping = customerCountryShipping.filter((c) => c.id !== id);
+    renderCustomerCountryShipping();
+};
+
+function renderCustomerCountryShipping() {
+    const container = document.getElementById("customerCountryShippingContainer");
+    if (!container) return;
+    countryShippingAcInstances = {};
+    container.innerHTML = customerCountryShipping
+        .map(
+            (c) => `
+      <div class="d-flex gap-2 mb-2 align-items-center" data-country-shipping-id="${esc(String(c.id))}">
+        <input type="text" class="form-control form-control-sm flex-grow-1 js-country-input" placeholder="Search country..." data-id="${esc(String(c.id))}" value="${esc(c.country_name || "")}" autocomplete="off">
+        <input type="hidden" class="js-country-id" data-id="${esc(String(c.id))}" value="${c.country_id || ""}">
+        <input type="text" class="form-control form-control-sm js-shipping-code-input" style="min-width:120px" placeholder="Shipping code" data-id="${esc(String(c.id))}" value="${esc(c.shipping_code || "")}">
+        <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeCustomerCountryShipping('${esc(String(c.id))}')">×</button>
+      </div>
+    `,
+        )
+        .join("");
+    document.querySelectorAll(".js-shipping-code-input").forEach((inp) => {
+        inp.addEventListener("input", () => {
+            const c = customerCountryShipping.find((x) => String(x.id) === inp.dataset.id);
+            if (c) c.shipping_code = inp.value;
+        });
+    });
+}
+
+
+let countryShippingAcInstances = {};
+
+function initCountryShippingAutocompletes() {
+    document.querySelectorAll(".js-country-input").forEach((inp) => {
+        const dataId = inp.dataset.id;
+        if (countryShippingAcInstances[dataId]) return;
+        countryShippingAcInstances[dataId] = Autocomplete.init(inp, {
+            resource: "countries",
+            searchPath: "/search",
+            minChars: 0,
+            placeholder: "Search country...",
+            displayValue: (c) => c.name + " (" + c.code + ")",
+            renderItem: (c) => c.name + " (" + c.code + ")",
+            onSelect: (item) => {
+                const row = customerCountryShipping.find((x) => String(x.id) === dataId);
+                if (row) {
+                    row.country_id = item.id;
+                    row.country_name = item.name;
+                    row.country_code = item.code;
+                }
+                document.querySelectorAll(".js-country-id").forEach((hid) => {
+                    if (hid.dataset.id === dataId) hid.value = item.id;
+                });
+            },
+        });
+    });
+}
 
 function renderCustomerPaymentLinks() {
     const container = document.getElementById("customerPaymentLinksContainer");
@@ -103,7 +169,12 @@ function openCustomerForm() {
     document.getElementById("customerId").value = "";
     document.getElementById("customerModalTitle").textContent = "Add Customer";
     customerPaymentLinks = [];
+    customerCountryShipping = [];
+    countryShippingAcInstances = {};
     renderCustomerPaymentLinks();
+    renderCustomerCountryShipping();
+    const passportList = document.getElementById("customerPassportList");
+    if (passportList) passportList.innerHTML = '<p class="text-muted small mb-0">Save customer first to add passport/ID attachments</p>';
 }
 
 async function editCustomer(id) {
@@ -111,9 +182,10 @@ async function editCustomer(id) {
         const res = await api("GET", "/customers/" + id);
         const d = res.data;
         document.getElementById("customerId").value = d.id;
-        document.getElementById("customerCode").value = d.code || "";
         document.getElementById("customerName").value = d.name || "";
         document.getElementById("customerPhone").value = d.phone || "";
+        const emailEl = document.getElementById("customerEmail");
+        if (emailEl) emailEl.value = d.email || "";
         document.getElementById("customerAddress").value = d.address || "";
         document.getElementById("customerPaymentTerms").value =
             d.payment_terms || "";
@@ -128,10 +200,21 @@ async function editCustomer(id) {
             name: p.name || "",
             value: p.value || "",
         }));
+        customerCountryShipping = (d.country_shipping || []).map((cs, i) => ({
+            id: Date.now() + i + 1000,
+            country_id: cs.country_id,
+            country_name: cs.country_name || "",
+            country_code: cs.country_code || "",
+            shipping_code: cs.shipping_code || "",
+        }));
+        countryShippingAcInstances = {};
         renderCustomerPaymentLinks();
+        renderCustomerCountryShipping();
         document.getElementById("customerModalTitle").textContent =
             "Edit Customer";
         new bootstrap.Modal(document.getElementById("customerModal")).show();
+        setTimeout(initCountryShippingAutocompletes, 100);
+        loadCustomerPassportAttachments(id);
     } catch (e) {
         showToast(e.message, "danger");
     }
@@ -140,9 +223,9 @@ async function editCustomer(id) {
 async function saveCustomer() {
     const id = document.getElementById("customerId").value;
     const payload = {
-        code: document.getElementById("customerCode").value.trim(),
         name: document.getElementById("customerName").value.trim(),
         phone: document.getElementById("customerPhone").value.trim() || null,
+        email: document.getElementById("customerEmail")?.value?.trim() || null,
         address:
             document.getElementById("customerAddress").value.trim() || null,
         payment_terms:
@@ -163,9 +246,15 @@ async function saveCustomer() {
                 name: (p.name || "").trim(),
                 value: (p.value || "").trim(),
             })),
+        country_shipping: customerCountryShipping
+            .filter((c) => c.country_id)
+            .map((c) => ({
+                country_id: c.country_id,
+                shipping_code: (c.shipping_code || "").trim() || null,
+            })),
     };
-    if (!payload.code || !payload.name) {
-        showToast("Code and Name are required", "danger");
+    if (!payload.name || !payload.default_shipping_code) {
+        showToast("Name and Default Shipping Code are required", "danger");
         return;
     }
     try {
@@ -187,6 +276,75 @@ async function saveCustomer() {
     }
 }
 
+async function loadCustomerPassportAttachments(customerId) {
+    const listEl = document.getElementById("customerPassportList");
+    if (!listEl) return;
+    try {
+        const res = await api("GET", "/design-attachments?entity_type=customer&entity_id=" + customerId);
+        const list = res.data || [];
+        const base = (window.API_BASE || "/cargochina/api/v1").replace("/api/v1", "");
+        listEl.innerHTML = list.length
+            ? list
+                  .map(
+                      (a) => `
+        <div class="d-flex align-items-center gap-2 mb-1">
+          <a href="${base}/backend/${a.file_path}" target="_blank" class="small text-truncate" style="max-width:200px">${esc(a.internal_note || "Passport/ID")}</a>
+          <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteCustomerPassport(${a.id}, ${customerId})">×</button>
+        </div>`,
+                  )
+                  .join("")
+            : '<p class="text-muted small mb-0">No attachments</p>';
+    } catch (e) {
+        listEl.innerHTML = '<p class="text-muted small mb-0">No attachments</p>';
+    }
+}
+
+window.deleteCustomerPassport = async function (attachmentId, customerId) {
+    try {
+        await api("DELETE", "/design-attachments/" + attachmentId);
+        showToast("Attachment removed");
+        if (customerId) loadCustomerPassportAttachments(customerId);
+    } catch (e) {
+        showToast(e.message, "danger");
+    }
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+    const passportInput = document.getElementById("customerPassportInput");
+    if (passportInput) {
+        passportInput.addEventListener("change", async function () {
+            const customerId = document.getElementById("customerId")?.value;
+            if (!customerId) {
+                showToast("Save customer first to add passport/ID attachments", "warning");
+                return;
+            }
+            const files = this.files;
+            if (!files?.length) return;
+            for (let i = 0; i < files.length; i++) {
+                try {
+                    const path = await uploadFile(files[i]);
+                    if (path) {
+                        await api("POST", "/design-attachments", {
+                            entity_type: "customer",
+                            entity_id: parseInt(customerId, 10),
+                            file_path: path,
+                            file_type: (files[i].name || "").split(".").pop() || null,
+                            internal_note: "Passport",
+                        });
+                        loadCustomerPassportAttachments(customerId);
+                        showToast("Attachment added");
+                    }
+                } catch (e) {
+                    showToast(e.message, "danger");
+                }
+            }
+            this.value = "";
+        });
+    }
+});
+
+let depOrderAc = null;
+
 function openDepositModal(customerId, name) {
     document.getElementById("depCustomerId").value = customerId;
     document.getElementById("depCustomerName").textContent = name;
@@ -194,6 +352,18 @@ function openDepositModal(customerId, name) {
     document.getElementById("depMethod").value = "";
     document.getElementById("depReference").value = "";
     document.getElementById("depNotes").value = "";
+    const orderInput = document.getElementById("depOrderId");
+    if (orderInput) orderInput.value = "";
+    if (depOrderAc && typeof depOrderAc.setValue === "function") depOrderAc.setValue(null);
+    if (typeof Autocomplete !== "undefined" && orderInput) {
+        depOrderAc = Autocomplete.init(orderInput, {
+            resource: "orders",
+            searchPath: "/search",
+            placeholder: "Type to search order (optional)…",
+            extraParams: () => ({ customer_id: document.getElementById("depCustomerId")?.value || "" }),
+            minChars: 0,
+        });
+    }
     new bootstrap.Modal(document.getElementById("depositModal")).show();
 }
 
@@ -204,12 +374,15 @@ async function submitDeposit() {
         showToast("Amount must be positive", "danger");
         return;
     }
+    const orderVal = (depOrderAc?.getSelectedId?.() || document.getElementById("depOrderId").value?.trim() || "").replace(/^#/, "");
+    const orderId = orderVal && /^\d+$/.test(String(orderVal)) ? parseInt(orderVal, 10) : null;
     const payload = {
         amount,
         currency: document.getElementById("depCurrency").value,
         payment_method: document.getElementById("depMethod").value || null,
         reference_no: document.getElementById("depReference").value || null,
         notes: document.getElementById("depNotes").value || null,
+        order_id: orderId,
     };
     const btn = document.getElementById("depSubmitBtn");
     try {

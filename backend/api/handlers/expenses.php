@@ -64,7 +64,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     if (!$userId) {
         jsonError('Unauthorized', 401);
     }
-    if (!hasAnyRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'])) {
+    if (!hasAnyRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin', 'WarehouseStaff'])) {
         jsonError('Forbidden', 403);
     }
 
@@ -128,12 +128,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if ($id === 'categories') {
                 setCacheHeaders(60);
                 $q = trim($_GET['q'] ?? '');
+                $warehouseOnly = !empty($_GET['warehouse_only']);
                 $sql = "SELECT * FROM expense_categories WHERE is_active = 1";
                 $params = [];
+                if ($warehouseOnly) {
+                    $sql .= " AND category_type = 'warehouse'";
+                }
                 if (strlen($q) >= 1) {
                     $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
                     $sql .= " AND (name LIKE ? OR category_type LIKE ?)";
-                    $params = [$like, $like];
+                    $params = array_merge($params, [$like, $like]);
                 }
                 $sql .= " ORDER BY category_type, name";
                 $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
@@ -288,10 +292,18 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $supplierId = !empty($input['supplier_id']) ? (int) $input['supplier_id'] : null;
 
             if (!$categoryId && $categoryName !== '') {
+                if (hasAnyRole(['WarehouseStaff']) && !hasAnyRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'])) {
+                    jsonError('Warehouse staff must select a category from the dropdown. Cannot create new categories.', 400);
+                }
                 $categoryId = findOrCreateExpenseCategory($pdo, $categoryName, $userId);
             }
             if (!$categoryId || $amount <= 0) {
                 jsonError('Category and amount are required. Type a category name or select one from the search.', 400);
+            }
+            if (hasAnyRole(['WarehouseStaff']) && !hasAnyRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'])) {
+                $chk = $pdo->prepare("SELECT category_type FROM expense_categories WHERE id = ?");
+                $chk->execute([$categoryId]);
+                if ($chk->fetchColumn() !== 'warehouse') jsonError('Warehouse staff can only use warehouse expense categories', 403);
             }
             if (!in_array($currency, ['USD', 'RMB', 'EUR'], true)) {
                 $currency = 'USD';
@@ -321,6 +333,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if (!$stmt->fetch()) jsonError('Expense not found', 404);
 
             $categoryId = array_key_exists('category_id', $input) ? (int) $input['category_id'] : null;
+            if ($categoryId && hasAnyRole(['WarehouseStaff']) && !hasAnyRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'])) {
+                $chk = $pdo->prepare("SELECT category_type FROM expense_categories WHERE id = ?");
+                $chk->execute([$categoryId]);
+                $ct = $chk->fetchColumn();
+                if ($ct !== 'warehouse') jsonError('Warehouse staff can only use warehouse expense categories', 403);
+            }
             $categoryName = trim($input['category_name'] ?? '');
             if ($categoryId !== null && !$categoryId && $categoryName !== '') {
                 $categoryId = findOrCreateExpenseCategory($pdo, $categoryName, $userId);
@@ -359,6 +377,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
         case 'DELETE':
             if (!$id) jsonError('Expense ID required', 400);
+            if (hasAnyRole(['WarehouseStaff']) && !hasAnyRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'])) {
+                jsonError('Warehouse staff cannot delete expenses. Contact admin for removal.', 403);
+            }
             $stmt = $pdo->prepare("DELETE FROM expenses WHERE id = ?");
             $stmt->execute([$id]);
             if ($stmt->rowCount() === 0) jsonError('Expense not found', 404);

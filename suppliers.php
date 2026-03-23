@@ -93,20 +93,14 @@ require 'includes/layout.php';
               <div class="input-group"><span class="input-group-text">+</span><input type="tel" class="form-control" id="supplierPhone" placeholder="e.g. +86 123 4567 8900"></div>
             </div>
             <div class="col-12 col-md-4 mb-2"><label class="form-label">Fax</label><input type="text" class="form-control" id="supplierFax" placeholder="Fax number (optional)"></div>
-            <div class="col-12 col-md-4 mb-2"><label class="form-label">Factory Location</label><input type="text" class="form-control" id="supplierFactory"></div>
+            <div class="col-12 col-md-4 mb-2 d-none"><label class="form-label">Factory Location</label><input type="text" class="form-control" id="supplierFactory"></div>
           </div>
           <div class="row form-row-responsive">
             <div class="col-12 col-md-4 mb-2"><label class="form-label">Commission Rate / Amount</label><input type="number" min="0" step="0.0001" class="form-control" id="supplierCommissionRate" placeholder="e.g. 5 or 25"></div>
-            <div class="col-12 col-md-4 mb-2"><label class="form-label">Commission Type</label><select class="form-select" id="supplierCommissionType">
-                <option value="percentage">Percentage</option>
-                <option value="fixed">Fixed amount</option>
-              </select></div>
-            <div class="col-12 col-md-4 mb-2"><label class="form-label">Commission Base</label><select class="form-select" id="supplierCommissionAppliedOn">
-                <option value="buy_value">Buy value</option>
-                <option value="sell_value">Sell value</option>
-              </select><small class="text-muted">Used only in internal finance calculations.</small></div>
+            <div class="col-12 col-md-4 mb-2 d-none"><label class="form-label">Commission Type</label><select class="form-select" id="supplierCommissionType"><option value="percentage">Percentage</option><option value="fixed">Fixed</option></select></div>
+            <div class="col-12 col-md-4 mb-2 d-none"><label class="form-label">Commission Base</label><select class="form-select" id="supplierCommissionAppliedOn"><option value="buy_value">Buy value</option><option value="sell_value">Sell value</option></select></div>
           </div>
-          <div class="mb-2"><label class="form-label">Address</label><input type="text" class="form-control" id="supplierAddress" placeholder="Full address (used in order export header)"></div>
+          <div class="mb-2 d-none"><label class="form-label">Address</label><input type="text" class="form-control" id="supplierAddress" placeholder="Full address (used in order export header)"></div>
           <div class="mb-2"><label class="form-label">Notes</label><textarea class="form-control" id="supplierNotes" rows="2"></textarea></div>
           <div class="mb-2">
             <label class="form-label">Additional IDs (e.g. Tax ID, VAT)</label>

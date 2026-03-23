@@ -11,7 +11,7 @@ require 'includes/layout.php';
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2 py-3">
     <span class="fw-semibold">Customer List</span>
     <div class="d-flex gap-2 align-items-center flex-wrap">
-      <input type="text" class="form-control form-control-sm" id="customerSearch" placeholder="Search by name, code, or phone..." style="min-width:220px">
+      <input type="text" class="form-control form-control-sm" id="customerSearch" placeholder="Search by name, shipping code, phone, or email..." style="min-width:220px">
       <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#importModal" onclick="openImportModal('customers')">Import CSV</button>
       <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#customerModal" onclick="openCustomerForm()">+ Add Customer</button>
     </div>
@@ -21,7 +21,7 @@ require 'includes/layout.php';
       <table class="table table-hover table-striped table-sm align-middle mb-0">
         <thead>
           <tr>
-            <th>Code</th>
+            <th>Shipping Code</th>
             <th>Name</th>
             <th>Phone</th>
             <th>Address</th>
@@ -47,22 +47,26 @@ require 'includes/layout.php';
           <input type="hidden" id="customerId">
           <div class="row g-3">
             <div class="col-md-6">
-              <label class="form-label">Code *</label>
-              <input type="text" class="form-control" id="customerCode" required placeholder="e.g. CUST001">
-            </div>
-            <div class="col-md-6">
               <label class="form-label">Name *</label>
               <input type="text" class="form-control" id="customerName" required placeholder="Full name">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Default Shipping Code *</label>
+              <input type="text" class="form-control" id="customerDefaultShippingCode" required placeholder="Primary shipping code (checked for duplicates)">
             </div>
             <div class="col-md-6">
               <label class="form-label">Phone</label>
               <input type="text" class="form-control" id="customerPhone" placeholder="Phone number">
             </div>
             <div class="col-md-6">
+              <label class="form-label">Email</label>
+              <input type="email" class="form-control" id="customerEmail" placeholder="Optional email">
+            </div>
+            <div class="col-md-6">
               <label class="form-label">Payment Terms</label>
               <input type="text" class="form-control" id="customerPaymentTerms" placeholder="e.g. 30 days, T/T">
             </div>
-            <div class="col-md-4">
+            <div class="col-md-6">
               <label class="form-label">Priority Level</label>
               <select class="form-select" id="customerPriorityLevel">
                 <option value="normal">Normal</option>
@@ -71,13 +75,15 @@ require 'includes/layout.php';
                 <option value="critical">Critical</option>
               </select>
             </div>
-            <div class="col-md-4">
-              <label class="form-label">Default Shipping Code</label>
-              <input type="text" class="form-control" id="customerDefaultShippingCode" placeholder="Auto-fill into new order items">
-            </div>
-            <div class="col-md-4">
+            <div class="col-12">
               <label class="form-label">Priority Note</label>
               <input type="text" class="form-control" id="customerPriorityNote" placeholder="Reason / special handling">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Countries & Shipping Codes</label>
+              <small class="text-muted d-block mb-1">Add countries this customer ships to; each can have its own shipping code or use the default</small>
+              <div id="customerCountryShippingContainer"></div>
+              <button type="button" class="btn btn-outline-secondary btn-sm mt-1" onclick="addCustomerCountryShipping()">+ Add country</button>
             </div>
             <div class="col-12">
               <label class="form-label">Payment Links & Descriptions</label>
@@ -88,6 +94,12 @@ require 'includes/layout.php';
             <div class="col-12">
               <label class="form-label">Address</label>
               <textarea class="form-control" id="customerAddress" rows="2" placeholder="Full address"></textarea>
+            </div>
+            <div class="col-12" id="customerPassportSection">
+              <label class="form-label">Passport / ID Documents</label>
+              <small class="text-muted d-block mb-1">Attach passport image or other ID documents (save customer first when adding new)</small>
+              <div id="customerPassportList" class="mb-2"></div>
+              <input type="file" class="form-control form-control-sm" id="customerPassportInput" accept="image/*,.pdf" multiple style="max-width:300px">
             </div>
           </div>
         </form>
@@ -121,6 +133,7 @@ require 'includes/layout.php';
           <div class="col-6"><label class="form-label">Payment Method</label><input type="text" class="form-control" id="depMethod" placeholder="Bank, Cash, etc."></div>
           <div class="col-6"><label class="form-label">Reference No</label><input type="text" class="form-control" id="depReference" placeholder="Receipt/TT number"></div>
         </div>
+        <div class="mb-3"><label class="form-label">Order</label><input type="text" class="form-control" id="depOrderId" placeholder="Type to search order (optional)…" autocomplete="off"></div>
         <div class="mb-2"><label class="form-label">Notes</label><textarea class="form-control" id="depNotes" rows="2"></textarea></div>
       </div>
       <div class="modal-footer">
@@ -170,7 +183,7 @@ require 'includes/layout.php';
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <p class="text-muted small">Paste CSV or choose file. Columns: <code>code</code>, <code>name</code>, <code>phone</code>, <code>address</code>, <code>payment_terms</code>. Duplicate codes are skipped.</p>
+        <p class="text-muted small">Paste CSV or choose file. Columns: <code>name</code>, <code>default_shipping_code</code> (or <code>code</code>), <code>phone</code>, <code>email</code>, <code>address</code>, <code>payment_terms</code>. Duplicate shipping codes are skipped.</p>
         <input type="file" class="form-control form-control-sm mb-2" id="importCsvFile" accept=".csv,.txt" title="Choose CSV file">
         <textarea class="form-control font-monospace" id="importCsvData" rows="10" placeholder="code,name,phone,address,payment_terms&#10;CUST001,Acme Co,+86-21-12345678,123 Shanghai,Net 30"></textarea>
         <div id="importResult" class="alert d-none mt-2"></div>
@@ -265,5 +278,6 @@ require 'includes/layout.php';
     </div>
   </div>
 </div>
-<?php $pageScript = '/cargochina/frontend/js/customers.js';
+<?php $pageScripts = ['frontend/js/autocomplete.js?v=' . filemtime(__DIR__ . '/frontend/js/autocomplete.js')];
+$pageScript = 'frontend/js/customers.js?v=' . filemtime(__DIR__ . '/frontend/js/customers.js');
 require 'includes/footer.php'; ?>

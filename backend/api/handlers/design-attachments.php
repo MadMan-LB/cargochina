@@ -13,14 +13,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
     $userId = getAuthUserId() ?? 0;
 
-    $validTypes = ['product', 'order_item'];
+    $validTypes = ['product', 'order_item', 'customer'];
 
     switch ($method) {
         case 'GET':
             $entityType = trim($_GET['entity_type'] ?? '');
             $entityId = (int) ($_GET['entity_id'] ?? 0);
             if (!in_array($entityType, $validTypes, true) || $entityId <= 0) {
-                jsonError('entity_type (product|order_item) and entity_id required', 400);
+                jsonError('entity_type (product|order_item|customer) and entity_id required', 400);
             }
             $stmt = $pdo->prepare("SELECT id, entity_type, entity_id, file_path, file_type, internal_note, uploaded_at FROM design_attachments WHERE entity_type = ? AND entity_id = ? ORDER BY uploaded_at DESC");
             $stmt->execute([$entityType, $entityId]);
@@ -42,13 +42,17 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $fileType = trim($input['file_type'] ?? '') ?: strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
             $internalNote = isset($input['internal_note']) ? trim($input['internal_note']) : null;
             if (!in_array($entityType, $validTypes, true) || $entityId <= 0 || !$filePath) {
-                jsonError('entity_type (product|order_item), entity_id, and file_path required', 400);
+                jsonError('entity_type (product|order_item|customer), entity_id, and file_path required', 400);
             }
             // Validate entity exists
             if ($entityType === 'product') {
                 $chk = $pdo->prepare("SELECT 1 FROM products WHERE id = ?");
                 $chk->execute([$entityId]);
                 if (!$chk->fetch()) jsonError('Product not found', 404);
+            } elseif ($entityType === 'customer') {
+                $chk = $pdo->prepare("SELECT 1 FROM customers WHERE id = ?");
+                $chk->execute([$entityId]);
+                if (!$chk->fetch()) jsonError('Customer not found', 404);
             } else {
                 $chk = $pdo->prepare("SELECT 1 FROM order_items WHERE id = ?");
                 $chk->execute([$entityId]);

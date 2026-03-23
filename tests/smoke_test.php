@@ -42,6 +42,16 @@ try {
         throw new Exception('customers missing payment_links (run migration 026)');
     }
     echo "OK: customers.payment_links\n";
+    $expectedReady = $pdo->query("SHOW COLUMNS FROM orders WHERE Field = 'expected_ready_date'")->fetch(PDO::FETCH_ASSOC);
+    if (!$expectedReady || strtoupper((string) ($expectedReady['Null'] ?? 'NO')) !== 'YES') {
+        throw new Exception('orders.expected_ready_date must be nullable (run migration 050)');
+    }
+    echo "OK: orders.expected_ready_date nullable\n";
+    $cols = $pdo->query("SHOW COLUMNS FROM order_items WHERE Field IN ('hs_code','custom_design_required','custom_design_note')")->fetchAll(PDO::FETCH_COLUMN);
+    if (count($cols) !== 3) {
+        throw new Exception('order_items missing draft-order builder fields (run migration 047)');
+    }
+    echo "OK: order_items.hs_code, order_items.custom_design_required, order_items.custom_design_note\n";
     $pdo->query("SELECT 1 FROM expense_categories LIMIT 1");
     echo "OK: expense_categories\n";
     $pdo->query("SELECT 1 FROM expenses LIMIT 1");

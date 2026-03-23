@@ -1,13 +1,19 @@
 <?php
 require_once 'includes/auth_check.php';
 require_once 'includes/page_guard.php';
-requireRoleForPage(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin']);
+requireRoleForPage(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin', 'WarehouseStaff']);
+$userRoles = $_SESSION['user_roles'] ?? [];
+$isWarehouseOnly = in_array('WarehouseStaff', $userRoles) && !array_intersect($userRoles, ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin']);
+if ($isWarehouseOnly) {
+    header('Location: /cargochina/warehouse/expenses.php');
+    exit;
+}
 $currentPage = 'expenses';
 $pageTitle = 'Expenses';
 require 'includes/layout.php';
 ?>
 <h1 class="mb-4">Expenses</h1>
-<p class="text-muted mb-4">Manage operational expenses, salaries, order and container costs.</p>
+<p class="text-muted mb-4">Manage operational expenses, salaries, order and container costs. Warehouse staff can record pallet fees, delivery fees, and other order-related expenses.</p>
 
 <div class="card mb-4">
   <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">

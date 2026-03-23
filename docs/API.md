@@ -36,7 +36,7 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 
 ## Products
 - `GET /products` — List all (filters: `q`, `supplier_id`, `hs_code`, `alert_filter`, `image_filter`)
-- `GET /products/search?q=...` — Search by description_cn/description_en/hs_code (top 10)
+- `GET /products/search?q=...&supplier_id=...` — Search by description_cn/description_en/hs_code (top 10). `supplier_id` scopes autocomplete results to one supplier section.
 - `GET /products/hs-codes?q=...` — Distinct HS codes from products (legacy; Products page uses hs-code-catalog)
 - `GET /products/{id}` — Get one
 - `GET /products/suggest?q=...` — Suggest by description/HS code (with similarity score)
@@ -51,19 +51,28 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 - `POST /hs-code-catalog/import` — Import `{source?: "filename.csv"}` from `hs codes/` folder. Default: lebanon_customs_tariffs.csv. Truncates and reloads. **SuperAdmin only.**
 
 ## Translations
-- `POST /translations` — Lookup/translate `{text, source_lang?, target_lang?}` — returns `{translated, cached}`
+- `POST /translations` — Lookup/translate `{text, source_lang?, target_lang?}` — returns `{translated}`
 - `POST /translate` — Translate via TranslationService `{text, source_lang?, target_lang?}` — returns `{translated}`
 
 ## Orders
-- `GET /orders?status=&customer_id=` — List (optional filters)
-- `GET /orders/{id}/export` — Export order as Template-style CSV (company header + GOOD DETAILS table: PHOTO, ITEM NO, DESCRIPTION, TOTAL CTNS, QTY/CTN, TOTAL QTY, UNIT PRICE, TOTAL AMOUNT, CBM, TOTAL CBM, GWKG, TOTAL GW). Uses supplier name/address/phone/fax for header.
+- `GET /orders?status=&customer_id=&order_type=` — List (optional filters). `order_type=draft_procurement` isolates Draft an Order records from standard orders.
+- `GET /orders/search?q=...&order_type=` — Search by order ID, customer, supplier, phone, shipping code, item description, and item-level HS code (`order_items.hs_code` with fallback to product HS code).
+- `GET /orders/{id}/export` — Export a standard order as Template-style CSV (company header + GOOD DETAILS table: PHOTO, ITEM NO, DESCRIPTION, TOTAL CTNS, QTY/CTN, TOTAL QTY, UNIT PRICE, TOTAL AMOUNT, CBM, TOTAL CBM, GWKG, TOTAL GW). Draft-procurement orders use `GET /draft-orders/{id}/export` for grouped supplier-section export.
 - `GET /orders/{id}` — Get one with items, attachments, receipt (when present), receipt.items, receipt.photos, customer_photo_visibility
-- `POST /orders` — Create `{customer_id, supplier_id, expected_ready_date, currency (USD|RMB), items}` — items: product_id?, item_no?, shipping_code?, cartons?, qty_per_carton?, quantity, unit, declared_cbm, declared_weight, item_length?, item_width?, item_height?, unit_price?, total_amount?, notes?, image_paths?, description_cn?, description_en? — Submit requires min 1 photo per item (configurable). CBM auto-calculated from L*W*H/1000000 on client.
+- `POST /orders` — Create `{customer_id, supplier_id?, expected_ready_date?, currency (USD|RMB), items}` — `expected_ready_date` is optional. Items: `product_id?`, `supplier_id?`, `item_no?`, `shipping_code?`, `cartons?`, `qty_per_carton?`, `quantity`, `unit`, `declared_cbm`, `declared_weight`, `item_length?`, `item_width?`, `item_height?`, `unit_price?`, `total_amount?`, `notes?`, `image_paths?`, `description_cn?`, `description_en?`, `hs_code?`, `custom_design_required?`, `custom_design_note?` — Submit requires min 1 photo per item (configurable). CBM auto-calculated from L*W*H/1000000 on client.
 - `PUT /orders/{id}` — Update (any status)
 - `POST /orders/{id}/submit` — Draft → Submitted
 - `POST /orders/{id}/approve` — Submitted → Approved
 - `POST /orders/{id}/receive` — Record receipt `{actual_cartons, actual_cbm, actual_weight, condition, notes?, photo_paths?, items?}` — items: `[{order_item_id, actual_cartons?, actual_cbm?, actual_weight?, condition?, photo_paths?}]` for item-level receiving. Sum of items must match order-level. Evidence photos required when variance or damage.
 - `POST /orders/{id}/confirm` — AwaitingCustomerConfirmation → Confirmed
+
+## Draft Orders
+- `GET /draft-orders` — List Draft an Order records backed by real `orders` where `order_type='draft_procurement'`
+- `GET /draft-orders/{id}` — Get one builder payload grouped into `supplier_sections[]`, with section totals, grand totals, customer shipping-code defaults, and editability state
+- `GET /draft-orders/{id}/export` — Export grouped draft-order CSV by supplier section with section subtotals and grand totals
+- `POST /draft-orders` — Create a real draft order. Body: `{customer_id, expected_ready_date?, currency, high_alert_notes?, supplier_sections[]}` where `expected_ready_date` is optional and each section is `{supplier_id, items[]}`. Each item can include `product_id?`, `description_entries[]`, `pieces_per_carton`, `cartons`, `unit_price`, `cbm_mode`, `cbm?`, `item_length?`, `item_width?`, `item_height?`, `weight`, `hs_code?`, `photo_paths[]`, `custom_design_required`, `custom_design_note?`, `custom_design_paths[]`, `shipping_code?`, `item_no?`, `dimensions_scope?}`. Draft-order items may send a single description entry with only one side filled; the server auto-completes the missing Chinese/English counterpart before storing the order item and any auto-created product.
+- `PUT /draft-orders/{id}` — Update a real draft order while its status is still `Draft`
+- `POST /draft-orders/legacy/{legacyId}/migrate` — Guided migration for one legacy `procurement_drafts` row. Requires `{customer_id, currency}`; `expected_ready_date` is optional. Existing `converted_order_id` rows are mapped instead of duplicated.
 
 ## Order Templates
 - `GET /order-templates` — List all templates (id, name, created_at)
@@ -143,4 +152,5 @@ Note: Confirmation tokens are generated when an order moves to `AwaitingCustomer
 ## RBAC
 - **Approve orders:** ChinaAdmin, LebanonAdmin, SuperAdmin
 - **Receive orders:** WarehouseStaff, SuperAdmin
+- **Draft orders builder + API:** ChinaAdmin, ChinaEmployee, SuperAdmin
 - **Containers, Users, Config:** SuperAdmin

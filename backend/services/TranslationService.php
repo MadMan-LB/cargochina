@@ -17,6 +17,12 @@ class TranslationService
         $text = trim($text);
         if ($text === '') return '';
 
+        $sourceLang = $this->normalizeLang($sourceLang, 'zh');
+        $targetLang = $this->normalizeLang($targetLang, 'en');
+        if ($sourceLang === $targetLang) {
+            return $text;
+        }
+
         $hash = hash('sha256', $text . $sourceLang . $targetLang);
         $stmt = $this->pdo->prepare("SELECT translated_text FROM translations WHERE original_hash = ?");
         $stmt->execute([$hash]);
@@ -25,7 +31,7 @@ class TranslationService
             return $row['translated_text'];
         }
 
-        $translated = $this->stubTranslate($text);
+        $translated = $this->stubTranslate($text, $sourceLang, $targetLang);
         try {
             $this->pdo->prepare("INSERT INTO translations (original_hash, original_text, translated_text, source_lang, target_lang) VALUES (?, ?, ?, ?, ?)")
                 ->execute([$hash, $text, $translated, $sourceLang, $targetLang]);
@@ -38,8 +44,23 @@ class TranslationService
         return $translated;
     }
 
-    private function stubTranslate(string $text): string
+    private function normalizeLang(string $lang, string $fallback): string
     {
-        return '[EN] ' . $text;
+        $lang = strtolower(trim($lang));
+        if ($lang === '') {
+            return $fallback;
+        }
+
+        return substr($lang, 0, 2) ?: $fallback;
+    }
+
+    private function stubTranslate(string $text, string $sourceLang, string $targetLang): string
+    {
+        if ($sourceLang === $targetLang) {
+            return $text;
+        }
+
+        $tag = strtoupper($targetLang ?: 'EN');
+        return '[' . $tag . '] ' . $text;
     }
 }

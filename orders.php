@@ -95,8 +95,18 @@ require 'includes/layout.php';
           <button class="btn btn-outline-primary" type="button" onclick="loadOrders()" title="Search">Search</button>
           <button class="btn btn-outline-secondary" type="button" onclick="clearOrderSearch()" title="Clear">Clear</button>
         </div>
+        <div class="row g-2 mt-2">
+          <div class="col-12 col-md-5">
+            <label class="form-label small mb-1">Order Type</label>
+            <select class="form-select form-select-sm" id="filterOrderType" onchange="loadOrders()">
+              <option value="">All order types</option>
+              <option value="standard">Standard Orders</option>
+              <option value="draft_procurement">Draft an Order</option>
+            </select>
+          </div>
+        </div>
         <div class="filter-summary-row">
-          <small class="summary-text">Tip: use the dropdown to jump to the right order faster, then combine it with the status chips above.</small>
+          <small class="summary-text">Tip: combine the search, order type, and status chips to separate normal orders from Draft an Order records.</small>
         </div>
       </div>
     </div>
@@ -129,58 +139,59 @@ require 'includes/layout.php';
       <div class="modal-body">
         <form id="orderForm">
           <input type="hidden" id="orderId">
-          <div class="order-form-panel order-form-basics mb-4">
-            <div class="order-form-panel-header">
-              <div>
-                <div class="order-form-eyebrow">Basics</div>
-                <h6 class="mb-1">Order details</h6>
-                <p class="text-muted small mb-0">Choose the customer, default supplier, expected ready date, and currency first.</p>
-              </div>
+          <div class="order-form-panel order-form-basics mb-3">
+            <div class="order-form-panel-header py-2">
+              <div class="order-form-eyebrow">Basics</div>
             </div>
-            <div class="row form-row-responsive g-3">
-              <div class="col-12 col-md-4">
-                <label class="form-label">Customer *</label>
-                <input type="text" class="form-control" id="orderCustomer" placeholder="Type to search..." required>
-                <div class="mt-2 small order-inline-help" id="recentCustomers"></div>
+            <div class="row g-2">
+              <div class="col-6 col-md-3">
+                <label class="form-label form-label-sm">Customer *</label>
+                <input type="text" class="form-control form-control-sm" id="orderCustomer" placeholder="Type to search..." required>
               </div>
-              <div class="col-12 col-md-4">
-                <label class="form-label">Default supplier (optional)</label>
-                <input type="text" class="form-control" id="orderSupplier" placeholder="Type to search... (used for new items)" autocomplete="off">
-                <small class="text-muted d-block mt-2">Each item can have its own supplier; this sets the default for new rows. Leave blank for multi-supplier orders.</small>
-                <div class="mt-2 small order-inline-help" id="recentSuppliers"></div>
+              <div class="col-6 col-md-3">
+                <label class="form-label form-label-sm">Supplier</label>
+                <input type="text" class="form-control form-control-sm" id="orderSupplier" placeholder="Type supplier..." autocomplete="off">
               </div>
-              <div class="col-12 col-md-2">
-                <label class="form-label">Expected Ready *</label>
-                <input type="date" class="form-control" id="orderExpectedDate" required>
+              <div class="col-4 col-md-2">
+                <label class="form-label form-label-sm">Expected Ready</label>
+                <input type="date" class="form-control form-control-sm" id="orderExpectedDate">
+                <div class="form-text">Optional. You will be asked to confirm before saving without it.</div>
               </div>
-              <div class="col-12 col-md-2">
-                <label class="form-label">Currency *</label>
-                <select class="form-select" id="orderCurrency">
+              <div class="col-4 col-md-1">
+                <label class="form-label form-label-sm">Currency</label>
+                <select class="form-select form-select-sm" id="orderCurrency">
                   <option value="USD">USD</option>
                   <option value="RMB">RMB</option>
                 </select>
               </div>
-              <div class="col-12">
-                <label class="form-label">High Alert Notes</label>
-                <textarea class="form-control" id="orderHighAlertNotes" rows="2" placeholder="Fragile, special handling, etc."></textarea>
+              <div class="col-4 col-md-2" id="orderDestinationCountryWrap">
+                <label class="form-label form-label-sm">Destination</label>
+                <input type="hidden" id="orderDestinationCountryId">
+                <div id="orderDestinationCountrySelectWrap" class="d-none">
+                  <select class="form-select form-select-sm" id="orderDestinationCountrySelect">
+                    <option value="">Select...</option>
+                  </select>
+                </div>
+                <div id="orderDestinationCountryInputWrap">
+                  <input type="text" class="form-control form-control-sm" id="orderDestinationCountry" placeholder="Country..." autocomplete="off">
+                </div>
+              </div>
+              <div class="col-12 col-md-4">
+                <label class="form-label form-label-sm">High Alert Notes</label>
+                <input type="text" class="form-control form-control-sm" id="orderHighAlertNotes" placeholder="Fragile, special handling, etc.">
               </div>
             </div>
           </div>
           <div class="order-form-panel">
-            <div class="order-form-panel-header order-form-panel-header-stack mb-2">
-              <div>
-                <div class="order-form-eyebrow">Items</div>
-                <h6 class="mb-1">Goods details</h6>
-                <p class="text-muted small mb-0">Add item lines with supplier, packaging, pricing, CBM, and weight.</p>
-              </div>
-              <div class="order-template-actions">
-                <select class="form-select form-select-sm" id="orderTemplateSelect" onchange="loadOrderTemplate(this.value)">
+            <div class="order-form-panel-header d-flex justify-content-between align-items-center py-2 mb-2">
+              <div class="order-form-eyebrow">Items</div>
+              <div class="d-flex gap-1">
+                <select class="form-select form-select-sm" id="orderTemplateSelect" onchange="loadOrderTemplate(this.value)" style="max-width:140px">
                   <option value="">Load template...</option>
                 </select>
-                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="saveOrderAsTemplate()" title="Save current items as template">Save as template</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="saveOrderAsTemplate()" title="Save as template">Save template</button>
               </div>
             </div>
-            <p class="text-muted small order-form-tip mb-3">Min 1 photo per item is required before submit. Totals update as you type.</p>
             <div class="d-flex gap-2 mb-2">
               <button type="button" class="btn btn-outline-secondary btn-sm" id="togglePasteCsv" onclick="togglePasteCsv()">Paste CSV</button>
             </div>
@@ -192,13 +203,10 @@ require 'includes/layout.php';
                 <button type="button" class="btn btn-outline-secondary btn-sm" onclick="saveCsvAsTemplate()">Save as template</button>
               </div>
             </div>
-            <div id="orderItemsBody" class="order-items-cards d-flex flex-column gap-3"></div>
-            <div class="order-totals-bar d-flex justify-content-between align-items-center gap-3 mt-3 py-3 px-3 rounded bg-light border">
-              <div>
-                <span class="fw-medium d-block">Order totals</span>
-                <small class="text-muted">Quick summary for amount, volume, and gross weight.</small>
-              </div>
-              <div class="d-flex align-items-center gap-4">
+            <div id="orderItemsBody" class="order-items-cards d-flex flex-column gap-2"></div>
+            <div class="order-totals-bar d-flex justify-content-between align-items-center gap-3 mt-2 py-2 px-3 rounded bg-light border">
+              <span class="fw-medium small">Order totals</span>
+              <div class="d-flex align-items-center gap-3">
                 <span><strong id="orderTotalAmount">$0.00</strong></span>
                 <span class="text-muted"><span id="orderTotalCbm">0</span> CBM</span>
                 <span class="text-muted"><span id="orderTotalWeight">0</span> kg</span>

@@ -29,5 +29,14 @@ require __DIR__ . '/../includes/area_layout.php';
       </div>
     </div>
   </div>
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title">Expenses</h5>
+        <p class="card-text">Record pallet fees, delivery fees, and other order-related expenses.</p>
+        <a href="<?= $areaBase ?>/expenses.php" class="btn btn-outline-primary">Record Expense</a>
+      </div>
+    </div>
+  </div>
 </div>
 <?php require __DIR__ . '/../includes/area_footer.php'; ?>

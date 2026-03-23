@@ -87,6 +87,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             if ($id === 'search') {
                 $q = trim($input['q'] ?? $_GET['q'] ?? '');
+                $supplierId = isset($_GET['supplier_id']) && $_GET['supplier_id'] !== '' ? (int) $_GET['supplier_id'] : null;
                 if (strlen($q) < 1) {
                     jsonResponse(['data' => []]);
                 }
@@ -98,6 +99,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if (productHasColumn($pdo, 'required_design')) $searchCols .= ", p.required_design";
                 $params = [];
                 $where = buildProductSearchSql($q, $params, 'p', 's');
+                if ($supplierId) {
+                    $where .= " AND p.supplier_id = ?";
+                    $params[] = $supplierId;
+                }
                 $stmt = $pdo->prepare("SELECT $searchCols FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id WHERE $where ORDER BY p.id DESC LIMIT 10");
                 $stmt->execute($params);
                 jsonResponse(['data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);

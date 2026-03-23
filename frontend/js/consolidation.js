@@ -1,6 +1,9 @@
 let currentDraftId = null;
 let eligibleOrders = [];
 let draftOrders = [];
+let draftCbmForCapacity = 0;
+let draftWeightForCapacity = 0;
+let draftContainerAc = null;
 
 function renderCapacityBars(cbm, weight, container, hintEl) {
     if (!hintEl) return;
@@ -77,6 +80,32 @@ document.addEventListener("DOMContentLoaded", () => {
                 displayValue: (c) => c.code || "",
                 renderItem: (c) => (c.name ? `${c.name} (${c.code})` : c.code),
                 placeholder: "Type country name or code (e.g. LB, Lebanon)",
+            });
+        }
+        const containerSearchInput = el("draftContainerSearch");
+        if (containerSearchInput && typeof Autocomplete !== "undefined") {
+            draftContainerAc = Autocomplete.init(containerSearchInput, {
+                resource: "containers",
+                searchPath: "/search",
+                displayValue: (c) => c?.code || "",
+                renderItem: (c) =>
+                    c ? `${c.code || ""} (${c.max_cbm || 0} CBM, ${c.max_weight || 0} kg)` : "",
+                placeholder: "Search containers by code...",
+                onSelect: (item) => {
+                    if (item?.id) {
+                        el("draftContainer").value = item.id;
+                        renderCapacityBars(
+                            draftCbmForCapacity,
+                            draftWeightForCapacity,
+                            item,
+                            el("draftCapacityHint"),
+                        );
+                    }
+                },
+            });
+            containerSearchInput.addEventListener("input", () => {
+                if (!containerSearchInput.value.trim() && el("draftContainer"))
+                    el("draftContainer").value = "";
             });
         }
     } catch (e) {
@@ -433,7 +462,6 @@ async function openDraftModal(id) {
     currentDraftId = id;
     document.getElementById("draftModalId").textContent = "#" + id;
     const deleteBtn = document.getElementById("draftDeleteBtn");
-    if (deleteBtn) deleteBtn.style.display = "";
     try {
         const [draftRes, ordersRes, res2, containersRes] = await Promise.all([
             api("GET", "/shipment-drafts/" + id),
@@ -462,8 +490,21 @@ async function openDraftModal(id) {
 
         const addBody = el("draftAddOrderBody");
         const removeBody = el("draftRemoveOrderBody");
-        const containerSel = el("draftContainer");
-        if (!addBody || !removeBody || !containerSel) return;
+        const containerHidden = el("draftContainer");
+        const containerSearchInput = el("draftContainerSearch");
+        if (!addBody || !removeBody || !containerHidden) return;
+
+        if (deleteBtn) deleteBtn.style.display = draftRes.data.status === "finalized" ? "none" : "";
+        const finalizeSection = el("draftFinalizeSection");
+        const finalizedMessage = el("draftFinalizedMessage");
+        const saveRefsBtn = document.querySelector('[onclick="saveDraftCarrierRefs()"]');
+        if (finalizeSection) finalizeSection.classList.toggle("d-none", draftRes.data.status === "finalized");
+        if (finalizedMessage) finalizedMessage.classList.toggle("d-none", draftRes.data.status !== "finalized");
+        if (saveRefsBtn) {
+            saveRefsBtn.classList.toggle("btn-primary", draftRes.data.status === "finalized");
+            saveRefsBtn.classList.toggle("btn-outline-primary", draftRes.data.status !== "finalized");
+            saveRefsBtn.textContent = draftRes.data.status === "finalized" ? "Save changes" : "Save refs";
+        }
 
         addBody.innerHTML =
             eligibleOrders
@@ -489,14 +530,16 @@ async function openDraftModal(id) {
         if (removeAll) removeAll.checked = false;
 
         const containers = containersRes.data || [];
-        containerSel.innerHTML =
-            '<option value="">— Select container —</option>' +
-            containers
-                .map(
-                    (c) =>
-                        `<option value="${c.id}" ${draftRes.data.container_id == c.id ? "selected" : ""}>${esc(c.code)} (${c.max_cbm} CBM, ${c.max_weight} kg)</option>`,
-                )
-                .join("");
+        draftCbmForCapacity = draftRes.data.total_cbm ?? 0;
+        draftWeightForCapacity = draftRes.data.total_weight ?? 0;
+        if (containerHidden) containerHidden.value = "";
+        if (containerSearchInput) containerSearchInput.value = "";
+        const containerId = draftRes.data.container_id;
+        const containerData = containers?.find((c) => c.id == containerId);
+        if (containerData && draftContainerAc) {
+            draftContainerAc.setValue(containerData);
+            containerHidden.value = containerData.id;
+        }
 
         const draftCbm = draftRes.data.total_cbm ?? 0;
         const draftWeight = draftRes.data.total_weight ?? 0;
@@ -511,17 +554,7 @@ async function openDraftModal(id) {
         el("draftTrackingUrl").value = draftRes.data.tracking_url || "";
         renderDraftDocuments(draftRes.data.documents || []);
 
-        const containerId = draftRes.data.container_id;
-        const containerData = containers?.find((c) => c.id == containerId);
         renderCapacityBars(draftCbm, draftWeight, containerData, hintEl);
-
-        // Re-render capacity bars when container selection changes (preview before assign)
-        containerSel.onchange = () => {
-            const selId = containerSel.value;
-            const selContainer =
-                containers.find((c) => String(c.id) === String(selId)) || null;
-            renderCapacityBars(draftCbm, draftWeight, selContainer, hintEl);
-        };
 
         new bootstrap.Modal(document.getElementById("draftModal")).show();
     } catch (e) {

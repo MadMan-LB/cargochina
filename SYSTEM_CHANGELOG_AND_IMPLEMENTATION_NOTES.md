@@ -5,6 +5,45 @@
 
 ---
 
+## 2026-03-18 Draft an Order Builder
+
+- Replaced the old single-supplier procurement-draft workflow with a real **Draft an Order** builder at `procurement_drafts.php`, while keeping the route itself for compatibility.
+- New draft orders now save directly into `orders` with `order_type='draft_procurement'` and line items in `order_items`; legacy `procurement_drafts` remain only as a migration source and legacy reference surface.
+- Added `backend/api/handlers/draft-orders.php` with authenticated endpoints for list/get/create/update/export and guided legacy migration via `POST /draft-orders/legacy/{legacyId}/migrate`.
+- Added migration `047_draft_order_builder_fields.sql` for `order_items.hs_code`, `order_items.custom_design_required`, and `order_items.custom_design_note`.
+- Builder behavior now supports one customer across multiple supplier sections, customer shipping-code driven item numbering, supplier-scoped product autocomplete, autofill from existing products, free-text items that auto-create products on save, custom-design note/file capture, and live per-section plus grand totals.
+- Draft-order print/export now read from real orders: `procurement_draft_print.php?order_id=` prints grouped supplier sections and `GET /draft-orders/{id}/export` returns grouped CSV with supplier subtotals and grand totals.
+- Orders page downstream updates:
+  - `orders.php` + `frontend/js/orders.js` now expose an `order_type` filter, show a Draft Order badge, route edit/open back into the dedicated builder, and route draft-order exports to the grouped draft CSV instead of the standard order Excel export.
+  - Search/list filtering now accepts `order_type`, supplier summaries stay correct for multi-supplier draft orders, and draft-order rows remain in the normal lifecycle/status flow after submit/approve/receive/consolidation.
+- Product and receiving downstream updates:
+  - `backend/api/handlers/products.php` product search accepts `supplier_id` so each supplier section can keep its autocomplete scoped correctly.
+  - `backend/api/handlers/orders.php`, `backend/api/handlers/receiving.php`, and HS-code estimation/search paths now respect item-level `order_items.hs_code` with fallback to product HS code, and keep derived quantity/CBM/weight behavior aligned with `dimensions_scope`.
+- Supplier and navigation downstream updates:
+  - `frontend/js/suppliers.js` adds `Draft Order` deep-link entry points from the supplier page.
+  - `includes/layout.php` renames the page label from Procurement Drafts to Draft an Order.
+- Permissions and visibility review:
+  - New builder/API surface remains limited to `ChinaAdmin`, `ChinaEmployee`, and `SuperAdmin`.
+  - No new customer-facing or warehouse-facing exposure was introduced; legacy procurement-draft activity links remain resolvable until migration is complete, while all new builder actions log against `order`.
+- Verification completed:
+  - PHP lint passed on all touched PHP entry points and handlers.
+  - Migration runner applies the new order-item columns.
+  - Added schema and handler coverage in `tests/draft_order_builder_test.php` and extended `tests/smoke_test.php`.
+  - Orders-page export routing was updated after downstream review exposed the standard Excel export mismatch for draft-procurement rows.
+
+## 2026-03-18 Expected Ready Date Optional
+
+- `orders.expected_ready_date` is now nullable via migration `050_orders_expected_ready_nullable.sql`.
+- `orders.php` and `procurement_drafts.php` now treat the date as optional in the form UI and show a confirmation popup before saving or migrating without it.
+- `backend/api/handlers/orders.php`, `backend/api/handlers/draft-orders.php`, and the legacy `backend/api/handlers/procurement-drafts.php` convert path now accept missing expected-ready dates and persist `NULL` instead of failing validation.
+- Downstream date-ordered queues were reviewed and updated to keep blank-date orders at the end instead of bubbling to the top:
+  - `backend/api/handlers/orders.php`
+  - `backend/api/handlers/receiving.php`
+  - `backend/api/handlers/warehouse-stock.php`
+- Date-driven dashboard/cron/report logic already safely ignores null dates because overdue comparisons only match rows with a real date.
+
+---
+
 ## Implementation Plan Overview
 
 ### Phase 1: Schema & Business Rules Foundation
@@ -290,9 +329,11 @@
 ## Phase 2A/2B/2C Completion Proof
 
 ### Phase 2A: Procurement Drafts, Shipping Auto-Fill, Nullable Supplier
+> Superseded on 2026-03-18 by the real Draft an Order builder backed by `orders`/`order_items`; legacy `procurement_drafts` are now migration-only for new work.
+
 | Feature | Complete because |
 |---------|------------------|
-| Procurement convert | POST /procurement-drafts/{id}/convert creates order with order_type=draft_procurement, copies items, sets draft status=converted; procurement_drafts.php has Convert modal with customer autocomplete, expected date, currency; Convert/View Order buttons in table |
+| Draft an Order builder | `procurement_drafts.php` opens a real multi-supplier Draft an Order builder; `/draft-orders` CRUD persists real orders with `order_type=draft_procurement`; `/draft-orders/legacy/{id}/migrate` handles the remaining legacy queue without duplicating already-converted drafts |
 | Shipping auto-fill | customers search returns default_shipping_code; orders.js applyCustomerDefaultShippingCode() fills first empty shipping code on customer select; addOrderItem() pre-fills from selected customer |
 | Nullable supplier | Migration 034 makes orders.supplier_id nullable; POST/PUT accept null; all queries use LEFT JOIN suppliers |
 
@@ -321,7 +362,7 @@
 ### DB Changes
 - Migration 033: design_attachments table (already present)
 - Migration 034: orders.supplier_id nullable (already present)
-- No new migrations in this phase
+- Migration 047: `order_items.hs_code`, `order_items.custom_design_required`, `order_items.custom_design_note`
 
 ### Role/Permission Impact
 - design-attachments: ChinaAdmin, ChinaEmployee, WarehouseStaff, SuperAdmin
@@ -329,7 +370,8 @@
 - Orders: no new role changes; supplier optional for all order roles
 
 ### Manual QA Required
-- [ ] Procurement draft: create draft, add items, Convert → order created, draft marked converted
+- [ ] Draft an Order: create a real multi-supplier draft order, verify numbering, grouped totals, edit/reopen, and submit
+- [ ] Legacy migration: migrate one unmigrated procurement draft and verify already-converted drafts do not duplicate
 - [ ] Shipping auto-fill: select customer with default_shipping_code, verify first item gets it
 - [ ] Nullable supplier: create order without supplier, save; verify no error
 - [ ] Excel export: order with sell_price on item → export shows sell_price
@@ -506,11 +548,11 @@ Independent review pass completed on 2026-03-14. This section is the authoritati
 - Manual QA needed: Create one percentage-commission supplier and one fixed-commission supplier, then verify order profit results in Financials.
 
 2. Draft orders / draft procurement lists
-- Status: Partially Complete
-- Evidence: Orders save as `Draft`; `backend/api/handlers/procurement-drafts.php` and `procurement_drafts.php` support draft procurement records and conversion to orders.
-- Problem: Procurement drafts are still primarily single-supplier records and do not fully cover richer supplier-grouped procurement planning across mixed-source scenarios.
-- Action taken: Re-checked the flows and left the existing guarded draft/edit/convert behavior in place.
-- Manual QA needed: Create, edit, and convert procurement drafts; verify mixed-source business expectations against current single-supplier draft behavior.
+- Status: Complete
+- Evidence: `procurement_drafts.php` is now the Draft an Order builder, `backend/api/handlers/draft-orders.php` saves directly into real `orders` / `order_items` with `order_type='draft_procurement'`, and legacy `procurement_drafts` now serve only as a guided migration queue.
+- Problem: The older procurement-draft model was single-supplier and required a second conversion step before real lifecycle handling.
+- Action taken: Replaced new-save behavior with a real multi-supplier order builder, added grouped export/print, kept the old tables only for guided migration, and routed downstream order-page edit/export behavior back into the builder.
+- Manual QA needed: Create and edit multi-supplier Draft an Order records, verify grouped totals/export/print, then migrate at least one unmigrated legacy procurement draft.
 
 3. Custom product design attachments
 - Status: Partially Complete
@@ -934,3 +976,14 @@ High-confidence completed items after this review pass:
 - **Supplier filter:** When filtering by supplier_id, orders are included if they have at least one item from that supplier (item-level or product-level supplier_id).
 - **Fallback:** When order_items has no supplier_id column (legacy), commission falls back to order-level supplier (o.supplier_id).
 - **Affected:** `backend/api/handlers/financials.php` — profit endpoint. Financials page, filters, and summary cards unchanged (API contract preserved).
+
+## 2026-03-18 Draft Order Builder Description Simplification
+
+- `frontend/js/procurement_drafts.js`
+  - Draft an Order items now use a single visible description field instead of multi-row dual-language inputs.
+  - Existing saved CN/EN description pairs are preserved on reopen; if the user edits the single field, the cached pair is cleared and rebuilt on save.
+  - Product autofill no longer auto-checks `Custom design`; that checkbox now stays off by default unless the saved draft item already had it enabled.
+- `backend/api/handlers/draft-orders.php`
+  - Draft-order normalization now auto-completes missing Chinese/English description sides using `TranslationService`, so the simplified builder still stores `description_cn` and `description_en` consistently for order items, product creation, search, and export/print.
+- `backend/services/TranslationService.php` and `backend/api/handlers/translations.php`
+  - Translation stubs now respect the target language tag (`[EN]`, `[ZH]`, etc.) so server-side CN/EN auto-fill does not incorrectly label all generated values as English.

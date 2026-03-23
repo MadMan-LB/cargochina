@@ -16,7 +16,7 @@ function runSearchHandler(string $root, string $resource, string $q): string
 {
     $rootEsc = addslashes(str_replace('\\', '/', $root));
     $qEsc = addslashes($q);
-    $code = "<?php\n\$_GET = ['q' => '$qEsc'];\nrequire '$rootEsc/backend/config/database.php';\nrequire '$rootEsc/backend/api/helpers.php';\n\$pdo = getDb();\n\$h = require '$rootEsc/backend/api/handlers/$resource.php';\n\$h('GET', 'search', null, []);\n";
+    $code = "<?php\nsession_start();\n\$_SESSION['user_id'] = 1;\n\$_SESSION['user_roles'] = ['SuperAdmin'];\n\$_GET = ['q' => '$qEsc'];\nrequire '$rootEsc/backend/config/database.php';\nrequire '$rootEsc/backend/api/helpers.php';\n\$pdo = getDb();\n\$h = require '$rootEsc/backend/api/handlers/$resource.php';\n\$h('GET', 'search', null, []);\n";
     $tmp = tempnam(sys_get_temp_dir(), 'search_test_');
     file_put_contents($tmp . '.php', $code);
     $php = (defined('PHP_BINARY') && file_exists(PHP_BINARY)) ? PHP_BINARY : 'php';

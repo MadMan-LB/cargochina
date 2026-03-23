@@ -191,9 +191,8 @@ require 'includes/layout.php';
                             <div class="mb-0">
                                 <label class="form-label"><strong>Assign Container</strong></label>
                                 <div class="d-flex gap-2 align-items-center">
-                                    <select class="form-select" id="draftContainer" style="max-width:220px">
-                                        <option value="">— Select container —</option>
-                                    </select>
+                                    <input type="text" class="form-control" id="draftContainerSearch" placeholder="Search containers by code..." style="max-width:220px" autocomplete="off" title="Type to search">
+                                    <input type="hidden" id="draftContainer" value="">
                                     <button type="button" class="btn btn-primary"
                                         onclick="assignContainerToDraft()">Assign</button>
                                 </div>
@@ -238,10 +237,13 @@ require 'includes/layout.php';
                         </div>
                     </div>
                     <hr>
-                    <div class="d-flex justify-content-between align-items-center">
+                    <div id="draftFinalizeSection" class="d-flex justify-content-between align-items-center">
                         <span class="text-muted small">Finalize when orders are added and container assigned.</span>
                         <button type="button" class="btn btn-success" onclick="openFinalizeConfirm()">Finalize & Push to
                             Tracking</button>
+                    </div>
+                    <div id="draftFinalizedMessage" class="d-flex justify-content-between align-items-center d-none">
+                        <span class="text-muted small">Draft finalized. Use &quot;Save refs&quot; above to update carrier information.</span>
                     </div>
                 </div>
             </div>

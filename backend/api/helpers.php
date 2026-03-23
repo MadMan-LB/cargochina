@@ -110,8 +110,15 @@ function normalizeStoredUploadPath(string $filePath, bool $mustExist = true): st
         jsonError('Invalid file_path; only uploaded files are allowed', 400);
     }
 
-    $backendDir = dirname(__DIR__, 2);
-    $uploadRoot = realpath($backendDir . '/uploads');
+    // Must match upload handler: backend/uploads (dirname(__DIR__,1) = backend from backend/api)
+    $backendDir = dirname(__DIR__, 1);
+    $uploadDir = $backendDir . '/uploads';
+    if (!is_dir($uploadDir)) {
+        if (!@mkdir($uploadDir, 0755, true)) {
+            jsonError('Upload directory is not available', 500);
+        }
+    }
+    $uploadRoot = realpath($uploadDir);
     if ($uploadRoot === false) {
         jsonError('Upload directory is not available', 500);
     }

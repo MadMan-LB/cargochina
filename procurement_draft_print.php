@@ -3,28 +3,188 @@ require_once 'includes/auth_check.php';
 require_once 'includes/page_guard.php';
 requireRoleForPage(['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin']);
 
-$id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
-if ($id <= 0) {
-  header('Location: procurement_drafts.php');
-  exit;
-}
-
 require_once __DIR__ . '/backend/config/database.php';
 $pdo = getDb();
+$basePath = '/cargochina';
 
-$stmt = $pdo->prepare("SELECT pd.*, s.name as supplier_name FROM procurement_drafts pd LEFT JOIN suppliers s ON pd.supplier_id = s.id WHERE pd.id = ?");
-$stmt->execute([$id]);
-$draft = $stmt->fetch(PDO::FETCH_ASSOC);
-if (!$draft) {
-  header('Location: procurement_drafts.php');
-  exit;
+$orderId = isset($_GET['order_id']) ? (int) $_GET['order_id'] : 0;
+$legacyId = isset($_GET['id']) ? (int) $_GET['id'] : 0;
+
+function printDraftEntryRows(array $sections): string
+{
+    ob_start();
+    foreach ($sections as $sectionIndex => $section) {
+        $supplierName = $section['supplier_name'] ?? 'Unassigned supplier';
+        ?>
+        <tr class="table-light">
+          <td colspan="11"><strong>Supplier:</strong> <?= htmlspecialchars($supplierName) ?></td>
+        </tr>
+        <?php foreach (($section['items'] ?? []) as $itemIndex => $item): ?>
+            <?php
+            $desc = implode(' | ', array_map(
+                static fn($entry) => trim((string) ($entry['description_text'] ?? '')),
+                $item['description_entries'] ?? []
+            ));
+            $multiplier = (($item['dimensions_scope'] ?? 'carton') === 'carton')
+                ? (float) ($item['cartons'] ?? 0)
+                : (float) ($item['quantity'] ?? 0);
+            $totalCbm = round((float) (($item['cbm'] ?? 0) * $multiplier), 6);
+            $totalWeight = round((float) (($item['weight'] ?? 0) * $multiplier), 4);
+            ?>
+            <tr>
+              <td><?= $itemIndex + 1 ?></td>
+              <td><?= htmlspecialchars($item['item_no'] ?? '—') ?></td>
+              <td><?= htmlspecialchars($item['shipping_code'] ?? '—') ?></td>
+              <td><?= htmlspecialchars($desc ?: '—') ?></td>
+              <td><?= htmlspecialchars($item['hs_code'] ?? '—') ?></td>
+              <td><?= htmlspecialchars((string) ($item['pieces_per_carton'] ?? '—')) ?></td>
+              <td><?= htmlspecialchars((string) ($item['cartons'] ?? '—')) ?></td>
+              <td><?= htmlspecialchars((string) ($item['quantity'] ?? '—')) ?></td>
+              <td><?= $item['unit_price'] !== null ? number_format((float) $item['unit_price'], 2) : '—' ?></td>
+              <td><?= number_format($totalCbm, 6) ?></td>
+              <td><?= number_format($totalWeight, 4) ?></td>
+            </tr>
+        <?php endforeach; ?>
+        <tr class="table-secondary">
+          <td colspan="8"><strong>Supplier subtotal</strong></td>
+          <td><strong><?= number_format((float) ($section['totals']['amount'] ?? 0), 2) ?></strong></td>
+          <td><strong><?= number_format((float) ($section['totals']['cbm'] ?? 0), 6) ?></strong></td>
+          <td><strong><?= number_format((float) ($section['totals']['weight'] ?? 0), 4) ?></strong></td>
+        </tr>
+        <?php
+    }
+    return ob_get_clean();
 }
 
-$itemsStmt = $pdo->prepare("SELECT pdi.*, p.description_cn, p.description_en, p.cbm, p.weight, p.unit_price FROM procurement_draft_items pdi LEFT JOIN products p ON pdi.product_id = p.id WHERE pdi.draft_id = ? ORDER BY pdi.sort_order, pdi.id");
-$itemsStmt->execute([$id]);
-$items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+if ($orderId > 0) {
+    $stmt = $pdo->prepare(
+        "SELECT o.*, c.name as customer_name, c.default_shipping_code, s.name as supplier_name
+         FROM orders o
+         JOIN customers c ON o.customer_id = c.id
+         LEFT JOIN suppliers s ON o.supplier_id = s.id
+         WHERE o.id = ?
+           AND o.order_type = 'draft_procurement'"
+    );
+    $stmt->execute([$orderId]);
+    $order = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$order) {
+        header('Location: procurement_drafts.php');
+        exit;
+    }
 
-$basePath = '/cargochina';
+    $itemsStmt = $pdo->prepare(
+        "SELECT oi.*, s.name as supplier_name, p.hs_code as product_hs_code, p.dimensions_scope as product_dimensions_scope
+         FROM order_items oi
+         LEFT JOIN suppliers s ON oi.supplier_id = s.id
+         LEFT JOIN products p ON p.id = oi.product_id
+         WHERE oi.order_id = ?
+         ORDER BY COALESCE(oi.supplier_id, 0), oi.id"
+    );
+    $itemsStmt->execute([$orderId]);
+    $rows = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $sections = [];
+    foreach ($rows as $row) {
+        $supplierId = (int) ($row['supplier_id'] ?? 0);
+        $key = $supplierId > 0 ? (string) $supplierId : '0';
+        if (!isset($sections[$key])) {
+            $sections[$key] = [
+                'supplier_name' => $row['supplier_name'] ?? 'Unassigned supplier',
+                'items' => [],
+                'totals' => ['amount' => 0.0, 'cbm' => 0.0, 'weight' => 0.0],
+            ];
+        }
+        $entries = [];
+        $cnParts = array_values(array_filter(array_map('trim', preg_split('/\s*\|\s*/', (string) ($row['description_cn'] ?? '')) ?: [])));
+        $enParts = array_values(array_filter(array_map('trim', preg_split('/\s*\|\s*/', (string) ($row['description_en'] ?? '')) ?: [])));
+        $entryCount = max(count($cnParts), count($enParts));
+        for ($i = 0; $i < $entryCount; $i++) {
+            $entries[] = [
+                'description_text' => $cnParts[$i] ?? $enParts[$i] ?? '',
+                'description_translated' => $enParts[$i] ?? $cnParts[$i] ?? '',
+            ];
+        }
+        $scope = strtolower((string) ($row['product_dimensions_scope'] ?? 'carton'));
+        if (!in_array($scope, ['piece', 'carton'], true)) {
+            $scope = 'carton';
+        }
+        $multiplier = $scope === 'carton'
+            ? (float) ($row['cartons'] ?? 0)
+            : (float) (($row['quantity'] ?? 0) ?: 0);
+        $sections[$key]['items'][] = [
+            'item_no' => $row['item_no'] ?: null,
+            'shipping_code' => $row['shipping_code'] ?: null,
+            'description_entries' => $entries,
+            'hs_code' => $row['hs_code'] ?? $row['product_hs_code'] ?? null,
+            'pieces_per_carton' => $row['qty_per_carton'] ?? null,
+            'cartons' => $row['cartons'] ?? null,
+            'quantity' => $row['quantity'] ?? null,
+            'unit_price' => $row['unit_price'] !== null ? (float) $row['unit_price'] : null,
+            'cbm' => $multiplier > 0 ? round(((float) ($row['declared_cbm'] ?? 0)) / $multiplier, 6) : 0,
+            'weight' => $multiplier > 0 ? round(((float) ($row['declared_weight'] ?? 0)) / $multiplier, 4) : 0,
+            'dimensions_scope' => $scope,
+        ];
+        $sections[$key]['totals']['amount'] += (float) ($row['total_amount'] ?? 0);
+        $sections[$key]['totals']['cbm'] += (float) ($row['declared_cbm'] ?? 0);
+        $sections[$key]['totals']['weight'] += (float) ($row['declared_weight'] ?? 0);
+    }
+    $sections = array_values($sections);
+    $grandAmount = array_sum(array_map(static fn($section) => (float) ($section['totals']['amount'] ?? 0), $sections));
+    $grandCbm = array_sum(array_map(static fn($section) => (float) ($section['totals']['cbm'] ?? 0), $sections));
+    $grandWeight = array_sum(array_map(static fn($section) => (float) ($section['totals']['weight'] ?? 0), $sections));
+    $title = 'Draft Order #' . $orderId;
+    $subtitle = 'Customer: ' . ($order['customer_name'] ?? '—') . ' | Status: ' . ($order['status'] ?? '—') . ' | Expected Ready: ' . ($order['expected_ready_date'] ?? '—');
+} else {
+    if ($legacyId <= 0) {
+        header('Location: procurement_drafts.php');
+        exit;
+    }
+
+    $stmt = $pdo->prepare("SELECT pd.*, s.name as supplier_name FROM procurement_drafts pd LEFT JOIN suppliers s ON pd.supplier_id = s.id WHERE pd.id = ?");
+    $stmt->execute([$legacyId]);
+    $draft = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$draft) {
+        header('Location: procurement_drafts.php');
+        exit;
+    }
+
+    $itemsStmt = $pdo->prepare("SELECT pdi.*, p.description_cn, p.description_en, p.cbm, p.weight, p.unit_price, p.hs_code FROM procurement_draft_items pdi LEFT JOIN products p ON pdi.product_id = p.id WHERE pdi.draft_id = ? ORDER BY pdi.sort_order, pdi.id");
+    $itemsStmt->execute([$legacyId]);
+    $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+    $sections = [[
+        'supplier_name' => $draft['supplier_name'] ?? '—',
+        'items' => array_map(static function ($item) {
+            $desc = trim((string) ($item['description_cn'] ?? $item['description_en'] ?? $item['notes'] ?? ''));
+            $qty = (float) ($item['quantity'] ?? 0);
+            return [
+                'item_no' => null,
+                'shipping_code' => null,
+                'description_entries' => [[
+                    'description_text' => $desc,
+                    'description_translated' => $desc,
+                ]],
+                'hs_code' => $item['hs_code'] ?? null,
+                'pieces_per_carton' => $qty ?: null,
+                'cartons' => 1,
+                'quantity' => $qty ?: null,
+                'unit_price' => isset($item['unit_price']) ? (float) $item['unit_price'] : null,
+                'cbm' => isset($item['cbm']) ? (float) $item['cbm'] : 0,
+                'weight' => isset($item['weight']) ? (float) $item['weight'] : 0,
+                'dimensions_scope' => 'piece',
+            ];
+        }, $items),
+        'totals' => [
+            'amount' => array_sum(array_map(static fn($item) => (float) (($item['unit_price'] ?? 0) * ($item['quantity'] ?? 0)), $items)),
+            'cbm' => array_sum(array_map(static fn($item) => (float) (($item['cbm'] ?? 0) * ($item['quantity'] ?? 0)), $items)),
+            'weight' => array_sum(array_map(static fn($item) => (float) (($item['weight'] ?? 0) * ($item['quantity'] ?? 0)), $items)),
+        ],
+    ]];
+    $grandAmount = (float) ($sections[0]['totals']['amount'] ?? 0);
+    $grandCbm = (float) ($sections[0]['totals']['cbm'] ?? 0);
+    $grandWeight = (float) ($sections[0]['totals']['weight'] ?? 0);
+    $title = $draft['name'] ?? 'Legacy Procurement Draft';
+    $subtitle = 'Legacy procurement draft | Status: ' . ($draft['status'] ?? '—');
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -32,7 +192,7 @@ $basePath = '/cargochina';
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Print: <?= htmlspecialchars($draft['name'] ?? 'Procurement Draft') ?> | CLMS</title>
+  <title><?= htmlspecialchars($title) ?> | CLMS</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
     @media print {
@@ -43,16 +203,11 @@ $basePath = '/cargochina';
       body {
         padding: 0;
       }
-
-      .print-container {
-        box-shadow: none;
-        border: none;
-      }
     }
 
     @media screen {
       .print-container {
-        max-width: 900px;
+        max-width: 1100px;
         margin: 2rem auto;
         padding: 1.5rem;
       }
@@ -67,53 +222,35 @@ $basePath = '/cargochina';
       <button type="button" class="btn btn-primary" onclick="window.print()">Print / Save as PDF</button>
     </div>
 
-    <h1 class="h4 mb-2"><?= htmlspecialchars($draft['name'] ?? 'Procurement Draft') ?></h1>
-    <p class="text-muted small mb-3">
-      Supplier: <?= htmlspecialchars($draft['supplier_name'] ?? '—') ?> &nbsp;|&nbsp;
-      Status: <?= htmlspecialchars($draft['status'] ?? '') ?> &nbsp;|&nbsp;
-      Created: <?= $draft['created_at'] ? date('d/m/Y', strtotime($draft['created_at'])) : '—' ?>
-    </p>
+    <h1 class="h4 mb-2"><?= htmlspecialchars($title) ?></h1>
+    <p class="text-muted small mb-3"><?= htmlspecialchars($subtitle) ?></p>
 
     <table class="table table-bordered table-sm">
       <thead class="table-light">
         <tr>
           <th>#</th>
+          <th>Item No</th>
+          <th>Ship Code</th>
           <th>Description</th>
-          <th>Qty</th>
-          <th>CBM</th>
-          <th>Weight (kg)</th>
+          <th>HS Code</th>
+          <th>Pieces/Carton</th>
+          <th>Cartons</th>
+          <th>Quantity</th>
           <th>Unit Price</th>
-          <th>Total</th>
-          <th>Notes</th>
+          <th>Total CBM</th>
+          <th>Total Weight</th>
         </tr>
       </thead>
       <tbody>
-        <?php foreach ($items as $i => $it): ?>
-          <?php
-          $qty = (float) ($it['quantity'] ?? 0);
-          $cbm = (float) ($it['cbm'] ?? 0);
-          $weight = (float) ($it['weight'] ?? 0);
-          $unitPrice = (float) ($it['unit_price'] ?? 0);
-          $totalCbm = $qty > 0 ? round($cbm * $qty, 4) : 0;
-          $totalWeight = $qty > 0 ? round($weight * $qty, 4) : 0;
-          $totalAmount = $qty > 0 && $unitPrice > 0 ? round($unitPrice * $qty, 2) : '';
-          $desc = trim($it['description_en'] ?? $it['description_cn'] ?? $it['notes'] ?? '');
-          ?>
-          <tr>
-            <td><?= $i + 1 ?></td>
-            <td><?= htmlspecialchars($desc ?: '—') ?></td>
-            <td><?= $qty ?></td>
-            <td><?= $totalCbm ?></td>
-            <td><?= $totalWeight ?></td>
-            <td><?= $unitPrice > 0 ? number_format($unitPrice, 2) : '—' ?></td>
-            <td><?= $totalAmount !== '' ? number_format($totalAmount, 2) : '—' ?></td>
-            <td><?= htmlspecialchars($it['notes'] ?? '') ?></td>
-          </tr>
-        <?php endforeach; ?>
+        <?= printDraftEntryRows($sections) ?>
+        <tr class="table-dark">
+          <td colspan="8"><strong>Grand total</strong></td>
+          <td><strong><?= number_format($grandAmount, 2) ?></strong></td>
+          <td><strong><?= number_format($grandCbm, 6) ?></strong></td>
+          <td><strong><?= number_format($grandWeight, 4) ?></strong></td>
+        </tr>
       </tbody>
     </table>
-
-    <p class="small text-muted mt-3 no-print">Use your browser's Print dialog and choose "Save as PDF" to download as PDF.</p>
   </div>
 </body>
 

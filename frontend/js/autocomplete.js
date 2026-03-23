@@ -100,12 +100,19 @@ const Autocomplete = {
 
         const searchPath =
             opts.searchPath !== undefined ? opts.searchPath : "/search";
+        const extraParams = opts.extraParams || {};
         const fetchSearch = async (q) => {
             if (abortController) abortController.abort();
             abortController = new AbortController();
             try {
-                const params = new URLSearchParams({ q });
+                const params = new URLSearchParams({ q: q || "" });
                 if (resultLimit) params.set("limit", String(resultLimit));
+                const extra = typeof extraParams === "function" ? extraParams() : extraParams;
+                if (extra && typeof extra === "object") {
+                    Object.entries(extra).forEach(([k, v]) => {
+                        if (v != null && v !== "") params.set(k, String(v));
+                    });
+                }
                 const res = await fetch(
                     AUTOCOMPLETE_API_BASE +
                         "/" +
@@ -132,10 +139,11 @@ const Autocomplete = {
         };
 
         const debounceMs = opts.debounceMs ?? this.debounceMs;
+        const minChars = Number.isFinite(Number(opts.minChars)) ? Number(opts.minChars) : this.minChars;
         let debounceTimer;
         inputEl.addEventListener("input", () => {
             const q = inputEl.value.trim();
-            if (q.length < this.minChars) {
+            if (q.length < minChars) {
                 hide();
                 delete inputEl.dataset.selectedId;
                 delete inputEl.dataset.selectedJson;
@@ -148,9 +156,13 @@ const Autocomplete = {
             }, debounceMs);
         });
 
-        inputEl.addEventListener("focus", () => {
+        inputEl.addEventListener("focus", async () => {
             const q = inputEl.value.trim();
-            if (q.length >= this.minChars && items.length > 0) show(items);
+            if (q.length >= minChars && items.length > 0) show(items);
+            else if (minChars === 0 && q.length === 0 && items.length === 0) {
+                const list = await fetchSearch("");
+                show(list);
+            }
         });
 
         inputEl.addEventListener("blur", () => {
@@ -199,7 +211,7 @@ const Autocomplete = {
     },
 
     defaultRender: {
-        customers: (c) => formatAutocompleteParts(c.name, c.code) || `#${c.id}`,
+        customers: (c) => formatAutocompleteParts(c.name, c.default_shipping_code || c.code) || `#${c.id}`,
         suppliers: (s) =>
             formatAutocompleteParts(s.name, s.phone, s.code || s.store_id) ||
             `#${s.id}`,

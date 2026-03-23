@@ -59,6 +59,7 @@ async function loadSuppliers() {
                     let actions = `<button class="btn btn-sm btn-outline-secondary" onclick="openVisitModal(${r.id}, '${nameEsc}')">Log visit</button>`;
                     if (buyer) {
                         actions += ` <button class="btn btn-sm btn-outline-primary" onclick="editSupplier(${r.id})">Edit</button>
+          <a class="btn btn-sm btn-outline-dark" href="/cargochina/procurement_drafts.php?supplier_id=${r.id}">Draft Order</a>
           <button class="btn btn-sm btn-outline-success" onclick="openPaymentModal(${r.id}, '${nameEsc}')">Pay</button>
           <button class="btn btn-sm btn-outline-info" onclick="showPayHistory(${r.id}, '${nameEsc}')">History</button>
           <button class="btn btn-sm btn-outline-danger" onclick="deleteSupplier(${r.id}, '${nameEsc}')">Del</button>`;

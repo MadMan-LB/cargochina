@@ -144,6 +144,20 @@ document.addEventListener("DOMContentLoaded", () => {
     } else {
         updateContainerStatusFilterSummary();
     }
+    const searchInput = document.getElementById("containerSearch");
+    if (searchInput && typeof Autocomplete !== "undefined") {
+        Autocomplete.init(searchInput, {
+            resource: "containers",
+            searchPath: "/search",
+            displayValue: (c) => (c?.code || ""),
+            renderItem: (c) =>
+                c
+                    ? `${c.code || ""} — ${containerStatusDisplay(c.status)} (${c.max_cbm || 0} CBM)`
+                    : "",
+            placeholder: "Code, customer, phone, shipping code, item description…",
+            onSelect: () => loadContainers(),
+        });
+    }
 });
 
 function applyClientFilters() {
@@ -228,6 +242,7 @@ function applyClientFilters() {
             <td>${escHtml(String(c.max_cbm ?? ""))}</td>
             <td>${escHtml(String(c.max_weight ?? ""))}</td>
             <td class="d-flex gap-1 flex-wrap">
+              <button class="btn btn-sm btn-outline-secondary js-edit-container" data-id="${c.id}" data-code="${escHtml(c.code || "")}" title="Edit container info">Edit</button>
               <button class="btn btn-sm btn-success js-assign-btn" data-id="${c.id}" data-code="${escHtml(c.code || "")}" data-max-cbm="${c.max_cbm}" data-max-weight="${c.max_weight}" data-used-cbm="${parseFloat(c.used_cbm || 0).toFixed(4)}" data-used-weight="${parseFloat(c.used_weight || 0).toFixed(2)}" title="Assign orders to this container">+ Assign</button>
               <button class="btn btn-sm btn-outline-info js-view-container" data-id="${c.id}" data-code="${escHtml(c.code || "")}" title="View orders in this container">View</button>
               <a class="btn btn-sm btn-outline-success" href="${CONTAINERS_API_BASE}/containers/${c.id}/export" download title="Download Excel">Excel</a>
@@ -272,14 +287,21 @@ async function openContainerEditModal(id, code) {
     const modal = bootstrap.Modal.getOrCreateInstance(
         document.getElementById("containerEditModal"),
     );
-    document.getElementById("containerEditShipDate").value = "";
-    document.getElementById("containerEditEta").value = "";
-    document.getElementById("containerEditActualDep").value = "";
-    document.getElementById("containerEditActualArr").value = "";
-    document.getElementById("containerEditVessel").value = "";
-    document.getElementById("containerEditDestCountry").value = "";
-    document.getElementById("containerEditDest").value = "";
-    document.getElementById("containerEditNotes").value = "";
+    const set = (elId, v) => {
+        const el = document.getElementById(elId);
+        if (el) el.value = v ?? "";
+    };
+    set("containerEditCode", "");
+    set("containerEditMaxCbm", "");
+    set("containerEditMaxWeight", "");
+    set("containerEditShipDate", "");
+    set("containerEditEta", "");
+    set("containerEditActualDep", "");
+    set("containerEditActualArr", "");
+    set("containerEditVessel", "");
+    set("containerEditDestCountry", "");
+    set("containerEditDest", "");
+    set("containerEditNotes", "");
     modal.show();
     try {
         const res = await fetch(CONTAINERS_API_BASE + "/containers/" + id, {
@@ -287,20 +309,17 @@ async function openContainerEditModal(id, code) {
         });
         if (!res.ok) throw new Error("Failed to load");
         const data = (await res.json()).data || {};
-        document.getElementById("containerEditShipDate").value =
-            data.expected_ship_date || "";
-        document.getElementById("containerEditEta").value = data.eta_date || "";
-        document.getElementById("containerEditActualDep").value =
-            data.actual_departure_date || "";
-        document.getElementById("containerEditActualArr").value =
-            data.actual_arrival_date || "";
-        document.getElementById("containerEditVessel").value =
-            data.vessel_name || "";
-        document.getElementById("containerEditDestCountry").value =
-            data.destination_country || "";
-        document.getElementById("containerEditDest").value =
-            data.destination || "";
-        document.getElementById("containerEditNotes").value = data.notes || "";
+        set("containerEditCode", data.code);
+        set("containerEditMaxCbm", data.max_cbm);
+        set("containerEditMaxWeight", data.max_weight);
+        set("containerEditShipDate", data.expected_ship_date);
+        set("containerEditEta", data.eta_date);
+        set("containerEditActualDep", data.actual_departure_date);
+        set("containerEditActualArr", data.actual_arrival_date);
+        set("containerEditVessel", data.vessel_name);
+        set("containerEditDestCountry", data.destination_country);
+        set("containerEditDest", data.destination);
+        set("containerEditNotes", data.notes);
     } catch (e) {
         if (typeof showToast === "function") {
             showToast(e.message || "Failed to load", "danger");
@@ -314,8 +333,15 @@ async function saveContainerEdit() {
     const id = parseInt(document.getElementById("containerEditId").value, 10);
     if (!id) return;
     const btn = document.getElementById("containerEditSaveBtn");
-    const v = (id) => document.getElementById(id)?.value?.trim() || null;
+    const v = (elId) => document.getElementById(elId)?.value?.trim() || null;
+    const vNum = (elId) => {
+        const x = parseFloat(document.getElementById(elId)?.value);
+        return Number.isFinite(x) ? x : null;
+    };
     const payload = {
+        code: v("containerEditCode") || null,
+        max_cbm: vNum("containerEditMaxCbm"),
+        max_weight: vNum("containerEditMaxWeight"),
         expected_ship_date: v("containerEditShipDate") || null,
         eta_date: v("containerEditEta") || null,
         actual_departure_date: v("containerEditActualDep") || null,
@@ -340,11 +366,7 @@ async function saveContainerEdit() {
         bootstrap.Modal.getOrCreateInstance(
             document.getElementById("containerEditModal"),
         ).hide();
-        const c = _allContainers.find((x) => x.id == id);
-        if (c) {
-            Object.assign(c, payload);
-        }
-        applyClientFilters();
+        loadContainers();
         if (typeof showToast === "function") {
             showToast("Container schedule updated");
         }
@@ -425,6 +447,7 @@ async function viewContainer(id, code) {
         const data = (await res.json()).data || {};
         const container = data.container || {};
         const orders = data.orders || [];
+        const drafts = data.drafts || [];
 
         const st = CONTAINER_STATUS[container.status] || {
             label: container.status || "—",
@@ -438,22 +461,22 @@ async function viewContainer(id, code) {
         if (subtitleEl)
             subtitleEl.innerHTML = `<span class="badge ${st.cls}">${escHtml(st.label)}</span>${extra ? ` <span class="text-muted ms-2">${escHtml(extra)}</span>` : ""}`;
 
-        if (orders.length === 0) {
+        if (orders.length === 0 && drafts.length === 0) {
             if (bodyEl)
                 bodyEl.innerHTML =
                     '<p class="text-muted py-3">No orders are assigned to this container yet.</p>';
             return;
         }
 
-        const totalCbm = orders.reduce(
+        const totalCbm = (orders || []).reduce(
             (s, o) => s + (parseFloat(o.total_cbm) || 0),
             0,
         );
-        const totalWeight = orders.reduce(
+        const totalWeight = (orders || []).reduce(
             (s, o) => s + (parseFloat(o.total_weight) || 0),
             0,
         );
-        const totalAmt = orders.reduce(
+        const totalAmt = (orders || []).reduce(
             (s, o) => s + (parseFloat(o.total_amount) || 0),
             0,
         );
@@ -464,7 +487,7 @@ async function viewContainer(id, code) {
         const barColor = (p) =>
             p >= 100 ? "#dc2626" : p >= 85 ? "#d97706" : "#16a34a";
 
-        const orderRows = orders
+        const orderRows = (orders || [])
             .map((o) => {
                 const sBadge =
                     typeof statusBadgeClass === "function"
@@ -514,7 +537,107 @@ async function viewContainer(id, code) {
                 <td class="text-end">${totalAmt.toFixed(2)}</td>
               </tr></tfoot>
             </table>
-          </div>`;
+          </div>
+          ${
+              drafts.length > 0
+                  ? `
+          <div class="mt-4 pt-3 border-top">
+            <h6 class="mb-2">Shipment drafts</h6>
+            <p class="small text-muted mb-2">Finalized drafts linked to this container. "Push to tracking" sends shipment data to the external tracking API when you finalize. Edit carrier refs below or <a href="/cargochina/consolidation.php">manage in Consolidation</a>.</p>
+            ${drafts
+                .map(
+                    (d) => `
+            <div class="card mb-2" data-draft-id="${d.id}">
+              <div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-start">
+                  <div>
+                    <strong>Draft #${d.id}</strong>
+                    <span class="badge ${d.status === "finalized" ? "bg-success" : "bg-secondary"} ms-1">${escHtml(d.status || "")}</span>
+                    <span class="text-muted small ms-1">${d.order_count || 0} orders</span>
+                  </div>
+                  <button type="button" class="btn btn-sm btn-outline-primary js-edit-draft-refs" data-draft-id="${d.id}">Edit refs</button>
+                </div>
+                <div class="small text-muted mt-1">
+                  ${d.container_number ? `Container: ${escHtml(d.container_number)}` : ""}
+                  ${d.booking_number ? ` • Booking: ${escHtml(d.booking_number)}` : ""}
+                  ${d.tracking_url ? ` • <a href="${escHtml(d.tracking_url)}" target="_blank" rel="noopener">Tracking</a>` : ""}
+                  ${!d.container_number && !d.booking_number && !d.tracking_url ? "—" : ""}
+                </div>
+                <div class="draft-edit-form mt-2 d-none" data-draft-id="${d.id}">
+                  <div class="row g-2">
+                    <div class="col-4"><input type="text" class="form-control form-control-sm draft-edit-container" placeholder="Container #" value="${escHtml(d.container_number || "")}"></div>
+                    <div class="col-4"><input type="text" class="form-control form-control-sm draft-edit-booking" placeholder="Booking #" value="${escHtml(d.booking_number || "")}"></div>
+                    <div class="col-4"><input type="url" class="form-control form-control-sm draft-edit-tracking" placeholder="Tracking URL" value="${escHtml(d.tracking_url || "")}"></div>
+                  </div>
+                  <button type="button" class="btn btn-sm btn-success mt-2 js-save-draft-refs" data-draft-id="${d.id}">Save</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary mt-2 ms-1 js-cancel-draft-edit">Cancel</button>
+                </div>
+              </div>
+            </div>
+            `,
+                )
+                .join("")}
+          </div>
+          `
+                  : ""
+          }`;
+        if (bodyEl && drafts.length > 0) {
+            bodyEl.querySelectorAll(".js-edit-draft-refs").forEach((btn) => {
+                btn.addEventListener("click", () => {
+                    const draftId = btn.dataset.draftId;
+                    const form = bodyEl.querySelector(
+                        `.draft-edit-form[data-draft-id="${draftId}"]`,
+                    );
+                    if (form) form.classList.remove("d-none");
+                });
+            });
+            bodyEl.querySelectorAll(".js-cancel-draft-edit").forEach((btn) => {
+                btn.addEventListener("click", () => {
+                    btn.closest(".draft-edit-form")?.classList.add("d-none");
+                });
+            });
+            bodyEl.querySelectorAll(".js-save-draft-refs").forEach((btn) => {
+                btn.addEventListener("click", async () => {
+                    const draftId = btn.dataset.draftId;
+                    const card = btn.closest("[data-draft-id]");
+                    const containerNum =
+                        card?.querySelector(".draft-edit-container")?.value ||
+                        "";
+                    const bookingNum =
+                        card?.querySelector(".draft-edit-booking")?.value || "";
+                    const trackingUrl =
+                        card?.querySelector(".draft-edit-tracking")?.value ||
+                        "";
+                    try {
+                        const res = await fetch(
+                            CONTAINERS_API_BASE +
+                                "/shipment-drafts/" +
+                                draftId,
+                            {
+                                method: "PUT",
+                                headers: {
+                                    "Content-Type": "application/json",
+                                },
+                                credentials: "same-origin",
+                                body: JSON.stringify({
+                                    container_number: containerNum.trim() || null,
+                                    booking_number: bookingNum.trim() || null,
+                                    tracking_url: trackingUrl.trim() || null,
+                                }),
+                            },
+                        );
+                        if (!res.ok) {
+                            const j = await res.json().catch(() => ({}));
+                            throw new Error(j.message || "Save failed");
+                        }
+                        btn.closest(".draft-edit-form")?.classList.add("d-none");
+                        viewContainer(id, code);
+                    } catch (e) {
+                        alert("Error: " + e.message);
+                    }
+                });
+            });
+        }
     } catch (e) {
         if (bodyEl)
             bodyEl.innerHTML = `<div class="alert alert-danger">${escHtml(e.message)}</div>`;

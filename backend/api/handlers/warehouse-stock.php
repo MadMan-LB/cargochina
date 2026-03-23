@@ -62,7 +62,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $sql .= " AND (oi.description_cn LIKE ? OR oi.description_en LIKE ? OR c.name LIKE ? OR s.name LIKE ?)";
         $params = array_merge($params, [$like, $like, $like, $like]);
     }
-    $sql .= " ORDER BY o.expected_ready_date, o.id, oi.id";
+    $sql .= " ORDER BY o.expected_ready_date IS NULL, o.expected_ready_date, o.id, oi.id";
     $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
     if ($params) $stmt->execute($params);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);

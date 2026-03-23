@@ -267,6 +267,7 @@ require 'includes/layout.php';
                     <th>Deposits</th>
                     <th>Receivable</th>
                     <th>Balance</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody id="customerBalancesBody"></tbody>
@@ -290,6 +291,7 @@ require 'includes/layout.php';
                     <th>Invoiced</th>
                     <th>Paid</th>
                     <th>Payable</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody id="supplierPayablesBody"></tbody>
@@ -297,6 +299,73 @@ require 'includes/layout.php';
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Record Deposit Modal (Financials) -->
+<div class="modal fade" id="finDepositModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Record Deposit — <span id="finDepCustomerName"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="finDepCustomerId">
+        <div class="row mb-3">
+          <div class="col-6"><label class="form-label">Amount *</label><input type="number" step="0.01" class="form-control" id="finDepAmount" required></div>
+          <div class="col-6"><label class="form-label">Currency *</label><select class="form-select" id="finDepCurrency">
+            <option value="USD">USD</option>
+            <option value="RMB">RMB</option>
+          </select></div>
+        </div>
+        <div class="row mb-3">
+          <div class="col-6"><label class="form-label">Payment Method</label><input type="text" class="form-control" id="finDepMethod" placeholder="Bank, Cash, etc."></div>
+          <div class="col-6"><label class="form-label">Reference No</label><input type="text" class="form-control" id="finDepReference" placeholder="Receipt/TT number"></div>
+        </div>
+        <div class="mb-3"><label class="form-label">Order</label><input type="text" class="form-control" id="finDepOrderId" placeholder="Type to search order (optional)…" autocomplete="off"></div>
+        <div class="mb-2"><label class="form-label">Notes</label><textarea class="form-control" id="finDepNotes" rows="2"></textarea></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="finDepSubmitBtn" onclick="submitFinDeposit()">Record Deposit</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Record Payment Modal (Financials) -->
+<div class="modal fade" id="finPaymentModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Record Payment — <span id="finPaySupplierName"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="finPaySupplierId">
+        <div class="row mb-3">
+          <div class="col-6"><label class="form-label">Invoice Amount</label><input type="number" step="0.01" class="form-control" id="finPayInvoiceAmount" placeholder="Total invoice"></div>
+          <div class="col-6"><label class="form-label">Amount Paid *</label><input type="number" step="0.01" class="form-control" id="finPayAmount" required></div>
+        </div>
+        <div class="row mb-3">
+          <div class="col-6"><label class="form-label">Currency *</label><select class="form-select" id="finPayCurrency">
+            <option value="USD">USD</option>
+            <option value="RMB">RMB</option>
+          </select></div>
+          <div class="col-6"><label class="form-label">Order</label><input type="text" class="form-control" id="finPayOrderId" placeholder="Type to search order (optional)…" autocomplete="off"></div>
+        </div>
+        <div class="form-check mb-3">
+          <input type="checkbox" class="form-check-input" id="finPayMarkedFull">
+          <label class="form-check-label" for="finPayMarkedFull">Mark as fully paid</label>
+        </div>
+        <div class="mb-2"><label class="form-label">Notes / Use case</label><textarea class="form-control" id="finPayNotes" rows="2" placeholder="What is this payment for?"></textarea></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="finPaySubmitBtn" onclick="submitFinPayment()">Record Payment</button>
       </div>
     </div>
   </div>

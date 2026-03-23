@@ -28,6 +28,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $custCols = 'c.name as customer_name, c.phone as customer_phone, c.code as customer_code';
         $chkPrio = @$pdo->query("SHOW COLUMNS FROM customers LIKE 'priority_level'");
         if ($chkPrio && $chkPrio->rowCount() > 0) $custCols .= ', c.priority_level as customer_priority_level, c.priority_note as customer_priority_note';
+        $coll = 'COLLATE utf8mb4_unicode_ci';
         $sql = "SELECT o.id, o.customer_id, o.supplier_id, o.expected_ready_date, o.status, o.high_alert_notes,
             $custCols,
             s.name as supplier_name, s.phone as supplier_phone
@@ -37,15 +38,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             WHERE o.status IN ($placeholders)
             AND (
                 o.id = ?
-                OR c.name LIKE ?
-                OR c.code LIKE ?
-                OR (c.phone IS NOT NULL AND c.phone LIKE ?)
-                OR s.name LIKE ?
-                OR s.code LIKE ?
-                OR (s.phone IS NOT NULL AND s.phone LIKE ?)
-                OR EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND (oi.shipping_code LIKE ? OR oi.item_no LIKE ? OR oi.description_cn LIKE ? OR oi.description_en LIKE ?))
+                OR (c.name $coll LIKE ?)
+                OR (c.code $coll LIKE ?)
+                OR (c.phone IS NOT NULL AND c.phone $coll LIKE ?)
+                OR (s.name $coll LIKE ?)
+                OR (s.code $coll LIKE ?)
+                OR (s.phone IS NOT NULL AND s.phone $coll LIKE ?)
+                OR EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND ((oi.shipping_code $coll LIKE ?) OR (oi.item_no $coll LIKE ?) OR (oi.description_cn $coll LIKE ?) OR (oi.description_en $coll LIKE ?)))
             )
-            ORDER BY o.expected_ready_date ASC, o.id ASC
+            ORDER BY o.expected_ready_date IS NULL ASC, o.expected_ready_date ASC, o.id ASC
             LIMIT 30";
         $oid = ctype_digit($q) ? (int) $q : 0;
         $params = array_merge($statuses, [$oid, $like, $like, $like, $like, $like, $like, $like, $like, $like, $like]);
@@ -112,20 +113,24 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $params[] = $dateTo;
         }
         if ($shippingCode !== '') {
-            $sql .= " AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND oi.shipping_code LIKE ?)";
+            $sql .= " AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND (oi.shipping_code COLLATE utf8mb4_unicode_ci) LIKE ?)";
             $params[] = '%' . $shippingCode . '%';
         }
-        $sql .= " ORDER BY o.expected_ready_date ASC, o.id ASC LIMIT 200";
+        $sql .= " ORDER BY o.expected_ready_date IS NULL ASC, o.expected_ready_date ASC, o.id ASC LIMIT 200";
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $chkProductAlert = @$pdo->query("SHOW COLUMNS FROM products LIKE 'high_alert_note'");
         $chkRequiredDesign = @$pdo->query("SHOW COLUMNS FROM products LIKE 'required_design'");
+        $chkItemHs = @$pdo->query("SHOW COLUMNS FROM order_items LIKE 'hs_code'");
         $itemAlertCol = ($chkProductAlert && $chkProductAlert->rowCount() > 0) ? ", p.high_alert_note as product_high_alert_note" : "";
         if ($chkRequiredDesign && $chkRequiredDesign->rowCount() > 0) $itemAlertCol .= ", p.required_design as product_required_design";
+        $itemHsCol = ($chkItemHs && $chkItemHs->rowCount() > 0)
+            ? ", COALESCE(oi.hs_code, p.hs_code) as hs_code"
+            : ", p.hs_code as hs_code";
         foreach ($rows as &$r) {
-            $items = $pdo->prepare("SELECT oi.id, oi.shipping_code, oi.cartons, oi.qty_per_carton, oi.declared_cbm, oi.declared_weight, oi.item_length, oi.item_width, oi.item_height, oi.description_cn, oi.description_en, p.hs_code$itemAlertCol FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?");
+            $items = $pdo->prepare("SELECT oi.id, oi.shipping_code, oi.cartons, oi.qty_per_carton, oi.declared_cbm, oi.declared_weight, oi.item_length, oi.item_width, oi.item_height, oi.description_cn, oi.description_en$itemHsCol$itemAlertCol FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?");
             $items->execute([$r['id']]);
             $r['items'] = $items->fetchAll(PDO::FETCH_ASSOC);
             $r['declared_cbm'] = array_sum(array_column($r['items'], 'declared_cbm'));

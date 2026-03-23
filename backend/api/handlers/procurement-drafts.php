@@ -19,12 +19,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if (!$draft) jsonError('Draft not found', 404);
         if ($draft['status'] === 'converted') jsonError('Draft already converted', 400);
         $customerId = (int) ($input['customer_id'] ?? 0);
-        $expectedReady = trim($input['expected_ready_date'] ?? '');
+        $expectedReady = trim((string) ($input['expected_ready_date'] ?? ''));
         $currency = trim($input['currency'] ?? 'USD') ?: 'USD';
-        if (!$customerId || !$expectedReady) jsonError('customer_id and expected_ready_date required', 400);
+        if (!$customerId) jsonError('customer_id required', 400);
         if (!in_array($currency, ['USD', 'RMB'], true)) $currency = 'USD';
-        $expectedDate = date('Y-m-d', strtotime($expectedReady));
-        if ($expectedDate === '1970-01-01' || !$expectedDate) jsonError('Invalid expected_ready_date', 400);
+        $expectedDate = null;
+        if ($expectedReady !== '') {
+            $ts = strtotime($expectedReady);
+            if ($ts === false) jsonError('Invalid expected_ready_date', 400);
+            $expectedDate = date('Y-m-d', $ts);
+        }
 
         $items = $pdo->prepare("SELECT pdi.*, p.description_cn, p.description_en, p.cbm, p.weight, p.unit_price FROM procurement_draft_items pdi LEFT JOIN products p ON pdi.product_id = p.id WHERE pdi.draft_id = ? ORDER BY pdi.sort_order, pdi.id");
         $items->execute([$id]);
