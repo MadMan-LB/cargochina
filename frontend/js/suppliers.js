@@ -13,6 +13,7 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 let additionalIdIndex = 0;
+let supplierAttachments = [];
 
 function isBuyer() {
     const card = document.querySelector(".card[data-is-buyer]");
@@ -191,6 +192,10 @@ function openSupplierForm() {
     document.getElementById("supplierCommissionRate").value = "";
     document.getElementById("supplierCommissionType").value = "percentage";
     document.getElementById("supplierCommissionAppliedOn").value = "buy_value";
+    const attachmentInput = document.getElementById("supplierAttachmentInput");
+    if (attachmentInput) attachmentInput.value = "";
+    supplierAttachments = [];
+    renderSupplierAttachments();
     addAdditionalIdRow();
 }
 
@@ -225,6 +230,7 @@ async function editSupplier(id) {
         } else {
             addAdditionalIdRow();
         }
+        await loadSupplierAttachments(id);
         new bootstrap.Modal(document.getElementById("supplierModal")).show();
     } catch (e) {
         showToast(e.message, "danger");
@@ -265,16 +271,26 @@ async function saveSupplier() {
     }
     try {
         setLoading(btn, true);
+        let res;
         if (id) {
-            await api("PUT", "/suppliers/" + id, payload);
+            res = await api("PUT", "/suppliers/" + id, payload);
             showToast("Supplier updated");
         } else {
-            await api("POST", "/suppliers", payload);
-            showToast("Supplier created");
+            res = await api("POST", "/suppliers", payload);
+            const newId = res?.data?.id;
+            if (newId) {
+                document.getElementById("supplierId").value = newId;
+                document.getElementById("supplierModalTitle").textContent =
+                    "Edit Supplier";
+                await loadSupplierAttachments(newId);
+            }
+            showToast("Supplier created. You can now add documents and photos.");
         }
-        bootstrap.Modal.getInstance(
-            document.getElementById("supplierModal"),
-        ).hide();
+        if (id) {
+            bootstrap.Modal.getInstance(
+                document.getElementById("supplierModal"),
+            ).hide();
+        }
         loadSuppliers();
     } catch (e) {
         showToast(e.message, "danger");
@@ -282,6 +298,119 @@ async function saveSupplier() {
         setLoading(btn, false);
     }
 }
+
+function supplierAttachmentKind(fileType, url) {
+    const kind = (fileType || url || "").toLowerCase();
+    return /png|jpg|jpeg|gif|webp/.test(kind) ? "image" : "file";
+}
+
+function renderSupplierAttachments() {
+    const listEl = document.getElementById("supplierAttachmentList");
+    const supplierId = document.getElementById("supplierId")?.value || "";
+    if (!listEl) return;
+    if (!supplierId) {
+        listEl.innerHTML =
+            '<p class="text-muted small mb-0">Save supplier first to add documents and photos.</p>';
+        return;
+    }
+    if (!supplierAttachments.length) {
+        listEl.innerHTML =
+            '<p class="text-muted small mb-0">No supplier documents uploaded yet.</p>';
+        return;
+    }
+    listEl.innerHTML = supplierAttachments
+        .map((attachment) => {
+            const isImage =
+                supplierAttachmentKind(
+                    attachment.file_type,
+                    attachment.file_path || attachment.url,
+                ) === "image";
+            return `<div class="d-flex align-items-center gap-2 border rounded-3 px-2 py-2 mb-2">
+          ${
+              isImage
+                  ? `<img src="${escapeHtml(attachment.url)}" alt="Supplier attachment" style="width:52px;height:52px;object-fit:cover;border-radius:10px;border:1px solid #e2e8f0;">`
+                  : `<div class="d-flex align-items-center justify-content-center bg-light border rounded-3" style="width:52px;height:52px;min-width:52px;">PDF</div>`
+          }
+          <div class="flex-grow-1 min-w-0">
+            <a href="${escapeHtml(attachment.url)}" target="_blank" rel="noopener" class="small fw-semibold text-decoration-none d-block text-truncate">${escapeHtml(attachment.internal_note || attachment.file_type || "Supplier document")}</a>
+            <div class="text-muted small">${escapeHtml((attachment.uploaded_at || "").replace("T", " ").slice(0, 16) || "")}</div>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteSupplierAttachment(${attachment.id})">×</button>
+        </div>`;
+        })
+        .join("");
+}
+
+async function loadSupplierAttachments(supplierId) {
+    if (!supplierId) {
+        supplierAttachments = [];
+        renderSupplierAttachments();
+        return;
+    }
+    try {
+        const res = await api(
+            "GET",
+            `/design-attachments?entity_type=supplier&entity_id=${supplierId}`,
+        );
+        supplierAttachments = res.data || [];
+    } catch (_) {
+        supplierAttachments = [];
+    }
+    renderSupplierAttachments();
+}
+
+window.deleteSupplierAttachment = async function deleteSupplierAttachment(
+    attachmentId,
+) {
+    const supplierId = document.getElementById("supplierId")?.value;
+    if (!supplierId) return;
+    try {
+        await api("DELETE", "/design-attachments/" + attachmentId);
+        showToast("Attachment removed");
+        await loadSupplierAttachments(supplierId);
+    } catch (e) {
+        showToast(e.message, "danger");
+    }
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+    const input = document.getElementById("supplierAttachmentInput");
+    if (!input) return;
+    input.addEventListener("change", async function () {
+        const supplierId = document.getElementById("supplierId")?.value;
+        if (!supplierId) {
+            showToast(
+                "Save supplier first to add documents and photos",
+                "warning",
+            );
+            this.value = "";
+            return;
+        }
+        const files = Array.from(this.files || []);
+        for (const file of files) {
+            try {
+                const path = await uploadFile(file);
+                if (!path) continue;
+                await api("POST", "/design-attachments", {
+                    entity_type: "supplier",
+                    entity_id: parseInt(supplierId, 10),
+                    file_path: path,
+                    file_type:
+                        (file.name || "").split(".").pop()?.toLowerCase() ||
+                        null,
+                    internal_note: file.name || "Supplier attachment",
+                });
+            } catch (e) {
+                showToast(e.message, "danger");
+            }
+        }
+        await loadSupplierAttachments(supplierId);
+        if (files.length) {
+            showToast("Supplier attachments updated");
+        }
+        this.value = "";
+    });
+});
 
 function openPaymentModal(supplierId, name) {
     document.getElementById("paymentSupplierId").value = supplierId;

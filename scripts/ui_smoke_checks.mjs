@@ -213,6 +213,28 @@ async function checkContainers(page) {
         "Container status summary missing",
     );
     await expectVisible(page, "#containersTbody", "Containers table missing");
+    await expectCountAtLeast(
+        page,
+        ".js-view-container",
+        1,
+        "Container view action missing",
+    );
+    await page.locator(".js-view-container").first().click();
+    await expectVisible(
+        page,
+        "#containerViewModal .order-info-stat-card",
+        "Container totals summary missing from view modal",
+    );
+    await expectVisible(
+        page,
+        "#containerViewModal table tfoot",
+        "Container totals footer missing from view modal",
+    );
+    await page.locator("#containerViewModal .btn-close").click();
+    await page.waitForSelector("#containerViewModal", {
+        state: "hidden",
+        timeout: 15000,
+    });
     log("PASS containers");
 }
 
@@ -245,22 +267,102 @@ async function checkProcurementDrafts(page) {
     await openPage(page, "/procurement_drafts.php");
     await expectVisible(
         page,
-        "#draftsTable",
-        "Procurement drafts table missing",
+        "#draftOrdersTable",
+        "Draft orders table missing",
     );
-    await page.getByRole("button", { name: "+ New Draft" }).click();
+    await page.getByRole("button", { name: "+ Draft an Order" }).click();
     await expectVisible(
         page,
-        "#draftSupplierSearch",
-        "Procurement draft supplier search missing",
+        "#draftOrderCustomer",
+        "Draft order customer search missing",
     );
     await expectVisible(
         page,
-        ".draft-product-search",
-        "Procurement draft product search missing",
+        "#draftOrderSections",
+        "Draft order supplier sections missing",
     );
-    await page.keyboard.press("Escape");
+    await page.locator("#draftOrderModal .btn-close").click();
+    await page.waitForSelector("#draftOrderModal", {
+        state: "hidden",
+        timeout: 15000,
+    });
     log("PASS procurement_drafts");
+}
+
+async function checkCustomers(page) {
+    await openPage(page, "/customers.php");
+    await expectVisible(
+        page,
+        "#customerSearch",
+        "Customers search field missing",
+    );
+    await expectVisible(
+        page,
+        "#customersTable",
+        "Customers table missing",
+    );
+    await page.getByRole("button", { name: "+ Add Customer" }).click();
+    await expectVisible(
+        page,
+        "#customerPorContainer",
+        "Customer POR inputs missing",
+    );
+    await expectVisible(
+        page,
+        "#customerSaveBtn",
+        "Customer save button missing",
+    );
+    await page.locator("#customerModal .btn-close").click();
+    await page.waitForSelector("#customerModal", {
+        state: "hidden",
+        timeout: 15000,
+    });
+    const portalButtons = page.getByRole("button", { name: "Portal Link" });
+    if ((await portalButtons.count()) > 0) {
+        await portalButtons.first().click();
+        await expectVisible(
+            page,
+            "#portalHistory",
+            "Customer portal history missing",
+        );
+        await page.locator("#portalModal .btn-close").click();
+        await page.waitForSelector("#portalModal", {
+            state: "hidden",
+            timeout: 15000,
+        });
+    }
+    log("PASS customers");
+}
+
+async function checkSuppliers(page) {
+    await openPage(page, "/suppliers.php");
+    await expectVisible(
+        page,
+        "#supplierSearch",
+        "Suppliers search field missing",
+    );
+    await expectVisible(
+        page,
+        "#suppliersTable",
+        "Suppliers table missing",
+    );
+    await page.getByRole("button", { name: "+ Add Supplier" }).click();
+    await expectVisible(
+        page,
+        "#supplierAttachmentList",
+        "Supplier attachments panel missing",
+    );
+    await expectVisible(
+        page,
+        "#supplierAttachmentInput",
+        "Supplier attachment input missing",
+    );
+    await page.locator("#supplierModal .btn-close").click();
+    await page.waitForSelector("#supplierModal", {
+        state: "hidden",
+        timeout: 15000,
+    });
+    log("PASS suppliers");
 }
 
 async function checkProducts(page) {
@@ -402,6 +504,8 @@ const page = await browser.newPage({
 try {
     await login(page);
     await checkOrders(page);
+    await checkCustomers(page);
+    await checkSuppliers(page);
     await checkWarehouseStock(page);
     await checkFinancials(page);
     await checkHsCodeCatalog(page);

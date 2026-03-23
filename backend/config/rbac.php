@@ -18,6 +18,8 @@ return [
     'customers' => [
         'read' => ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'SuperAdmin'],
         'write' => ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'],
+        'create' => ['ChinaAdmin', 'SuperAdmin'],
+        'import' => ['ChinaAdmin', 'SuperAdmin'],
     ],
     'products' => [
         'read' => ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'],

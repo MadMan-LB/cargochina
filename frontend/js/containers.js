@@ -448,6 +448,7 @@ async function viewContainer(id, code) {
         const container = data.container || {};
         const orders = data.orders || [];
         const drafts = data.drafts || [];
+        const totals = data.totals || {};
 
         const st = CONTAINER_STATUS[container.status] || {
             label: container.status || "—",
@@ -468,18 +469,13 @@ async function viewContainer(id, code) {
             return;
         }
 
-        const totalCbm = (orders || []).reduce(
-            (s, o) => s + (parseFloat(o.total_cbm) || 0),
-            0,
-        );
-        const totalWeight = (orders || []).reduce(
-            (s, o) => s + (parseFloat(o.total_weight) || 0),
-            0,
-        );
-        const totalAmt = (orders || []).reduce(
-            (s, o) => s + (parseFloat(o.total_amount) || 0),
-            0,
-        );
+        const totalOrders = parseInt(totals.order_count, 10) || orders.length;
+        const totalItems = parseInt(totals.item_count, 10) || 0;
+        const totalCartons = parseFloat(totals.cartons || 0);
+        const totalQty = parseFloat(totals.quantity || 0);
+        const totalCbm = parseFloat(totals.cbm || 0);
+        const totalWeight = parseFloat(totals.weight || 0);
+        const totalAmt = parseFloat(totals.amount || 0);
         const maxCbm = parseFloat(container.max_cbm) || 1;
         const maxWt = parseFloat(container.max_weight) || 1;
         const cbmPct = Math.min(100, (totalCbm / maxCbm) * 100);
@@ -491,7 +487,7 @@ async function viewContainer(id, code) {
             .map((o) => {
                 const sBadge =
                     typeof statusBadgeClass === "function"
-                        ? `<span class="badge ${statusBadgeClass(o.status)}">${escHtml(o.status || "—")}</span>`
+                        ? `<span class="badge ${statusBadgeClass(o.status)}">${escHtml(typeof statusLabel === "function" ? statusLabel(o.status) : o.status || "—")}</span>`
                         : escHtml(o.status || "—");
                 return `<tr>
               <td>${o.id}</td>
@@ -500,6 +496,8 @@ async function viewContainer(id, code) {
               <td>${escHtml(o.expected_ready_date || "—")}</td>
               <td>${sBadge}</td>
               <td class="text-end">${o.items || 0}</td>
+              <td class="text-end">${parseFloat(o.total_ctns || 0).toFixed(2)}</td>
+              <td class="text-end">${parseFloat(o.total_qty || 0).toFixed(2)}</td>
               <td class="text-end">${parseFloat(o.total_cbm || 0).toFixed(3)}</td>
               <td class="text-end">${parseFloat(o.total_weight || 0).toFixed(2)} kg</td>
               <td class="text-end">${parseFloat(o.total_amount || 0).toFixed(2)}</td>
@@ -510,10 +508,15 @@ async function viewContainer(id, code) {
         if (bodyEl)
             bodyEl.innerHTML = `
           <div class="row g-3 mb-3">
-            <div class="col-12 col-md-3"><div class="order-info-stat-card"><div class="label">Orders</div><div class="value">${orders.length}</div></div></div>
-            <div class="col-12 col-md-3"><div class="order-info-stat-card"><div class="label">CBM Used</div><div class="value">${totalCbm.toFixed(3)} / ${container.max_cbm}</div></div></div>
-            <div class="col-12 col-md-3"><div class="order-info-stat-card"><div class="label">Weight Used</div><div class="value">${totalWeight.toFixed(2)} / ${container.max_weight} kg</div></div></div>
-            <div class="col-12 col-md-3"><div class="order-info-stat-card"><div class="label">Total Amount</div><div class="value">${totalAmt.toFixed(2)}</div></div></div>
+            <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">Orders</div><div class="value">${totalOrders}</div></div></div>
+            <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">Items</div><div class="value">${totalItems}</div></div></div>
+            <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">Cartons</div><div class="value">${totalCartons.toFixed(2)}</div></div></div>
+            <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">Quantity</div><div class="value">${totalQty.toFixed(2)}</div></div></div>
+            <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">CBM Used</div><div class="value">${totalCbm.toFixed(3)}</div><div class="small text-muted">${container.max_cbm} max</div></div></div>
+            <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">Weight Used</div><div class="value">${totalWeight.toFixed(2)}</div><div class="small text-muted">${container.max_weight} kg max</div></div></div>
+          </div>
+          <div class="row g-3 mb-3">
+            <div class="col-12 col-md-4"><div class="order-info-stat-card"><div class="label">Sell-side amount</div><div class="value">${totalAmt.toFixed(2)}</div></div></div>
           </div>
           <div class="mb-3">
             <div class="d-flex justify-content-between small text-muted mb-1"><span>CBM Fill</span><span>${cbmPct.toFixed(1)}%</span></div>
@@ -525,13 +528,15 @@ async function viewContainer(id, code) {
             <table class="table table-sm table-hover align-middle">
               <thead class="table-light"><tr>
                 <th>ID</th><th>Customer</th><th>Supplier</th><th>Expected Ready</th>
-                <th>Status</th><th class="text-end">Items</th>
+                <th>Status</th><th class="text-end">Items</th><th class="text-end">Cartons</th><th class="text-end">Qty</th>
                 <th class="text-end">CBM</th><th class="text-end">Weight</th><th class="text-end">Amount</th>
               </tr></thead>
               <tbody>${orderRows}</tbody>
               <tfoot class="table-light fw-semibold"><tr>
                 <td colspan="5" class="text-end">Totals:</td>
-                <td class="text-end">${orders.length}</td>
+                <td class="text-end">${totalItems}</td>
+                <td class="text-end">${totalCartons.toFixed(2)}</td>
+                <td class="text-end">${totalQty.toFixed(2)}</td>
                 <td class="text-end">${totalCbm.toFixed(3)}</td>
                 <td class="text-end">${totalWeight.toFixed(2)} kg</td>
                 <td class="text-end">${totalAmt.toFixed(2)}</td>

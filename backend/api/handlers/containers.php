@@ -7,6 +7,147 @@
 
 require_once __DIR__ . '/../helpers.php';
 
+function containerTableHasColumn(PDO $pdo, string $table, string $column): bool
+{
+    static $cache = [];
+
+    $key = $table . '.' . $column;
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+
+    try {
+        $stmt = $pdo->prepare("SHOW COLUMNS FROM `$table` LIKE ?");
+        $stmt->execute([$column]);
+        $cache[$key] = (bool) $stmt->rowCount();
+    } catch (Throwable $e) {
+        $cache[$key] = false;
+    }
+
+    return $cache[$key];
+}
+
+function buildContainerLineMetrics(array $item): array
+{
+    $cartons = isset($item['order_cartons']) && $item['order_cartons'] !== null && $item['order_cartons'] !== ''
+        ? (float) $item['order_cartons']
+        : (float) ($item['cartons'] ?? 0);
+    $qtyPerCarton = isset($item['order_qty_per_carton']) && $item['order_qty_per_carton'] !== null && $item['order_qty_per_carton'] !== ''
+        ? (float) $item['order_qty_per_carton']
+        : (float) ($item['qty_per_carton'] ?? 0);
+    $quantity = (float) ($item['quantity'] ?? 0);
+    if ($quantity <= 0 && $cartons > 0 && $qtyPerCarton > 0) {
+        $quantity = $cartons * $qtyPerCarton;
+    }
+
+    $sellPrice = isset($item['sell_price']) && $item['sell_price'] !== null && $item['sell_price'] !== ''
+        ? (float) $item['sell_price']
+        : null;
+    $unitPrice = isset($item['unit_price']) && $item['unit_price'] !== null && $item['unit_price'] !== ''
+        ? (float) $item['unit_price']
+        : null;
+    $storedAmount = isset($item['total_amount']) && $item['total_amount'] !== null && $item['total_amount'] !== ''
+        ? (float) $item['total_amount']
+        : null;
+
+    if ($sellPrice !== null && $quantity > 0) {
+        $amount = $sellPrice * $quantity;
+    } elseif ($storedAmount !== null) {
+        $amount = $storedAmount;
+    } elseif ($unitPrice !== null && $quantity > 0) {
+        $amount = $unitPrice * $quantity;
+    } else {
+        $amount = 0.0;
+    }
+
+    return [
+        'cartons' => $cartons,
+        'quantity' => $quantity,
+        'cbm' => (float) ($item['declared_cbm'] ?? 0),
+        'weight' => (float) ($item['declared_weight'] ?? 0),
+        'amount' => $amount,
+    ];
+}
+
+function loadContainerOrderTotals(PDO $pdo, int $orderId): array
+{
+    $columns = [
+        'id',
+        'cartons',
+        'qty_per_carton',
+        'quantity',
+        'declared_cbm',
+        'declared_weight',
+        'unit_price',
+        'total_amount',
+    ];
+    if (containerTableHasColumn($pdo, 'order_items', 'order_cartons')) {
+        $columns[] = 'order_cartons';
+    }
+    if (containerTableHasColumn($pdo, 'order_items', 'order_qty_per_carton')) {
+        $columns[] = 'order_qty_per_carton';
+    }
+    if (containerTableHasColumn($pdo, 'order_items', 'sell_price')) {
+        $columns[] = 'sell_price';
+    }
+
+    $stmt = $pdo->prepare("SELECT " . implode(', ', $columns) . " FROM order_items WHERE order_id = ?");
+    $stmt->execute([$orderId]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $totals = [
+        'items' => count($rows),
+        'total_ctns' => 0.0,
+        'total_qty' => 0.0,
+        'total_cbm' => 0.0,
+        'total_weight' => 0.0,
+        'total_amount' => 0.0,
+    ];
+
+    foreach ($rows as $row) {
+        $line = buildContainerLineMetrics($row);
+        $totals['total_ctns'] += $line['cartons'];
+        $totals['total_qty'] += $line['quantity'];
+        $totals['total_cbm'] += $line['cbm'];
+        $totals['total_weight'] += $line['weight'];
+        $totals['total_amount'] += $line['amount'];
+    }
+
+    return [
+        'items' => (int) $totals['items'],
+        'total_ctns' => round($totals['total_ctns'], 4),
+        'total_qty' => round($totals['total_qty'], 4),
+        'total_cbm' => round($totals['total_cbm'], 4),
+        'total_weight' => round($totals['total_weight'], 2),
+        'total_amount' => round($totals['total_amount'], 2),
+    ];
+}
+
+function fetchContainerUsage(PDO $pdo, int $containerId): array
+{
+    $stmt = $pdo->prepare(
+        "SELECT
+            COALESCE(SUM(oi.declared_cbm), 0) AS used_cbm,
+            COALESCE(SUM(oi.declared_weight), 0) AS used_weight,
+            COUNT(DISTINCT ord.order_id) AS order_count
+         FROM (
+            SELECT DISTINCT sdo.order_id
+            FROM shipment_draft_orders sdo
+            JOIN shipment_drafts sd ON sdo.shipment_draft_id = sd.id
+            WHERE sd.container_id = ?
+         ) ord
+         LEFT JOIN order_items oi ON oi.order_id = ord.order_id"
+    );
+    $stmt->execute([$containerId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+    return [
+        'used_cbm' => round((float) ($row['used_cbm'] ?? 0), 4),
+        'used_weight' => round((float) ($row['used_weight'] ?? 0), 2),
+        'order_count' => (int) ($row['order_count'] ?? 0),
+    ];
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
 
@@ -43,40 +184,44 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     "SELECT o.id, o.status, o.expected_ready_date, o.currency, o.high_alert_notes,
                             $custCols,
                             s.name as supplier_name,
-                            sd.id as draft_id
+                            MIN(sd.id) as draft_id
                      FROM shipment_draft_orders sdo
                      JOIN shipment_drafts sd ON sdo.shipment_draft_id = sd.id
                      JOIN orders o ON sdo.order_id = o.id
                      JOIN customers c ON o.customer_id = c.id
                      LEFT JOIN suppliers s ON o.supplier_id = s.id
                      WHERE sd.container_id = ?
-                     ORDER BY sd.id, o.id"
+                     GROUP BY o.id, o.status, o.expected_ready_date, o.currency, o.high_alert_notes, c.name, s.name" .
+                    (($chkPrio && $chkPrio->rowCount() > 0) ? ", c.priority_level, c.priority_note" : "") .
+                    " ORDER BY draft_id, o.id"
                 );
                 $stmt->execute([$id]);
                 $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                $totalCbm = 0.0;
-                $totalWeight = 0.0;
+                $totals = [
+                    'order_count' => count($orders),
+                    'item_count' => 0,
+                    'cartons' => 0.0,
+                    'quantity' => 0.0,
+                    'cbm' => 0.0,
+                    'weight' => 0.0,
+                    'amount' => 0.0,
+                ];
                 foreach ($orders as &$ord) {
-                    $tot = $pdo->prepare(
-                        "SELECT COUNT(*) as items,
-                                COALESCE(SUM(cartons),0) as total_ctns,
-                                COALESCE(SUM(quantity),0) as total_qty,
-                                COALESCE(SUM(declared_cbm),0) as total_cbm,
-                                COALESCE(SUM(declared_weight),0) as total_weight,
-                                COALESCE(SUM(total_amount),0) as total_amount
-                         FROM order_items WHERE order_id = ?"
-                    );
-                    $tot->execute([$ord['id']]);
-                    $t = $tot->fetch(PDO::FETCH_ASSOC);
+                    $t = loadContainerOrderTotals($pdo, (int) $ord['id']);
                     $ord += $t;
-                    $totalCbm   += (float) ($t['total_cbm']    ?? 0);
-                    $totalWeight += (float) ($t['total_weight'] ?? 0);
+                    $totals['item_count'] += (int) $t['items'];
+                    $totals['cartons'] += (float) $t['total_ctns'];
+                    $totals['quantity'] += (float) $t['total_qty'];
+                    $totals['cbm'] += (float) $t['total_cbm'];
+                    $totals['weight'] += (float) $t['total_weight'];
+                    $totals['amount'] += (float) $t['total_amount'];
                 }
                 unset($ord);
-                $container['used_cbm']    = round($totalCbm,    4);
-                $container['used_weight'] = round($totalWeight,  2);
+                $usage = fetchContainerUsage($pdo, (int) $id);
+                $container['used_cbm']    = $usage['used_cbm'];
+                $container['used_weight'] = $usage['used_weight'];
                 $container['fill_pct_cbm'] = $container['max_cbm'] > 0
-                    ? round($totalCbm / $container['max_cbm'] * 100, 1) : 0;
+                    ? round($container['used_cbm'] / $container['max_cbm'] * 100, 1) : 0;
                 $draftsStmt = $pdo->prepare(
                     "SELECT sd.id, sd.status, sd.container_number, sd.booking_number, sd.tracking_url,
                             (SELECT COUNT(*) FROM shipment_draft_orders WHERE shipment_draft_id = sd.id) as order_count
@@ -84,7 +229,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 );
                 $draftsStmt->execute([$id]);
                 $drafts = $draftsStmt->fetchAll(PDO::FETCH_ASSOC);
-                jsonResponse(['data' => ['container' => $container, 'orders' => $orders, 'drafts' => $drafts]]);
+                jsonResponse(['data' => ['container' => $container, 'orders' => $orders, 'drafts' => $drafts, 'totals' => [
+                    'order_count' => (int) $totals['order_count'],
+                    'item_count' => (int) $totals['item_count'],
+                    'cartons' => round($totals['cartons'], 4),
+                    'quantity' => round($totals['quantity'], 4),
+                    'cbm' => round($totals['cbm'], 4),
+                    'weight' => round($totals['weight'], 2),
+                    'amount' => round($totals['amount'], 2),
+                ]]]);
             }
 
             if ($id && $action === 'export') {
@@ -92,7 +245,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt->execute([$id]);
                 $container = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$container) jsonError('Container not found', 404);
-                $stmt = $pdo->prepare("SELECT order_id FROM shipment_draft_orders sdo JOIN shipment_drafts sd ON sdo.shipment_draft_id = sd.id WHERE sd.container_id = ? ORDER BY sdo.shipment_draft_id, sdo.order_id");
+                $stmt = $pdo->prepare("SELECT DISTINCT sdo.order_id FROM shipment_draft_orders sdo JOIN shipment_drafts sd ON sdo.shipment_draft_id = sd.id WHERE sd.container_id = ? ORDER BY sdo.order_id");
                 $stmt->execute([$id]);
                 $orderIds = array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'order_id');
                 if (empty($orderIds)) jsonError('No orders in this container', 404);
@@ -129,27 +282,25 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $statusMode = strtolower(trim((string) ($_GET['status_mode'] ?? 'include')));
                 $statusMode = $statusMode === 'exclude' ? 'exclude' : 'include';
                 $sql = "SELECT c.*,
-                    COALESCE((
-                        SELECT SUM(oi.declared_cbm)
+                    COALESCE(cu.used_cbm, 0) AS used_cbm,
+                    COALESCE(cu.used_weight, 0) AS used_weight,
+                    COALESCE(cu.order_count, 0) AS order_count
+                FROM containers c
+                LEFT JOIN (
+                    SELECT ord.container_id,
+                           COALESCE(SUM(oi.declared_cbm), 0) AS used_cbm,
+                           COALESCE(SUM(oi.declared_weight), 0) AS used_weight,
+                           COUNT(DISTINCT ord.order_id) AS order_count
+                    FROM (
+                        SELECT DISTINCT sd.container_id, sdo.order_id
                         FROM shipment_draft_orders sdo
                         JOIN shipment_drafts sd ON sdo.shipment_draft_id = sd.id
-                        JOIN order_items oi ON oi.order_id = sdo.order_id
-                        WHERE sd.container_id = c.id
-                    ), 0) AS used_cbm,
-                    COALESCE((
-                        SELECT SUM(oi.declared_weight)
-                        FROM shipment_draft_orders sdo
-                        JOIN shipment_drafts sd ON sdo.shipment_draft_id = sd.id
-                        JOIN order_items oi ON oi.order_id = sdo.order_id
-                        WHERE sd.container_id = c.id
-                    ), 0) AS used_weight,
-                    COALESCE((
-                        SELECT COUNT(DISTINCT sdo.order_id)
-                        FROM shipment_draft_orders sdo
-                        JOIN shipment_drafts sd ON sdo.shipment_draft_id = sd.id
-                        WHERE sd.container_id = c.id
-                    ), 0) AS order_count
-                FROM containers c WHERE 1=1";
+                        WHERE sd.container_id IS NOT NULL
+                    ) ord
+                    LEFT JOIN order_items oi ON oi.order_id = ord.order_id
+                    GROUP BY ord.container_id
+                ) cu ON cu.container_id = c.id
+                WHERE 1=1";
                 $params = [];
                 if ($search !== '') {
                     $like = '%' . $search . '%';
@@ -217,6 +368,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $allowed_statuses = ['planning', 'to_go', 'on_route', 'arrived', 'available'];
             $sets = [];
             $params = [];
+            $usage = null;
             if (array_key_exists('code', $input)) {
                 $code = trim((string) ($input['code'] ?? ''));
                 if ($code === '') jsonError('Code cannot be empty', 400);
@@ -229,9 +381,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if (array_key_exists('max_cbm', $input)) {
                 $maxCbm = (float) $input['max_cbm'];
                 if ($maxCbm <= 0) jsonError('Max CBM must be positive', 400);
-                $stmt = $pdo->prepare("SELECT COALESCE(SUM(oi.declared_cbm),0) FROM shipment_draft_orders sdo JOIN shipment_drafts sd ON sdo.shipment_draft_id = sd.id JOIN order_items oi ON oi.order_id = sdo.order_id WHERE sd.container_id = ?");
-                $stmt->execute([$id]);
-                $usedCbm = (float) $stmt->fetchColumn();
+                $usage = fetchContainerUsage($pdo, (int) $id);
+                $usedCbm = (float) $usage['used_cbm'];
                 if ($usedCbm > $maxCbm) jsonError('Max CBM cannot be less than used CBM (' . round($usedCbm, 2) . ')', 400);
                 $sets[] = 'max_cbm = ?';
                 $params[] = $maxCbm;
@@ -239,9 +390,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if (array_key_exists('max_weight', $input)) {
                 $maxWeight = (float) $input['max_weight'];
                 if ($maxWeight <= 0) jsonError('Max weight must be positive', 400);
-                $stmt = $pdo->prepare("SELECT COALESCE(SUM(oi.declared_weight),0) FROM shipment_draft_orders sdo JOIN shipment_drafts sd ON sdo.shipment_draft_id = sd.id JOIN order_items oi ON oi.order_id = sdo.order_id WHERE sd.container_id = ?");
-                $stmt->execute([$id]);
-                $usedWeight = (float) $stmt->fetchColumn();
+                $usage = $usage ?? fetchContainerUsage($pdo, (int) $id);
+                $usedWeight = (float) $usage['used_weight'];
                 if ($usedWeight > $maxWeight) jsonError('Max weight cannot be less than used weight (' . round($usedWeight, 2) . ' kg)', 400);
                 $sets[] = 'max_weight = ?';
                 $params[] = $maxWeight;
@@ -340,16 +490,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
 
                 // Compute CURRENT usage of this container
-                $usageSql = "SELECT COALESCE(SUM(oi.declared_cbm),0) AS used_cbm,
-                                    COALESCE(SUM(oi.declared_weight),0) AS used_weight
-                             FROM shipment_draft_orders sdo
-                             JOIN shipment_drafts sd ON sdo.shipment_draft_id = sd.id
-                             JOIN order_items oi ON oi.order_id = sdo.order_id
-                             WHERE sd.container_id = ?";
-                $usageStmt = $pdo->prepare($usageSql);
-                $usageStmt->execute([$id]);
-                $usage = $usageStmt->fetch(PDO::FETCH_ASSOC);
-                $currentCbm    = (float) ($usage['used_cbm']    ?? 0);
+                $usage = fetchContainerUsage($pdo, (int) $id);
+                $currentCbm    = (float) ($usage['used_cbm'] ?? 0);
                 $currentWeight = (float) ($usage['used_weight'] ?? 0);
 
                 // Compute what the NEW orders would add
@@ -394,14 +536,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $pdo->prepare("UPDATE orders SET status='AssignedToContainer' WHERE id IN ($ph)")->execute($orderIds);
                 }
 
-                $usageStmt->execute([$id]);
-                $newUsage = $usageStmt->fetch(PDO::FETCH_ASSOC);
+                $newUsage = fetchContainerUsage($pdo, (int) $id);
                 jsonResponse([
                     'data' => [
                         'draft_id'      => $draftId,
                         'orders_added'  => count($orderIds),
                         'over_capacity' => $overCbm || $overWeight,
-                        'used_cbm'      => (float) ($newUsage['used_cbm']    ?? 0),
+                        'used_cbm'      => (float) ($newUsage['used_cbm'] ?? 0),
                         'used_weight'   => (float) ($newUsage['used_weight'] ?? 0),
                         'max_cbm'       => $maxCbm,
                         'max_weight'    => $maxWeight,

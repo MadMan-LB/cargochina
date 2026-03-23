@@ -4,16 +4,21 @@ require_once 'includes/page_guard.php';
 requireRoleForPage(['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin']);
 $currentPage = 'customers';
 $pageTitle = 'Customers';
+$roles = $_SESSION['user_roles'] ?? [];
+$canCreateCustomers = in_array('ChinaAdmin', $roles, true) || in_array('SuperAdmin', $roles, true);
+$canGeneratePortalLinks = in_array('ChinaAdmin', $roles, true) || in_array('SuperAdmin', $roles, true);
 require 'includes/layout.php';
 ?>
 <h1 class="mb-4">Customers</h1>
-<div class="card">
+<div class="card" id="customersPage" data-can-create-customers="<?= $canCreateCustomers ? '1' : '0' ?>" data-can-generate-portal="<?= $canGeneratePortalLinks ? '1' : '0' ?>">
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2 py-3">
     <span class="fw-semibold">Customer List</span>
     <div class="d-flex gap-2 align-items-center flex-wrap">
-      <input type="text" class="form-control form-control-sm" id="customerSearch" placeholder="Search by name, shipping code, phone, or email..." style="min-width:220px">
-      <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#importModal" onclick="openImportModal('customers')">Import CSV</button>
-      <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#customerModal" onclick="openCustomerForm()">+ Add Customer</button>
+      <input type="text" class="form-control form-control-sm" id="customerSearch" placeholder="Search by name, shipping code, POR, phone, or email..." style="min-width:220px">
+      <?php if ($canCreateCustomers): ?>
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#importModal" onclick="openImportModal('customers')">Import CSV</button>
+        <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#customerModal" onclick="openCustomerForm()">+ Add Customer</button>
+      <?php endif; ?>
     </div>
   </div>
   <div class="card-body py-3">
@@ -92,6 +97,12 @@ require 'includes/layout.php';
               <button type="button" class="btn btn-outline-secondary btn-sm mt-1" onclick="addCustomerPaymentLink()">+ Add payment link</button>
             </div>
             <div class="col-12">
+              <label class="form-label">por</label>
+              <small class="text-muted d-block mb-1">Add one or more POR values as separate entries so they stay searchable and structured.</small>
+              <div id="customerPorContainer"></div>
+              <button type="button" class="btn btn-outline-secondary btn-sm mt-1" onclick="addCustomerPor()">+ Add POR</button>
+            </div>
+            <div class="col-12">
               <label class="form-label">Address</label>
               <textarea class="form-control" id="customerAddress" rows="2" placeholder="Full address"></textarea>
             </div>
@@ -106,7 +117,7 @@ require 'includes/layout.php';
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary" onclick="saveCustomer()">Save</button>
+        <button type="button" class="btn btn-primary" id="customerSaveBtn" onclick="saveCustomer()">Save</button>
       </div>
     </div>
   </div>
@@ -204,7 +215,7 @@ require 'includes/layout.php';
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <p class="text-muted small">One-time link for customer to view order status. Valid 24 hours.</p>
+        <p class="text-muted small">One-time link for the customer to view order status. After the first successful open, the link is consumed and cannot be reused.</p>
         <div class="mb-2">
           <label class="form-label small">Hours valid</label>
           <select class="form-select form-select-sm" id="portalHours">
@@ -220,6 +231,12 @@ require 'includes/layout.php';
             <input type="text" class="form-control form-control-sm" id="portalLinkInput" readonly>
             <button class="btn btn-outline-secondary btn-sm" type="button" onclick="copyPortalLink()">Copy</button>
           </div>
+          <a class="btn btn-link btn-sm px-0 mt-2" id="portalOpenLink" href="#" target="_blank" rel="noopener">Open portal in a new tab</a>
+        </div>
+        <hr>
+        <div>
+          <label class="form-label small mb-1">Recent portal links</label>
+          <div id="portalHistory" class="small text-muted">Loading…</div>
         </div>
       </div>
       <div class="modal-footer">

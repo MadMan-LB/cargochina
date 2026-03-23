@@ -1,7 +1,33 @@
 let searchTimeout = null;
+let customerPaymentLinks = [];
+let customerCountryShipping = [];
+let customerPorValues = [];
+
+function customerPageEl() {
+    return document.getElementById("customersPage");
+}
+
+function canCreateCustomers() {
+    return customerPageEl()?.dataset?.canCreateCustomers === "1";
+}
+
+function canGeneratePortalLinks() {
+    return customerPageEl()?.dataset?.canGeneratePortal === "1";
+}
+
+function setCustomerSaveState(isEditing) {
+    const saveBtn = document.getElementById("customerSaveBtn");
+    if (!saveBtn) return;
+    const blocked = !isEditing && !canCreateCustomers();
+    saveBtn.disabled = blocked;
+    saveBtn.title = blocked
+        ? "Only Admin and Super Admin can add customers"
+        : "";
+}
 
 document.addEventListener("DOMContentLoaded", () => {
     loadCustomers();
+    setCustomerSaveState(false);
     const searchInput = document.getElementById("customerSearch");
     if (searchInput) {
         searchInput.addEventListener("input", () => {
@@ -27,13 +53,14 @@ async function loadCustomers() {
         const path = q ? "/customers?q=" + encodeURIComponent(q) : "/customers";
         const res = await api("GET", path);
         const rows = res.data || [];
+        const portalActionsEnabled = canGeneratePortalLinks();
         tbody.innerHTML =
             rows
                 .map(
                     (r) => `
       <tr>
         <td>${esc(r.default_shipping_code || r.code || "-")}</td>
-        <td>${esc(r.name)}${r.priority_level && r.priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${esc(r.priority_note || "")}">${esc(r.priority_level)}</span>` : ""}${r.default_shipping_code ? `<br><small class="text-muted">Ship code: ${esc(r.default_shipping_code)}</small>` : ""}</td>
+        <td>${esc(r.name)}${r.priority_level && r.priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${esc(r.priority_note || "")}">${esc(r.priority_level)}</span>` : ""}${r.default_shipping_code ? `<br><small class="text-muted">Ship code: ${esc(r.default_shipping_code)}</small>` : ""}${Array.isArray(r.por) && r.por.length ? `<div class="mt-1 d-flex gap-1 flex-wrap">${r.por.map((por) => `<span class="badge bg-light text-dark border">${esc(por)}</span>`).join("")}</div>` : ""}</td>
         <td>${esc(r.phone || "-")}</td>
         <td class="text-truncate" style="max-width:180px" title="${esc(r.address || "")}">${esc((r.address || "-").substring(0, 50))}${(r.address || "").length > 50 ? "…" : ""}</td>
         <td>${esc(r.payment_terms || "-")}</td>
@@ -42,7 +69,7 @@ async function loadCustomers() {
           <button type="button" class="btn btn-sm btn-outline-info" onclick="showOrders(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Orders</button>
           <button type="button" class="btn btn-sm btn-outline-success" onclick="openDepositModal(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Deposit</button>
           <button type="button" class="btn btn-sm btn-outline-secondary" onclick="showBalance(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Balance</button>
-          <button type="button" class="btn btn-sm btn-outline-info" onclick="generatePortalLink(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')" title="One-time portal link">Portal</button>
+          ${portalActionsEnabled ? `<button type="button" class="btn btn-sm btn-outline-info" onclick="generatePortalLink(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')" title="One-time customer status link">Portal Link</button>` : ""}
           <button type="button" class="btn btn-sm btn-outline-secondary" onclick="openMessagesModal(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Messages</button>
           <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteCustomer(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Del</button>
         </td>
@@ -55,9 +82,6 @@ async function loadCustomers() {
         showToast(e.message, "danger");
     }
 }
-
-let customerPaymentLinks = [];
-let customerCountryShipping = [];
 
 window.addCustomerPaymentLink = function addCustomerPaymentLink(
     name = "",
@@ -83,6 +107,23 @@ window.addCustomerCountryShipping = function addCustomerCountryShipping(countryI
 window.removeCustomerCountryShipping = function removeCustomerCountryShipping(id) {
     customerCountryShipping = customerCountryShipping.filter((c) => c.id !== id);
     renderCustomerCountryShipping();
+};
+
+window.addCustomerPor = function addCustomerPor(value = "") {
+    customerPorValues.push({ id: Date.now() + Math.random(), value });
+    renderCustomerPorValues();
+};
+
+window.removeCustomerPor = function removeCustomerPor(id) {
+    customerPorValues = customerPorValues.filter((por) => por.id !== id);
+    renderCustomerPorValues();
+};
+
+window.updateCustomerPor = function updateCustomerPor(id, value) {
+    const row = customerPorValues.find((por) => por.id === id);
+    if (row) {
+        row.value = value;
+    }
 };
 
 function renderCustomerCountryShipping() {
@@ -154,6 +195,23 @@ function renderCustomerPaymentLinks() {
         .join("");
 }
 
+function renderCustomerPorValues() {
+    const container = document.getElementById("customerPorContainer");
+    if (!container) return;
+    container.innerHTML = customerPorValues.length
+        ? customerPorValues
+              .map(
+                  (row) => `
+      <div class="d-flex gap-2 mb-2 align-items-center">
+        <input type="text" class="form-control form-control-sm" placeholder="POR value" value="${esc(row.value || "")}" onchange="updateCustomerPor(${row.id}, this.value)" oninput="updateCustomerPor(${row.id}, this.value)">
+        <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeCustomerPor(${row.id})">×</button>
+      </div>
+    `,
+              )
+              .join("")
+        : '<p class="text-muted small mb-0">No POR values added yet.</p>';
+}
+
 window.updatePaymentLinkName = function updatePaymentLinkName(id, v) {
     const p = customerPaymentLinks.find((x) => x.id === id);
     if (p) p.name = v;
@@ -165,14 +223,21 @@ window.updatePaymentLinkValue = function updatePaymentLinkValue(id, v) {
 };
 
 function openCustomerForm() {
+    if (!canCreateCustomers()) {
+        showToast("Only Admin and Super Admin can add customers", "warning");
+        return;
+    }
     document.getElementById("customerForm").reset();
     document.getElementById("customerId").value = "";
     document.getElementById("customerModalTitle").textContent = "Add Customer";
     customerPaymentLinks = [];
     customerCountryShipping = [];
+    customerPorValues = [];
     countryShippingAcInstances = {};
     renderCustomerPaymentLinks();
     renderCustomerCountryShipping();
+    renderCustomerPorValues();
+    setCustomerSaveState(false);
     const passportList = document.getElementById("customerPassportList");
     if (passportList) passportList.innerHTML = '<p class="text-muted small mb-0">Save customer first to add passport/ID attachments</p>';
 }
@@ -207,11 +272,17 @@ async function editCustomer(id) {
             country_code: cs.country_code || "",
             shipping_code: cs.shipping_code || "",
         }));
+        customerPorValues = (d.por || []).map((por, i) => ({
+            id: Date.now() + i + 2000,
+            value: por || "",
+        }));
         countryShippingAcInstances = {};
         renderCustomerPaymentLinks();
         renderCustomerCountryShipping();
+        renderCustomerPorValues();
         document.getElementById("customerModalTitle").textContent =
             "Edit Customer";
+        setCustomerSaveState(true);
         new bootstrap.Modal(document.getElementById("customerModal")).show();
         setTimeout(initCountryShippingAutocompletes, 100);
         loadCustomerPassportAttachments(id);
@@ -222,6 +293,10 @@ async function editCustomer(id) {
 
 async function saveCustomer() {
     const id = document.getElementById("customerId").value;
+    if (!id && !canCreateCustomers()) {
+        showToast("Only Admin and Super Admin can add customers", "danger");
+        return;
+    }
     const payload = {
         name: document.getElementById("customerName").value.trim(),
         phone: document.getElementById("customerPhone").value.trim() || null,
@@ -252,6 +327,9 @@ async function saveCustomer() {
                 country_id: c.country_id,
                 shipping_code: (c.shipping_code || "").trim() || null,
             })),
+        por: customerPorValues
+            .map((row) => (row.value || "").trim())
+            .filter(Boolean),
     };
     if (!payload.name || !payload.default_shipping_code) {
         showToast("Name and Default Shipping Code are required", "danger");
@@ -522,10 +600,17 @@ async function deleteCustomer(id, name) {
 }
 
 window.generatePortalLink = function (customerId, name) {
+    if (!canGeneratePortalLinks()) {
+        showToast("Only Admin and Super Admin can generate portal links", "warning");
+        return;
+    }
     window._portalCustomerId = customerId;
     document.getElementById("portalCustomerName").textContent = name;
     document.getElementById("portalLinkResult").classList.add("d-none");
     document.getElementById("portalLinkInput").value = "";
+    const openLink = document.getElementById("portalOpenLink");
+    if (openLink) openLink.href = "#";
+    loadPortalHistory(customerId);
     new bootstrap.Modal(document.getElementById("portalModal")).show();
 };
 
@@ -542,6 +627,9 @@ window.doGeneratePortalLink = async function () {
         const link = res.data?.link || "";
         document.getElementById("portalLinkInput").value = link;
         document.getElementById("portalLinkResult").classList.remove("d-none");
+        const openLink = document.getElementById("portalOpenLink");
+        if (openLink) openLink.href = link || "#";
+        loadPortalHistory(customerId);
         showToast("Link generated");
     } catch (e) {
         showToast(e.message, "danger");
@@ -552,10 +640,58 @@ window.doGeneratePortalLink = async function () {
 
 window.copyPortalLink = function () {
     const inp = document.getElementById("portalLinkInput");
+    if (!inp?.value) return;
+    if (navigator.clipboard?.writeText) {
+        navigator.clipboard
+            .writeText(inp.value)
+            .then(() => showToast("Copied to clipboard"))
+            .catch(() => {
+                inp.select();
+                document.execCommand("copy");
+                showToast("Copied to clipboard");
+            });
+        return;
+    }
     inp.select();
     document.execCommand("copy");
     showToast("Copied to clipboard");
 };
+
+async function loadPortalHistory(customerId) {
+    const historyEl = document.getElementById("portalHistory");
+    if (!historyEl) return;
+    historyEl.innerHTML = '<span class="text-muted">Loading…</span>';
+    try {
+        const res = await api(
+            "GET",
+            "/customer-portal-tokens?customer_id=" + encodeURIComponent(customerId),
+        );
+        const rows = res.data || [];
+        if (!rows.length) {
+            historyEl.innerHTML =
+                '<span class="text-muted">No portal links generated yet for this customer.</span>';
+            return;
+        }
+        historyEl.innerHTML = rows
+            .map((row) => {
+                const state = row.used_at
+                    ? '<span class="badge bg-secondary">Used</span>'
+                    : '<span class="badge bg-success">Unused</span>';
+                return `<div class="d-flex justify-content-between align-items-start gap-2 border rounded-3 px-2 py-2 mb-2">
+            <div>
+              <div class="fw-semibold small">${state}</div>
+              <div class="text-muted small">Created: ${esc((row.created_at || "").replace("T", " ").slice(0, 16) || "-")}</div>
+              <div class="text-muted small">Expires: ${esc((row.expires_at || "").replace("T", " ").slice(0, 16) || "-")}</div>
+            </div>
+            <div class="text-end small text-muted">${row.used_at ? `Opened: ${esc((row.used_at || "").replace("T", " ").slice(0, 16))}` : "Ready to send"}</div>
+          </div>`;
+            })
+            .join("");
+    } catch (e) {
+        historyEl.innerHTML =
+            '<span class="text-danger">Failed to load recent portal links.</span>';
+    }
+}
 
 window.openMessagesModal = function (customerId, name) {
     window._messagesCustomerId = customerId;
@@ -612,6 +748,10 @@ window.sendMessage = async function () {
 };
 
 window.openImportModal = function (entity) {
+    if (!canCreateCustomers()) {
+        showToast("Only Admin and Super Admin can import customers", "warning");
+        return;
+    }
     window._importEntity = entity || "customers";
     window._importOnSuccess = loadCustomers;
     const ta = document.getElementById("importCsvData");
@@ -626,6 +766,10 @@ window.openImportModal = function (entity) {
 };
 
 window.doImport = async function () {
+    if (!canCreateCustomers()) {
+        showToast("Only Admin and Super Admin can import customers", "danger");
+        return;
+    }
     const entity = window._importEntity || "customers";
     const csv = document.getElementById("importCsvData")?.value?.trim();
     if (!csv) {

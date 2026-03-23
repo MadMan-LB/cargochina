@@ -110,7 +110,12 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'customers' && $id === 'import' && !hasAnyRole(['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'])) {
+    if ($resource === 'customers' && $method === 'POST' && $id === null && !hasAnyRole($rbac['customers']['create'] ?? ['ChinaAdmin', 'SuperAdmin'])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'customers' && $id === 'import' && !hasAnyRole($rbac['customers']['import'] ?? ['ChinaAdmin', 'SuperAdmin'])) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;

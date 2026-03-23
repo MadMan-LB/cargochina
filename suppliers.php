@@ -107,6 +107,12 @@ require 'includes/layout.php';
             <div id="additionalIdsContainer"></div>
             <button type="button" class="btn btn-outline-secondary btn-sm mt-1" onclick="addAdditionalIdRow()">+ Add ID</button>
           </div>
+          <div class="mb-2" id="supplierAttachmentSection">
+            <label class="form-label">Documents & Photos</label>
+            <small class="text-muted d-block mb-1">Upload supplier files, invoices, licenses, or photos. Save the supplier first when creating a new record.</small>
+            <div id="supplierAttachmentList" class="mb-2"></div>
+            <input type="file" class="form-control form-control-sm" id="supplierAttachmentInput" accept="image/*,.pdf" multiple style="max-width:320px">
+          </div>
         </form>
       </div>
       <div class="modal-footer">
@@ -238,5 +244,5 @@ require 'includes/layout.php';
     </div>
   </div>
 </div>
-<?php $pageScript = 'frontend/js/suppliers.js';
+<?php $pageScript = 'frontend/js/suppliers.js?v=' . filemtime(__DIR__ . '/frontend/js/suppliers.js');
 require 'includes/footer.php'; ?>

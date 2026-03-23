@@ -6,6 +6,26 @@
 
 require_once __DIR__ . '/../helpers.php';
 
+function customerTableHas(PDO $pdo, string $table, string $column): bool
+{
+    static $cache = [];
+
+    $key = $table . '.' . $column;
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+
+    try {
+        $stmt = $pdo->prepare("SHOW COLUMNS FROM `$table` LIKE ?");
+        $stmt->execute([$column]);
+        $cache[$key] = (bool) $stmt->rowCount();
+    } catch (Throwable $e) {
+        $cache[$key] = false;
+    }
+
+    return $cache[$key];
+}
+
 function normalizeCustomerPriority(array $input): array
 {
     $priorityLevel = trim((string) ($input['priority_level'] ?? 'normal'));
@@ -58,6 +78,97 @@ function loadCountryShipping(PDO $pdo, int $customerId): array
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (Throwable $e) {
         return [];
+    }
+}
+
+function customerHasPorTable(PDO $pdo): bool
+{
+    static $hasTable = null;
+    if ($hasTable !== null) {
+        return $hasTable;
+    }
+    try {
+        $stmt = $pdo->query("SHOW TABLES LIKE 'customer_pors'");
+        $hasTable = (bool) ($stmt && $stmt->rowCount() > 0);
+    } catch (Throwable $e) {
+        $hasTable = false;
+    }
+
+    return $hasTable;
+}
+
+function normalizeCustomerPorInput($input): array
+{
+    $values = [];
+    if (is_array($input)) {
+        $values = $input;
+    } elseif (is_string($input)) {
+        $values = [$input];
+    }
+
+    $normalized = [];
+    foreach ($values as $value) {
+        $por = trim((string) $value);
+        if ($por === '') {
+            continue;
+        }
+        if (mb_strlen($por) > 120) {
+            jsonError('Each por value must be 120 characters or fewer', 400);
+        }
+        $normalized[] = $por;
+    }
+
+    return array_values(array_unique($normalized));
+}
+
+function loadCustomerPorValues(PDO $pdo, int $customerId): array
+{
+    if (!customerHasPorTable($pdo)) {
+        return [];
+    }
+
+    try {
+        $stmt = $pdo->prepare("SELECT por_value FROM customer_pors WHERE customer_id = ? ORDER BY sort_order, id");
+        $stmt->execute([$customerId]);
+        return array_values(array_filter(array_map(static function ($row) {
+            return trim((string) ($row['por_value'] ?? ''));
+        }, $stmt->fetchAll(PDO::FETCH_ASSOC)), static fn($value) => $value !== ''));
+    } catch (Throwable $e) {
+        return [];
+    }
+}
+
+function persistCustomerPorValues(PDO $pdo, int $customerId, array $porValues): void
+{
+    if (!customerHasPorTable($pdo)) {
+        return;
+    }
+
+    $pdo->prepare("DELETE FROM customer_pors WHERE customer_id = ?")->execute([$customerId]);
+    if (empty($porValues)) {
+        return;
+    }
+
+    $stmt = $pdo->prepare("INSERT INTO customer_pors (customer_id, por_value, sort_order) VALUES (?, ?, ?)");
+    foreach (array_values($porValues) as $index => $por) {
+        $stmt->execute([$customerId, $por, $index]);
+    }
+}
+
+function persistCountryShipping(PDO $pdo, int $customerId, array $countryShipping): void
+{
+    $pdo->prepare("DELETE FROM customer_country_shipping WHERE customer_id = ?")->execute([$customerId]);
+    if (empty($countryShipping)) {
+        return;
+    }
+
+    $ins = $pdo->prepare("INSERT INTO customer_country_shipping (customer_id, country_id, shipping_code) VALUES (?, ?, ?)");
+    foreach ($countryShipping as $cs) {
+        $cid = (int) ($cs['country_id'] ?? 0);
+        $sc = trim((string) ($cs['shipping_code'] ?? '')) ?: null;
+        if ($cid > 0) {
+            $ins->execute([$customerId, $cid, $sc]);
+        }
     }
 }
 
@@ -120,11 +231,19 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $coll = 'COLLATE utf8mb4_unicode_ci';
                 $where = "(name $coll LIKE ?) OR (code $coll LIKE ?) OR (default_shipping_code $coll LIKE ?)";
                 $params = [$like, $like, $like];
+                if (customerHasPorTable($pdo)) {
+                    $where .= " OR EXISTS (SELECT 1 FROM customer_pors cp WHERE cp.customer_id = customers.id AND cp.por_value $coll LIKE ?)";
+                    $params[] = $like;
+                }
                 if ($hasPhone) { $where .= " OR (phone $coll LIKE ?)"; $params[] = $like; }
                 if ($hasEmail) { $where .= " OR (email $coll LIKE ?)"; $params[] = $like; }
                 $stmt = $pdo->prepare("SELECT $sel FROM customers WHERE $where ORDER BY name LIMIT 20");
                 $stmt->execute($params);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                foreach ($rows as &$row) {
+                    $row['por'] = loadCustomerPorValues($pdo, (int) ($row['id'] ?? 0));
+                }
+                unset($row);
                 jsonResponse(['data' => $rows]);
             }
             if ($id === null) {
@@ -153,6 +272,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     if ($hasPhone) { $sql .= " OR (phone $coll LIKE ?)"; $params[] = $like; }
                     if ($hasEmail) { $sql .= " OR (email $coll LIKE ?)"; $params[] = $like; }
                     if ($hasDefaultShippingCode) { $sql .= " OR (default_shipping_code $coll LIKE ?)"; $params[] = $like; }
+                    if (customerHasPorTable($pdo)) {
+                        $sql .= " OR EXISTS (SELECT 1 FROM customer_pors cp WHERE cp.customer_id = customers.id AND cp.por_value $coll LIKE ?)";
+                        $params[] = $like;
+                    }
                 }
                 $sql .= " ORDER BY name";
                 $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
@@ -163,6 +286,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $r['addresses'] = $r['addresses'] ? json_decode($r['addresses'], true) : [];
                     $r['payment_links'] = isset($r['payment_links']) && $r['payment_links'] ? json_decode($r['payment_links'], true) : [];
                     $r['country_shipping'] = loadCountryShipping($pdo, (int) $r['id']);
+                    $r['por'] = loadCustomerPorValues($pdo, (int) $r['id']);
                 }
                 jsonResponse(['data' => $rows]);
             }
@@ -176,6 +300,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $row['addresses'] = $row['addresses'] ? json_decode($row['addresses'], true) : [];
             $row['payment_links'] = isset($row['payment_links']) && $row['payment_links'] ? json_decode($row['payment_links'], true) : [];
             $row['country_shipping'] = loadCountryShipping($pdo, (int) $id);
+            $row['por'] = loadCustomerPorValues($pdo, (int) $id);
             if ($action === 'next-item-no') {
                 $shippingCode = trim($_GET['shipping_code'] ?? '');
                 if ($shippingCode === '') {
@@ -205,6 +330,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
         case 'POST':
             if ($id === 'import') {
+                requireRole(['ChinaAdmin', 'SuperAdmin']);
                 $csv = trim($input['csv'] ?? $input['data'] ?? '');
                 if (!$csv) jsonError('No CSV data provided', 400);
                 $lines = preg_split('/\r\n|\r|\n/', $csv);
@@ -305,11 +431,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt->execute([$newId]);
                 jsonResponse(['data' => $stmt->fetch(PDO::FETCH_ASSOC)], 201);
             }
+            requireRole(['ChinaAdmin', 'SuperAdmin']);
             $name = trim($input['name'] ?? '');
             if (!$name) {
                 jsonError('Missing required fields', 400, ['name' => 'Required']);
             }
             $countryShipping = is_array($input['country_shipping'] ?? null) ? $input['country_shipping'] : [];
+            $porValues = normalizeCustomerPorInput($input['por'] ?? []);
             $defaultShippingCode = isset($input['default_shipping_code']) ? (trim((string) $input['default_shipping_code']) ?: null) : null;
             $code = trim($input['code'] ?? '');
             if ($code === '') {
@@ -334,6 +462,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $hasPriority = false;
             $hasPriorityNote = false;
             $hasDefaultShippingCode = false;
+            $hasEmail = false;
             try {
                 $chk = $pdo->query("SHOW COLUMNS FROM customers WHERE Field IN ('phone','address','priority_level','priority_note','default_shipping_code','email')");
                 $colsExist = $chk ? array_column($chk->fetchAll(PDO::FETCH_ASSOC), 'Field') : [];
@@ -394,22 +523,40 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $cols[] = 'default_shipping_code';
                 $vals[] = $defaultShippingCode;
             }
+            if ($hasEmail) {
+                $cols[] = 'email';
+                $vals[] = $email;
+            }
             $ph = implode(',', array_fill(0, count($vals), '?'));
             $colStr = implode(', ', $cols);
             try {
+                $pdo->beginTransaction();
                 $stmt = $pdo->prepare("INSERT INTO customers ($colStr) VALUES ($ph)");
                 $stmt->execute($vals);
                 $newId = (int) $pdo->lastInsertId();
+                persistCountryShipping($pdo, $newId, $countryShipping);
+                persistCustomerPorValues($pdo, $newId, $porValues);
                 $stmt = $pdo->prepare("SELECT * FROM customers WHERE id = ?");
                 $stmt->execute([$newId]);
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                $pdo->commit();
                 $row['contacts'] = $row['contacts'] ? json_decode($row['contacts'], true) : [];
                 $row['addresses'] = $row['addresses'] ? json_decode($row['addresses'], true) : [];
                 $row['payment_links'] = isset($row['payment_links']) && $row['payment_links'] ? json_decode($row['payment_links'], true) : [];
+                $row['country_shipping'] = loadCountryShipping($pdo, $newId);
+                $row['por'] = loadCustomerPorValues($pdo, $newId);
                 jsonResponse(array_filter(['data' => $row, 'warning' => $duplicateWarning]), 201);
             } catch (PDOException $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
                 if ($e->getCode() == 23000) {
                     jsonError('Customer code already exists', 409);
+                }
+                throw $e;
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
                 }
                 throw $e;
             }
@@ -435,6 +582,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $contacts = isset($input['contacts']) ? json_encode($input['contacts']) : null;
             $addresses = isset($input['addresses']) ? json_encode($input['addresses']) : null;
             $paymentTerms = $input['payment_terms'] ?? null;
+            $porValues = normalizeCustomerPorInput($input['por'] ?? []);
             $paymentLinks = isset($input['payment_links']) && is_array($input['payment_links'])
                 ? json_encode(array_values(array_map(function ($p) {
                     return ['name' => trim($p['name'] ?? ''), 'value' => trim($p['value'] ?? '')];
@@ -520,28 +668,31 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $vals[] = $email;
             }
             $vals[] = $id;
-            $pdo->prepare("UPDATE customers SET " . implode(', ', $sets) . " WHERE id=?")->execute($vals);
-            if (is_array($countryShipping)) {
-                $pdo->prepare("DELETE FROM customer_country_shipping WHERE customer_id = ?")->execute([$id]);
-                if (!empty($countryShipping)) {
-                    $ins = $pdo->prepare("INSERT INTO customer_country_shipping (customer_id, country_id, shipping_code) VALUES (?, ?, ?)");
-                    foreach ($countryShipping as $cs) {
-                        $cid = (int) ($cs['country_id'] ?? 0);
-                        $sc = trim($cs['shipping_code'] ?? '') ?: null;
-                        if ($cid > 0) {
-                            $ins->execute([$id, $cid, $sc]);
-                        }
-                    }
+            try {
+                $pdo->beginTransaction();
+                $pdo->prepare("UPDATE customers SET " . implode(', ', $sets) . " WHERE id=?")->execute($vals);
+                if (is_array($countryShipping)) {
+                    persistCountryShipping($pdo, (int) $id, $countryShipping);
                 }
+                if (array_key_exists('por', $input)) {
+                    persistCustomerPorValues($pdo, (int) $id, $porValues);
+                }
+                $stmt = $pdo->prepare("SELECT * FROM customers WHERE id = ?");
+                $stmt->execute([$id]);
+                $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                $pdo->commit();
+                $row['contacts'] = $row['contacts'] ? json_decode($row['contacts'], true) : [];
+                $row['addresses'] = $row['addresses'] ? json_decode($row['addresses'], true) : [];
+                $row['payment_links'] = isset($row['payment_links']) && $row['payment_links'] ? json_decode($row['payment_links'], true) : [];
+                $row['country_shipping'] = loadCountryShipping($pdo, (int) $id);
+                $row['por'] = loadCustomerPorValues($pdo, (int) $id);
+                jsonResponse(array_filter(['data' => $row, 'warning' => $duplicateWarning]));
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
             }
-            $stmt = $pdo->prepare("SELECT * FROM customers WHERE id = ?");
-            $stmt->execute([$id]);
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
-            $row['contacts'] = $row['contacts'] ? json_decode($row['contacts'], true) : [];
-            $row['addresses'] = $row['addresses'] ? json_decode($row['addresses'], true) : [];
-            $row['payment_links'] = isset($row['payment_links']) && $row['payment_links'] ? json_decode($row['payment_links'], true) : [];
-            $row['country_shipping'] = loadCountryShipping($pdo, (int) $id);
-            jsonResponse(array_filter(['data' => $row, 'warning' => $duplicateWarning]));
 
         case 'DELETE':
             if (!$id) {

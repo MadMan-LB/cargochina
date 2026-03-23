@@ -987,3 +987,28 @@ High-confidence completed items after this review pass:
   - Draft-order normalization now auto-completes missing Chinese/English description sides using `TranslationService`, so the simplified builder still stores `description_cn` and `description_en` consistently for order items, product creation, search, and export/print.
 - `backend/services/TranslationService.php` and `backend/api/handlers/translations.php`
   - Translation stubs now respect the target language tag (`[EN]`, `[ZH]`, etc.) so server-side CN/EN auto-fill does not incorrectly label all generated values as English.
+
+## 2026-03-23 Customer Portal / POR / Supplier Attachments / Container Totals / Customer Create RBAC
+
+- Customer portal flow was completed from the existing token-based implementation instead of rebuilding it:
+  - `customers.php` now exposes a clearer `Portal Link` action for eligible users and shows recent one-time portal links in the modal.
+  - `frontend/js/customers.js` now loads portal-link history through the existing `customer-portal-tokens` API and keeps the generated link accessible for copy/open actions.
+  - Existing `customer_portal.php` and `backend/api/handlers/customer-portal-tokens.php` were reused as the customer-facing status flow.
+- Customers now support structured multi-value `por` data:
+  - Added migration `backend/migrations/051_customer_pors.sql`
+  - `backend/api/handlers/customers.php` now persists POR values in `customer_pors`, returns them on list/detail responses, and includes POR values in customer search.
+  - `customers.php` / `frontend/js/customers.js` now provide repeatable POR inputs and show POR badges in the customer list.
+- Customer create/import is now restricted to admin roles at both UI and API layers:
+  - `customers.php` hides add/import actions for non-admin users.
+  - `frontend/js/customers.js` blocks create/import actions client-side for non-admin users.
+  - `backend/config/rbac.php` and `backend/api/index.php` now enforce `customers.create` and `customers.import` for `ChinaAdmin` and `SuperAdmin` only, without broadening or breaking the existing edit permissions.
+- Supplier add/edit now supports safe documents/photos by reusing the existing validated upload and design-attachment flow:
+  - `backend/api/handlers/design-attachments.php` now supports `entity_type = supplier`
+  - `suppliers.php` / `frontend/js/suppliers.js` now show existing supplier attachments and allow upload/delete after the supplier exists.
+- Container totals were corrected and deduplicated:
+  - `backend/api/handlers/containers.php` now derives per-order totals from order items using order-level carton/packing overrides where available, returns a modal totals payload, deduplicates container usage/order aggregation across shipment drafts, and fixes the container list/export/assignment math to use the same source-of-truth.
+  - `frontend/js/containers.js` now renders totals from the API instead of re-summing mixed legacy fields in the browser.
+- Validation:
+  - PHP syntax checks passed for all changed PHP files.
+  - JS syntax checks passed for all changed JS files.
+  - `npm run smoke:ui` passed after updating smoke coverage for customers, suppliers, containers, and the current procurement-drafts UI.
