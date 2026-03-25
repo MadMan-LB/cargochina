@@ -10,7 +10,11 @@
     let finDepOrderAc = null;
     let finPayOrderAc = null;
     let balancesLoadedOnce = false;
-    const PROFIT_DEFAULT_EXCLUDED_STATUSES = ["Draft", "CustomerDeclined"];
+    const PROFIT_DEFAULT_EXCLUDED_STATUSES = [
+        "Draft",
+        "CustomerDeclined",
+        "CustomerDeclinedAfterAutoConfirm",
+    ];
 
     async function api(path, opts = {}) {
         const fetchOpts = { credentials: "same-origin", ...opts };
@@ -39,6 +43,38 @@
         if (value > 0) return "+" + formatted;
         if (value < 0) return "-" + formatted;
         return formatted;
+    }
+
+    function getCurrencyBucket(row, currency) {
+        return row?.currencies?.[currency] || {};
+    }
+
+    function renderBalanceBreakdown(row, fields, positiveField = null) {
+        const currency = fields.currency;
+        const bucket = getCurrencyBucket(row, currency);
+        const primary = parseFloat(bucket[fields.primary] || 0);
+        const secondary = parseFloat(bucket[fields.secondary] || 0);
+        const tertiary =
+            fields.tertiary != null
+                ? parseFloat(bucket[fields.tertiary] || 0)
+                : null;
+        const primaryClass =
+            positiveField && positiveField === fields.primary && primary > 0
+                ? "text-success"
+                : positiveField && positiveField === fields.primary && primary < 0
+                  ? "text-danger"
+                  : "";
+        return `
+            <div class="small">
+                <div><strong class="${primaryClass}">${fields.signed ? formatSignedNum(primary) : formatNum(primary)}</strong> ${escapeHtml(currency)}</div>
+                <div class="text-muted">${escapeHtml(fields.secondaryLabel)} ${formatNum(secondary)}</div>
+                ${
+                    tertiary !== null
+                        ? `<div class="text-muted">${escapeHtml(fields.tertiaryLabel)} ${formatNum(tertiary)}</div>`
+                        : ""
+                }
+            </div>
+        `;
     }
 
     function getStatusBadge(status) {
@@ -79,7 +115,7 @@
         const statuses = getSelectedProfitStatuses();
         if (!statuses.length) {
             summaryEl.textContent =
-                "Default scope: all except Draft and Customer Declined.";
+                "Default scope: all except Draft and declined orders.";
             return;
         }
         const labels = formatProfitStatusLabels(statuses);
@@ -197,7 +233,7 @@
             "profitFilterSummary",
             getFilterSummary(
                 filters,
-                "Showing the default finance scope: all except Draft and Customer Declined.",
+                "Showing the default finance scope: all except Draft and declined orders.",
             ),
         );
         setText(
@@ -345,30 +381,28 @@
                       (c) => `
             <tr>
                 <td><a href="/cargochina/customers.php?id=${c.id}">${escapeHtml(c.name || c.code)}</a></td>
-                <td>${formatNum(c.deposits)}</td>
-                <td>${formatNum(c.receivable)}</td>
-                <td class="${c.balance >= 0 ? "text-success" : "text-danger"}">${formatSignedNum(c.balance)}</td>
+                <td>${renderBalanceBreakdown(c, { currency: "USD", primary: "balance", secondary: "deposits", tertiary: "receivable", secondaryLabel: "Deposits", tertiaryLabel: "Receivable", signed: true }, "balance")}</td>
+                <td>${renderBalanceBreakdown(c, { currency: "RMB", primary: "balance", secondary: "deposits", tertiary: "receivable", secondaryLabel: "Deposits", tertiaryLabel: "Receivable", signed: true }, "balance")}</td>
                 <td><button class="btn btn-sm btn-outline-primary" onclick="openFinDepositModal(${c.id}, '${nameEsc(c.name || c.code)}')">Record Deposit</button></td>
             </tr>
         `,
                   )
                   .join("")
-            : '<tr><td colspan="5" class="text-center text-muted">No customers.</td></tr>';
+            : '<tr><td colspan="4" class="text-center text-muted">No customers.</td></tr>';
         suppBody.innerHTML = supp.length
             ? supp
                   .map(
                       (s) => `
             <tr>
                 <td><a href="/cargochina/suppliers.php?id=${s.id}">${escapeHtml(s.name || s.code)}</a></td>
-                <td>${formatNum(s.invoiced)}</td>
-                <td>${formatNum(s.paid)}</td>
-                <td class="${s.payable > 0 ? "text-warning" : ""}">${formatNum(s.payable)}</td>
+                <td>${renderBalanceBreakdown(s, { currency: "USD", primary: "payable", secondary: "invoiced", tertiary: "settlement_delta", secondaryLabel: "Invoiced", tertiaryLabel: "Settlement delta", signed: false })}</td>
+                <td>${renderBalanceBreakdown(s, { currency: "RMB", primary: "payable", secondary: "invoiced", tertiary: "settlement_delta", secondaryLabel: "Invoiced", tertiaryLabel: "Settlement delta", signed: false })}</td>
                 <td><button class="btn btn-sm btn-outline-success" onclick="openFinPaymentModal(${s.id}, '${nameEsc(s.name || s.code)}')">Record Payment</button></td>
             </tr>
         `,
                   )
                   .join("")
-            : '<tr><td colspan="5" class="text-center text-muted">No suppliers.</td></tr>';
+            : '<tr><td colspan="4" class="text-center text-muted">No suppliers.</td></tr>';
         updateBalanceOverview(cust, supp);
     }
 
@@ -383,47 +417,62 @@
         if (customerText) filters.push(`Customer: ${customerText}`);
         if (supplierText) filters.push(`Supplier: ${supplierText}`);
 
-        const positiveBalances = customers.filter((c) => (c.balance || 0) > 0);
-        const negativeBalances = customers.filter((c) => (c.balance || 0) < 0);
-        const totalCredit = positiveBalances.reduce(
-            (sum, c) => sum + (parseFloat(c.balance) || 0),
-            0,
-        );
-        const totalOutstanding = negativeBalances.reduce(
-            (sum, c) => sum + Math.abs(parseFloat(c.balance) || 0),
-            0,
-        );
-        const totalPayable = suppliers.reduce(
-            (sum, s) => sum + Math.max(parseFloat(s.payable) || 0, 0),
-            0,
-        );
-        const totalReceivable = customers.reduce(
-            (sum, c) => sum + (parseFloat(c.receivable) || 0),
-            0,
-        );
+        const customerCurrencyTotals = { USD: { credit: 0, outstanding: 0, receivable: 0 }, RMB: { credit: 0, outstanding: 0, receivable: 0 } };
+        const supplierCurrencyTotals = { USD: { payable: 0 }, RMB: { payable: 0 } };
+        customers.forEach((customer) => {
+            ["USD", "RMB"].forEach((currency) => {
+                const bucket = getCurrencyBucket(customer, currency);
+                const balance = parseFloat(bucket.balance || 0);
+                const receivable = parseFloat(bucket.receivable || 0);
+                customerCurrencyTotals[currency].receivable += receivable;
+                if (balance > 0) {
+                    customerCurrencyTotals[currency].credit += balance;
+                } else if (balance < 0) {
+                    customerCurrencyTotals[currency].outstanding += Math.abs(balance);
+                }
+            });
+        });
+        suppliers.forEach((supplier) => {
+            ["USD", "RMB"].forEach((currency) => {
+                const bucket = getCurrencyBucket(supplier, currency);
+                supplierCurrencyTotals[currency].payable += Math.max(
+                    parseFloat(bucket.payable || 0),
+                    0,
+                );
+            });
+        });
 
         setText("balanceCustomerCount", String(customers.length));
         setText(
             "balanceCustomerDetail",
             customers.length
-                ? `${positiveBalances.length} with credit, ${negativeBalances.length} still owing.`
+                ? `${customers.length} customer account(s) split across RMB and USD without FX conversion.`
                 : "No customers in the current balance view.",
         );
-        setText("balanceCreditCount", formatNum(totalCredit));
+        setText(
+            "balanceCreditCount",
+            `USD ${formatNum(customerCurrencyTotals.USD.credit)} | RMB ${formatNum(customerCurrencyTotals.RMB.credit)}`,
+        );
         setText(
             "balanceCreditDetail",
-            positiveBalances.length
-                ? `${positiveBalances.length} customer account(s) currently prepaid.`
+            customers.length
+                ? "Prepaid customer credit is shown separately by currency."
                 : "No prepaid customer balances in the visible set.",
         );
-        setText("balanceOutstandingCount", formatNum(totalOutstanding));
+        setText(
+            "balanceOutstandingCount",
+            `USD ${formatNum(customerCurrencyTotals.USD.outstanding)} | RMB ${formatNum(customerCurrencyTotals.RMB.outstanding)}`,
+        );
         setText(
             "balanceOutstandingDetail",
-            negativeBalances.length
-                ? `${negativeBalances.length} customer account(s) are still collectible.`
+            customers.length
+                ? "Outstanding customer exposure is tracked per currency."
                 : "No outstanding customer receivables in the visible set.",
         );
-        setText("balanceSupplierPayableCount", formatNum(totalPayable));
+        setText(
+            "balanceSupplierPayableCount",
+            `USD ${formatNum(supplierCurrencyTotals.USD.payable)} | RMB ${formatNum(supplierCurrencyTotals.RMB.payable)}`,
+        );
         setText(
             "balanceSupplierPayableDetail",
             suppliers.length
@@ -440,7 +489,7 @@
         setText(
             "balancesSummaryText",
             customers.length || suppliers.length
-                ? `Receivable total ${formatNum(totalReceivable)} | Supplier payable total ${formatNum(totalPayable)}.`
+                ? `Receivable USD ${formatNum(customerCurrencyTotals.USD.receivable)} / RMB ${formatNum(customerCurrencyTotals.RMB.receivable)} | Payables USD ${formatNum(supplierCurrencyTotals.USD.payable)} / RMB ${formatNum(supplierCurrencyTotals.RMB.payable)}.`
                 : "No balance data loaded yet.",
         );
         setText(
@@ -517,8 +566,22 @@
         document.getElementById("finPaySupplierName").textContent = name;
         document.getElementById("finPayInvoiceAmount").value = "";
         document.getElementById("finPayAmount").value = "";
+        document.getElementById("finPayChannel").value = "";
         document.getElementById("finPayMarkedFull").checked = false;
         document.getElementById("finPayNotes").value = "";
+        document.getElementById("finPaySettlementNote").value = "";
+        document
+            .getElementById("finPaySettlementNoteWrap")
+            .classList.add("d-none");
+        document
+            .getElementById("finPaySettlementPreview")
+            .classList.add("d-none");
+        document.getElementById("finPaySupplierContext").textContent =
+            "Loading supplier payment options…";
+        document.getElementById("finPayOrdersBody").innerHTML =
+            '<tr><td colspan="6" class="text-center text-muted py-3">Loading order context…</td></tr>';
+        document.getElementById("finPayOrdersSummary").textContent =
+            "Loading order context…";
         const orderInput = document.getElementById("finPayOrderId");
         if (orderInput) orderInput.value = "";
         if (finPayOrderAc && typeof finPayOrderAc.setValue === "function") finPayOrderAc.setValue(null);
@@ -531,7 +594,158 @@
                 minChars: 0,
             });
         }
+        Promise.all([
+            api("/suppliers/" + supplierId),
+            api("/orders?supplier_id=" + supplierId),
+        ])
+            .then(([supplierRes, ordersRes]) => {
+                const supplier = supplierRes.data || {};
+                const facility = supplier.payment_facility_days
+                    ? `Facility ${supplier.payment_facility_days} day(s)`
+                    : "No payment facility saved";
+                const links = (supplier.payment_links || [])
+                    .map((row) => `${row.label || "Payment"}: ${row.value || "—"}`)
+                    .join(" | ");
+                document.getElementById("finPaySupplierContext").textContent =
+                    `${facility}${links ? " | " + links : ""}`;
+                renderFinSupplierOrders(ordersRes.data || []);
+            })
+            .catch(() => {
+                document.getElementById("finPaySupplierContext").textContent =
+                    "Could not load supplier payment options.";
+                document.getElementById("finPayOrdersBody").innerHTML =
+                    '<tr><td colspan="6" class="text-center text-muted py-3">Could not load supplier orders.</td></tr>';
+            });
         new bootstrap.Modal(document.getElementById("finPaymentModal")).show();
+    };
+
+    function calcOrderSellTotal(order) {
+        return (order.items || []).reduce((sum, item) => {
+            const quantity = parseFloat(item.quantity || 0) || 0;
+            const sellPrice =
+                item.sell_price != null
+                    ? parseFloat(item.sell_price || 0)
+                    : parseFloat(item.unit_price || 0);
+            const totalAmount = parseFloat(item.total_amount || 0) || 0;
+            return sum + (sellPrice > 0 ? quantity * sellPrice : totalAmount);
+        }, 0);
+    }
+
+    function renderFinSupplierOrders(orders) {
+        const tbody = document.getElementById("finPayOrdersBody");
+        const summary = document.getElementById("finPayOrdersSummary");
+        if (!tbody || !summary) return;
+        if (!orders.length) {
+            tbody.innerHTML =
+                '<tr><td colspan="6" class="text-center text-muted py-3">No supplier-linked orders found.</td></tr>';
+            summary.textContent = "No supplier-linked orders";
+            return;
+        }
+        const orderRows = [...orders].sort((a, b) => {
+            const aPending = ["Draft", "Submitted", "Approved", "InTransitToWarehouse", "ReceivedAtWarehouse", "Confirmed", "ReadyForConsolidation", "ConsolidatedIntoShipmentDraft", "AssignedToContainer"].includes(a.status);
+            const bPending = ["Draft", "Submitted", "Approved", "InTransitToWarehouse", "ReceivedAtWarehouse", "Confirmed", "ReadyForConsolidation", "ConsolidatedIntoShipmentDraft", "AssignedToContainer"].includes(b.status);
+            if (aPending !== bPending) return aPending ? -1 : 1;
+            return (b.id || 0) - (a.id || 0);
+        });
+        tbody.innerHTML = orderRows
+            .map((order) => {
+                const total = calcOrderSellTotal(order);
+                const state =
+                    ["FinalizedAndPushedToTracking", "CustomerDeclined", "CustomerDeclinedAfterAutoConfirm"].includes(order.status)
+                        ? "Closed / historical"
+                        : "Open / review";
+                return `
+                    <tr>
+                        <td><a href="/cargochina/orders.php?id=${order.id}">#${order.id}</a><div class="small text-muted">${escapeHtml(order.customer_name || "")}</div></td>
+                        <td>${getStatusBadge(order.status || "")}</td>
+                        <td>${escapeHtml(order.expected_ready_date || "—")}</td>
+                        <td>${escapeHtml(order.currency || "USD")} ${formatNum(total)}</td>
+                        <td>${escapeHtml(state)}</td>
+                        <td><button type="button" class="btn btn-sm btn-outline-secondary" onclick="openFinOrderInfo(${order.id})">Info</button></td>
+                    </tr>
+                `;
+            })
+            .join("");
+        const openCount = orderRows.filter(
+            (order) =>
+                !["FinalizedAndPushedToTracking", "CustomerDeclined", "CustomerDeclinedAfterAutoConfirm"].includes(order.status),
+        ).length;
+        summary.textContent = `${openCount} open / ${orderRows.length - openCount} historical`;
+    }
+
+    window.openFinOrderInfo = async function (orderId) {
+        document.getElementById("finOrderInfoTitle").textContent =
+            `Order #${orderId}`;
+        document.getElementById("finOrderInfoBody").innerHTML =
+            '<div class="text-center py-4 text-muted">Loading order details…</div>';
+        const modal = new bootstrap.Modal(
+            document.getElementById("finOrderInfoModal"),
+        );
+        modal.show();
+        try {
+            const res = await api("/orders/" + orderId);
+            const order = res.data || {};
+            const attachments = (order.attachments || [])
+                .map(
+                    (attachment) =>
+                        `<a class="btn btn-sm btn-outline-secondary me-2 mb-2" target="_blank" rel="noopener" href="/cargochina/backend/${escapeHtml(attachment.file_path || "")}">${escapeHtml((attachment.file_path || "").split("/").pop() || "Attachment")}</a>`,
+                )
+                .join("");
+            const photos = (order.receipt?.photos || [])
+                .map(
+                    (photo) =>
+                        `<img src="/cargochina/backend/${escapeHtml(photo.file_path || "")}" alt="Receipt evidence" class="img-thumbnail me-2 mb-2" style="max-width:120px;">`,
+                )
+                .join("");
+            document.getElementById("finOrderInfoBody").innerHTML = `
+                <div class="row g-3">
+                    <div class="col-lg-4">
+                        <div class="border rounded p-3 h-100">
+                            <div><strong>Customer:</strong> ${escapeHtml(order.customer_name || "—")}</div>
+                            <div><strong>Supplier:</strong> ${escapeHtml(order.supplier_name || "—")}</div>
+                            <div><strong>Status:</strong> ${getStatusBadge(order.status || "")}</div>
+                            <div><strong>Expected Ready:</strong> ${escapeHtml(order.expected_ready_date || "—")}</div>
+                            <div><strong>Destination:</strong> ${escapeHtml(order.destination_country_name || "—")}</div>
+                            <div><strong>High Alert:</strong> ${escapeHtml(order.high_alert_notes || "—")}</div>
+                        </div>
+                    </div>
+                    <div class="col-lg-8">
+                        <div class="border rounded p-3 h-100">
+                            <div class="fw-semibold mb-2">Items</div>
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead><tr><th>Item</th><th>Shipping</th><th>Qty</th><th>Sell</th></tr></thead>
+                                    <tbody>
+                                        ${(order.items || [])
+                                            .map(
+                                                (item) => `
+                                            <tr>
+                                                <td>${escapeHtml(item.description_en || item.description_cn || "—")}</td>
+                                                <td class="small text-muted">${escapeHtml(item.item_no || item.shipping_code || "—")}</td>
+                                                <td>${escapeHtml(String(item.quantity || item.cartons || "0"))}</td>
+                                                <td>${escapeHtml(order.currency || "USD")} ${formatNum(item.total_amount || (parseFloat(item.quantity || 0) * parseFloat(item.sell_price || item.unit_price || 0)))}</td>
+                                            </tr>`,
+                                            )
+                                            .join("") || '<tr><td colspan="4" class="text-muted">No items.</td></tr>'}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="mt-3">
+                                <div class="fw-semibold mb-2">Attachments</div>
+                                ${attachments || '<div class="text-muted small">No order attachments.</div>'}
+                            </div>
+                            <div class="mt-3">
+                                <div class="fw-semibold mb-2">Receipt Photos</div>
+                                ${photos || '<div class="text-muted small">No receipt photos.</div>'}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        } catch (error) {
+            document.getElementById("finOrderInfoBody").innerHTML =
+                `<div class="alert alert-danger mb-0">${escapeHtml(error.message || "Failed to load order details")}</div>`;
+        }
     };
 
     window.submitFinDeposit = async function () {
@@ -579,11 +793,22 @@
         const payload = {
             amount,
             currency: document.getElementById("finPayCurrency").value,
+            payment_channel:
+                document.getElementById("finPayChannel").value || null,
             order_id: orderId,
             notes: document.getElementById("finPayNotes").value || null,
             marked_full_payment: document.getElementById("finPayMarkedFull").checked ? 1 : 0,
         };
         if (invoiceAmount) payload.invoice_amount = parseFloat(invoiceAmount);
+        if (
+            payload.marked_full_payment &&
+            payload.invoice_amount &&
+            amount < payload.invoice_amount
+        ) {
+            payload.settlement_mode = "fully_settled_by_agreement";
+            payload.settlement_note =
+                document.getElementById("finPaySettlementNote").value || null;
+        }
         const btn = document.getElementById("finPaySubmitBtn");
         try {
             btn.disabled = true;
@@ -673,8 +898,42 @@
                 if (getSelectedProfitStatuses().length) loadProfit();
             });
         updateProfitStatusSummary();
+        document
+            .getElementById("finPayInvoiceAmount")
+            ?.addEventListener("input", updateFinSettlementPreview);
+        document
+            .getElementById("finPayAmount")
+            ?.addEventListener("input", updateFinSettlementPreview);
+        document
+            .getElementById("finPayMarkedFull")
+            ?.addEventListener("change", updateFinSettlementPreview);
         activateTabFromHash();
         loadProfit();
         loadBalances();
     });
+
+    function updateFinSettlementPreview() {
+        const invoiceAmount = parseFloat(
+            document.getElementById("finPayInvoiceAmount")?.value || 0,
+        );
+        const amount = parseFloat(
+            document.getElementById("finPayAmount")?.value || 0,
+        );
+        const markedFull =
+            document.getElementById("finPayMarkedFull")?.checked || false;
+        const preview = document.getElementById("finPaySettlementPreview");
+        const noteWrap = document.getElementById("finPaySettlementNoteWrap");
+        if (!preview || !noteWrap) return;
+        if (invoiceAmount > 0 && amount > 0 && invoiceAmount > amount) {
+            const delta = invoiceAmount - amount;
+            preview.textContent = markedFull
+                ? `Settlement delta ${formatNum(delta)} will be stored explicitly and this payable will be closed as fully settled by agreement.`
+                : `Short-paid amount ${formatNum(delta)} will remain payable unless you mark this as fully settled.`;
+            preview.classList.remove("d-none");
+            noteWrap.classList.toggle("d-none", !markedFull);
+            return;
+        }
+        preview.classList.add("d-none");
+        noteWrap.classList.add("d-none");
+    }
 })();

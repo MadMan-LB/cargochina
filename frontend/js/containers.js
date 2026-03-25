@@ -16,6 +16,45 @@ function containerStatusDisplay(status) {
     return CONTAINER_STATUS[status]?.label || status || "—";
 }
 
+function getContainerDestinationCountryId(container) {
+    const value = container?.destination_country_id;
+    return value != null && value !== "" ? Number(value) : null;
+}
+
+function getContainerDestinationDisplay(container) {
+    return (
+        container?.destination_country_name ||
+        container?.destination_country ||
+        container?.destination ||
+        "No destination"
+    );
+}
+
+function getOrderDestinationCountryId(order) {
+    const value = order?.destination_country_id;
+    return value != null && value !== "" ? Number(value) : null;
+}
+
+function getOrderDestinationDisplay(order) {
+    if (order?.destination_country_name) {
+        return order.destination_country_code
+            ? `${order.destination_country_name} (${order.destination_country_code})`
+            : order.destination_country_name;
+    }
+    return "No destination";
+}
+
+function filterAssignableOrdersForContainer(orders, container) {
+    const destinationCountryId = getContainerDestinationCountryId(container);
+    return (orders || []).filter((order) => {
+        if (typeof orderIsShipmentEligible === "function" && !orderIsShipmentEligible(order)) {
+            return false;
+        }
+        if (!destinationCountryId) return true;
+        return getOrderDestinationCountryId(order) === destinationCountryId;
+    });
+}
+
 function updateContainerOverview(rows) {
     const list = rows || [];
     const setText = (id, value) => {
@@ -214,7 +253,7 @@ function applyClientFilters() {
                 `<div style="height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;"><div style="height:100%;width:${Math.min(100, p)}%;background:${barC(p)};border-radius:3px;"></div></div><small class="text-muted">${parseFloat(c.used_cbm || 0).toFixed(2)}/${c.max_cbm}</small>`;
             const wBar = (p) =>
                 `<div style="height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;"><div style="height:100%;width:${Math.min(100, p)}%;background:${barC(p)};border-radius:3px;"></div></div><small class="text-muted">${parseFloat(c.used_weight || 0).toFixed(0)}/${c.max_weight} kg</small>`;
-            const destination = c.destination || c.destination_country || "";
+            const destination = getContainerDestinationDisplay(c);
             const eta = c.eta_date || "";
             const shipDate = c.expected_ship_date || "";
             const vessel = c.vessel_name || "";
@@ -656,13 +695,20 @@ let _assignContainer = null;
 let _assignEligibleOrders = [];
 
 async function openAssignOrdersModal(dataset) {
+    const selectedId = parseInt(dataset.id, 10);
+    const fullContainer =
+        _allContainers.find((container) => Number(container.id) === selectedId) ||
+        {};
     _assignContainer = {
-        id: parseInt(dataset.id, 10),
-        code: dataset.code || "",
-        maxCbm: parseFloat(dataset.maxCbm) || 0,
-        maxWeight: parseFloat(dataset.maxWeight) || 0,
-        usedCbm: parseFloat(dataset.usedCbm) || 0,
-        usedWeight: parseFloat(dataset.usedWeight) || 0,
+        ...fullContainer,
+        id: selectedId,
+        code: fullContainer.code || dataset.code || "",
+        maxCbm: parseFloat(fullContainer.max_cbm ?? dataset.maxCbm) || 0,
+        maxWeight:
+            parseFloat(fullContainer.max_weight ?? dataset.maxWeight) || 0,
+        usedCbm: parseFloat(fullContainer.used_cbm ?? dataset.usedCbm) || 0,
+        usedWeight:
+            parseFloat(fullContainer.used_weight ?? dataset.usedWeight) || 0,
     };
 
     const titleEl = document.getElementById("assignOrdersTitle");
@@ -671,7 +717,7 @@ async function openAssignOrdersModal(dataset) {
     if (titleEl)
         titleEl.textContent = "Assign Orders → " + _assignContainer.code;
     if (subtitleEl)
-        subtitleEl.textContent = `Capacity: ${_assignContainer.maxCbm} CBM, ${_assignContainer.maxWeight} kg`;
+        subtitleEl.textContent = `Capacity: ${_assignContainer.maxCbm} CBM, ${_assignContainer.maxWeight} kg • Destination: ${getContainerDestinationDisplay(_assignContainer)}`;
     if (tbody)
         tbody.innerHTML =
             '<tr><td colspan="7" class="text-center text-muted py-3">Loading eligible orders…</td></tr>';
@@ -709,7 +755,11 @@ async function openAssignOrdersModal(dataset) {
                     0,
                 ),
             };
-        });
+        }).filter((order) =>
+            typeof orderIsShipmentEligible === "function"
+                ? orderIsShipmentEligible(order)
+                : true,
+        );
         _renderAssignOrders();
     } catch (e) {
         if (tbody)
@@ -720,9 +770,16 @@ async function openAssignOrdersModal(dataset) {
 function _renderAssignOrders() {
     const tbody = document.getElementById("assignOrdersTbody");
     if (!tbody) return;
-    if (_assignEligibleOrders.length === 0) {
-        tbody.innerHTML =
-            '<tr><td colspan="7" class="text-center text-muted py-3">No eligible orders (must be ReadyForConsolidation or Confirmed).</td></tr>';
+    const rows = filterAssignableOrdersForContainer(
+        _assignEligibleOrders,
+        _assignContainer,
+    );
+    if (rows.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted py-3">${
+            getContainerDestinationCountryId(_assignContainer)
+                ? `No eligible orders match ${escHtml(getContainerDestinationDisplay(_assignContainer))}.`
+                : "No eligible orders (must be ReadyForConsolidation or Confirmed with no pending customer review)."
+        }</td></tr>`;
         return;
     }
     const statusCls =
@@ -731,13 +788,13 @@ function _renderAssignOrders() {
             : () => "bg-secondary";
     const statusLbl =
         typeof statusLabel === "function" ? statusLabel : (s) => s;
-    tbody.innerHTML = _assignEligibleOrders
+    tbody.innerHTML = rows
         .map(
             (o) => `
         <tr>
           <td><input type="checkbox" class="form-check-input assign-order-cb" data-id="${o.id}" data-cbm="${o.total_cbm}" data-weight="${o.total_weight}" onchange="_onAssignSelChange()"></td>
           <td class="fw-semibold">${o.id}</td>
-          <td>${escHtml(o.customer_name || "—")}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escHtml(o.customer_priority_note || "")}">${escHtml(o.customer_priority_level)}</span>` : ""}${o.high_alert_notes ? ` <span class="badge bg-danger-subtle text-danger border border-danger-subtle ms-1" title="${escHtml(o.high_alert_notes)}">Alert</span>` : ""}</td>
+          <td>${escHtml(o.customer_name || "—")}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escHtml(o.customer_priority_note || "")}">${escHtml(o.customer_priority_level)}</span>` : ""}${o.high_alert_notes ? ` <span class="badge bg-danger-subtle text-danger border border-danger-subtle ms-1" title="${escHtml(o.high_alert_notes)}">Alert</span>` : ""}<div class="small text-muted">${escHtml(getOrderDestinationDisplay(o))}</div></td>
           <td class="small text-muted">${escHtml((o.supplier_name || "—").substring(0, 22))}</td>
           <td class="text-end">${o.total_cbm.toFixed(3)}</td>
           <td class="text-end">${o.total_weight.toFixed(2)} kg</td>

@@ -7,7 +7,7 @@ $pageTitle = 'Orders';
 require 'includes/layout.php';
 ?>
 <h1 class="mb-4">Orders</h1>
-<p class="text-muted mb-4">Track draft, approval, confirmation, and consolidation readiness from one cleaner workspace.</p>
+<p class="text-muted mb-4">Track draft, approval, customer follow-up, and consolidation readiness from one cleaner workspace.</p>
 
 <div class="metric-card-grid mb-4">
   <div class="metric-card">
@@ -21,9 +21,9 @@ require 'includes/layout.php';
     <div class="detail">Still waiting to be submitted</div>
   </div>
   <div class="metric-card">
-    <div class="eyebrow">Awaiting Confirmation</div>
+    <div class="eyebrow">Customer Feedback Pending</div>
     <div class="value" id="orderAwaitingCount">0</div>
-    <div class="detail">Customer action still needed</div>
+    <div class="detail">Auto-confirmed receipts still waiting on customer review</div>
   </div>
   <div class="metric-card">
     <div class="eyebrow">Ready to Move</div>
@@ -59,8 +59,9 @@ require 'includes/layout.php';
             'Approved' => 'Approved',
             'InTransitToWarehouse' => 'In Transit',
             'ReceivedAtWarehouse' => 'Received',
-            'AwaitingCustomerConfirmation' => 'Awaiting Confirmation',
+            'AwaitingCustomerConfirmation' => 'Legacy Awaiting Confirmation',
             'CustomerDeclined' => 'Customer Declined',
+            'CustomerDeclinedAfterAutoConfirm' => 'Declined After Auto-Confirm',
             'Confirmed' => 'Confirmed',
             'ReadyForConsolidation' => 'Ready for Consolidation',
             'ConsolidatedIntoShipmentDraft' => 'In Shipment Draft',
@@ -104,9 +105,17 @@ require 'includes/layout.php';
               <option value="draft_procurement">Draft an Order</option>
             </select>
           </div>
+          <div class="col-12 col-md-7">
+            <label class="form-label small mb-1">Customer Follow-Up</label>
+            <select class="form-select form-select-sm" id="filterCustomerFeedback" onchange="loadOrders()">
+              <option value="">All feedback states</option>
+              <option value="pending">Pending customer review</option>
+              <option value="declined_after_auto_confirm">Declined after auto-confirm</option>
+            </select>
+          </div>
         </div>
         <div class="filter-summary-row">
-          <small class="summary-text">Tip: combine the search, order type, and status chips to separate normal orders from Draft an Order records.</small>
+          <small class="summary-text">Tip: combine search, order type, customer follow-up, and status chips to separate normal orders from Draft an Order records.</small>
         </div>
       </div>
     </div>

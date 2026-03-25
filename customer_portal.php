@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Customer Portal - one-time token access to view orders and pending confirmations
+ * Customer Portal - one-time token access to view orders and customer follow-up actions
  * No auth required; token in URL validates access
  */
 require_once __DIR__ . '/backend/config/database.php';
@@ -68,8 +68,9 @@ $statusLabels = [
   'Approved' => 'Approved',
   'InTransitToWarehouse' => 'In Transit To Warehouse',
   'ReceivedAtWarehouse' => 'Received At Warehouse',
-  'AwaitingCustomerConfirmation' => 'Awaiting Your Confirmation',
+  'AwaitingCustomerConfirmation' => 'Legacy Awaiting Confirmation',
   'CustomerDeclined' => 'Declined',
+  'CustomerDeclinedAfterAutoConfirm' => 'Declined After Auto-Confirm',
   'Confirmed' => 'Confirmed',
   'ReadyForConsolidation' => 'Ready For Consolidation',
   'ConsolidatedIntoShipmentDraft' => 'Added To Shipment Draft',
@@ -171,9 +172,14 @@ $statusLabels = [
         <div class="row g-4">
             <?php foreach ($orders as $order): ?>
             <?php
+          $pendingReview = trim((string) ($order['confirmation_token'] ?? '')) !== '' && empty($order['declined_at']) && empty($order['confirmed_at']);
           switch ($order['status']) {
+            case 'CustomerDeclinedAfterAutoConfirm':
+            case 'CustomerDeclined':
+              $badgeClass = 'bg-danger';
+              break;
             case 'AwaitingCustomerConfirmation':
-              $badgeClass = 'bg-warning text-dark';
+              $badgeClass = 'bg-secondary';
               break;
             case 'Confirmed':
             case 'ReadyForConsolidation':
@@ -182,11 +188,11 @@ $statusLabels = [
             case 'Shipped':
               $badgeClass = 'bg-success';
               break;
-            case 'CustomerDeclined':
-              $badgeClass = 'bg-danger';
-              break;
             default:
               $badgeClass = 'bg-primary';
+          }
+          if ($pendingReview) {
+            $badgeClass = 'bg-warning text-dark';
           }
           ?>
             <div class="col-12">
@@ -197,7 +203,7 @@ $statusLabels = [
                                 <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
                                     <h2 class="h5 mb-0">Order #<?= (int) $order['id'] ?></h2>
                                     <span
-                                        class="badge <?= $badgeClass ?>"><?= htmlspecialchars($statusLabels[$order['status']] ?? $order['status']) ?></span>
+                                        class="badge <?= $badgeClass ?>"><?= htmlspecialchars($pendingReview ? 'Awaiting Your Review' : ($statusLabels[$order['status']] ?? $order['status'])) ?></span>
                                 </div>
                                 <div class="text-muted small">Supplier:
                                     <?= htmlspecialchars($order['supplier_name'] ?: 'Multiple / not specified') ?></div>
@@ -267,12 +273,11 @@ $statusLabels = [
                                             <?= htmlspecialchars(formatPortalDate($order['confirmed_at'], 'Y-m-d H:i')) ?>
                                         </div>
                                     </div>
-                                    <?php elseif ($order['status'] === 'AwaitingCustomerConfirmation'): ?>
+                                    <?php elseif ($pendingReview): ?>
                                     <div class="mb-0">
                                         <span class="timeline-dot"></span>
-                                        <strong>Waiting for your confirmation</strong>
-                                        <div class="text-muted small ms-4">Please review the warehouse measurements
-                                            below.</div>
+                                        <strong>Waiting for your review</strong>
+                                        <div class="text-muted small ms-4">The receipt is already auto-confirmed into stock. Please review the warehouse measurements below.</div>
                                     </div>
                                     <?php endif; ?>
                                 </div>
@@ -310,19 +315,18 @@ $statusLabels = [
                                 <div class="small text-muted mb-3">Condition:
                                     <?= htmlspecialchars($order['receipt_condition'] ?: '—') ?></div>
 
-                                <?php if ($order['status'] === 'AwaitingCustomerConfirmation' && !empty($order['confirmation_token'])): ?>
+                                <?php if ($pendingReview): ?>
                                 <div class="alert alert-warning py-2 small mb-3">
-                                    This order needs your confirmation. Declining requires a reason in the next step.
+                                    This order is already auto-confirmed into stock. Please review the warehouse measurements and either accept them or decline with a reason.
                                 </div>
                                 <a class="btn btn-primary w-100"
                                     href="/cargochina/confirm.php?token=<?= urlencode($order['confirmation_token']) ?>">Review
-                                    Measurements And Confirm / Decline</a>
+                                    Warehouse Receipt</a>
                                 <?php elseif (!empty($order['confirmed_at'])): ?>
-                                <div class="alert alert-success py-2 small mb-0">This order has already been confirmed.
+                                <div class="alert alert-success py-2 small mb-0">Your review has already been recorded and the order remains accepted in stock.
                                 </div>
                                 <?php elseif (!empty($order['declined_at'])): ?>
-                                <div class="alert alert-danger py-2 small mb-0">This order was declined and sent back to
-                                    the team for review.</div>
+                                <div class="alert alert-danger py-2 small mb-0">This order was declined after auto-confirm and has been sent back to the team for recovery.</div>
                                 <?php else: ?>
                                 <div class="alert alert-light py-2 small mb-0">No customer action is currently required
                                     for this order.</div>

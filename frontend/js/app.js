@@ -11,8 +11,9 @@ const ORDER_STATUS_LABELS = {
     Approved: "Approved",
     InTransitToWarehouse: "In Transit",
     ReceivedAtWarehouse: "Received",
-    AwaitingCustomerConfirmation: "Awaiting Confirmation",
+    AwaitingCustomerConfirmation: "Legacy Awaiting Confirmation",
     CustomerDeclined: "Customer Declined",
+    CustomerDeclinedAfterAutoConfirm: "Declined After Auto-Confirm",
     Confirmed: "Confirmed",
     ReadyForConsolidation: "Ready for Consolidation",
     ConsolidatedIntoShipmentDraft: "In Shipment Draft",
@@ -31,6 +32,7 @@ function statusBadgeClass(s) {
         ReceivedAtWarehouse: "status-received",
         AwaitingCustomerConfirmation: "status-awaiting",
         CustomerDeclined: "status-declined",
+        CustomerDeclinedAfterAutoConfirm: "status-declined",
         Confirmed: "status-confirmed",
         ReadyForConsolidation: "status-ready",
         ConsolidatedIntoShipmentDraft: "status-consolidated",
@@ -38,6 +40,16 @@ function statusBadgeClass(s) {
         FinalizedAndPushedToTracking: "status-finalized",
     };
     return (s && map[s]) || "status-draft";
+}
+function orderHasPendingCustomerReview(order) {
+    return !!String(order?.confirmation_token || "").trim();
+}
+function orderIsOperationallyConfirmed(order) {
+    return (order?.status || "") === "Confirmed" && !orderHasPendingCustomerReview(order);
+}
+function orderIsShipmentEligible(order) {
+    const status = order?.status || "";
+    return status === "ReadyForConsolidation" || orderIsOperationallyConfirmed(order);
 }
 /** Description language: 'en' or 'cn'. Stored in localStorage. Default 'en'. */
 function descLang() {
@@ -66,6 +78,9 @@ if (typeof window !== "undefined") {
     window.descLang = descLang;
     window.descText = descText;
     window.setDescLang = setDescLang;
+    window.orderHasPendingCustomerReview = orderHasPendingCustomerReview;
+    window.orderIsOperationallyConfirmed = orderIsOperationallyConfirmed;
+    window.orderIsShipmentEligible = orderIsShipmentEligible;
 }
 
 const UPLOAD_BASE = "/cargochina/api/v1/upload";

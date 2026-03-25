@@ -7,6 +7,9 @@
 require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__, 2) . '/services/OrderStateService.php';
 require_once dirname(__DIR__, 2) . '/services/NotificationService.php';
+require_once dirname(__DIR__, 2) . '/services/OrderCountryService.php';
+require_once dirname(__DIR__, 2) . '/services/OrderItemNumberingService.php';
+require_once dirname(__DIR__, 2) . '/services/OrderReceiptWorkflowService.php';
 
 function normalizeOrderItems(array $items): array
 {
@@ -59,6 +62,17 @@ function resolveOrderExpectedReadyDate(array $input, array $order = []): ?string
     }
 
     return normalizeOptionalExpectedReadyDate($input['expected_ready_date'] ?? null);
+}
+
+function normalizeOrderDestinationCountryId(PDO $pdo, int $customerId, ?int $requestedCountryId): ?int
+{
+    return OrderCountryService::resolveDestinationCountryId($pdo, $customerId, $requestedCountryId);
+}
+
+function normalizeOrderItemsForPersistence(PDO $pdo, int $customerId, ?int $destinationCountryId, ?int $defaultSupplierId, array $items, ?string $currentStatus = 'Draft'): array
+{
+    $shippingCode = OrderCountryService::resolveShippingCode($pdo, $customerId, $destinationCountryId);
+    return OrderItemNumberingService::prepareItemsForPersistence($items, $currentStatus, $shippingCode, $defaultSupplierId);
 }
 
 function buildOrderSearchSql(PDO $pdo, string $query, array &$params, string $orderAlias = 'o', string $customerAlias = 'c', string $supplierAlias = 's'): string
@@ -530,6 +544,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $statuses = is_array($statusParam) ? array_filter($statusParam) : ($statusParam ? [$statusParam] : []);
                 $statusMode = strtolower(trim((string) ($_GET['status_mode'] ?? 'include')));
                 $statusMode = $statusMode === 'exclude' ? 'exclude' : 'include';
+                $customerFeedback = trim((string) ($_GET['customer_feedback'] ?? ''));
                 $customerId = $_GET['customer_id'] ?? null;
                 $supplierId = $_GET['supplier_id'] ?? null;
                 $dateFrom = $_GET['date_from'] ?? null;
@@ -541,11 +556,18 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $custCols = 'c.name as customer_name';
                 $chkPrio = @$pdo->query("SHOW COLUMNS FROM customers LIKE 'priority_level'");
                 if ($chkPrio && $chkPrio->rowCount() > 0) $custCols .= ', c.priority_level as customer_priority_level, c.priority_note as customer_priority_note';
+                $destCols = orderTableHasColumn($pdo, 'orders', 'destination_country_id')
+                    ? ', co.id as destination_country_id, co.name as destination_country_name, co.code as destination_country_code'
+                    : '';
+                $destJoin = orderTableHasColumn($pdo, 'orders', 'destination_country_id')
+                    ? ' LEFT JOIN countries co ON o.destination_country_id = co.id'
+                    : '';
                 $sql = "SELECT o.*, $custCols, s.name as supplier_name,
                     (SELECT c.code FROM containers c JOIN shipment_drafts sd ON sd.container_id = c.id JOIN shipment_draft_orders sdo ON sdo.shipment_draft_id = sd.id WHERE sdo.order_id = o.id LIMIT 1) as container_code,
                     (SELECT c.eta_date FROM containers c JOIN shipment_drafts sd ON sd.container_id = c.id JOIN shipment_draft_orders sdo ON sdo.shipment_draft_id = sd.id WHERE sdo.order_id = o.id LIMIT 1) as container_eta
+                    $destCols
                     FROM orders o
-                    JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id WHERE 1=1";
+                    JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id$destJoin WHERE 1=1";
                 $params = [];
                 if (!empty($statuses)) {
                     $placeholders = implode(',', array_fill(0, count($statuses), '?'));
@@ -591,6 +613,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 if ($q !== '') {
                     $sql .= " AND " . buildOrderSearchSql($pdo, $q, $params, 'o', 'c', 's');
+                }
+                if ($customerFeedback !== '') {
+                    if ($customerFeedback === 'pending') {
+                        $sql .= " AND COALESCE(o.confirmation_token, '') <> ''";
+                    } elseif ($customerFeedback === 'declined_after_auto_confirm') {
+                        $sql .= " AND o.status = 'CustomerDeclinedAfterAutoConfirm'";
+                    }
                 }
                 $sql .= " ORDER BY o.expected_ready_date IS NULL ASC, o.expected_ready_date ASC, o.created_at DESC";
                 $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
@@ -655,8 +684,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $supplierId = isset($input['supplier_id']) ? ($input['supplier_id'] ? (int) $input['supplier_id'] : null) : ($order['supplier_id'] ?? null);
             $expectedDate = resolveOrderExpectedReadyDate($input, $order);
             $highAlertNotes = isset($input['high_alert_notes']) ? (trim($input['high_alert_notes']) ?: null) : ($order['high_alert_notes'] ?? null);
-            $destinationCountryId = array_key_exists('destination_country_id', $input) ? (!empty($input['destination_country_id']) ? (int) $input['destination_country_id'] : null) : ($order['destination_country_id'] ?? null);
-            $items = $input['items'] ?? [];
+            $requestedDestinationCountryId = array_key_exists('destination_country_id', $input) ? (!empty($input['destination_country_id']) ? (int) $input['destination_country_id'] : null) : ($order['destination_country_id'] ?? null);
+            $destinationCountryId = orderTableHasColumn($pdo, 'orders', 'destination_country_id')
+                ? normalizeOrderDestinationCountryId($pdo, $customerId, $requestedDestinationCountryId)
+                : $requestedDestinationCountryId;
+            $items = normalizeOrderItemsForPersistence($pdo, $customerId, $destinationCountryId, $supplierId ? (int) $supplierId : null, $input['items'] ?? [], (string) ($order['status'] ?? 'Draft'));
             $dupWarn = enforceDuplicateShippingCodePolicy($pdo, $customerId, (int) $id, $items);
             $pdo->beginTransaction();
             try {
@@ -792,7 +824,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $supplierId = (int) ($input['supplier_id'] ?? 0);
                 $expectedDate = normalizeOptionalExpectedReadyDate($input['expected_ready_date'] ?? null);
                 $currency = trim($input['currency'] ?? 'USD');
-                $items = $input['items'] ?? [];
                 if (!$customerId) {
                     jsonError('Missing required: customer_id', 400);
                 }
@@ -800,7 +831,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     jsonError('Currency must be USD or RMB', 400);
                 }
                 $highAlertNotes = isset($input['high_alert_notes']) && trim($input['high_alert_notes']) ? trim($input['high_alert_notes']) : null;
-                $destinationCountryId = !empty($input['destination_country_id']) ? (int) $input['destination_country_id'] : null;
+                $requestedDestinationCountryId = !empty($input['destination_country_id']) ? (int) $input['destination_country_id'] : null;
+                $destinationCountryId = orderTableHasColumn($pdo, 'orders', 'destination_country_id')
+                    ? normalizeOrderDestinationCountryId($pdo, $customerId, $requestedDestinationCountryId)
+                    : $requestedDestinationCountryId;
+                $items = normalizeOrderItemsForPersistence($pdo, $customerId, $destinationCountryId, $supplierId ?: null, $input['items'] ?? [], 'Draft');
                 $dupWarn = enforceDuplicateShippingCodePolicy($pdo, $customerId, 0, $items);
                 foreach ($items as $it) {
                     $qty = (float) ($it['quantity'] ?? 0);
@@ -1054,7 +1089,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                             }
                         }
                     }
-                    $newStatus = $hasVariance ? 'AwaitingCustomerConfirmation' : 'ReadyForConsolidation';
+                    $newStatus = $hasVariance ? 'Confirmed' : 'ReadyForConsolidation';
                     $confirmToken = null;
                     if ($hasVariance) {
                         $confirmToken = bin2hex(random_bytes(24));
@@ -1079,22 +1114,20 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt->execute([$id]);
                 $order = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$order) jsonError('Order not found', 404);
-                if ($order['status'] !== 'AwaitingCustomerConfirmation') {
-                    jsonError('Order is not awaiting customer confirmation', 400);
+                if (trim((string) ($order['confirmation_token'] ?? '')) === '') {
+                    jsonError('Order no longer has a pending customer follow-up response', 400);
                 }
                 // Allow staff session-based confirm OR token-based public confirm
                 if ($token && !hash_equals((string)($order['confirmation_token'] ?? ''), $token)) {
-                    jsonError('Invalid or expired confirmation token', 403);
+                    jsonError('Invalid or expired customer follow-up token', 403);
                 }
-                $pdo->prepare("UPDATE orders SET status='Confirmed', confirmation_token=NULL WHERE id=?")->execute([$id]);
-                $wr = $pdo->prepare("SELECT * FROM warehouse_receipts WHERE order_id = ? ORDER BY received_at DESC LIMIT 1");
-                $wr->execute([$id]);
-                $receipt = $wr->fetch(PDO::FETCH_ASSOC);
-                $accepted = $receipt ? ['actual_cbm' => $receipt['actual_cbm'], 'actual_weight' => $receipt['actual_weight'], 'actual_cartons' => $receipt['actual_cartons']] : [];
-                $pdo->prepare("INSERT INTO customer_confirmations (order_id, confirmed_by, accepted_actuals) VALUES (?,?,?)")
-                    ->execute([$id, $userId, json_encode($accepted)]);
-                $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, user_id) VALUES ('order',?,'confirm',?)")->execute([$id, $userId]);
-                jsonResponse(['data' => ['status' => 'Confirmed']]);
+                OrderReceiptWorkflowService::acceptAutoConfirmedOrder($pdo, (int) $id, $userId, 'confirm');
+                jsonResponse(['data' => ['status' => 'ReadyForConsolidation']]);
+            }
+            if ($id && $action === 'reset-after-decline') {
+                requireRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin']);
+                OrderReceiptWorkflowService::resetDeclinedOrder($pdo, (int) $id, $userId, trim((string) ($input['reason'] ?? '')) ?: null);
+                jsonResponse(['data' => ['status' => 'Submitted']]);
             }
             if ($id && in_array($action, ['submit', 'approve'], true)) {
                 $stmt = $pdo->prepare("SELECT * FROM orders WHERE id = ?");

@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Order Confirmation — Salameh Cargo</title>
+  <title>Warehouse Receipt Review — Salameh Cargo</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
     :root {
@@ -250,7 +250,7 @@
     async function loadOrder() {
       const app = document.getElementById('app');
       if (!token) {
-        renderError(app, 'No confirmation token provided. Please use the link from your notification.');
+        renderError(app, 'No review token provided. Please use the secure link from your notification.');
         return;
       }
       try {
@@ -284,8 +284,8 @@
 
       app.innerHTML = `
     <div class="confirm-header">
-      <h1>⚖️ Warehouse Receipt Confirmation</h1>
-      <p>Order #${esc(o.id)} — Please review the actual measurements and confirm acceptance</p>
+      <h1>⚖️ Warehouse Receipt Review</h1>
+      <p>Order #${esc(o.id)} — This receipt was auto-confirmed into stock. Please review and accept or decline it.</p>
     </div>
     <div class="confirm-body">
       <div class="info-grid">
@@ -299,7 +299,7 @@
         <div class="variance-icon">⚠️</div>
         <div>
           <strong>Variance Detected</strong><br>
-          <span class="text-muted" style="font-size:.9rem;">The actual warehouse measurements differ from the declared values. Please review and confirm or contact us.</span>
+          <span class="text-muted" style="font-size:.9rem;">The actual warehouse measurements differ from the declared values. The goods are already in stock, but you can still accept the receipt or decline it for follow-up.</span>
         </div>
       </div>
 
@@ -329,7 +329,7 @@
         </div>` : ''}
     </div>
     <div class="action-panel">
-      <p class="text-muted small mb-3">By confirming, you acknowledge the actual measurements above and release Salameh Cargo from responsibility for any declared vs. actual discrepancy.</p>
+      <p class="text-muted small mb-3">By accepting, you acknowledge the actual warehouse receipt above. If you decline, Salameh Cargo will unwind the receipt operationally and contact you.</p>
       <div id="errorMsg" class="alert alert-danger d-none mb-3"></div>
       <div id="declineSection" class="mb-3">
         <label class="form-label small">Or decline (reason required)</label>
@@ -339,9 +339,9 @@
         </div>
       </div>
       <button class="btn-confirm" id="confirmBtn" onclick="submitConfirmation()">
-        ✓ I Confirm — Accept Actual Measurements
+        ✓ I Accept This Warehouse Receipt
       </button>
-      <p class="text-center mt-2 mb-0"><small class="text-muted">This link is single-use and will expire after confirmation or decline.</small></p>
+      <p class="text-center mt-2 mb-0"><small class="text-muted">This link is single-use and will expire after you accept or decline the warehouse receipt.</small></p>
     </div>`;
     }
 
@@ -369,7 +369,7 @@
           errEl.classList.remove('d-none');
           btn.disabled = false;
           if (declineBtn) declineBtn.disabled = false;
-          btn.textContent = '✓ I Confirm — Accept Actual Measurements';
+          btn.textContent = '✓ I Accept This Warehouse Receipt';
           return;
         }
         renderSuccess(document.getElementById('app'));
@@ -378,7 +378,7 @@
         errEl.classList.remove('d-none');
         btn.disabled = false;
         if (declineBtn) declineBtn.disabled = false;
-        btn.textContent = '✓ I Confirm — Accept Actual Measurements';
+        btn.textContent = '✓ I Accept This Warehouse Receipt';
       }
     }
 
@@ -437,7 +437,7 @@
     <div class="success-state">
       <div class="success-icon">✅</div>
       <h2 style="color:#16a34a; font-weight:700;">Confirmed!</h2>
-      <p class="text-muted">Thank you. Your confirmation has been recorded and Salameh Cargo has been notified.</p>
+      <p class="text-muted">Thank you. Your review has been recorded and Salameh Cargo has been notified.</p>
       <p class="text-muted small">You may close this page.</p>
     </div>`;
     }
@@ -447,7 +447,7 @@
     <div class="success-state">
       <div class="success-icon" style="font-size:3rem;">📋</div>
       <h2 style="color:#d97706; font-weight:700;">Declined</h2>
-      <p class="text-muted">Your decline has been recorded. Salameh Cargo has been notified and will contact you.</p>
+      <p class="text-muted">Your decline has been recorded. Salameh Cargo has been notified, the stock receipt will be unwound operationally, and the team will contact you.</p>
       <p class="text-muted small">You may close this page.</p>
     </div>`;
     }

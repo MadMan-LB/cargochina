@@ -77,7 +77,7 @@
         const tbody = document.getElementById("stockTableBody");
         if (!rows || rows.length === 0) {
             tbody.innerHTML =
-                '<tr><td colspan="8" class="text-center text-muted py-4">No stock found.</td></tr>';
+                '<tr><td colspan="9" class="text-center text-muted py-4">No stock found.</td></tr>';
             return;
         }
         tbody.innerHTML = rows
@@ -92,11 +92,125 @@
                 <td>${r.quantity || "—"}</td>
                 <td>${r.declared_cbm != null ? parseFloat(r.declared_cbm).toFixed(2) : "—"}</td>
                 <td>${r.order_actual_cbm != null ? parseFloat(r.order_actual_cbm).toFixed(2) : "—"}</td>
+                <td><button type="button" class="btn btn-sm btn-outline-info" onclick="openStockOrderInfo(${Number(r.order_id)})" title="View full order details">Info</button></td>
             </tr>
         `,
             )
             .join("");
     }
+
+    function renderStatusBadge(status) {
+        const badgeClass =
+            typeof statusBadgeClass === "function"
+                ? statusBadgeClass(status)
+                : "bg-secondary";
+        const label =
+            typeof statusLabel === "function" ? statusLabel(status) : status;
+        return `<span class="badge ${badgeClass}">${escapeHtml(
+            label || "—",
+        )}</span>`;
+    }
+
+    function renderStockOrderInfo(order) {
+        const attachments = (order.attachments || [])
+            .map((attachment) => {
+                const filePath = attachment.file_path || "";
+                const fileName = filePath.split("/").pop() || "Attachment";
+                return `<a class="btn btn-sm btn-outline-secondary me-2 mb-2" target="_blank" rel="noopener" href="/cargochina/backend/${escapeHtml(filePath)}">${escapeHtml(fileName)}</a>`;
+            })
+            .join("");
+        const photos = (order.receipt?.photos || [])
+            .map((photo) => {
+                const filePath = photo.file_path || "";
+                return `<img src="/cargochina/backend/${escapeHtml(filePath)}" alt="Receipt evidence" class="img-thumbnail me-2 mb-2" style="max-width:120px;">`;
+            })
+            .join("");
+        const itemsHtml = (order.items || [])
+            .map(
+                (item) => `
+                    <tr>
+                        <td>${escapeHtml(item.description_en || item.description_cn || "—")}</td>
+                        <td>${escapeHtml(item.shipping_code || "—")}</td>
+                        <td>${escapeHtml(item.item_no || "—")}</td>
+                        <td>${escapeHtml(item.supplier_name || order.supplier_name || "—")}</td>
+                        <td>${item.quantity != null ? escapeHtml(String(item.quantity)) : "—"}</td>
+                        <td>${item.declared_cbm != null ? parseFloat(item.declared_cbm || 0).toFixed(3) : "—"}</td>
+                    </tr>
+                `,
+            )
+            .join("");
+
+        return `
+            <div class="row g-3">
+                <div class="col-lg-4">
+                    <div class="border rounded p-3 h-100">
+                        <div><strong>Customer:</strong> ${escapeHtml(order.customer_name || "—")}</div>
+                        <div><strong>Supplier:</strong> ${escapeHtml(order.supplier_name || "—")}</div>
+                        <div><strong>Status:</strong> ${renderStatusBadge(order.status || "")}</div>
+                        <div><strong>Expected Ready:</strong> ${escapeHtml(order.expected_ready_date || "—")}</div>
+                        <div><strong>Destination:</strong> ${escapeHtml(order.destination_country_name || "—")}</div>
+                        <div><strong>Shipping Code:</strong> ${escapeHtml(order.default_shipping_code || order.shipping_code || "—")}</div>
+                        <div><strong>High Alert:</strong> ${escapeHtml(order.high_alert_notes || "—")}</div>
+                    </div>
+                </div>
+                <div class="col-lg-8">
+                    <div class="border rounded p-3 h-100">
+                        <div class="fw-semibold mb-2">Items</div>
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Item</th>
+                                        <th>Shipping</th>
+                                        <th>Item No</th>
+                                        <th>Supplier</th>
+                                        <th>Qty</th>
+                                        <th>CBM</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${itemsHtml || '<tr><td colspan="6" class="text-center text-muted py-3">No items found.</td></tr>'}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <div class="border rounded p-3">
+                        <div class="fw-semibold mb-2">Attachments</div>
+                        ${attachments || '<div class="text-muted small">No order attachments.</div>'}
+                    </div>
+                </div>
+                <div class="col-12">
+                    <div class="border rounded p-3">
+                        <div class="fw-semibold mb-2">Receipt Photos</div>
+                        ${photos || '<div class="text-muted small">No receipt photos.</div>'}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    window.openStockOrderInfo = async function (orderId) {
+        const titleEl = document.getElementById("stockOrderInfoTitle");
+        const bodyEl = document.getElementById("stockOrderInfoBody");
+        const modalEl = document.getElementById("stockOrderInfoModal");
+        if (!titleEl || !bodyEl || !modalEl) return;
+
+        titleEl.textContent = `Order #${orderId}`;
+        bodyEl.innerHTML =
+            '<div class="text-center py-4 text-muted">Loading order details…</div>';
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+
+        try {
+            const response = await api(`/orders/${orderId}`);
+            bodyEl.innerHTML = renderStockOrderInfo(response.data || {});
+        } catch (error) {
+            bodyEl.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml(
+                error.message || "Failed to load order details",
+            )}</div>`;
+        }
+    };
 
     function escapeHtml(s) {
         if (!s) return "";

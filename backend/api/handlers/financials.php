@@ -7,6 +7,31 @@
 
 require_once __DIR__ . '/../helpers.php';
 
+function financialsTableHasColumn(PDO $pdo, string $table, string $column): bool
+{
+    static $cache = [];
+    $key = $table . '.' . $column;
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+    try {
+        $stmt = $pdo->prepare("SHOW COLUMNS FROM `$table` LIKE ?");
+        $stmt->execute([$column]);
+        $cache[$key] = (bool) $stmt->rowCount();
+    } catch (Throwable $e) {
+        $cache[$key] = false;
+    }
+    return $cache[$key];
+}
+
+function financialSupplierSettlementExpr(PDO $pdo): string
+{
+    if (financialsTableHasColumn($pdo, 'supplier_payments', 'settlement_delta')) {
+        return 'COALESCE(settlement_delta, COALESCE(discount_amount,0), 0)';
+    }
+    return 'COALESCE(discount_amount,0)';
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
     if (!getAuthUserId()) jsonError('Unauthorized', 401);
@@ -22,7 +47,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $statuses = is_array($statusParam) ? array_values(array_filter($statusParam)) : ($statusParam ? [$statusParam] : []);
     $statusMode = strtolower(trim((string) ($_GET['status_mode'] ?? 'include')));
     $statusMode = $statusMode === 'exclude' ? 'exclude' : 'include';
-    $defaultExcludedStatuses = ['Draft', 'CustomerDeclined'];
+    $defaultExcludedStatuses = ['Draft', 'CustomerDeclined', 'CustomerDeclinedAfterAutoConfirm'];
 
     if ($id === 'balances') {
         $customers = [];
@@ -30,8 +55,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $hasDeposits = $chkDep && $chkDep->rowCount() > 0;
         $chkSell = @$pdo->query("SHOW COLUMNS FROM order_items LIKE 'sell_price'");
         $hasSell = $chkSell && $chkSell->rowCount() > 0;
-        $depSubq = $hasDeposits ? "(SELECT COALESCE(SUM(amount), 0) FROM customer_deposits WHERE customer_id = c.id)" : "0";
-        $custSql = "SELECT c.id, c.name, c.code, $depSubq as total_deposits FROM customers c";
+        $custSql = "SELECT c.id, c.name, c.code FROM customers c";
         $custParams = [];
         if ($customerId) {
             $custSql .= " WHERE c.id = ?";
@@ -41,16 +65,63 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if ($custParams) {
             $stmt->execute($custParams);
         }
+        $depositMap = [];
+        if ($hasDeposits) {
+            $depSql = "SELECT customer_id, currency, SUM(amount) as total FROM customer_deposits";
+            $depParams = [];
+            if ($customerId) {
+                $depSql .= " WHERE customer_id = ?";
+                $depParams[] = $customerId;
+            }
+            $depSql .= " GROUP BY customer_id, currency";
+            $depStmt = $depParams ? $pdo->prepare($depSql) : $pdo->query($depSql);
+            if ($depParams) {
+                $depStmt->execute($depParams);
+            }
+            while ($dep = $depStmt->fetch(PDO::FETCH_ASSOC)) {
+                $depositMap[(int) $dep['customer_id']][(string) ($dep['currency'] ?: 'USD')] = (float) $dep['total'];
+            }
+        }
+        $receivableExpr = $hasSell
+            ? "SUM(CASE WHEN oi.sell_price IS NOT NULL THEN oi.quantity * oi.sell_price ELSE COALESCE(oi.total_amount, oi.quantity * COALESCE(oi.unit_price, 0)) END)"
+            : "SUM(COALESCE(oi.total_amount, oi.quantity * COALESCE(oi.unit_price, 0)))";
+        $receivableSql = "SELECT o.customer_id, o.currency, COALESCE($receivableExpr, 0) as total
+            FROM orders o
+            JOIN order_items oi ON oi.order_id = o.id
+            WHERE o.status NOT IN ('Draft','CustomerDeclined','CustomerDeclinedAfterAutoConfirm')";
+        $receivableParams = [];
+        if ($customerId) {
+            $receivableSql .= " AND o.customer_id = ?";
+            $receivableParams[] = $customerId;
+        }
+        $receivableSql .= " GROUP BY o.customer_id, o.currency";
+        $receivableStmt = $receivableParams ? $pdo->prepare($receivableSql) : $pdo->query($receivableSql);
+        if ($receivableParams) {
+            $receivableStmt->execute($receivableParams);
+        }
+        $receivableMap = [];
+        while ($rr = $receivableStmt->fetch(PDO::FETCH_ASSOC)) {
+            $receivableMap[(int) $rr['customer_id']][(string) ($rr['currency'] ?: 'USD')] = (float) $rr['total'];
+        }
+
         while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
             $custId = $r['id'];
-            $deposits = (float) ($r['total_deposits'] ?? 0);
-            $receivableExpr = $hasSell
-                ? "SUM(oi.quantity * COALESCE(oi.sell_price, oi.unit_price, 0))"
-                : "SUM(COALESCE(oi.total_amount, oi.quantity * COALESCE(oi.unit_price, 0)))";
-            $orderTotal = $pdo->prepare("SELECT COALESCE($receivableExpr, 0) FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.customer_id = ? AND o.status NOT IN ('Draft','CustomerDeclined')");
-            $orderTotal->execute([$custId]);
-            $receivable = (float) $orderTotal->fetchColumn();
-            $customers[] = ['id' => $custId, 'name' => $r['name'], 'code' => $r['code'], 'deposits' => $deposits, 'receivable' => $receivable, 'balance' => $deposits - $receivable];
+            $currencies = [];
+            foreach (['USD', 'RMB'] as $currency) {
+                $deposits = (float) ($depositMap[$custId][$currency] ?? 0);
+                $receivable = (float) ($receivableMap[$custId][$currency] ?? 0);
+                $currencies[$currency] = [
+                    'deposits' => $deposits,
+                    'receivable' => $receivable,
+                    'balance' => round($deposits - $receivable, 4),
+                ];
+            }
+            $customers[] = [
+                'id' => $custId,
+                'name' => $r['name'],
+                'code' => $r['code'],
+                'currencies' => $currencies,
+            ];
         }
         $suppliers = [];
         $suppSql = "SELECT s.id, s.name, s.code FROM suppliers s";
@@ -61,19 +132,55 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         }
         $chkPay = @$pdo->query("SHOW TABLES LIKE 'supplier_payments'");
         $hasPayments = $chkPay && $chkPay->rowCount() > 0;
+        $settlementExpr = financialSupplierSettlementExpr($pdo);
         if ($hasPayments) {
             $stmt = $suppParams ? $pdo->prepare($suppSql) : $pdo->query($suppSql);
             if ($suppParams) {
                 $stmt->execute($suppParams);
             }
+            $paymentSql = "SELECT supplier_id, currency, SUM(amount) as total_paid, SUM(COALESCE(invoice_amount, amount)) as total_invoiced, SUM($settlementExpr) as total_settlement FROM supplier_payments";
+            $paymentParams = [];
+            if ($supplierId) {
+                $paymentSql .= " WHERE supplier_id = ?";
+                $paymentParams[] = $supplierId;
+            }
+            $paymentSql .= " GROUP BY supplier_id, currency";
+            $paymentStmt = $paymentParams ? $pdo->prepare($paymentSql) : $pdo->query($paymentSql);
+            if ($paymentParams) {
+                $paymentStmt->execute($paymentParams);
+            }
+            $paymentMap = [];
+            while ($pay = $paymentStmt->fetch(PDO::FETCH_ASSOC)) {
+                $paymentMap[(int) $pay['supplier_id']][(string) ($pay['currency'] ?: 'USD')] = [
+                    'paid' => (float) $pay['total_paid'],
+                    'invoiced' => (float) $pay['total_invoiced'],
+                    'settlement_delta' => (float) $pay['total_settlement'],
+                ];
+            }
             while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
-                $paidStmt = $pdo->prepare("SELECT COALESCE(SUM(amount), 0) FROM supplier_payments WHERE supplier_id = ?");
-                $paidStmt->execute([$r['id']]);
-                $paidVal = (float) $paidStmt->fetchColumn();
-                $invStmt = $pdo->prepare("SELECT COALESCE(SUM(COALESCE(invoice_amount, amount)), 0) FROM supplier_payments WHERE supplier_id = ?");
-                $invStmt->execute([$r['id']]);
-                $invVal = (float) $invStmt->fetchColumn();
-                $suppliers[] = ['id' => $r['id'], 'name' => $r['name'], 'code' => $r['code'], 'paid' => $paidVal, 'invoiced' => $invVal, 'payable' => $invVal - $paidVal];
+                $supplierCurrencies = [];
+                foreach (['USD', 'RMB'] as $currency) {
+                    $paidVal = (float) ($paymentMap[(int) $r['id']][$currency]['paid'] ?? 0);
+                    $invVal = (float) ($paymentMap[(int) $r['id']][$currency]['invoiced'] ?? 0);
+                    $settled = (float) ($paymentMap[(int) $r['id']][$currency]['settlement_delta'] ?? 0);
+                    $supplierCurrencies[$currency] = [
+                        'paid' => $paidVal,
+                        'invoiced' => $invVal,
+                        'settlement_delta' => $settled,
+                        'payable' => round($invVal - $paidVal - $settled, 4),
+                    ];
+                }
+                $detailStmt = $pdo->prepare("SELECT payment_facility_days, payment_links FROM suppliers WHERE id = ?");
+                $detailStmt->execute([$r['id']]);
+                $supplierMeta = $detailStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+                $suppliers[] = [
+                    'id' => $r['id'],
+                    'name' => $r['name'],
+                    'code' => $r['code'],
+                    'currencies' => $supplierCurrencies,
+                    'payment_facility_days' => isset($supplierMeta['payment_facility_days']) ? (int) $supplierMeta['payment_facility_days'] : null,
+                    'payment_links' => !empty($supplierMeta['payment_links']) ? (json_decode((string) $supplierMeta['payment_links'], true) ?: []) : [],
+                ];
             }
         } else {
             $stmt = $suppParams ? $pdo->prepare($suppSql) : $pdo->query($suppSql);
@@ -81,7 +188,17 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt->execute($suppParams);
             }
             while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
-                $suppliers[] = ['id' => $r['id'], 'name' => $r['name'], 'code' => $r['code'], 'paid' => 0, 'invoiced' => 0, 'payable' => 0];
+                $suppliers[] = [
+                    'id' => $r['id'],
+                    'name' => $r['name'],
+                    'code' => $r['code'],
+                    'currencies' => [
+                        'USD' => ['paid' => 0, 'invoiced' => 0, 'settlement_delta' => 0, 'payable' => 0],
+                        'RMB' => ['paid' => 0, 'invoiced' => 0, 'settlement_delta' => 0, 'payable' => 0],
+                    ],
+                    'payment_facility_days' => null,
+                    'payment_links' => [],
+                ];
             }
         }
         jsonResponse(['data' => ['customers' => $customers, 'suppliers' => $suppliers]]);

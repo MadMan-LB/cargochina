@@ -13,7 +13,7 @@ async function loadDashboardStats() {
             el("statPendingReceiving").textContent = s.pending_receiving ?? 0;
         if (el("statAwaitingConfirm"))
             el("statAwaitingConfirm").textContent =
-                s.awaiting_confirmation ?? 0;
+                s.customer_feedback_pending ?? 0;
         if (el("statReadyConsolidate"))
             el("statReadyConsolidate").textContent =
                 s.ready_for_consolidation ?? 0;
@@ -25,9 +25,9 @@ async function loadDashboardStats() {
         const staleText = el("staleAlertText");
         const msgs = [];
         const days = s.stale_threshold_days ?? 3;
-        if ((s.stale_awaiting_confirmation ?? 0) > 0)
+        if ((s.stale_customer_feedback ?? 0) > 0)
             msgs.push(
-                `${s.stale_awaiting_confirmation} order${s.stale_awaiting_confirmation > 1 ? "s" : ""} awaiting customer confirmation for more than ${days} day${days > 1 ? "s" : ""}`,
+                `${s.stale_customer_feedback} order${s.stale_customer_feedback > 1 ? "s" : ""} still waiting for customer feedback for more than ${days} day${days > 1 ? "s" : ""}`,
             );
         if ((s.stale_overdue ?? 0) > 0)
             msgs.push(

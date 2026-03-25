@@ -212,14 +212,14 @@ class NotificationService
     public function notifyOrderReceived(int $orderId, int $userId, bool $varianceDetected, ?string $confirmToken = null): void
     {
         $eventType = $varianceDetected ? 'variance_confirmation' : 'order_received';
-        $title = $varianceDetected ? 'Order #' . $orderId . ' — confirmation required' : 'Order #' . $orderId . ' received';
+        $title = $varianceDetected ? 'Order #' . $orderId . ' — customer follow-up link sent' : 'Order #' . $orderId . ' received';
         $confirmLink = '';
         if ($varianceDetected && $confirmToken) {
             $base = rtrim($this->config['app_url'] ?? 'http://localhost/cargochina', '/');
-            $confirmLink = "\n\nConfirmation link: $base/confirm.php?token=$confirmToken\n(Share with customer to confirm or cancel variance)";
+            $confirmLink = "\n\nCustomer review link: $base/confirm.php?token=$confirmToken\n(Share with customer so they can accept the warehouse actuals or decline them afterward.)";
         }
         $body = $varianceDetected
-            ? 'CBM/weight variance detected. Customer confirmation required.' . $confirmLink
+            ? 'CBM/weight variance detected. The order was auto-confirmed into stock and the customer review link is ready.' . $confirmLink
             : 'Order received at warehouse.';
         $GLOBALS['_log_order_id'] = $orderId;
         $this->notifyAdmins($eventType, $title, $body, ['order_id' => $orderId, 'variance' => $varianceDetected]);
@@ -258,23 +258,23 @@ class NotificationService
         unset($GLOBALS['_log_order_id']);
     }
 
-    /** Notify admins about stale orders (awaiting confirmation or overdue) */
-    public function notifyStaleOrders(int $awaitingCount, int $overdueCount, int $thresholdDays): void
+    /** Notify admins about stale orders (customer feedback pending or overdue) */
+    public function notifyStaleOrders(int $feedbackPendingCount, int $overdueCount, int $thresholdDays): void
     {
-        if ($awaitingCount <= 0 && $overdueCount <= 0) {
+        if ($feedbackPendingCount <= 0 && $overdueCount <= 0) {
             return;
         }
         $parts = [];
-        if ($awaitingCount > 0) {
-            $parts[] = $awaitingCount . ' order(s) awaiting confirmation beyond ' . $thresholdDays . ' days';
+        if ($feedbackPendingCount > 0) {
+            $parts[] = $feedbackPendingCount . ' order(s) still awaiting customer feedback beyond ' . $thresholdDays . ' days';
         }
         if ($overdueCount > 0) {
             $parts[] = $overdueCount . ' order(s) overdue (past expected ready date)';
         }
         $title = 'Stale order alert';
-        $body = implode('; ', $parts) . '. See Confirmations or Orders.';
+        $body = implode('; ', $parts) . '. Review the Orders page for customer follow-up or receiving recovery actions.';
         $this->notifyAdmins('stale_order_alert', $title, $body, [
-            'stale_awaiting_confirmation' => $awaitingCount,
+            'stale_customer_feedback' => $feedbackPendingCount,
             'stale_overdue' => $overdueCount,
         ]);
     }
@@ -309,8 +309,8 @@ class NotificationService
         $GLOBALS['_log_order_id'] = $orderId;
         $svc->notifyAdmins(
             'order_declined',
-            'Order #' . $orderId . ' — Customer declined',
-            'Customer declined variance confirmation. Reason: ' . $reason,
+            'Order #' . $orderId . ' — Customer declined after auto-confirm',
+            'Customer declined the auto-confirmed warehouse receipt. Reason: ' . $reason,
             ['order_id' => $orderId, 'decline_reason' => $reason]
         );
         unset($GLOBALS['_log_order_id']);

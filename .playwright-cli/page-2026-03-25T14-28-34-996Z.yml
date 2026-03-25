@@ -1,0 +1,158 @@
+- generic [active] [ref=e1]:
+  - complementary [ref=e2]:
+    - link "CLMS" [ref=e4] [cursor=pointer]:
+      - /url: /cargochina/index.php
+    - navigation [ref=e5]:
+      - generic [ref=e6]: Main
+      - link "Dashboard" [ref=e7] [cursor=pointer]:
+        - /url: /cargochina/index.php
+        - img [ref=e8]
+        - text: Dashboard
+      - link "Orders" [ref=e10] [cursor=pointer]:
+        - /url: /cargochina/orders.php
+        - img [ref=e11]
+        - text: Orders
+      - link "Receiving" [ref=e13] [cursor=pointer]:
+        - /url: /cargochina/receiving.php
+        - img [ref=e14]
+        - text: Receiving
+      - link "Pipeline" [ref=e16] [cursor=pointer]:
+        - /url: /cargochina/pipeline.php
+        - img [ref=e17]
+        - text: Pipeline
+      - link "Consolidation" [ref=e19] [cursor=pointer]:
+        - /url: /cargochina/consolidation.php
+        - img [ref=e20]
+        - text: Consolidation
+      - link "Containers" [ref=e22] [cursor=pointer]:
+        - /url: /cargochina/containers.php
+        - img [ref=e23]
+        - text: Containers
+      - link "Assign to Container" [ref=e25] [cursor=pointer]:
+        - /url: /cargochina/assign_container.php
+        - img [ref=e26]
+        - text: Assign to Container
+      - link "Expenses" [ref=e28] [cursor=pointer]:
+        - /url: /cargochina/expenses.php
+        - img [ref=e29]
+        - text: Expenses
+      - link "Financials" [ref=e31] [cursor=pointer]:
+        - /url: /cargochina/financials.php
+        - img [ref=e32]
+        - text: Financials
+      - link "HS Code Tax" [ref=e34] [cursor=pointer]:
+        - /url: /cargochina/hs_code_tax.php
+        - img [ref=e35]
+        - text: HS Code Tax
+      - link "Calendar" [ref=e37] [cursor=pointer]:
+        - /url: /cargochina/calendar.php
+        - img [ref=e38]
+        - text: Calendar
+      - link "Warehouse Stock" [ref=e40] [cursor=pointer]:
+        - /url: /cargochina/warehouse_stock.php
+        - img [ref=e41]
+        - text: Warehouse Stock
+      - link "Draft an Order" [ref=e43] [cursor=pointer]:
+        - /url: /cargochina/procurement_drafts.php
+        - img [ref=e44]
+        - text: Draft an Order
+      - generic [ref=e46]: Data
+      - link "Suppliers" [ref=e47] [cursor=pointer]:
+        - /url: /cargochina/suppliers.php
+        - img [ref=e48]
+        - text: Suppliers
+      - link "Customers" [ref=e50] [cursor=pointer]:
+        - /url: /cargochina/customers.php
+        - img [ref=e51]
+        - text: Customers
+      - link "Products" [ref=e53] [cursor=pointer]:
+        - /url: /cargochina/products.php
+        - img [ref=e54]
+        - text: Products
+      - generic [ref=e56]: Notifications
+      - link "Notifications" [ref=e57] [cursor=pointer]:
+        - /url: /cargochina/notifications.php
+        - img [ref=e58]
+        - text: Notifications
+      - link "Preferences" [ref=e60] [cursor=pointer]:
+        - /url: /cargochina/notification_preferences.php
+        - img [ref=e61]
+        - text: Preferences
+      - generic [ref=e63]: Administration
+      - link "Business Settings" [ref=e64] [cursor=pointer]:
+        - /url: /cargochina/business_settings.php
+        - img [ref=e65]
+        - text: Business Settings
+      - link "Configuration" [ref=e67] [cursor=pointer]:
+        - /url: /cargochina/admin_config.php
+        - img [ref=e68]
+        - text: Configuration
+      - link "Users" [ref=e71] [cursor=pointer]:
+        - /url: /cargochina/admin_users.php
+        - img [ref=e72]
+        - text: Users
+      - link "Diagnostics" [ref=e74] [cursor=pointer]:
+        - /url: /cargochina/admin_diagnostics.php
+        - img [ref=e75]
+        - text: Diagnostics
+      - link "Tracking Push Log" [ref=e77] [cursor=pointer]:
+        - /url: /cargochina/admin_tracking_push.php
+        - img [ref=e78]
+        - text: Tracking Push Log
+      - link "Audit Log" [ref=e80] [cursor=pointer]:
+        - /url: /cargochina/admin_audit_log.php
+        - img [ref=e81]
+        - text: Audit Log
+    - generic [ref=e83]:
+      - generic [ref=e84]:
+        - img [ref=e85]
+        - generic [ref=e87]: Super Admin
+      - link "Logout" [ref=e88] [cursor=pointer]:
+        - /url: /cargochina/login.php?logout=1
+        - img [ref=e89]
+        - text: Logout
+  - generic [ref=e91]:
+    - banner [ref=e92]:
+      - button "Toggle sidebar" [expanded] [ref=e93] [cursor=pointer]:
+        - img [ref=e94]
+      - generic [ref=e96]: Draft an Order
+      - generic [ref=e97]:
+        - group "Description language" [ref=e98]:
+          - button "EN" [ref=e99] [cursor=pointer]
+          - button "中文" [ref=e100] [cursor=pointer]
+        - generic [ref=e101]: SuperAdmin
+    - generic [ref=e102]:
+      - heading "Draft an Order" [level=1] [ref=e103]
+      - paragraph [ref=e104]: Build one customer order across multiple suppliers, save it directly as a real order, and migrate any old procurement drafts that still need customer details or optional scheduling info.
+      - generic [ref=e105]:
+        - generic [ref=e106]:
+          - generic [ref=e107]:
+            - generic [ref=e108]: Draft Orders
+            - text: These are real orders saved with the draft-order workflow.
+          - button "+ Draft an Order" [ref=e109] [cursor=pointer]
+        - table [ref=e112]:
+          - rowgroup [ref=e113]:
+            - row "ID Customer Suppliers Expected Ready Status Items Totals Actions" [ref=e114]:
+              - columnheader "ID" [ref=e115]
+              - columnheader "Customer" [ref=e116]
+              - columnheader "Suppliers" [ref=e117]
+              - columnheader "Expected Ready" [ref=e118]
+              - columnheader "Status" [ref=e119]
+              - columnheader "Items" [ref=e120]
+              - columnheader "Totals" [ref=e121]
+              - columnheader "Actions" [ref=e122]
+          - rowgroup
+      - generic [ref=e123]:
+        - generic [ref=e125]:
+          - generic [ref=e126]: Legacy Procurement Drafts
+          - text: Old rows stay here until they are migrated into real draft orders.
+        - table [ref=e129]:
+          - rowgroup [ref=e130]:
+            - row "ID Name Supplier Status Items Actions" [ref=e131]:
+              - columnheader "ID" [ref=e132]
+              - columnheader "Name" [ref=e133]
+              - columnheader "Supplier" [ref=e134]
+              - columnheader "Status" [ref=e135]
+              - columnheader "Items" [ref=e136]
+              - columnheader "Actions" [ref=e137]
+          - rowgroup

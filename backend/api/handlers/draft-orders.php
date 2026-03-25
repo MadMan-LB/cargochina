@@ -8,6 +8,8 @@
 
 require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__, 2) . '/services/NotificationService.php';
+require_once dirname(__DIR__, 2) . '/services/OrderCountryService.php';
+require_once dirname(__DIR__, 2) . '/services/OrderItemNumberingService.php';
 require_once dirname(__DIR__, 2) . '/services/TranslationService.php';
 
 function draftOrderTableHasColumn(PDO $pdo, string $table, string $column): bool
@@ -81,6 +83,28 @@ function draftOrderResolveExpectedReadyDate(array $input, array $order = []): ?s
     }
 
     return draftOrderNormalizeExpectedReadyDate($input['expected_ready_date'] ?? null);
+}
+
+function draftOrderResolveDestinationCountryId(PDO $pdo, int $customerId, array $input, array $order = []): ?int
+{
+    if (!draftOrderTableHasColumn($pdo, 'orders', 'destination_country_id')) {
+        return null;
+    }
+
+    $requestedCountryId = null;
+    if (array_key_exists('destination_country_id', $input)) {
+        $requestedCountryId = !empty($input['destination_country_id'])
+            ? (int) $input['destination_country_id']
+            : null;
+    } elseif (!empty($order['destination_country_id'])) {
+        $requestedCountryId = (int) $order['destination_country_id'];
+    }
+
+    return OrderCountryService::resolveDestinationCountryId(
+        $pdo,
+        $customerId,
+        $requestedCountryId
+    );
 }
 
 function draftOrderTranslationService(PDO $pdo): TranslationService
@@ -610,6 +634,12 @@ function draftOrderFlattenSections(PDO $pdo, array $sections): array
     return $normalized;
 }
 
+function draftOrderAssignCanonicalItemNumbers(PDO $pdo, int $customerId, array $items, ?int $defaultSupplierId = null, ?int $destinationCountryId = null): array
+{
+    $shippingCode = OrderCountryService::resolveShippingCode($pdo, $customerId, $destinationCountryId);
+    return OrderItemNumberingService::assignItemNumbers($items, $shippingCode, $defaultSupplierId);
+}
+
 function draftOrderInsertDesignAttachments(PDO $pdo, int $itemId, array $paths, ?string $note, ?int $userId): void
 {
     if (!$paths) {
@@ -845,11 +875,18 @@ function draftOrderBuildSupplierSections(array $items): array
 
 function draftOrderFetchOrderPayload(PDO $pdo, int $orderId): array
 {
+    $destCols = draftOrderTableHasColumn($pdo, 'orders', 'destination_country_id')
+        ? ", co.id as destination_country_id, co.name as destination_country_name, co.code as destination_country_code"
+        : "";
+    $destJoin = draftOrderTableHasColumn($pdo, 'orders', 'destination_country_id')
+        ? " LEFT JOIN countries co ON co.id = o.destination_country_id"
+        : "";
     $stmt = $pdo->prepare(
-        "SELECT o.*, c.name as customer_name, c.default_shipping_code, s.name as supplier_name
+        "SELECT o.*, c.name as customer_name, c.default_shipping_code, s.name as supplier_name$destCols
          FROM orders o
          JOIN customers c ON o.customer_id = c.id
          LEFT JOIN suppliers s ON o.supplier_id = s.id
+         $destJoin
          WHERE o.id = ?
            AND o.order_type = 'draft_procurement'"
     );
@@ -869,6 +906,9 @@ function draftOrderFetchOrderPayload(PDO $pdo, int $orderId): array
         'customer_id' => (int) $order['customer_id'],
         'customer_name' => $order['customer_name'],
         'default_shipping_code' => $order['default_shipping_code'] ?: null,
+        'destination_country_id' => !empty($order['destination_country_id']) ? (int) $order['destination_country_id'] : null,
+        'destination_country_name' => $order['destination_country_name'] ?? null,
+        'destination_country_code' => $order['destination_country_code'] ?? null,
         'supplier_id' => $order['supplier_id'] ? (int) $order['supplier_id'] : null,
         'supplier_name' => $order['supplier_name'] ?: null,
         'expected_ready_date' => $order['expected_ready_date'],
@@ -920,6 +960,7 @@ function draftOrderExportCsv(PDO $pdo, int $orderId): void
     $out = fopen('php://output', 'w');
     fputcsv($out, ['Draft Order', '#' . $order['id']]);
     fputcsv($out, ['Customer', $order['customer_name']]);
+    fputcsv($out, ['Destination Country', trim((string) (($order['destination_country_name'] ?? '') . (!empty($order['destination_country_code']) ? ' (' . $order['destination_country_code'] . ')' : ''))) ?: '—']);
     fputcsv($out, ['Expected Ready', $order['expected_ready_date']]);
     fputcsv($out, ['Currency', $order['currency']]);
     fputcsv($out, ['Status', $order['status']]);
@@ -1007,6 +1048,21 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if (!in_array($currency, ['USD', 'RMB'], true)) {
             $currency = 'USD';
         }
+        $destinationCountryId = null;
+        if (draftOrderTableHasColumn($pdo, 'orders', 'destination_country_id')) {
+            if (array_key_exists('destination_country_id', $input)) {
+                $destinationCountryId = draftOrderResolveDestinationCountryId($pdo, $customerId, $input);
+            } else {
+                $customerCountries = OrderCountryService::fetchCustomerCountries($pdo, $customerId);
+                $allowedIds = array_values(array_unique(array_filter(array_map(
+                    static fn(array $row): int => (int) ($row['country_id'] ?? 0),
+                    $customerCountries
+                ))));
+                if (count($allowedIds) === 1) {
+                    $destinationCountryId = (int) $allowedIds[0];
+                }
+            }
+        }
 
         $itemsStmt = $pdo->prepare(
             "SELECT pdi.*, p.description_cn, p.description_en, p.cbm, p.weight, p.unit_price, p.hs_code
@@ -1024,10 +1080,17 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $supplierId = !empty($legacy['supplier_id']) ? (int) $legacy['supplier_id'] : null;
         $pdo->beginTransaction();
         try {
-            $pdo->prepare(
-                "INSERT INTO orders (customer_id, supplier_id, expected_ready_date, currency, status, order_type, created_by)
-                 VALUES (?, ?, ?, ?, 'Draft', 'draft_procurement', ?)"
-            )->execute([$customerId, $supplierId, $expectedDate, $currency, $userId]);
+            if (draftOrderTableHasColumn($pdo, 'orders', 'destination_country_id')) {
+                $pdo->prepare(
+                    "INSERT INTO orders (customer_id, supplier_id, expected_ready_date, currency, status, order_type, created_by, destination_country_id)
+                     VALUES (?, ?, ?, ?, 'Draft', 'draft_procurement', ?, ?)"
+                )->execute([$customerId, $supplierId, $expectedDate, $currency, $userId, $destinationCountryId]);
+            } else {
+                $pdo->prepare(
+                    "INSERT INTO orders (customer_id, supplier_id, expected_ready_date, currency, status, order_type, created_by)
+                     VALUES (?, ?, ?, ?, 'Draft', 'draft_procurement', ?)"
+                )->execute([$customerId, $supplierId, $expectedDate, $currency, $userId]);
+            }
             $orderId = (int) $pdo->lastInsertId();
 
             $normalizedItems = [];
@@ -1074,6 +1137,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 jsonError('Legacy procurement draft has no valid items to migrate.', 400);
             }
 
+            $normalizedItems = draftOrderAssignCanonicalItemNumbers($pdo, $customerId, $normalizedItems, $supplierId, $destinationCountryId);
             draftOrderInsertItems($pdo, $orderId, $supplierId, $normalizedItems, $userId);
             $previousStatus = $legacy['status'] ?? 'draft';
             $pdo->prepare("UPDATE procurement_drafts SET status = 'converted', converted_order_id = ? WHERE id = ?")->execute([$orderId, $legacyId]);
@@ -1131,21 +1195,30 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if (!in_array($currency, ['USD', 'RMB'], true)) {
             jsonError('Currency must be USD or RMB', 400);
         }
+        $destinationCountryId = draftOrderResolveDestinationCountryId($pdo, $customerId, $input);
 
         $items = draftOrderFlattenSections($pdo, $input['supplier_sections'] ?? []);
-        $dupWarn = draftOrderEnforceDuplicateShippingCodePolicy($pdo, $customerId, 0, $items);
         $supplierIds = array_values(array_unique(array_filter(array_map(
             static fn($item) => (int) ($item['supplier_id'] ?? 0),
             $items
         ))));
         $defaultSupplierId = count($supplierIds) === 1 ? $supplierIds[0] : null;
+        $items = draftOrderAssignCanonicalItemNumbers($pdo, $customerId, $items, $defaultSupplierId, $destinationCountryId);
+        $dupWarn = draftOrderEnforceDuplicateShippingCodePolicy($pdo, $customerId, 0, $items);
 
         $pdo->beginTransaction();
         try {
-            $pdo->prepare(
-                "INSERT INTO orders (customer_id, supplier_id, expected_ready_date, currency, status, order_type, high_alert_notes, created_by)
-                 VALUES (?, ?, ?, ?, 'Draft', 'draft_procurement', ?, ?)"
-            )->execute([$customerId, $defaultSupplierId, $expectedDate, $currency, $highAlertNotes, $userId]);
+            if (draftOrderTableHasColumn($pdo, 'orders', 'destination_country_id')) {
+                $pdo->prepare(
+                    "INSERT INTO orders (customer_id, supplier_id, expected_ready_date, currency, status, order_type, high_alert_notes, created_by, destination_country_id)
+                     VALUES (?, ?, ?, ?, 'Draft', 'draft_procurement', ?, ?, ?)"
+                )->execute([$customerId, $defaultSupplierId, $expectedDate, $currency, $highAlertNotes, $userId, $destinationCountryId]);
+            } else {
+                $pdo->prepare(
+                    "INSERT INTO orders (customer_id, supplier_id, expected_ready_date, currency, status, order_type, high_alert_notes, created_by)
+                     VALUES (?, ?, ?, ?, 'Draft', 'draft_procurement', ?, ?)"
+                )->execute([$customerId, $defaultSupplierId, $expectedDate, $currency, $highAlertNotes, $userId]);
+            }
             $orderId = (int) $pdo->lastInsertId();
             draftOrderInsertItems($pdo, $orderId, $defaultSupplierId, $items, $userId);
             $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order', ?, 'create', ?, ?)")
@@ -1186,19 +1259,26 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if (!in_array($currency, ['USD', 'RMB'], true)) {
             jsonError('Currency must be USD or RMB', 400);
         }
+        $destinationCountryId = draftOrderResolveDestinationCountryId($pdo, $customerId, $input, $order);
 
         $items = draftOrderFlattenSections($pdo, $input['supplier_sections'] ?? []);
-        $dupWarn = draftOrderEnforceDuplicateShippingCodePolicy($pdo, $customerId, $orderId, $items);
         $supplierIds = array_values(array_unique(array_filter(array_map(
             static fn($item) => (int) ($item['supplier_id'] ?? 0),
             $items
         ))));
         $defaultSupplierId = count($supplierIds) === 1 ? $supplierIds[0] : null;
+        $items = draftOrderAssignCanonicalItemNumbers($pdo, $customerId, $items, $defaultSupplierId, $destinationCountryId);
+        $dupWarn = draftOrderEnforceDuplicateShippingCodePolicy($pdo, $customerId, $orderId, $items);
 
         $pdo->beginTransaction();
         try {
-            $pdo->prepare("UPDATE orders SET customer_id = ?, supplier_id = ?, expected_ready_date = ?, currency = ?, high_alert_notes = ? WHERE id = ?")
-                ->execute([$customerId, $defaultSupplierId, $expectedDate, $currency, $highAlertNotes, $orderId]);
+            if (draftOrderTableHasColumn($pdo, 'orders', 'destination_country_id')) {
+                $pdo->prepare("UPDATE orders SET customer_id = ?, supplier_id = ?, expected_ready_date = ?, currency = ?, high_alert_notes = ?, destination_country_id = ? WHERE id = ?")
+                    ->execute([$customerId, $defaultSupplierId, $expectedDate, $currency, $highAlertNotes, $destinationCountryId, $orderId]);
+            } else {
+                $pdo->prepare("UPDATE orders SET customer_id = ?, supplier_id = ?, expected_ready_date = ?, currency = ?, high_alert_notes = ? WHERE id = ?")
+                    ->execute([$customerId, $defaultSupplierId, $expectedDate, $currency, $highAlertNotes, $orderId]);
+            }
             draftOrderDeleteExistingItems($pdo, $orderId);
             draftOrderInsertItems($pdo, $orderId, $defaultSupplierId, $items, $userId);
             $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order', ?, 'update', ?, ?)")

@@ -7,6 +7,24 @@
 
 require_once __DIR__ . '/../helpers.php';
 
+function dashboardWarehouseReceiptHasColumn(PDO $pdo, string $column): bool
+{
+    static $cache = [];
+    if (array_key_exists($column, $cache)) {
+        return $cache[$column];
+    }
+
+    try {
+        $stmt = $pdo->prepare("SHOW COLUMNS FROM warehouse_receipts LIKE ?");
+        $stmt->execute([$column]);
+        $cache[$column] = (bool) $stmt->rowCount();
+    } catch (Throwable $e) {
+        $cache[$column] = false;
+    }
+
+    return $cache[$column];
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     if ($method !== 'GET' || $id !== 'stats') {
         jsonError('Not found', 404);
@@ -25,6 +43,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             'ReceivedAtWarehouse' => 'received',
             'AwaitingCustomerConfirmation' => 'awaiting_confirmation',
             'Confirmed' => 'confirmed',
+            'CustomerDeclinedAfterAutoConfirm' => 'declined_after_auto_confirm',
             'ReadyForConsolidation' => 'ready_for_consolidation',
             'ConsolidatedIntoShipmentDraft' => 'in_shipment_draft',
             'AssignedToContainer' => 'assigned_to_container',
@@ -41,6 +60,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
     $stmt = $pdo->query("SELECT COUNT(*) FROM shipment_drafts WHERE status = 'draft'");
     $stats['draft_shipments'] = (int) $stmt->fetchColumn();
+
+    $stmt = $pdo->query("SELECT COUNT(*) FROM orders WHERE COALESCE(confirmation_token, '') <> ''");
+    $stats['customer_feedback_pending'] = (int) $stmt->fetchColumn();
 
     $userId = getAuthUserId() ?? 0;
     if ($userId) {
@@ -59,10 +81,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if ($submitted > 0) {
             $stats['my_tasks'][] = ['label' => 'Orders to approve', 'count' => $submitted, 'url' => '/cargochina/orders.php?status=Submitted'];
         }
-        $stmt = $pdo->query("SELECT COUNT(*) FROM orders WHERE status = 'AwaitingCustomerConfirmation'");
-        $awaitConfirm = (int) $stmt->fetchColumn();
-        if ($awaitConfirm > 0) {
-            $stats['my_tasks'][] = ['label' => 'Awaiting customer confirmation', 'count' => $awaitConfirm, 'url' => '/cargochina/orders.php?status=AwaitingCustomerConfirmation'];
+        $stmt = $pdo->query("SELECT COUNT(*) FROM orders WHERE COALESCE(confirmation_token, '') <> ''");
+        $feedbackPending = (int) $stmt->fetchColumn();
+        if ($feedbackPending > 0) {
+            $stats['my_tasks'][] = ['label' => 'Customer feedback pending', 'count' => $feedbackPending, 'url' => '/cargochina/orders.php?customer_feedback=pending'];
         }
     }
     if (in_array('WarehouseStaff', $userRoles) || in_array('SuperAdmin', $userRoles)) {
@@ -83,13 +105,21 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if ($drafts > 0) {
             $stats['my_tasks'][] = ['label' => 'Shipment drafts', 'count' => $drafts, 'url' => '/cargochina/consolidation.php'];
         }
+        $stmt = $pdo->query("SELECT COUNT(*) FROM orders WHERE status = 'CustomerDeclinedAfterAutoConfirm'");
+        $declinedAfter = (int) $stmt->fetchColumn();
+        if ($declinedAfter > 0) {
+            $stats['my_tasks'][] = ['label' => 'Declined after auto-confirm', 'count' => $declinedAfter, 'url' => '/cargochina/orders.php?customer_feedback=declined_after_auto_confirm'];
+        }
     }
 
-    // Stale order counts — orders stuck in confirmation/approval beyond configured threshold
+    // Stale order counts — orders stuck in customer feedback/approval beyond configured threshold
     $threshold = (int) ($pdo->query("SELECT key_value FROM system_config WHERE key_name='STALE_ORDER_THRESHOLD_DAYS' LIMIT 1")->fetchColumn() ?: 3);
-    $staleConfirm = $pdo->prepare("SELECT COUNT(*) FROM orders o JOIN warehouse_receipts wr ON wr.order_id = o.id WHERE o.status = 'AwaitingCustomerConfirmation' AND wr.received_at < DATE_SUB(NOW(), INTERVAL ? DAY)");
+    $staleReceiptWhere = dashboardWarehouseReceiptHasColumn($pdo, 'voided_at')
+        ? ' AND wr.voided_at IS NULL'
+        : '';
+    $staleConfirm = $pdo->prepare("SELECT COUNT(*) FROM orders o JOIN warehouse_receipts wr ON wr.order_id = o.id WHERE COALESCE(o.confirmation_token, '') <> ''$staleReceiptWhere AND wr.received_at < DATE_SUB(NOW(), INTERVAL ? DAY)");
     $staleConfirm->execute([$threshold]);
-    $stats['stale_awaiting_confirmation'] = (int) $staleConfirm->fetchColumn();
+    $stats['stale_customer_feedback'] = (int) $staleConfirm->fetchColumn();
 
     $staleApproved = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE status IN ('Approved','InTransitToWarehouse') AND expected_ready_date < DATE_SUB(CURDATE(), INTERVAL ? DAY)");
     $staleApproved->execute([$threshold]);

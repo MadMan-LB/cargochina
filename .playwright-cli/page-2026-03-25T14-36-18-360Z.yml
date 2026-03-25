@@ -1,0 +1,427 @@
+- generic [ref=e1]:
+  - complementary [ref=e2]:
+    - link "CLMS" [ref=e4] [cursor=pointer]:
+      - /url: /cargochina/index.php
+    - navigation [ref=e5]:
+      - generic [ref=e6]: Main
+      - link "Dashboard" [ref=e7] [cursor=pointer]:
+        - /url: /cargochina/index.php
+        - img [ref=e8]
+        - text: Dashboard
+      - link "Orders" [ref=e10] [cursor=pointer]:
+        - /url: /cargochina/orders.php
+        - img [ref=e11]
+        - text: Orders
+      - link "Receiving" [ref=e13] [cursor=pointer]:
+        - /url: /cargochina/receiving.php
+        - img [ref=e14]
+        - text: Receiving
+      - link "Pipeline" [ref=e16] [cursor=pointer]:
+        - /url: /cargochina/pipeline.php
+        - img [ref=e17]
+        - text: Pipeline
+      - link "Consolidation" [ref=e19] [cursor=pointer]:
+        - /url: /cargochina/consolidation.php
+        - img [ref=e20]
+        - text: Consolidation
+      - link "Containers" [ref=e22] [cursor=pointer]:
+        - /url: /cargochina/containers.php
+        - img [ref=e23]
+        - text: Containers
+      - link "Assign to Container" [ref=e25] [cursor=pointer]:
+        - /url: /cargochina/assign_container.php
+        - img [ref=e26]
+        - text: Assign to Container
+      - link "Expenses" [ref=e28] [cursor=pointer]:
+        - /url: /cargochina/expenses.php
+        - img [ref=e29]
+        - text: Expenses
+      - link "Financials" [ref=e31] [cursor=pointer]:
+        - /url: /cargochina/financials.php
+        - img [ref=e32]
+        - text: Financials
+      - link "HS Code Tax" [ref=e34] [cursor=pointer]:
+        - /url: /cargochina/hs_code_tax.php
+        - img [ref=e35]
+        - text: HS Code Tax
+      - link "Calendar" [ref=e37] [cursor=pointer]:
+        - /url: /cargochina/calendar.php
+        - img [ref=e38]
+        - text: Calendar
+      - link "Warehouse Stock" [ref=e40] [cursor=pointer]:
+        - /url: /cargochina/warehouse_stock.php
+        - img [ref=e41]
+        - text: Warehouse Stock
+      - link "Draft an Order" [ref=e43] [cursor=pointer]:
+        - /url: /cargochina/procurement_drafts.php
+        - img [ref=e44]
+        - text: Draft an Order
+      - generic [ref=e46]: Data
+      - link "Suppliers" [ref=e47] [cursor=pointer]:
+        - /url: /cargochina/suppliers.php
+        - img [ref=e48]
+        - text: Suppliers
+      - link "Customers" [ref=e50] [cursor=pointer]:
+        - /url: /cargochina/customers.php
+        - img [ref=e51]
+        - text: Customers
+      - link "Products" [ref=e53] [cursor=pointer]:
+        - /url: /cargochina/products.php
+        - img [ref=e54]
+        - text: Products
+      - generic [ref=e56]: Notifications
+      - link "Notifications 13" [ref=e138] [cursor=pointer]:
+        - /url: /cargochina/notifications.php
+        - img [ref=e58]
+        - text: Notifications
+        - generic [ref=e139]: "13"
+      - link "Preferences" [ref=e60] [cursor=pointer]:
+        - /url: /cargochina/notification_preferences.php
+        - img [ref=e61]
+        - text: Preferences
+      - generic [ref=e63]: Administration
+      - link "Business Settings" [ref=e64] [cursor=pointer]:
+        - /url: /cargochina/business_settings.php
+        - img [ref=e65]
+        - text: Business Settings
+      - link "Configuration" [ref=e67] [cursor=pointer]:
+        - /url: /cargochina/admin_config.php
+        - img [ref=e68]
+        - text: Configuration
+      - link "Users" [ref=e71] [cursor=pointer]:
+        - /url: /cargochina/admin_users.php
+        - img [ref=e72]
+        - text: Users
+      - link "Diagnostics" [ref=e74] [cursor=pointer]:
+        - /url: /cargochina/admin_diagnostics.php
+        - img [ref=e75]
+        - text: Diagnostics
+      - link "Tracking Push Log" [ref=e77] [cursor=pointer]:
+        - /url: /cargochina/admin_tracking_push.php
+        - img [ref=e78]
+        - text: Tracking Push Log
+      - link "Audit Log" [ref=e80] [cursor=pointer]:
+        - /url: /cargochina/admin_audit_log.php
+        - img [ref=e81]
+        - text: Audit Log
+    - generic [ref=e83]:
+      - generic [ref=e84]:
+        - img [ref=e85]
+        - generic [ref=e87]: Super Admin
+      - link "Logout" [ref=e88] [cursor=pointer]:
+        - /url: /cargochina/login.php?logout=1
+        - img [ref=e89]
+        - text: Logout
+  - generic [ref=e91]:
+    - banner [ref=e92]:
+      - button "Toggle sidebar" [expanded] [ref=e93] [cursor=pointer]:
+        - img [ref=e94]
+      - generic [ref=e96]: Draft an Order
+      - generic [ref=e97]:
+        - group "Description language" [ref=e98]:
+          - button "EN" [ref=e99] [cursor=pointer]
+          - button "中文" [ref=e100] [cursor=pointer]
+        - generic [ref=e101]: SuperAdmin
+    - generic [ref=e102]:
+      - heading "Draft an Order" [level=1] [ref=e103]
+      - paragraph [ref=e104]: Build one customer order across multiple suppliers, save it directly as a real order, and migrate any old procurement drafts that still need customer details or optional scheduling info.
+      - generic [ref=e105]:
+        - generic [ref=e106]:
+          - generic [ref=e107]:
+            - generic [ref=e108]: Draft Orders
+            - text: These are real orders saved with the draft-order workflow.
+          - button "+ Draft an Order" [ref=e109] [cursor=pointer]
+        - table [ref=e112]:
+          - rowgroup [ref=e113]:
+            - row "ID Customer Suppliers Expected Ready Status Items Totals Actions" [ref=e114]:
+              - columnheader "ID" [ref=e115]
+              - columnheader "Customer" [ref=e116]
+              - columnheader "Suppliers" [ref=e117]
+              - columnheader "Expected Ready" [ref=e118]
+              - columnheader "Status" [ref=e119]
+              - columnheader "Items" [ref=e120]
+              - columnheader "Totals" [ref=e121]
+              - columnheader "Actions" [ref=e122]
+          - rowgroup [ref=e140]:
+            - row "52 ali salameh Jinhua Gift Creations, Wjk — Approved 3 1510.69 USD 3.528258 CBM · 427.4336 kg View CSV Print Orders" [ref=e141]:
+              - cell "52" [ref=e142]
+              - cell "ali salameh" [ref=e143]
+              - cell "Jinhua Gift Creations, Wjk" [ref=e144]
+              - cell "—" [ref=e145]
+              - cell "Approved" [ref=e146]:
+                - generic [ref=e147]: Approved
+              - cell "3" [ref=e148]
+              - cell "1510.69 USD 3.528258 CBM · 427.4336 kg" [ref=e149]:
+                - generic [ref=e150]: 1510.69 USD
+                - text: 3.528258 CBM · 427.4336 kg
+              - cell "View CSV Print Orders" [ref=e151]:
+                - button "View" [ref=e152] [cursor=pointer]
+                - link "CSV" [ref=e153] [cursor=pointer]:
+                  - /url: /cargochina/api/v1/draft-orders/52/export
+                - link "Print" [ref=e154] [cursor=pointer]:
+                  - /url: /cargochina/procurement_draft_print.php?order_id=52
+                - link "Orders" [ref=e155] [cursor=pointer]:
+                  - /url: /cargochina/orders.php?order_type=draft_procurement
+            - row "50 imad salameh Wjk 2026-03-26 Draft 1 306.00 USD 0.500000 CBM · 60.0000 kg Open Submit CSV Print Orders" [ref=e156]:
+              - cell "50" [ref=e157]
+              - cell "imad salameh" [ref=e158]
+              - cell "Wjk" [ref=e159]
+              - cell "2026-03-26" [ref=e160]
+              - cell "Draft" [ref=e161]:
+                - generic [ref=e162]: Draft
+              - cell "1" [ref=e163]
+              - cell "306.00 USD 0.500000 CBM · 60.0000 kg" [ref=e164]:
+                - generic [ref=e165]: 306.00 USD
+                - text: 0.500000 CBM · 60.0000 kg
+              - cell "Open Submit CSV Print Orders" [ref=e166]:
+                - button "Open" [ref=e167] [cursor=pointer]
+                - button "Submit" [ref=e168] [cursor=pointer]
+                - link "CSV" [ref=e169] [cursor=pointer]:
+                  - /url: /cargochina/api/v1/draft-orders/50/export
+                - link "Print" [ref=e170] [cursor=pointer]:
+                  - /url: /cargochina/procurement_draft_print.php?order_id=50
+                - link "Orders" [ref=e171] [cursor=pointer]:
+                  - /url: /cargochina/orders.php?order_type=draft_procurement
+            - row "34 ali salameh Foshan Decor Works 2026-03-19 Assigned to Container 1 503.48 USD 0.613328 CBM · 95.2000 kg View CSV Print Orders" [ref=e172]:
+              - cell "34" [ref=e173]
+              - cell "ali salameh" [ref=e174]
+              - cell "Foshan Decor Works" [ref=e175]
+              - cell "2026-03-19" [ref=e176]
+              - cell "Assigned to Container" [ref=e177]:
+                - generic [ref=e178]: Assigned to Container
+              - cell "1" [ref=e179]
+              - cell "503.48 USD 0.613328 CBM · 95.2000 kg" [ref=e180]:
+                - generic [ref=e181]: 503.48 USD
+                - text: 0.613328 CBM · 95.2000 kg
+              - cell "View CSV Print Orders" [ref=e182]:
+                - button "View" [ref=e183] [cursor=pointer]
+                - link "CSV" [ref=e184] [cursor=pointer]:
+                  - /url: /cargochina/api/v1/draft-orders/34/export
+                - link "Print" [ref=e185] [cursor=pointer]:
+                  - /url: /cargochina/procurement_draft_print.php?order_id=34
+                - link "Orders" [ref=e186] [cursor=pointer]:
+                  - /url: /cargochina/orders.php?order_type=draft_procurement
+            - row "21 Mount Line Lifestyle Xiamen Outdoor Supply 2026-03-07 Ready for Consolidation 2 10252.01 USD 6.007740 CBM · 2038.3440 kg View CSV Print Orders" [ref=e187]:
+              - cell "21" [ref=e188]
+              - cell "Mount Line Lifestyle" [ref=e189]
+              - cell "Xiamen Outdoor Supply" [ref=e190]
+              - cell "2026-03-07" [ref=e191]
+              - cell "Ready for Consolidation" [ref=e192]:
+                - generic [ref=e193]: Ready for Consolidation
+              - cell "2" [ref=e194]
+              - cell "10252.01 USD 6.007740 CBM · 2038.3440 kg" [ref=e195]:
+                - generic [ref=e196]: 10252.01 USD
+                - text: 6.007740 CBM · 2038.3440 kg
+              - cell "View CSV Print Orders" [ref=e197]:
+                - button "View" [ref=e198] [cursor=pointer]
+                - link "CSV" [ref=e199] [cursor=pointer]:
+                  - /url: /cargochina/api/v1/draft-orders/21/export
+                - link "Print" [ref=e200] [cursor=pointer]:
+                  - /url: /cargochina/procurement_draft_print.php?order_id=21
+                - link "Orders" [ref=e201] [cursor=pointer]:
+                  - /url: /cargochina/orders.php?order_type=draft_procurement
+      - generic [ref=e123]:
+        - generic [ref=e125]:
+          - generic [ref=e126]: Legacy Procurement Drafts
+          - text: Old rows stay here until they are migrated into real draft orders.
+        - table [ref=e129]:
+          - rowgroup [ref=e130]:
+            - row "ID Name Supplier Status Items Actions" [ref=e131]:
+              - columnheader "ID" [ref=e132]
+              - columnheader "Name" [ref=e133]
+              - columnheader "Supplier" [ref=e134]
+              - columnheader "Status" [ref=e135]
+              - columnheader "Items" [ref=e136]
+              - columnheader "Actions" [ref=e137]
+          - rowgroup [ref=e202]:
+            - row "1 FULLQA Procurement Draft 01 Yiwu Master Packaging draft 3 Migrate Print" [ref=e203]:
+              - cell "1" [ref=e204]
+              - cell "FULLQA Procurement Draft 01" [ref=e205]
+              - cell "Yiwu Master Packaging" [ref=e206]
+              - cell "draft" [ref=e207]:
+                - generic [ref=e208]: draft
+              - cell "3" [ref=e209]
+              - cell "Migrate Print" [ref=e210]:
+                - button "Migrate" [ref=e211] [cursor=pointer]
+                - link "Print" [ref=e212] [cursor=pointer]:
+                  - /url: /cargochina/procurement_draft_print.php?id=1
+            - row "2 FULLQA Procurement Draft 02 Guangzhou Kitchen Source pending_review 3 Migrate Print" [ref=e213]:
+              - cell "2" [ref=e214]
+              - cell "FULLQA Procurement Draft 02" [ref=e215]
+              - cell "Guangzhou Kitchen Source" [ref=e216]
+              - cell "pending_review" [ref=e217]:
+                - generic [ref=e218]: pending_review
+              - cell "3" [ref=e219]
+              - cell "Migrate Print" [ref=e220]:
+                - button "Migrate" [ref=e221] [cursor=pointer]
+                - link "Print" [ref=e222] [cursor=pointer]:
+                  - /url: /cargochina/procurement_draft_print.php?id=2
+            - row "3 FULLQA Procurement Draft 03 Foshan Decor Works sent_to_supplier 3 Migrate Print" [ref=e223]:
+              - cell "3" [ref=e224]
+              - cell "FULLQA Procurement Draft 03" [ref=e225]
+              - cell "Foshan Decor Works" [ref=e226]
+              - cell "sent_to_supplier" [ref=e227]:
+                - generic [ref=e228]: sent_to_supplier
+              - cell "3" [ref=e229]
+              - cell "Migrate Print" [ref=e230]:
+                - button "Migrate" [ref=e231] [cursor=pointer]
+                - link "Print" [ref=e232] [cursor=pointer]:
+                  - /url: /cargochina/procurement_draft_print.php?id=3
+            - row "4 FULLQA Procurement Draft 04 Shenzhen Light Electronics Migrated 3 Open Order Print" [ref=e233]:
+              - cell "4" [ref=e234]
+              - cell "FULLQA Procurement Draft 04" [ref=e235]
+              - cell "Shenzhen Light Electronics" [ref=e236]
+              - cell "Migrated" [ref=e237]:
+                - generic [ref=e238]: Migrated
+              - cell "3" [ref=e239]
+              - cell "Open Order Print" [ref=e240]:
+                - button "Open Order" [ref=e241] [cursor=pointer]
+                - link "Print" [ref=e242] [cursor=pointer]:
+                  - /url: /cargochina/procurement_draft_print.php?id=4
+            - row "5 FULLQA Procurement Draft 05 Ningbo Textile Source cancelled 3 Migrate Print" [ref=e243]:
+              - cell "5" [ref=e244]
+              - cell "FULLQA Procurement Draft 05" [ref=e245]
+              - cell "Ningbo Textile Source" [ref=e246]
+              - cell "cancelled" [ref=e247]:
+                - generic [ref=e248]: cancelled
+              - cell "3" [ref=e249]
+              - cell "Migrate Print" [ref=e250]:
+                - button "Migrate" [ref=e251] [cursor=pointer]
+                - link "Print" [ref=e252] [cursor=pointer]:
+                  - /url: /cargochina/procurement_draft_print.php?id=5
+      - dialog [ref=e253]:
+        - generic [ref=e254]:
+          - generic [ref=e255]:
+            - generic [ref=e256]:
+              - heading "Draft an Order" [level=5] [ref=e257]
+              - text: One customer, multiple supplier sections, live totals.
+            - button [ref=e258] [cursor=pointer]
+          - generic [ref=e260]:
+            - generic [ref=e262]:
+              - generic [ref=e263]:
+                - generic [ref=e264]:
+                  - generic [ref=e265]: Customer *
+                  - textbox "Type to search customer..." [active] [ref=e266]: Bekaa Bulk Market — BEKAA-BULK
+                - generic [ref=e267]:
+                  - generic [ref=e268]: Country / Destination
+                  - textbox "Search country..." [ref=e270]
+                  - generic [ref=e271]: Uses the customer's country by default. If the customer has multiple countries, choose one here.
+                - generic [ref=e272]:
+                  - generic [ref=e273]: Expected Ready
+                  - textbox [ref=e274]
+                  - generic [ref=e275]: Optional. You will be asked to confirm before saving without it.
+                - generic [ref=e276]:
+                  - generic [ref=e277]: Currency *
+                  - combobox [ref=e278]:
+                    - option "USD" [selected]
+                    - option "RMB"
+                - generic [ref=e279]:
+                  - generic [ref=e280]: High Alert Notes
+                  - textbox "Special handling, urgent notes, fragile warnings..." [ref=e281]
+              - generic [ref=e282]: Default shipping code BEKAA-BULK is active. Item numbers now follow BEKAA-BULK-supplierSequence-itemSequence and stay aligned with supplier groups.
+            - generic [ref=e283]:
+              - generic [ref=e284]:
+                - generic [ref=e285]: Supplier Sections
+                - text: Each section is one supplier. Add as many suppliers as this customer order needs.
+              - button "+ Add Supplier Section" [ref=e286] [cursor=pointer]
+            - generic [ref=e288]:
+              - generic [ref=e289]:
+                - generic [ref=e290]:
+                  - generic [ref=e291]: New supplier section
+                  - textbox "Type to search supplier..." [ref=e292]
+                  - button "+" [ref=e293] [cursor=pointer]
+                - generic [ref=e294]:
+                  - generic [ref=e295]: 0.00 USD · 0.000000 CBM · 0.0000 kg
+                  - button "Collapse" [ref=e296] [cursor=pointer]
+                  - button "↑" [ref=e297] [cursor=pointer]
+                  - button "↓" [ref=e298] [cursor=pointer]
+                  - button "Remove Section" [ref=e299] [cursor=pointer]
+              - generic [ref=e300]:
+                - generic [ref=e302]:
+                  - generic [ref=e303]:
+                    - generic [ref=e304]:
+                      - generic [ref=e305]: Item Line
+                      - text: Product match or free-text item, then one description, packaging, pricing, dimensions, and photos.
+                    - button "Remove Item" [ref=e306] [cursor=pointer]
+                  - generic [ref=e307]:
+                    - generic [ref=e308]:
+                      - generic [ref=e309]: Product
+                      - textbox "Search existing products or type a new item name..." [ref=e310]
+                    - generic [ref=e311]:
+                      - generic [ref=e312]: Shipping Code
+                      - textbox "Auto from customer" [ref=e313]: BEKAA-BULK
+                    - generic [ref=e314]:
+                      - generic [ref=e315]: Item No
+                      - textbox "CODE-1" [ref=e316]: BEKAA-BULK-1-1
+                    - generic [ref=e317]:
+                      - generic [ref=e318]: Pieces / Carton
+                      - spinbutton [ref=e319]
+                    - generic [ref=e320]:
+                      - generic [ref=e321]: Cartons
+                      - spinbutton [ref=e322]
+                    - generic [ref=e323]:
+                      - generic [ref=e324]: Description
+                      - textbox "Type one description. Chinese and English are filled automatically." [ref=e325]
+                      - generic [ref=e326]: Use one description only. The system stores Chinese and English automatically for this item.
+                    - generic [ref=e327]:
+                      - generic [ref=e328]: Unit Price
+                      - spinbutton [ref=e329]
+                    - generic [ref=e330]:
+                      - generic [ref=e331]: Optional HS Code
+                      - textbox "HS code" [ref=e332]
+                    - generic [ref=e333]:
+                      - generic [ref=e334]: CBM / unit or carton
+                      - spinbutton [ref=e335]
+                    - generic [ref=e336]:
+                      - generic [ref=e337]: Weight / unit or carton (kg)
+                      - spinbutton [ref=e338]
+                    - generic [ref=e339]:
+                      - generic [ref=e340]: L (cm)
+                      - spinbutton [ref=e341]
+                    - generic [ref=e342]:
+                      - generic [ref=e343]: W (cm)
+                      - spinbutton [ref=e344]
+                    - generic [ref=e345]:
+                      - generic [ref=e346]: H (cm)
+                      - spinbutton [ref=e347]
+                    - generic [ref=e350]:
+                      - generic [ref=e351]:
+                        - generic [ref=e352]: Photos
+                        - text: Attach product photos or use the camera on mobile.
+                      - generic [ref=e353]:
+                        - button "Take Photo" [ref=e354] [cursor=pointer]
+                        - button "Upload Photo" [ref=e355] [cursor=pointer]
+                    - generic [ref=e358]:
+                      - checkbox "Custom design" [ref=e359]
+                      - generic [ref=e360]: Custom design
+                    - generic [ref=e362]:
+                      - generic [ref=e363]:
+                        - strong [ref=e364]: "0.00"
+                        - text: total
+                      - generic [ref=e365]:
+                        - strong [ref=e366]: "0.000000"
+                        - text: CBM
+                      - generic [ref=e367]:
+                        - strong [ref=e368]: "0.0000"
+                        - text: kg
+                      - generic [ref=e369]:
+                        - strong [ref=e370]: "0"
+                        - text: pcs
+                - button "+ Add Item" [ref=e371] [cursor=pointer]
+            - generic [ref=e373]:
+              - generic [ref=e374]:
+                - generic [ref=e375]: Order Totals
+                - text: Auto-calculated across all supplier sections.
+              - generic [ref=e376]:
+                - generic [ref=e377]:
+                  - strong [ref=e378]: "0.00"
+                  - text: USD
+                - generic [ref=e379]:
+                  - strong [ref=e380]: "0.000000"
+                  - text: CBM
+                - generic [ref=e381]:
+                  - strong [ref=e382]: "0.0000"
+                  - text: kg
+          - generic [ref=e383]:
+            - button "Close" [ref=e384] [cursor=pointer]
+            - button "Save Draft Order" [ref=e385] [cursor=pointer]

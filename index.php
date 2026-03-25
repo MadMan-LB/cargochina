@@ -1,4 +1,7 @@
 <?php
+require_once 'includes/auth_check.php';
+require_once 'includes/page_guard.php';
+requireRoleForPage(['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'FieldStaff', 'SuperAdmin']);
 $currentPage = 'dashboard';
 $pageTitle = 'Dashboard';
 require 'includes/layout.php';
@@ -29,10 +32,10 @@ require 'includes/layout.php';
     <div class="card border-0 h-100" style="background:linear-gradient(135deg,#fffbeb,#fef3c7);">
       <div class="card-body py-3">
         <div class="d-flex justify-content-between align-items-center">
-          <span class="text-muted small">Awaiting confirm</span>
+          <span class="text-muted small">Customer follow-up</span>
           <span class="fs-3 fw-bold text-warning" id="statAwaitingConfirm">—</span>
         </div>
-        <a href="orders.php?status=AwaitingCustomerConfirmation" class="stretched-link small text-warning fw-semibold">View →</a>
+        <a href="orders.php?customer_feedback=pending" class="stretched-link small text-warning fw-semibold">View →</a>
       </div>
     </div>
   </div>

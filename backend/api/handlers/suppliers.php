@@ -6,16 +6,79 @@
 
 require_once __DIR__ . '/../helpers.php';
 
+function supplierTableHasColumn(PDO $pdo, string $table, string $column): bool
+{
+    static $cache = [];
+
+    $key = $table . '.' . $column;
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+
+    try {
+        $stmt = $pdo->prepare("SHOW COLUMNS FROM `$table` LIKE ?");
+        $stmt->execute([$column]);
+        $cache[$key] = (bool) $stmt->rowCount();
+    } catch (Throwable $e) {
+        $cache[$key] = false;
+    }
+
+    return $cache[$key];
+}
+
+function normalizeSupplierPaymentLinks($value): ?string
+{
+    if (!is_array($value)) {
+        return null;
+    }
+
+    $rows = [];
+    foreach ($value as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $label = trim((string) ($row['label'] ?? $row['type'] ?? ''));
+        $content = trim((string) ($row['value'] ?? $row['link'] ?? ''));
+        if ($label === '' && $content === '') {
+            continue;
+        }
+        $rows[] = [
+            'label' => $label ?: 'Payment',
+            'value' => $content ?: null,
+        ];
+    }
+
+    return $rows ? json_encode($rows, JSON_UNESCAPED_UNICODE) : null;
+}
+
+function decodeSupplierPaymentLinks($value): array
+{
+    if (!$value) {
+        return [];
+    }
+
+    $decoded = json_decode((string) $value, true);
+    return is_array($decoded) ? $decoded : [];
+}
+
+function supplierSettlementDeltaExpr(PDO $pdo): string
+{
+    if (supplierTableHasColumn($pdo, 'supplier_payments', 'settlement_delta')) {
+        return 'COALESCE(settlement_delta, COALESCE(discount_amount,0), 0)';
+    }
+    return 'COALESCE(discount_amount,0)';
+}
+
 function calcSupplierScore(PDO $pdo, int $supplierId): ?float
 {
-    $orders = $pdo->prepare("SELECT COUNT(*) as total, SUM(CASE WHEN status IN ('ReceivedAtWarehouse','AwaitingCustomerConfirmation','Confirmed','ReadyForConsolidation','ConsolidatedIntoShipmentDraft','AssignedToContainer','FinalizedAndPushedToTracking') THEN 1 ELSE 0 END) as completed FROM orders WHERE supplier_id = ?");
+    $orders = $pdo->prepare("SELECT COUNT(*) as total, SUM(CASE WHEN status IN ('ReceivedAtWarehouse','ReadyForConsolidation','ConsolidatedIntoShipmentDraft','AssignedToContainer','FinalizedAndPushedToTracking') OR (status = 'Confirmed' AND COALESCE(confirmation_token, '') = '') THEN 1 ELSE 0 END) as completed FROM orders WHERE supplier_id = ?");
     $orders->execute([$supplierId]);
     $ord = $orders->fetch(PDO::FETCH_ASSOC);
     $totalOrders = (int) $ord['total'];
     if ($totalOrders < 1) return null;
     $completed = (int) $ord['completed'];
 
-    $variance = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE supplier_id = ? AND status = 'AwaitingCustomerConfirmation'");
+    $variance = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE supplier_id = ? AND COALESCE(confirmation_token, '') <> ''");
     $variance->execute([$supplierId]);
     $varianceCount = (int) $variance->fetchColumn();
 
@@ -67,9 +130,136 @@ function normalizeSupplierCommission(array $input): array
     return [round($rate, 4), $type, $appliedOn];
 }
 
+function normalizeSupplierDuplicateName(string $value): string
+{
+    $value = mb_strtolower(trim($value), 'UTF-8');
+    $value = preg_replace('/[^\p{L}\p{N}]+/u', ' ', $value) ?? '';
+    $value = preg_replace('/\s+/u', ' ', $value) ?? '';
+    return trim($value);
+}
+
+function normalizeSupplierDuplicatePhone(?string $value): string
+{
+    return preg_replace('/\D+/', '', (string) $value) ?? '';
+}
+
+function supplierNameSimilarity(string $left, string $right): float
+{
+    if ($left === '' || $right === '') {
+        return 0.0;
+    }
+    similar_text($left, $right, $percent);
+    return round(((float) $percent) / 100, 4);
+}
+
+function findLikelySupplierDuplicates(PDO $pdo, string $name, ?string $storeId, ?string $phone, ?int $excludeId = null): array
+{
+    $storeId = trim((string) $storeId);
+    $nameNorm = normalizeSupplierDuplicateName($name);
+    $phoneNorm = normalizeSupplierDuplicatePhone($phone);
+    if ($storeId === '' && ($nameNorm === '' || $phoneNorm === '')) {
+        return [];
+    }
+
+    $where = [];
+    $params = [];
+    if ($excludeId) {
+        $where[] = 'id != ?';
+        $params[] = $excludeId;
+    }
+
+    $candidateClauses = [];
+    if ($storeId !== '') {
+        $candidateClauses[] = 'store_id = ?';
+        $params[] = $storeId;
+    }
+    if ($nameNorm !== '') {
+        $nameLike = '%' . str_replace(' ', '%', $nameNorm) . '%';
+        $candidateClauses[] = 'name LIKE ?';
+        $params[] = $nameLike;
+    }
+    if ($phoneNorm !== '') {
+        $phoneTail = substr($phoneNorm, -6);
+        $candidateClauses[] = "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(phone,''), ' ', ''), '-', ''), '+', ''), '(', ''), ')', '') LIKE ?";
+        $params[] = '%' . $phoneTail;
+    }
+    if (!$candidateClauses) {
+        return [];
+    }
+
+    $sql = "SELECT id, code, name, store_id, phone FROM suppliers WHERE "
+        . ($where ? implode(' AND ', $where) . ' AND ' : '')
+        . '(' . implode(' OR ', $candidateClauses) . ') ORDER BY id DESC LIMIT 25';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    $duplicates = [];
+    foreach ($rows as $row) {
+        $reasons = [];
+        if ($storeId !== '' && trim((string) ($row['store_id'] ?? '')) !== '' && strcasecmp(trim((string) $row['store_id']), $storeId) === 0) {
+            $reasons[] = 'same store_id';
+        }
+
+        $rowPhoneNorm = normalizeSupplierDuplicatePhone((string) ($row['phone'] ?? ''));
+        $phoneMatches = $phoneNorm !== '' && $rowPhoneNorm !== '' && (
+            $rowPhoneNorm === $phoneNorm
+            || str_ends_with($rowPhoneNorm, $phoneNorm)
+            || str_ends_with($phoneNorm, $rowPhoneNorm)
+        );
+        $rowNameNorm = normalizeSupplierDuplicateName((string) ($row['name'] ?? ''));
+        $nameSimilarity = supplierNameSimilarity($nameNorm, $rowNameNorm);
+        $nameStrongMatch = $nameSimilarity >= 0.88
+            || ($nameNorm !== '' && $rowNameNorm !== '' && (str_contains($rowNameNorm, $nameNorm) || str_contains($nameNorm, $rowNameNorm)));
+
+        if ($phoneMatches && $nameStrongMatch) {
+            $reasons[] = sprintf('same phone + %.0f%% similar name', $nameSimilarity * 100);
+        }
+
+        if ($reasons) {
+            $duplicates[] = [
+                'id' => (int) $row['id'],
+                'code' => (string) ($row['code'] ?? ''),
+                'name' => (string) ($row['name'] ?? ''),
+                'store_id' => (string) ($row['store_id'] ?? ''),
+                'phone' => (string) ($row['phone'] ?? ''),
+                'reasons' => $reasons,
+            ];
+        }
+    }
+
+    return $duplicates;
+}
+
+function ensureSupplierDuplicateSafety(PDO $pdo, string $name, ?string $storeId, ?string $phone, ?int $excludeId = null): void
+{
+    $duplicates = findLikelySupplierDuplicates($pdo, $name, $storeId, $phone, $excludeId);
+    if (!$duplicates) {
+        return;
+    }
+
+    $top = array_slice($duplicates, 0, 3);
+    $summary = implode('; ', array_map(
+        static fn(array $row): string => trim(sprintf(
+            '%s (%s)%s%s',
+            $row['name'] ?: ('#' . $row['id']),
+            $row['code'] ?: ('ID ' . $row['id']),
+            !empty($row['store_id']) ? ' store_id ' . $row['store_id'] : '',
+            !empty($row['phone']) ? ' phone ' . $row['phone'] : ''
+        )) . ' [' . implode(', ', $row['reasons']) . ']',
+        $top
+    ));
+
+    jsonError(
+        'Likely duplicate supplier found. Review existing records before saving: ' . $summary,
+        409,
+        ['duplicates' => $duplicates]
+    );
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
-    $readRoles = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'FieldStaff', 'SuperAdmin'];
+    $readRoles = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'];
     $buyerRoles = ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'];
     $financeRoles = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'SuperAdmin'];
     $interactionRoles = ['ChinaAdmin', 'ChinaEmployee', 'FieldStaff', 'SuperAdmin'];
@@ -129,10 +319,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $where[] = "(s.name LIKE ? OR s.code LIKE ? OR (s.phone IS NOT NULL AND s.phone LIKE ?) OR (s.store_id IS NOT NULL AND s.store_id LIKE ?) OR (s.factory_location IS NOT NULL AND s.factory_location LIKE ?))";
                     $params = array_merge($params, [$like, $like, $like, $like, $like]);
                 }
+                $settlementExpr = supplierSettlementDeltaExpr($pdo);
                 if ($paymentStatus === 'outstanding') {
-                    $where[] = "EXISTS (SELECT 1 FROM (SELECT currency, SUM(COALESCE(invoice_amount, amount)) as inv, SUM(amount) as paid FROM supplier_payments WHERE supplier_id = s.id GROUP BY currency) x WHERE (inv - paid) > 0)";
+                    $where[] = "EXISTS (SELECT 1 FROM (SELECT currency, SUM(COALESCE(invoice_amount, amount)) as inv, SUM(amount) as paid, SUM($settlementExpr) as settled FROM supplier_payments WHERE supplier_id = s.id GROUP BY currency) x WHERE (inv - paid - settled) > 0)";
                 } elseif ($paymentStatus === 'fully_paid') {
-                    $where[] = "NOT EXISTS (SELECT 1 FROM (SELECT currency, SUM(COALESCE(invoice_amount, amount)) as inv, SUM(amount) as paid FROM supplier_payments WHERE supplier_id = s.id GROUP BY currency) x WHERE (inv - paid) > 0)";
+                    $where[] = "NOT EXISTS (SELECT 1 FROM (SELECT currency, SUM(COALESCE(invoice_amount, amount)) as inv, SUM(amount) as paid, SUM($settlementExpr) as settled FROM supplier_payments WHERE supplier_id = s.id GROUP BY currency) x WHERE (inv - paid - settled) > 0)";
                 }
                 $sql = "SELECT s.* FROM suppliers s";
                 if (!empty($where)) {
@@ -147,6 +338,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 foreach ($rows as &$r) {
                     $r['contacts'] = $r['contacts'] ? json_decode($r['contacts'], true) : [];
                     $r['additional_ids'] = $r['additional_ids'] ? json_decode($r['additional_ids'], true) : [];
+                    $r['payment_links'] = decodeSupplierPaymentLinks($r['payment_links'] ?? null);
                     $r['reliability_score'] = calcSupplierScore($pdo, (int) $r['id']);
                     if (!$canViewFinancials) {
                         unset($r['commission_rate'], $r['commission_type'], $r['commission_applied_on']);
@@ -162,11 +354,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             $row['contacts'] = $row['contacts'] ? json_decode($row['contacts'], true) : [];
             $row['additional_ids'] = $row['additional_ids'] ? json_decode($row['additional_ids'], true) : [];
+            $row['payment_links'] = decodeSupplierPaymentLinks($row['payment_links'] ?? null);
             $row['reliability_score'] = calcSupplierScore($pdo, (int) $id);
 
             if ($action === 'balance') {
                 requireRole($financeRoles);
-                $stmt = $pdo->prepare("SELECT currency, SUM(amount) as total_paid, SUM(COALESCE(invoice_amount,amount)) as total_invoiced, SUM(COALESCE(discount_amount,0)) as total_discount FROM supplier_payments WHERE supplier_id = ? GROUP BY currency");
+                $settlementExpr = supplierSettlementDeltaExpr($pdo);
+                $stmt = $pdo->prepare("SELECT currency, SUM(amount) as total_paid, SUM(COALESCE(invoice_amount,amount)) as total_invoiced, SUM($settlementExpr) as total_discount FROM supplier_payments WHERE supplier_id = ? GROUP BY currency");
                 $stmt->execute([$id]);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 $balance = [];
@@ -175,7 +369,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         'total_paid' => (float) $r['total_paid'],
                         'total_invoiced' => (float) $r['total_invoiced'],
                         'total_discount' => (float) $r['total_discount'],
-                        'outstanding' => round((float) $r['total_invoiced'] - (float) $r['total_paid'], 4),
+                        'outstanding' => round((float) $r['total_invoiced'] - (float) $r['total_paid'] - (float) $r['total_discount'], 4),
                     ];
                 }
                 jsonResponse(['data' => $balance]);
@@ -245,18 +439,61 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $currency = trim($input['currency'] ?? 'USD');
                 if (!in_array($currency, ['USD', 'RMB'], true)) jsonError('Currency must be USD or RMB', 400);
                 $paymentType = in_array($input['payment_type'] ?? '', ['partial', 'full']) ? $input['payment_type'] : 'partial';
+                $paymentChannel = trim((string) ($input['payment_channel'] ?? ''));
+                if ($paymentChannel !== '' && !in_array($paymentChannel, ['WeChat', 'Alipay', 'Bank Transfer', 'Cash'], true)) {
+                    jsonError('Unsupported payment channel', 400);
+                }
                 $notes = $input['notes'] ?? null;
                 $orderId = !empty($input['order_id']) ? (int) $input['order_id'] : null;
                 if ($amount <= 0) jsonError('Amount must be positive', 400);
                 $invoiceAmount = isset($input['invoice_amount']) ? (float) $input['invoice_amount'] : null;
                 $markedFull = !empty($input['marked_full_payment']) ? 1 : 0;
+                $settlementMode = trim((string) ($input['settlement_mode'] ?? ''));
+                $settlementNote = trim((string) ($input['settlement_note'] ?? '')) ?: null;
+                $settlementDelta = ($invoiceAmount !== null && $invoiceAmount > $amount && $markedFull)
+                    ? round($invoiceAmount - $amount, 4)
+                    : 0;
                 $discountAmount = ($invoiceAmount !== null && $invoiceAmount > $amount) ? round($invoiceAmount - $amount, 4) : 0;
                 $userId = getAuthUserId() ?? 1;
                 $markedBy = $markedFull ? $userId : null;
-                $pdo->prepare("INSERT INTO supplier_payments (supplier_id, order_id, amount, invoice_amount, discount_amount, marked_full_payment, marked_by, currency, payment_type, notes) VALUES (?,?,?,?,?,?,?,?,?,?)")
-                    ->execute([$id, $orderId, $amount, $invoiceAmount, $discountAmount, $markedFull, $markedBy, $currency, $paymentType, $notes]);
+                if ($orderId) {
+                    $orderStmt = $pdo->prepare("SELECT id FROM orders WHERE id = ? AND (supplier_id = ? OR EXISTS (SELECT 1 FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = orders.id AND COALESCE(oi.supplier_id, p.supplier_id) = ?))");
+                    $orderStmt->execute([$orderId, $id, $id]);
+                    if (!$orderStmt->fetchColumn()) {
+                        jsonError('Selected order does not belong to this supplier', 400);
+                    }
+                }
+                if ($markedFull && $settlementDelta > 0 && $settlementMode === '') {
+                    $settlementMode = 'fully_settled_by_agreement';
+                }
+
+                $columns = ['supplier_id', 'order_id', 'amount', 'invoice_amount', 'discount_amount', 'marked_full_payment', 'marked_by', 'currency', 'payment_type', 'notes'];
+                $values = ['?', '?', '?', '?', '?', '?', '?', '?', '?', '?'];
+                $params = [$id, $orderId, $amount, $invoiceAmount, $discountAmount, $markedFull, $markedBy, $currency, $paymentType, $notes];
+                if (supplierTableHasColumn($pdo, 'supplier_payments', 'payment_channel')) {
+                    $columns[] = 'payment_channel';
+                    $values[] = '?';
+                    $params[] = $paymentChannel ?: null;
+                }
+                if (supplierTableHasColumn($pdo, 'supplier_payments', 'settlement_delta')) {
+                    $columns[] = 'settlement_delta';
+                    $values[] = '?';
+                    $params[] = $settlementDelta;
+                }
+                if (supplierTableHasColumn($pdo, 'supplier_payments', 'settlement_mode')) {
+                    $columns[] = 'settlement_mode';
+                    $values[] = '?';
+                    $params[] = $settlementMode ?: null;
+                }
+                if (supplierTableHasColumn($pdo, 'supplier_payments', 'settlement_note')) {
+                    $columns[] = 'settlement_note';
+                    $values[] = '?';
+                    $params[] = $settlementNote;
+                }
+                $pdo->prepare("INSERT INTO supplier_payments (" . implode(', ', $columns) . ") VALUES (" . implode(', ', $values) . ")")
+                    ->execute($params);
                 $newId = (int) $pdo->lastInsertId();
-                logClms('supplier_payment', ['supplier_id' => (int)$id, 'payment_id' => $newId, 'amount' => $amount, 'invoice_amount' => $invoiceAmount, 'discount' => $discountAmount, 'marked_full' => $markedFull]);
+                logClms('supplier_payment', ['supplier_id' => (int)$id, 'payment_id' => $newId, 'amount' => $amount, 'invoice_amount' => $invoiceAmount, 'discount' => $discountAmount, 'settlement_delta' => $settlementDelta, 'settlement_mode' => $settlementMode, 'marked_full' => $markedFull]);
                 $row = $pdo->prepare("SELECT * FROM supplier_payments WHERE id = ?");
                 $row->execute([$newId]);
                 jsonResponse(['data' => $row->fetch(PDO::FETCH_ASSOC)], 201);
@@ -265,7 +502,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt = $pdo->prepare("SELECT id FROM suppliers WHERE id = ?");
                 $stmt->execute([$id]);
                 if (!$stmt->fetch()) jsonError('Supplier not found', 404);
-                $stmt = $pdo->prepare("SELECT currency, SUM(amount) as total_paid, SUM(COALESCE(invoice_amount,amount)) as total_invoiced, SUM(COALESCE(discount_amount,0)) as total_discount FROM supplier_payments WHERE supplier_id = ? GROUP BY currency");
+                $settlementExpr = supplierSettlementDeltaExpr($pdo);
+                $stmt = $pdo->prepare("SELECT currency, SUM(amount) as total_paid, SUM(COALESCE(invoice_amount,amount)) as total_invoiced, SUM($settlementExpr) as total_discount FROM supplier_payments WHERE supplier_id = ? GROUP BY currency");
                 $stmt->execute([$id]);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 $balance = [];
@@ -274,7 +512,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         'total_paid' => (float)$r['total_paid'],
                         'total_invoiced' => (float)$r['total_invoiced'],
                         'total_discount' => (float)$r['total_discount'],
-                        'outstanding' => round((float)$r['total_invoiced'] - (float)$r['total_paid'], 4),
+                        'outstanding' => round((float)$r['total_invoiced'] - (float)$r['total_paid'] - (float)$r['total_discount'], 4),
                     ];
                 }
                 jsonResponse(['data' => $balance]);
@@ -309,14 +547,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $notes = $input['notes'] ?? null;
             $address = isset($input['address']) ? trim($input['address']) : null;
             $fax = isset($input['fax']) ? trim($input['fax']) : null;
+            $paymentFacilityDays = array_key_exists('payment_facility_days', $input) && $input['payment_facility_days'] !== '' ? max(0, (int) $input['payment_facility_days']) : null;
+            $paymentLinks = normalizeSupplierPaymentLinks($input['payment_links'] ?? null);
             [$commissionRate, $commissionType, $commissionAppliedOn] = normalizeSupplierCommission($input);
+            ensureSupplierDuplicateSafety($pdo, $name, $storeId, $phone);
             try {
-                $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'address'");
-                $hasAddr = $chk && $chk->rowCount() > 0;
-                $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'fax'");
-                $hasFax = $chk && $chk->rowCount() > 0;
-                $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'commission_rate'");
-                $hasCommission = $chk && $chk->rowCount() > 0;
+                $hasAddr = supplierTableHasColumn($pdo, 'suppliers', 'address');
+                $hasFax = supplierTableHasColumn($pdo, 'suppliers', 'fax');
+                $hasCommission = supplierTableHasColumn($pdo, 'suppliers', 'commission_rate');
+                $hasPaymentFacility = supplierTableHasColumn($pdo, 'suppliers', 'payment_facility_days');
+                $hasPaymentLinks = supplierTableHasColumn($pdo, 'suppliers', 'payment_links');
                 $cols = "code, name, store_id, contacts, factory_location, notes, phone, additional_ids";
                 $vals = "?, ?, ?, ?, ?, ?, ?, ?";
                 $params = [$code, $name, $storeId ?: null, $contacts, $factoryLocation, $notes, $phone ?: null, $additionalIds];
@@ -337,6 +577,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $vals .= ", ?";
                     $params[] = $fax ?: null;
                 }
+                if ($hasPaymentFacility) {
+                    $cols .= ", payment_facility_days";
+                    $vals .= ", ?";
+                    $params[] = $paymentFacilityDays;
+                }
+                if ($hasPaymentLinks) {
+                    $cols .= ", payment_links";
+                    $vals .= ", ?";
+                    $params[] = $paymentLinks;
+                }
                 $stmt = $pdo->prepare("INSERT INTO suppliers ($cols) VALUES ($vals)");
                 $stmt->execute($params);
                 $newId = (int) $pdo->lastInsertId();
@@ -345,6 +595,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
                 $row['contacts'] = $row['contacts'] ? json_decode($row['contacts'], true) : [];
                 $row['additional_ids'] = $row['additional_ids'] ? json_decode($row['additional_ids'], true) : [];
+                $row['payment_links'] = decodeSupplierPaymentLinks($row['payment_links'] ?? null);
                 jsonResponse(['data' => $row], 201);
             } catch (PDOException $e) {
                 if ($e->getCode() == 23000) {
@@ -376,13 +627,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $notes = $input['notes'] ?? null;
             $address = isset($input['address']) ? trim($input['address']) : null;
             $fax = isset($input['fax']) ? trim($input['fax']) : null;
+            $paymentFacilityDays = array_key_exists('payment_facility_days', $input) && $input['payment_facility_days'] !== '' ? max(0, (int) $input['payment_facility_days']) : null;
+            $paymentLinks = normalizeSupplierPaymentLinks($input['payment_links'] ?? null);
             [$commissionRate, $commissionType, $commissionAppliedOn] = normalizeSupplierCommission($input);
-            $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'address'");
-            $hasAddr = $chk && $chk->rowCount() > 0;
-            $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'fax'");
-            $hasFax = $chk && $chk->rowCount() > 0;
-            $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'commission_rate'");
-            $hasCommission = $chk && $chk->rowCount() > 0;
+            ensureSupplierDuplicateSafety($pdo, $name, $storeId, $phone, (int) $id);
+            $hasAddr = supplierTableHasColumn($pdo, 'suppliers', 'address');
+            $hasFax = supplierTableHasColumn($pdo, 'suppliers', 'fax');
+            $hasCommission = supplierTableHasColumn($pdo, 'suppliers', 'commission_rate');
+            $hasPaymentFacility = supplierTableHasColumn($pdo, 'suppliers', 'payment_facility_days');
+            $hasPaymentLinks = supplierTableHasColumn($pdo, 'suppliers', 'payment_links');
             $sets = "code=?, name=?, store_id=?, contacts=?, factory_location=?, notes=?, phone=?, additional_ids=?";
             $params = [$code, $name, $storeId ?: null, $contacts, $factoryLocation, $notes, $phone ?: null, $additionalIds];
             if ($hasCommission) {
@@ -399,6 +652,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $sets .= ", fax=?";
                 $params[] = $fax ?: null;
             }
+            if ($hasPaymentFacility) {
+                $sets .= ", payment_facility_days=?";
+                $params[] = $paymentFacilityDays;
+            }
+            if ($hasPaymentLinks) {
+                $sets .= ", payment_links=?";
+                $params[] = $paymentLinks;
+            }
             $params[] = $id;
             $pdo->prepare("UPDATE suppliers SET $sets WHERE id=?")->execute($params);
             $stmt = $pdo->prepare("SELECT * FROM suppliers WHERE id = ?");
@@ -406,6 +667,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             $row['contacts'] = $row['contacts'] ? json_decode($row['contacts'], true) : [];
             $row['additional_ids'] = $row['additional_ids'] ? json_decode($row['additional_ids'], true) : [];
+            $row['payment_links'] = decodeSupplierPaymentLinks($row['payment_links'] ?? null);
             jsonResponse(['data' => $row]);
 
         case 'DELETE':

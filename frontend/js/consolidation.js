@@ -239,7 +239,11 @@ async function loadReadyTotals() {
             api("GET", "/orders?status=ReadyForConsolidation"),
             api("GET", "/orders?status=Confirmed"),
         ]);
-        const orders = [...(r1.data || []), ...(r2.data || [])];
+        const orders = [...(r1.data || []), ...(r2.data || [])].filter((order) =>
+            typeof orderIsShipmentEligible === "function"
+                ? orderIsShipmentEligible(order)
+                : true,
+        );
         let totalCbm = 0,
             totalWeight = 0;
         orders.forEach((o) => {
@@ -477,6 +481,12 @@ async function openDraftModal(id) {
         const seen = new Set();
         eligibleOrders = allEligibleRaw.filter((o) => {
             if (seen.has(o.id) || draftOrderIds.includes(o.id)) return false;
+            if (
+                typeof orderIsShipmentEligible === "function" &&
+                !orderIsShipmentEligible(o)
+            ) {
+                return false;
+            }
             seen.add(o.id);
             return true;
         });

@@ -97,11 +97,20 @@ require 'includes/layout.php';
           </div>
           <div class="row form-row-responsive">
             <div class="col-12 col-md-4 mb-2"><label class="form-label">Commission Rate / Amount</label><input type="number" min="0" step="0.0001" class="form-control" id="supplierCommissionRate" placeholder="e.g. 5 or 25"></div>
+            <div class="col-12 col-md-4 mb-2"><label class="form-label">Payment Facility (days)</label><input type="number" min="0" step="1" class="form-control" id="supplierPaymentFacilityDays" placeholder="30"></div>
             <div class="col-12 col-md-4 mb-2 d-none"><label class="form-label">Commission Type</label><select class="form-select" id="supplierCommissionType"><option value="percentage">Percentage</option><option value="fixed">Fixed</option></select></div>
             <div class="col-12 col-md-4 mb-2 d-none"><label class="form-label">Commission Base</label><select class="form-select" id="supplierCommissionAppliedOn"><option value="buy_value">Buy value</option><option value="sell_value">Sell value</option></select></div>
           </div>
           <div class="mb-2 d-none"><label class="form-label">Address</label><input type="text" class="form-control" id="supplierAddress" placeholder="Full address (used in order export header)"></div>
           <div class="mb-2"><label class="form-label">Notes</label><textarea class="form-control" id="supplierNotes" rows="2"></textarea></div>
+          <div class="mb-3">
+            <div class="d-flex justify-content-between align-items-center">
+              <label class="form-label mb-1">Payment Links / Accounts</label>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addSupplierPaymentLinkRow()">+ Add Link</button>
+            </div>
+            <div id="supplierPaymentLinksContainer" class="d-flex flex-column gap-2"></div>
+            <small class="text-muted d-block mt-1">Use this for WeChat, Alipay, bank account, or any payment reference operators need later in procurement and balances.</small>
+          </div>
           <div class="mb-2">
             <label class="form-label">Additional IDs (e.g. Tax ID, VAT)</label>
             <div id="additionalIdsContainer"></div>
@@ -145,7 +154,7 @@ require 'includes/layout.php';
 </div>
 <!-- Payment Modal -->
 <div class="modal fade" id="paymentModal" tabindex="-1">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">Record Payment — <span id="paymentSupplierName"></span></h5>
@@ -153,6 +162,7 @@ require 'includes/layout.php';
       </div>
       <div class="modal-body">
         <input type="hidden" id="paymentSupplierId">
+        <div class="alert alert-light border py-2 small" id="paymentSupplierContext">Stored supplier payment options will appear here.</div>
         <div class="row mb-3">
           <div class="col-6"><label class="form-label">Invoice Amount</label><input type="number" step="0.01" class="form-control" id="payInvoiceAmount" placeholder="Total invoice"></div>
           <div class="col-6"><label class="form-label">Amount Paid *</label><input type="number" step="0.01" class="form-control" id="payAmount" required></div>
@@ -162,13 +172,24 @@ require 'includes/layout.php';
               <option value="USD">USD</option>
               <option value="RMB">RMB</option>
             </select></div>
-          <div class="col-6"><label class="form-label">Linked Order</label><input type="number" class="form-control" id="payOrderId" placeholder="Order ID (optional)"></div>
+          <div class="col-6"><label class="form-label">Payment Channel</label><select class="form-select" id="payChannel">
+              <option value="">Choose channel...</option>
+              <option value="WeChat">WeChat</option>
+              <option value="Alipay">Alipay</option>
+              <option value="Bank Transfer">Bank Transfer</option>
+              <option value="Cash">Cash</option>
+            </select></div>
         </div>
+        <div class="mb-3"><label class="form-label">Linked Order</label><input type="number" class="form-control" id="payOrderId" placeholder="Order ID (optional)"></div>
         <div class="form-check mb-3">
           <input type="checkbox" class="form-check-input" id="payMarkedFull">
           <label class="form-check-label" for="payMarkedFull">Mark as fully paid (supplier accepted discount)</label>
         </div>
         <div id="payDiscountInfo" class="alert alert-info py-2 d-none"></div>
+        <div class="mb-3 d-none" id="paySettlementNoteWrap">
+          <label class="form-label">Settlement Note</label>
+          <textarea class="form-control" id="paySettlementNote" rows="2" placeholder="Reason for closing as fully settled with a short-paid amount"></textarea>
+        </div>
         <div class="mb-2"><label class="form-label">Notes</label><textarea class="form-control" id="payNotes" rows="2"></textarea></div>
       </div>
       <div class="modal-footer">

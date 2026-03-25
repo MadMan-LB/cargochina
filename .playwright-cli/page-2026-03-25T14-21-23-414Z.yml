@@ -1,0 +1,148 @@
+- generic [active] [ref=e1]:
+  - complementary [ref=e2]:
+    - link "CLMS" [ref=e4] [cursor=pointer]:
+      - /url: /cargochina/index.php
+    - navigation [ref=e5]:
+      - generic [ref=e6]: Main
+      - link "Dashboard" [ref=e7] [cursor=pointer]:
+        - /url: /cargochina/index.php
+        - img [ref=e8]
+        - text: Dashboard
+      - link "Orders" [ref=e10] [cursor=pointer]:
+        - /url: /cargochina/orders.php
+        - img [ref=e11]
+        - text: Orders
+      - link "Receiving" [ref=e13] [cursor=pointer]:
+        - /url: /cargochina/receiving.php
+        - img [ref=e14]
+        - text: Receiving
+      - link "Pipeline" [ref=e16] [cursor=pointer]:
+        - /url: /cargochina/pipeline.php
+        - img [ref=e17]
+        - text: Pipeline
+      - link "Consolidation" [ref=e19] [cursor=pointer]:
+        - /url: /cargochina/consolidation.php
+        - img [ref=e20]
+        - text: Consolidation
+      - link "Containers" [ref=e22] [cursor=pointer]:
+        - /url: /cargochina/containers.php
+        - img [ref=e23]
+        - text: Containers
+      - link "Assign to Container" [ref=e25] [cursor=pointer]:
+        - /url: /cargochina/assign_container.php
+        - img [ref=e26]
+        - text: Assign to Container
+      - link "Expenses" [ref=e28] [cursor=pointer]:
+        - /url: /cargochina/expenses.php
+        - img [ref=e29]
+        - text: Expenses
+      - link "Financials" [ref=e31] [cursor=pointer]:
+        - /url: /cargochina/financials.php
+        - img [ref=e32]
+        - text: Financials
+      - link "HS Code Tax" [ref=e34] [cursor=pointer]:
+        - /url: /cargochina/hs_code_tax.php
+        - img [ref=e35]
+        - text: HS Code Tax
+      - link "Calendar" [ref=e37] [cursor=pointer]:
+        - /url: /cargochina/calendar.php
+        - img [ref=e38]
+        - text: Calendar
+      - link "Warehouse Stock" [ref=e40] [cursor=pointer]:
+        - /url: /cargochina/warehouse_stock.php
+        - img [ref=e41]
+        - text: Warehouse Stock
+      - link "Draft an Order" [ref=e43] [cursor=pointer]:
+        - /url: /cargochina/procurement_drafts.php
+        - img [ref=e44]
+        - text: Draft an Order
+      - generic [ref=e46]: Data
+      - link "Suppliers" [ref=e47] [cursor=pointer]:
+        - /url: /cargochina/suppliers.php
+        - img [ref=e48]
+        - text: Suppliers
+      - link "Customers" [ref=e50] [cursor=pointer]:
+        - /url: /cargochina/customers.php
+        - img [ref=e51]
+        - text: Customers
+      - link "Products" [ref=e53] [cursor=pointer]:
+        - /url: /cargochina/products.php
+        - img [ref=e54]
+        - text: Products
+      - generic [ref=e56]: Notifications
+      - link "Notifications 13" [ref=e57] [cursor=pointer]:
+        - /url: /cargochina/notifications.php
+        - img [ref=e58]
+        - text: Notifications
+        - generic [ref=e60]: "13"
+      - link "Preferences" [ref=e61] [cursor=pointer]:
+        - /url: /cargochina/notification_preferences.php
+        - img [ref=e62]
+        - text: Preferences
+      - generic [ref=e64]: Administration
+      - link "Business Settings" [ref=e65] [cursor=pointer]:
+        - /url: /cargochina/business_settings.php
+        - img [ref=e66]
+        - text: Business Settings
+      - link "Configuration" [ref=e68] [cursor=pointer]:
+        - /url: /cargochina/admin_config.php
+        - img [ref=e69]
+        - text: Configuration
+      - link "Users" [ref=e72] [cursor=pointer]:
+        - /url: /cargochina/admin_users.php
+        - img [ref=e73]
+        - text: Users
+      - link "Diagnostics" [ref=e75] [cursor=pointer]:
+        - /url: /cargochina/admin_diagnostics.php
+        - img [ref=e76]
+        - text: Diagnostics
+      - link "Tracking Push Log" [ref=e78] [cursor=pointer]:
+        - /url: /cargochina/admin_tracking_push.php
+        - img [ref=e79]
+        - text: Tracking Push Log
+      - link "Audit Log" [ref=e81] [cursor=pointer]:
+        - /url: /cargochina/admin_audit_log.php
+        - img [ref=e82]
+        - text: Audit Log
+    - generic [ref=e84]:
+      - generic [ref=e85]:
+        - img [ref=e86]
+        - generic [ref=e88]: Super Admin
+      - link "Logout" [ref=e89] [cursor=pointer]:
+        - /url: /cargochina/login.php?logout=1
+        - img [ref=e90]
+        - text: Logout
+  - generic [ref=e92]:
+    - banner [ref=e93]:
+      - button "Toggle sidebar" [expanded] [ref=e94] [cursor=pointer]:
+        - img [ref=e95]
+      - generic [ref=e97]: Super Admin Dashboard
+      - generic [ref=e98]:
+        - group "Description language" [ref=e99]:
+          - button "EN" [ref=e100] [cursor=pointer]
+          - button "中文" [ref=e101] [cursor=pointer]
+        - generic [ref=e102]: SuperAdmin
+    - generic [ref=e104]:
+      - generic [ref=e105]:
+        - heading "Super Admin Dashboard" [level=1] [ref=e106]
+        - paragraph [ref=e107]: System administration and configuration.
+      - generic [ref=e110]:
+        - heading "Users" [level=5] [ref=e111]
+        - paragraph [ref=e112]: Manage user accounts and roles.
+        - link "Manage Users" [ref=e113] [cursor=pointer]:
+          - /url: /cargochina/superadmin/users.php
+      - generic [ref=e116]:
+        - heading "Configuration" [level=5] [ref=e117]
+        - paragraph [ref=e118]: System settings and parameters.
+        - link "Configuration" [ref=e119] [cursor=pointer]:
+          - /url: /cargochina/superadmin/configuration.php
+      - generic [ref=e122]:
+        - heading "Diagnostics" [level=5] [ref=e123]
+        - paragraph [ref=e124]: System health and diagnostics.
+        - link "Diagnostics" [ref=e125] [cursor=pointer]:
+          - /url: /cargochina/superadmin/diagnostics.php
+      - generic [ref=e128]:
+        - heading "Tracking Push Log" [level=5] [ref=e129]
+        - paragraph [ref=e130]: View tracking API push history.
+        - link "View Log" [ref=e131] [cursor=pointer]:
+          - /url: /cargochina/superadmin/tracking-push-log.php

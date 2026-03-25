@@ -138,17 +138,40 @@ function renderProductAlertHint(card, note) {
 function applyCustomerDefaultShippingCode(code) {
     if (!code || typeof code !== "string") return;
     orderEffectiveShippingCode = code.trim();
+    renumberOrderItemNumbers();
 }
 
-/** Fetch next item sequence for customer+shipping_code (global count across all orders). */
-async function fetchNextItemNo(customerId, shippingCode) {
-    if (!customerId || !shippingCode) return 1;
-    try {
-        const res = await api("GET", "/customers/" + customerId + "/next-item-no?shipping_code=" + encodeURIComponent(shippingCode));
-        return (res.data?.next ?? 1);
-    } catch (_) {
-        return 1;
-    }
+function renumberOrderItemNumbers() {
+    const baseShippingCode = (orderEffectiveShippingCode || "").trim();
+    const supplierSequenceByKey = new Map();
+    const supplierItemCounts = new Map();
+    let nextSupplierSequence = 1;
+    document.querySelectorAll("#orderItemsBody .order-item-card").forEach((card) => {
+        const supplierId =
+            card.querySelector(".item-supplier-id")?.value?.trim() || "";
+        const supplierName =
+            card._supplierAc?.getSelected?.()?.name ||
+            card.querySelector(".item-supplier")?.value?.trim() ||
+            "";
+        const supplierKey = supplierId || supplierName || `item-${card.dataset.idx || nextSupplierSequence}`;
+        if (!supplierSequenceByKey.has(supplierKey)) {
+            supplierSequenceByKey.set(supplierKey, nextSupplierSequence++);
+        }
+        const supplierSequence = supplierSequenceByKey.get(supplierKey);
+        const itemCount = (supplierItemCounts.get(supplierKey) || 0) + 1;
+        supplierItemCounts.set(supplierKey, itemCount);
+        const shipInput = card.querySelector(".item-shipping-code");
+        const itemNoInput = card.querySelector(".item-item-no");
+        if (shipInput && !card.dataset.manualShippingCode) {
+            shipInput.value = baseShippingCode || shipInput.value || "";
+        }
+        if (itemNoInput && !card.dataset.manualItemNo) {
+            const prefix = (shipInput?.value || baseShippingCode || "").trim();
+            itemNoInput.value = prefix
+                ? `${prefix}-${supplierSequence}-${itemCount}`
+                : "";
+        }
+    });
 }
 
 function applySelectedSupplierToItems(supplier, { onlyBlank = false } = {}) {
@@ -269,12 +292,12 @@ function getOrderSearchDisplayValue(order) {
 
 function updateOrderOverview(rows) {
     const list = rows || [];
+    const hasCustomerFeedback = (row) =>
+        !!String(row?.confirmation_token || "").trim();
     const counts = {
         visible: list.length,
         draft: list.filter((r) => r.status === "Draft").length,
-        awaiting: list.filter(
-            (r) => r.status === "AwaitingCustomerConfirmation",
-        ).length,
+        awaiting: list.filter(hasCustomerFeedback).length,
         ready: list.filter((r) =>
             [
                 "ReadyForConsolidation",
@@ -327,10 +350,14 @@ function buildOrderListQuery() {
     const orderType = (
         document.getElementById("filterOrderType")?.value || ""
     ).trim();
+    const customerFeedback = (
+        document.getElementById("filterCustomerFeedback")?.value || ""
+    ).trim();
     statuses.forEach((status) => params.append("status[]", status));
     if (statuses.length) params.set("status_mode", statusMode);
     if (q) params.set("q", q);
     if (orderType) params.set("order_type", orderType);
+    if (customerFeedback) params.set("customer_feedback", customerFeedback);
     return params.toString();
 }
 
@@ -447,8 +474,15 @@ document.addEventListener("DOMContentLoaded", () => {
     const legacyStatus = urlParams.get("status");
     const statusMode = urlParams.get("status_mode") || "include";
     const orderTypeFromUrl = urlParams.get("order_type") || "";
+    const customerFeedbackFromUrl = urlParams.get("customer_feedback") || "";
     const orderTypeEl = document.getElementById("filterOrderType");
     if (orderTypeEl && orderTypeFromUrl) orderTypeEl.value = orderTypeFromUrl;
+    const customerFeedbackEl = document.getElementById(
+        "filterCustomerFeedback",
+    );
+    if (customerFeedbackEl && customerFeedbackFromUrl) {
+        customerFeedbackEl.value = customerFeedbackFromUrl;
+    }
     if (statusFromUrl.length) {
         setOrderStatusFilter(statusFromUrl, statusMode);
     } else if (legacyStatus) {
@@ -501,7 +535,17 @@ async function loadOrders() {
                     const canBulk =
                         r.status === "Submitted" || r.status === "Draft";
                     const suppDisplay = getOrderSupplierDisplay(r);
+                    const hasCustomerFeedback = !!String(
+                        r.confirmation_token || "",
+                    ).trim();
+                    const isDeclinedAfterAutoConfirm =
+                        r.status === "CustomerDeclinedAfterAutoConfirm";
                     const isDraftBuilder = r.order_type === "draft_procurement";
+                    const canAssignToDraft =
+                        (r.status === "ReadyForConsolidation" ||
+                            r.status === "Confirmed") &&
+                        !hasCustomerFeedback &&
+                        !isDeclinedAfterAutoConfirm;
                     const exportHref = isDraftBuilder
                         ? `${window.API_BASE || "/cargochina/api/v1"}/draft-orders/${r.id}/export`
                         : `${window.API_BASE || "/cargochina/api/v1"}/orders/${r.id}/export`;
@@ -510,13 +554,13 @@ async function loadOrders() {
                         ? "Export grouped draft order CSV"
                         : "Export as Excel";
                     return `
-      <tr data-order-id="${r.id}" data-status="${escapeHtml(r.status)}">
+      <tr data-order-id="${r.id}" data-status="${escapeHtml(r.status)}" class="${isDeclinedAfterAutoConfirm ? "table-danger" : ""}">
         <td class="text-center">${canBulk ? `<input type="checkbox" class="form-check-input order-bulk-cb" data-order-id="${r.id}" data-status="${escapeHtml(r.status)}">` : ""}</td>
         <td>${r.id}</td>
         <td>${escapeHtml(r.customer_name)}${r.customer_priority_level && r.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(r.customer_priority_note || "")}">${escapeHtml(r.customer_priority_level)}</span>` : ""}</td>
         <td>${escapeHtml(suppDisplay)}</td>
-        <td>${r.expected_ready_date || "—"}</td>
-        <td><span class="badge ${typeof statusBadgeClass === "function" ? statusBadgeClass(r.status) : "bg-secondary"}">${escapeHtml(typeof statusLabel === "function" ? statusLabel(r.status) : r.status)}</span>${isDraftBuilder ? ' <span class="badge bg-dark-subtle text-dark border">Draft Order</span>' : ""}${r.high_alert_notes ? ' <span class="badge bg-warning text-dark" title="' + escapeHtml(r.high_alert_notes) + '">⚠️</span>' : ""}${r.container_code || r.container_eta ? ' <span class="badge bg-info text-dark ms-1" title="Container ' + escapeHtml(r.container_code || "—") + (r.container_eta ? ", ETA " + escapeHtml(r.container_eta) : "") + '">📦 ' + escapeHtml(r.container_code || "—") + (r.container_eta ? " · " + escapeHtml(r.container_eta) : "") + "</span>" : ""}</td>
+        <td>${r.expected_ready_date || "—"}${r.destination_country_name ? `<div class="small text-muted">${escapeHtml(r.destination_country_name)}${r.destination_country_code ? ` (${escapeHtml(r.destination_country_code)})` : ""}</div>` : ""}</td>
+        <td><span class="badge ${typeof statusBadgeClass === "function" ? statusBadgeClass(r.status) : "bg-secondary"}">${escapeHtml(typeof statusLabel === "function" ? statusLabel(r.status) : r.status)}</span>${hasCustomerFeedback ? ' <span class="badge bg-warning text-dark ms-1" title="This warehouse receipt is already in stock and still waiting on customer review.">Customer Feedback Pending</span>' : ""}${isDraftBuilder ? ' <span class="badge bg-dark-subtle text-dark border">Draft Order</span>' : ""}${r.high_alert_notes ? ' <span class="badge bg-warning text-dark" title="' + escapeHtml(r.high_alert_notes) + '">⚠️</span>' : ""}${r.container_code || r.container_eta ? ' <span class="badge bg-info text-dark ms-1" title="Container ' + escapeHtml(r.container_code || "—") + (r.container_eta ? ", ETA " + escapeHtml(r.container_eta) : "") + '">📦 ' + escapeHtml(r.container_code || "—") + (r.container_eta ? " · " + escapeHtml(r.container_eta) : "") + "</span>" : ""}</td>
         <td class="table-actions">
           <button class="btn btn-sm btn-outline-info" onclick="showOrderInfo(${r.id})" title="View order details">ℹ</button>
           <button class="btn btn-sm btn-outline-primary" onclick="editOrder(${r.id})">${isDraftBuilder ? "Open Builder" : "Edit"}</button>
@@ -525,7 +569,8 @@ async function loadOrders() {
           ${r.status === "Draft" ? `<button class="btn btn-sm btn-success" onclick="submitOrder(${r.id})">Submit</button>` : ""}
           ${r.status === "Submitted" ? `<button class="btn btn-sm btn-success" onclick="approveOrder(${r.id})">Approve</button>` : ""}
           ${r.status === "AwaitingCustomerConfirmation" ? `<button class="btn btn-sm btn-warning" onclick="confirmOrder(${r.id})">Confirm</button>` : ""}
-          ${r.status === "ReadyForConsolidation" || r.status === "Confirmed" ? `<button class="btn btn-sm btn-outline-primary" onclick="openAssignDraftModal(${r.id}, '${escapeHtml(r.customer_name)}')" title="Assign to Shipment Draft">→ Draft</button>` : ""}
+          ${canAssignToDraft ? `<button class="btn btn-sm btn-outline-primary" onclick="openAssignDraftModal(${r.id}, '${escapeHtml(r.customer_name)}')" title="Assign to Shipment Draft">→ Draft</button>` : ""}
+          ${isDeclinedAfterAutoConfirm ? `<button class="btn btn-sm btn-outline-danger" onclick="resetOrderAfterDecline(${r.id})" title="Undo the receipt result and move the order back to Submitted">Reset</button>` : ""}
           <button class="btn btn-sm btn-outline-secondary" onclick="showOrderFinance(${r.id})" title="P&amp;L / Finance">$</button>
         </td>
       </tr>
@@ -700,6 +745,8 @@ async function loadOrderTemplate(id) {
                 if (it.supplier_id) setItemSupplierValue(lastCard, it.supplier_id, it.supplier_name);
                 lastCard.querySelector(".item-item-no").value = it.item_no || "";
                 lastCard.querySelector(".item-shipping-code").value = it.shipping_code || "";
+                if (it.item_no) lastCard.dataset.manualItemNo = "1";
+                if (it.shipping_code) lastCard.dataset.manualShippingCode = "1";
                 lastCard.querySelector(".item-desc").value = it.description_cn || it.description_en || "";
                 const firstRow = lastCard.querySelector(".order-item-packaging-row");
                 if (firstRow) {
@@ -1026,7 +1073,7 @@ function addOrderItem() {
         <div class="order-item-index">Item #${idx + 1}</div>
         <div class="d-flex gap-1">
           <button type="button" class="btn btn-sm btn-outline-secondary order-item-design d-none" onclick="openOrderItemDesignModal(this.closest('.order-item-card'))" title="Design attachments">Design</button>
-          <button type="button" class="btn btn-sm btn-outline-danger order-item-remove" onclick="this.closest('.order-item-card').remove(); updateOrderTotals();" title="Remove">×</button>
+          <button type="button" class="btn btn-sm btn-outline-danger order-item-remove" onclick="removeOrderItemCard(this.closest('.order-item-card'))" title="Remove">×</button>
         </div>
       </div>
       <div class="row g-2 align-items-start">
@@ -1131,15 +1178,6 @@ function addOrderItem() {
       </div>
     </div>`;
     container.appendChild(card);
-    const itemNoInp = card.querySelector(".item-item-no");
-    const customerId = orderCustomerAc?.getSelectedId?.();
-    if (effectiveShipCode && customerId && itemNoInp) {
-        fetchNextItemNo(customerId, effectiveShipCode).then((next) => {
-            if (itemNoInp && !itemNoInp.value?.trim()) {
-                itemNoInp.value = effectiveShipCode + "-" + next;
-            }
-        });
-    }
     card.querySelector(".order-item-add-packaging")?.addEventListener("click", () => {
         addItemPackagingRow(card);
     });
@@ -1152,10 +1190,12 @@ function addOrderItem() {
             placeholder: "Type supplier...",
             onSelect: (item) => {
                 if (suppIdInput) suppIdInput.value = item.id;
+                renumberOrderItemNumbers();
             },
         });
         suppInput.addEventListener("input", () => {
             if (suppIdInput) suppIdInput.value = "";
+            renumberOrderItemNumbers();
         });
         if (ac && defaultSuppId && defaultSuppName)
             ac.setValue({ id: defaultSuppId, name: defaultSuppName });
@@ -1257,6 +1297,12 @@ function addOrderItem() {
         delete card.dataset.dimensionsScope;
         renderProductAlertHint(card, "");
     });
+    card.querySelector(".item-item-no")?.addEventListener("input", () => {
+        card.dataset.manualItemNo = card.querySelector(".item-item-no")?.value
+            ?.trim()
+            ? "1"
+            : "";
+    });
     card.querySelector(".item-photo-input").addEventListener("change", (e) =>
         handleItemPhoto(e, idx),
     );
@@ -1301,7 +1347,15 @@ function addOrderItem() {
         }
     });
     updateOrderTotals();
+    renumberOrderItemNumbers();
 }
+
+window.removeOrderItemCard = function (card) {
+    if (!card) return;
+    card.remove();
+    renumberOrderItemNumbers();
+    updateOrderTotals();
+};
 
 async function handleItemPhoto(e, idx) {
     const files = e.target.files;
@@ -1687,6 +1741,8 @@ async function copyOrder(id) {
                 copyLastCard.querySelector(".item-product-id").value = it.product_id || "";
                 copyLastCard.querySelector(".item-item-no").value = it.item_no || "";
                 copyLastCard.querySelector(".item-shipping-code").value = it.shipping_code || "";
+                if (it.item_no) copyLastCard.dataset.manualItemNo = "1";
+                if (it.shipping_code) copyLastCard.dataset.manualShippingCode = "1";
                 const firstRow = copyLastCard.querySelector(".order-item-packaging-row");
                 if (firstRow) {
                     firstRow.querySelector(".item-cartons").value = rowData.cartons;
@@ -1824,6 +1880,8 @@ async function editOrder(id) {
                 lastCard.querySelector(".item-product-id").value = it.product_id || "";
                 lastCard.querySelector(".item-item-no").value = it.item_no || "";
                 lastCard.querySelector(".item-shipping-code").value = it.shipping_code || "";
+                if (it.item_no) lastCard.dataset.manualItemNo = "1";
+                if (it.shipping_code) lastCard.dataset.manualShippingCode = "1";
                 const firstRow = lastCard.querySelector(".order-item-packaging-row");
                 if (firstRow) {
                     firstRow.querySelector(".item-cartons").value = rowData.cartons;
@@ -2156,8 +2214,8 @@ async function confirmOrder(id) {
             (o.customer_photo_visibility || "internal-only") ===
             "customer-visible";
         let msg =
-            "Confirm acceptance of actual warehouse measurements on behalf of customer?\n\n" +
-            "This will move the order to Confirmed. The customer will not need to take any action.";
+            "Confirm acceptance of this legacy warehouse-confirmation order on behalf of the customer?\n\n" +
+            "This is only for older confirmation-step orders and will move the order forward without a customer response.";
         if (receipt) {
             msg += `\n\nActual: ${receipt.actual_cbm} CBM, ${receipt.actual_weight} kg, ${receipt.actual_cartons} cartons`;
             if (showPhotos && receipt.photos?.length) {
@@ -2170,6 +2228,23 @@ async function confirmOrder(id) {
         loadOrders();
     } catch (e) {
         showToast(e.message || "Request failed", "danger");
+    }
+}
+
+async function resetOrderAfterDecline(id) {
+    if (
+        !window.confirm(
+            "Reset this declined auto-confirmed order back to Submitted? The receiving result will be operationally undone.",
+        )
+    ) {
+        return;
+    }
+    try {
+        await api("POST", `/orders/${id}/reset-after-decline`, {});
+        showToast("Order reset to Submitted");
+        loadOrders();
+    } catch (e) {
+        showToast(e.message, "danger");
     }
 }
 

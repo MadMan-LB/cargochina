@@ -7,7 +7,7 @@ $pageTitle = 'Pipeline';
 require 'includes/layout.php';
 ?>
 <h1 class="mb-4">Order Pipeline</h1>
-<p class="text-muted mb-4">A clearer operations board for approval, receiving, customer confirmation, consolidation, and final dispatch.</p>
+<p class="text-muted mb-4">A clearer operations board for approval, receiving, customer follow-up, consolidation, and final dispatch.</p>
 
 <div class="card page-hero-card mb-4">
   <div class="card-body">
@@ -34,9 +34,9 @@ require 'includes/layout.php';
     <div class="detail">Approved or in-transit orders waiting for warehouse action</div>
   </div>
   <div class="metric-card">
-    <div class="eyebrow">Awaiting Confirmation</div>
+    <div class="eyebrow">Customer Feedback Pending</div>
     <div class="value" id="pipeAwaitConfirm">0</div>
-    <div class="detail">Orders blocked on customer confirmation</div>
+    <div class="detail">Auto-confirmed receipts still waiting on customer feedback</div>
   </div>
   <div class="metric-card">
     <div class="eyebrow">Finalized</div>
@@ -80,14 +80,14 @@ require 'includes/layout.php';
       <div class="card-header">
         <div>
           <div>Exceptions & Shipping</div>
-          <div class="small text-muted fw-normal mt-1">Keep stalled confirmations and container movement visible without opening multiple pages.</div>
+          <div class="small text-muted fw-normal mt-1">Keep customer follow-up exceptions and container movement visible without opening multiple pages.</div>
         </div>
       </div>
       <div class="card-body">
         <div class="mb-3">
           <div class="small text-uppercase text-muted fw-semibold mb-1">Stale Items</div>
           <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
-            <span class="small">Awaiting customer confirmation</span>
+            <span class="small">Pending customer feedback</span>
             <strong id="pipelineStaleConfirm">0</strong>
           </div>
           <div class="d-flex justify-content-between align-items-center py-2">

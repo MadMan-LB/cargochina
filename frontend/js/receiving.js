@@ -1048,7 +1048,7 @@ async function submitReceive() {
         );
         showToast(
             res.data.variance_detected
-                ? "Received — customer confirmation required"
+                ? "Received — auto-confirmed, customer follow-up sent"
                 : "Received successfully",
         );
         loadReceivableOrders();

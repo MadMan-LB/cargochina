@@ -22,12 +22,20 @@ function escapeHtml(s) {
 async function loadReceipt() {
     const res = await api("/receiving/receipts/" + RECEIPT_ID);
     const r = res.data;
-    const statusBadge =
-        r.order_status === "AwaitingCustomerConfirmation"
-            ? '<span class="badge bg-warning">Confirmation required</span>'
-            : '<span class="badge bg-success">' +
-              escapeHtml(r.order_status) +
-              "</span>";
+    let statusBadge =
+        '<span class="badge bg-success">' +
+        escapeHtml(r.order_status) +
+        "</span>";
+    if (r.order_status === "AwaitingCustomerConfirmation") {
+        statusBadge =
+            '<span class="badge bg-secondary">Legacy Awaiting Confirmation</span>';
+    } else if (r.order_status === "Confirmed") {
+        statusBadge =
+            '<span class="badge bg-warning text-dark">Auto-confirmed in stock</span>';
+    } else if (r.order_status === "CustomerDeclinedAfterAutoConfirm") {
+        statusBadge =
+            '<span class="badge bg-danger">Declined After Auto-Confirm</span>';
+    }
     let itemsHtml = "";
     if (r.items && r.items.length) {
         itemsHtml = `

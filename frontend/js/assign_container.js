@@ -24,6 +24,45 @@ function containerStatusDisplay(status) {
     return labels[status] || status || "-";
 }
 
+function getContainerDestinationCountryId(container) {
+    const value = container?.destination_country_id;
+    return value != null && value !== "" ? Number(value) : null;
+}
+
+function getContainerDestinationDisplay(container) {
+    return (
+        container?.destination_country_name ||
+        container?.destination_country ||
+        container?.destination ||
+        "No destination"
+    );
+}
+
+function getOrderDestinationCountryId(order) {
+    const value = order?.destination_country_id;
+    return value != null && value !== "" ? Number(value) : null;
+}
+
+function getOrderDestinationDisplay(order) {
+    if (order?.destination_country_name) {
+        return order.destination_country_code
+            ? `${order.destination_country_name} (${order.destination_country_code})`
+            : order.destination_country_name;
+    }
+    return "No destination";
+}
+
+function filterOrdersForContainer(orders, container) {
+    const destinationCountryId = getContainerDestinationCountryId(container);
+    return (orders || []).filter((order) => {
+        if (typeof orderIsShipmentEligible === "function" && !orderIsShipmentEligible(order)) {
+            return false;
+        }
+        if (!destinationCountryId) return true;
+        return getOrderDestinationCountryId(order) === destinationCountryId;
+    });
+}
+
 function debounceOrderSearch() {
     clearTimeout(_searchTimer);
     _searchTimer = setTimeout(renderOrders, 180);
@@ -38,7 +77,8 @@ function setContainerSelection(containerId, seedItem = null) {
     const hiddenEl = document.getElementById("targetContainerId");
     const inputEl = document.getElementById("targetContainerSearch");
     const container =
-        seedItem || _containers.find((c) => Number(c.id) === Number(containerId));
+        _containers.find((c) => Number(c.id) === Number(containerId)) ||
+        seedItem;
 
     if (!container) {
         _selContainerId = null;
@@ -69,7 +109,7 @@ function updateSelectedContainerMeta(container) {
             "Search for a container to preview current fill and assignment impact.";
         return;
     }
-    const destination = container.destination || container.destination_country || "No destination";
+    const destination = getContainerDestinationDisplay(container);
     const eta = container.eta_date ? ` ETA ${container.eta_date}` : "";
     metaEl.textContent = `${container.code || `Container #${container.id}`} • ${containerStatusDisplay(container.status)} • ${destination}${eta}`;
 }
@@ -176,7 +216,11 @@ async function loadEligibleOrders() {
                 0,
             );
             return { ...order, total_cbm: totalCbm, total_weight: totalWeight };
-        });
+        }).filter((order) =>
+            typeof orderIsShipmentEligible === "function"
+                ? orderIsShipmentEligible(order)
+                : true,
+        );
         renderOrders();
     } catch (e) {
         setMetricText("assignEligibleCount", 0);
@@ -191,15 +235,23 @@ function renderOrders() {
     const q = (document.getElementById("orderSearch")?.value || "")
         .trim()
         .toLowerCase();
-    const rows = _orders.filter((order) => !q || getOrderSearchText(order).includes(q));
+    const container =
+        _containers.find((item) => item.id === _selContainerId) || null;
+    const rows = filterOrdersForContainer(
+        _orders.filter((order) => !q || getOrderSearchText(order).includes(q)),
+        container,
+    );
 
     const label = document.getElementById("eligibleCountLabel");
     if (label) label.textContent = rows.length ? `(${rows.length})` : "";
     setMetricText("assignEligibleCount", rows.length);
 
     if (!rows.length) {
-        tbody.innerHTML =
-            '<tr><td colspan="8" class="text-center text-muted py-4">No eligible orders found.</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center text-muted py-4">${
+            container && getContainerDestinationCountryId(container)
+                ? `No eligible orders match ${escHtml(getContainerDestinationDisplay(container))}.`
+                : "No eligible orders found. Orders with pending customer review stay out of shipment assignment."
+        }</td></tr>`;
         updateSelectionMetrics([]);
         return;
     }
@@ -214,6 +266,7 @@ function renderOrders() {
             ${escHtml(order.customer_name || "-")}
             ${order.customer_priority_level && order.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escHtml(order.customer_priority_note || "")}">${escHtml(order.customer_priority_level)}</span>` : ""}
             ${order.high_alert_notes ? ` <span class="badge bg-danger-subtle text-danger border border-danger-subtle ms-1" title="${escHtml(order.high_alert_notes)}">Alert</span>` : ""}
+            <div class="small text-muted">${escHtml(getOrderDestinationDisplay(order))}</div>
           </td>
           <td class="small text-muted">${escHtml((order.supplier_name || "-").substring(0, 36))}</td>
           <td><span class="badge ${getOrderStatusClass(order.status)}">${escHtml(getOrderStatusLabel(order.status))}</span></td>
@@ -244,19 +297,24 @@ function selectAllOrders() {
 }
 
 function getSelectedOrders() {
-    return [...document.querySelectorAll(".order-cb:checked")].map((cb) => ({
-        id: parseInt(cb.dataset.id, 10),
-        cbm: parseFloat(cb.dataset.cbm) || 0,
-        weight: parseFloat(cb.dataset.weight) || 0,
-    }));
+    return [...document.querySelectorAll(".order-cb:checked")].map((cb) => {
+        const id = parseInt(cb.dataset.id, 10);
+        return (
+            _orders.find((order) => Number(order.id) === id) || {
+                id,
+                total_cbm: parseFloat(cb.dataset.cbm) || 0,
+                total_weight: parseFloat(cb.dataset.weight) || 0,
+            }
+        );
+    });
 }
 
 function updateSelectionMetrics(selectedOrders) {
     const selected = selectedOrders || [];
     const totals = selected.reduce(
         (sum, order) => ({
-            cbm: sum.cbm + order.cbm,
-            weight: sum.weight + order.weight,
+            cbm: sum.cbm + (parseFloat(order.total_cbm) || 0),
+            weight: sum.weight + (parseFloat(order.total_weight) || 0),
         }),
         { cbm: 0, weight: 0 },
     );
@@ -273,9 +331,21 @@ function updateSelectionMetrics(selectedOrders) {
 
 function getSuggestedContainer(selectedOrders) {
     if (!selectedOrders.length || !_containers.length) return null;
-    const addCbm = selectedOrders.reduce((sum, order) => sum + order.cbm, 0);
+    const destinationIds = [
+        ...new Set(
+            selectedOrders
+                .map((order) => getOrderDestinationCountryId(order))
+                .filter(Boolean),
+        ),
+    ];
+    if (destinationIds.length !== 1) return null;
+    const targetDestinationId = destinationIds[0];
+    const addCbm = selectedOrders.reduce(
+        (sum, order) => sum + (parseFloat(order.total_cbm) || 0),
+        0,
+    );
     const addWeight = selectedOrders.reduce(
-        (sum, order) => sum + order.weight,
+        (sum, order) => sum + (parseFloat(order.total_weight) || 0),
         0,
     );
     const withRoom = _containers
@@ -284,7 +354,12 @@ function getSuggestedContainer(selectedOrders) {
             const usedWeight = parseFloat(container.used_weight) || 0;
             const maxCbm = parseFloat(container.max_cbm) || 0;
             const maxWeight = parseFloat(container.max_weight) || 0;
-            return usedCbm < maxCbm && usedWeight < maxWeight;
+            return (
+                usedCbm < maxCbm &&
+                usedWeight < maxWeight &&
+                getContainerDestinationCountryId(container) ===
+                    targetDestinationId
+            );
         })
         .sort((a, b) => a.id - b.id);
 
@@ -357,7 +432,7 @@ function renderContainerSummary() {
             .map((container) => {
                 const pct = parseFloat(container.fill_pct_cbm) || 0;
                 const status = containerStatusDisplay(container.status);
-                const destination = container.destination || container.destination_country || "No destination";
+                const destination = getContainerDestinationDisplay(container);
                 return `
           <div class="px-3 py-3 border-bottom">
             <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
@@ -386,6 +461,7 @@ function onContainerChange() {
     const panel = document.getElementById("containerCapacityPanel");
     if (!_selContainerId) {
         panel?.classList.add("d-none");
+        renderOrders();
         updateAssignBtn();
         return;
     }
@@ -393,12 +469,14 @@ function onContainerChange() {
     const container = _containers.find((item) => item.id === _selContainerId);
     if (!container) {
         panel?.classList.add("d-none");
+        renderOrders();
         updateAssignBtn();
         return;
     }
 
     panel?.classList.remove("d-none");
     updateSelectedContainerMeta(container);
+    renderOrders();
 
     const maxCbm = parseFloat(container.max_cbm) || 1;
     const maxWeight = parseFloat(container.max_weight) || 1;
@@ -438,8 +516,14 @@ function updateCapacityPreview() {
     afterPanel?.classList.remove("d-none");
     const maxCbm = parseFloat(container.max_cbm) || 1;
     const maxWeight = parseFloat(container.max_weight) || 1;
-    const addCbm = selected.reduce((sum, order) => sum + order.cbm, 0);
-    const addWeight = selected.reduce((sum, order) => sum + order.weight, 0);
+    const addCbm = selected.reduce(
+        (sum, order) => sum + (parseFloat(order.total_cbm) || 0),
+        0,
+    );
+    const addWeight = selected.reduce(
+        (sum, order) => sum + (parseFloat(order.total_weight) || 0),
+        0,
+    );
     const afterCbm = (parseFloat(container.used_cbm) || 0) + addCbm;
     const afterWeight = (parseFloat(container.used_weight) || 0) + addWeight;
     const cbmPct = Math.min(120, (afterCbm / maxCbm) * 100);

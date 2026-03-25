@@ -6,6 +6,7 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
+require_once dirname(__DIR__, 2) . '/services/OrderCountryService.php';
 
 function containerTableHasColumn(PDO $pdo, string $table, string $column): bool
 {
@@ -148,6 +149,30 @@ function fetchContainerUsage(PDO $pdo, int $containerId): array
     ];
 }
 
+function enrichContainerDestination(PDO $pdo, array $container): array
+{
+    static $countryCache = [];
+
+    $countryId = OrderCountryService::resolveContainerDestinationCountryId($pdo, $container);
+    $container['destination_country_id'] = $countryId ?: null;
+    $container['destination_country_name'] = null;
+    $container['destination_country_code'] = null;
+
+    if ($countryId) {
+        if (!array_key_exists($countryId, $countryCache)) {
+            $stmt = $pdo->prepare("SELECT id, name, code FROM countries WHERE id = ?");
+            $stmt->execute([$countryId]);
+            $countryCache[$countryId] = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        }
+        if (!empty($countryCache[$countryId])) {
+            $container['destination_country_name'] = $countryCache[$countryId]['name'];
+            $container['destination_country_code'] = $countryCache[$countryId]['code'];
+        }
+    }
+
+    return $container;
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
 
@@ -222,6 +247,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $container['used_weight'] = $usage['used_weight'];
                 $container['fill_pct_cbm'] = $container['max_cbm'] > 0
                     ? round($container['used_cbm'] / $container['max_cbm'] * 100, 1) : 0;
+                $container = enrichContainerDestination($pdo, $container);
                 $draftsStmt = $pdo->prepare(
                     "SELECT sd.id, sd.status, sd.container_number, sd.booking_number, sd.tracking_url,
                             (SELECT COUNT(*) FROM shipment_draft_orders WHERE shipment_draft_id = sd.id) as order_count
@@ -346,6 +372,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $r['order_count'] = (int)   $r['order_count'];
                     $r['fill_pct_cbm'] = $r['max_cbm'] > 0
                         ? round($r['used_cbm'] / $r['max_cbm'] * 100, 1) : 0;
+                    $r = enrichContainerDestination($pdo, $r);
                 }
                 unset($r);
                 jsonResponse(['data' => $rows]);
@@ -355,7 +382,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $stmt->execute([$id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$row) jsonError('Container not found', 404);
-            jsonResponse(['data' => $row]);
+            jsonResponse(['data' => enrichContainerDestination($pdo, $row)]);
             break;
 
         // -------------------------------------------------------------------------
@@ -459,7 +486,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         case 'POST':
             // Shortcut: assign orders directly to a container, handling draft creation automatically
             if ($id && $action === 'assign-orders') {
-                requireRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin']);
+                requireRole(['ChinaAdmin', 'LebanonAdmin', 'ContainersStaff', 'SuperAdmin']);
                 $orderIds = array_map('intval', $input['order_ids'] ?? []);
                 $force    = !empty($input['force']); // allow even if over capacity
                 if (empty($orderIds)) jsonError('order_ids required', 400);
@@ -472,11 +499,18 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 // Validate order eligibility
                 $eligible = ['ReadyForConsolidation', 'Confirmed'];
                 foreach ($orderIds as $oid) {
-                    $st = $pdo->prepare("SELECT status FROM orders WHERE id = ?");
+                    $st = $pdo->prepare("SELECT id, status, destination_country_id, confirmation_token FROM orders WHERE id = ?");
                     $st->execute([$oid]);
-                    $s = $st->fetchColumn();
-                    if (!in_array($s, $eligible)) {
+                    $order = $st->fetch(PDO::FETCH_ASSOC);
+                    $s = $order['status'] ?? null;
+                    if (!in_array($s, $eligible, true)) {
                         jsonError("Order #$oid is not eligible (status: $s). Must be ReadyForConsolidation or Confirmed.", 400);
+                    }
+                    if (trim((string) ($order['confirmation_token'] ?? '')) !== '') {
+                        jsonError("Order #$oid is still waiting for customer feedback and cannot be assigned to a container yet.", 400);
+                    }
+                    if (!OrderCountryService::orderMatchesContainer($pdo, $order, $container)) {
+                        jsonError("Order #$oid destination country does not match container destination.", 400);
                     }
                 }
 

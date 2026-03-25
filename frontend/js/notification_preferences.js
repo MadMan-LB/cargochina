@@ -2,7 +2,7 @@ const EVENT_LABELS = {
     order_submitted: "Order submitted",
     order_approved: "Order approved",
     order_received: "Order received",
-    variance_confirmation: "Variance — confirmation required",
+    variance_confirmation: "Variance — customer follow-up sent",
     shipment_finalized: "Shipment finalized",
 };
 

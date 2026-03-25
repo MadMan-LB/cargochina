@@ -1,7 +1,7 @@
 <?php
 require_once 'includes/auth_check.php';
 require_once 'includes/page_guard.php';
-requireRoleForPage(['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin']);
+requireRoleForPage(['ChinaAdmin', 'SuperAdmin']);
 $currentPage = 'customers';
 $pageTitle = 'Customers';
 $roles = $_SESSION['user_roles'] ?? [];

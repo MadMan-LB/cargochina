@@ -73,8 +73,9 @@ require 'includes/layout.php';
               'Approved' => 'Approved',
               'InTransitToWarehouse' => 'In Transit',
               'ReceivedAtWarehouse' => 'Received',
-              'AwaitingCustomerConfirmation' => 'Awaiting Confirmation',
+              'AwaitingCustomerConfirmation' => 'Legacy Awaiting Confirmation',
               'CustomerDeclined' => 'Customer Declined',
+              'CustomerDeclinedAfterAutoConfirm' => 'Declined After Auto-Confirm',
               'Confirmed' => 'Confirmed',
               'ReadyForConsolidation' => 'Ready for Consolidation',
               'ConsolidatedIntoShipmentDraft' => 'In Shipment Draft',
@@ -94,7 +95,7 @@ require 'includes/layout.php';
               <option value="include">Include selected</option>
               <option value="exclude">Exclude selected</option>
             </select>
-            <small class="summary-text" id="profitStatusSummary">Default scope: all except Draft and Customer Declined.</small>
+            <small class="summary-text" id="profitStatusSummary">Default scope: all except Draft and declined orders.</small>
           </div>
         </div>
         <div class="row g-3">
@@ -264,9 +265,8 @@ require 'includes/layout.php';
                 <thead>
                   <tr>
                     <th>Customer</th>
-                    <th>Deposits</th>
-                    <th>Receivable</th>
-                    <th>Balance</th>
+                    <th>USD</th>
+                    <th>RMB</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -288,9 +288,8 @@ require 'includes/layout.php';
                 <thead>
                   <tr>
                     <th>Supplier</th>
-                    <th>Invoiced</th>
-                    <th>Paid</th>
-                    <th>Payable</th>
+                    <th>USD</th>
+                    <th>RMB</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -338,7 +337,7 @@ require 'includes/layout.php';
 
 <!-- Record Payment Modal (Financials) -->
 <div class="modal fade" id="finPaymentModal" tabindex="-1">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-xl modal-fullscreen-lg-down">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">Record Payment — <span id="finPaySupplierName"></span></h5>
@@ -346,6 +345,7 @@ require 'includes/layout.php';
       </div>
       <div class="modal-body">
         <input type="hidden" id="finPaySupplierId">
+        <div class="alert alert-light border py-2 small mb-3" id="finPaySupplierContext">Stored supplier payment options will appear here.</div>
         <div class="row mb-3">
           <div class="col-6"><label class="form-label">Invoice Amount</label><input type="number" step="0.01" class="form-control" id="finPayInvoiceAmount" placeholder="Total invoice"></div>
           <div class="col-6"><label class="form-label">Amount Paid *</label><input type="number" step="0.01" class="form-control" id="finPayAmount" required></div>
@@ -355,17 +355,68 @@ require 'includes/layout.php';
             <option value="USD">USD</option>
             <option value="RMB">RMB</option>
           </select></div>
-          <div class="col-6"><label class="form-label">Order</label><input type="text" class="form-control" id="finPayOrderId" placeholder="Type to search order (optional)…" autocomplete="off"></div>
+          <div class="col-6"><label class="form-label">Payment Type</label><select class="form-select" id="finPayChannel">
+            <option value="">Choose payment type...</option>
+            <option value="WeChat">WeChat</option>
+            <option value="Alipay">Alipay</option>
+            <option value="Bank Transfer">Bank Transfer</option>
+            <option value="Cash">Cash</option>
+          </select></div>
         </div>
+        <div class="mb-3"><label class="form-label">Order</label><input type="text" class="form-control" id="finPayOrderId" placeholder="Type to search order (optional)…" autocomplete="off"></div>
         <div class="form-check mb-3">
           <input type="checkbox" class="form-check-input" id="finPayMarkedFull">
           <label class="form-check-label" for="finPayMarkedFull">Mark as fully paid</label>
         </div>
+        <div class="alert alert-info py-2 d-none mb-3" id="finPaySettlementPreview"></div>
+        <div class="mb-3 d-none" id="finPaySettlementNoteWrap">
+          <label class="form-label">Settlement Note</label>
+          <textarea class="form-control" id="finPaySettlementNote" rows="2" placeholder="Reason for accepting a short-paid full settlement"></textarea>
+        </div>
         <div class="mb-2"><label class="form-label">Notes / Use case</label><textarea class="form-control" id="finPayNotes" rows="2" placeholder="What is this payment for?"></textarea></div>
+        <div class="card mt-4">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span>Supplier Orders</span>
+            <small class="text-muted" id="finPayOrdersSummary">Loading order context…</small>
+          </div>
+          <div class="card-body p-0">
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Order</th>
+                    <th>Status</th>
+                    <th>Expected</th>
+                    <th>Total</th>
+                    <th>Payment State</th>
+                    <th>Info</th>
+                  </tr>
+                </thead>
+                <tbody id="finPayOrdersBody">
+                  <tr><td colspan="6" class="text-center text-muted py-3">Select a supplier to load order context.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
         <button type="button" class="btn btn-primary" id="finPaySubmitBtn" onclick="submitFinPayment()">Record Payment</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="finOrderInfoModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-fullscreen-lg-down">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="finOrderInfoTitle">Order Details</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="finOrderInfoBody">
+        <div class="text-center py-4 text-muted">Loading order details…</div>
       </div>
     </div>
   </div>

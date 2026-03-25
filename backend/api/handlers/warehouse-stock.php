@@ -2,15 +2,32 @@
 
 /**
  * Warehouse Stock API - current stock visibility
- * Roles: WarehouseStaff, ChinaAdmin, LebanonAdmin, SuperAdmin
+ * Roles: WarehouseStaff, ChinaAdmin, LebanonAdmin, ContainersStaff, SuperAdmin
  */
 
 require_once __DIR__ . '/../helpers.php';
 
+function warehouseStockHasColumn(PDO $pdo, string $table, string $column): bool
+{
+    static $cache = [];
+    $key = $table . '.' . $column;
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+    try {
+        $stmt = $pdo->prepare("SHOW COLUMNS FROM `$table` LIKE ?");
+        $stmt->execute([$column]);
+        $cache[$key] = (bool) $stmt->rowCount();
+    } catch (Throwable $e) {
+        $cache[$key] = false;
+    }
+    return $cache[$key];
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
     if (!getAuthUserId()) jsonError('Unauthorized', 401);
-    if (!hasAnyRole(['WarehouseStaff', 'ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'])) jsonError('Forbidden', 403);
+    if (!hasAnyRole(['WarehouseStaff', 'ChinaAdmin', 'LebanonAdmin', 'ContainersStaff', 'SuperAdmin'])) jsonError('Forbidden', 403);
 
     if ($method !== 'GET') jsonError('Method not allowed', 405);
 
@@ -25,6 +42,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $statusMode = $statusMode === 'exclude' ? 'exclude' : 'include';
     $q = trim($_GET['q'] ?? '');
 
+    $receiptHasVoidedAt = warehouseStockHasColumn($pdo, 'warehouse_receipts', 'voided_at');
+    $latestReceiptInnerWhere = $receiptHasVoidedAt
+        ? " WHERE voided_at IS NULL"
+        : "";
+    $latestReceiptOuterWhere = $receiptHasVoidedAt
+        ? " WHERE w.voided_at IS NULL"
+        : "";
+
     $sql = "SELECT o.id as order_id, o.customer_id, o.supplier_id, o.status, o.expected_ready_date,
         c.name as customer_name, s.name as supplier_name,
         oi.id as item_id, oi.product_id, oi.quantity, oi.unit, oi.declared_cbm, oi.declared_weight, oi.description_cn, oi.description_en,
@@ -35,7 +60,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         LEFT JOIN suppliers s ON o.supplier_id = s.id
         JOIN order_items oi ON oi.order_id = o.id
         LEFT JOIN products p ON oi.product_id = p.id
-        LEFT JOIN (SELECT w.order_id, w.actual_cbm, w.actual_weight, w.actual_cartons FROM warehouse_receipts w INNER JOIN (SELECT order_id, MAX(id) as mid FROM warehouse_receipts GROUP BY order_id) x ON w.order_id = x.order_id AND w.id = x.mid) wr ON wr.order_id = o.id
+        LEFT JOIN (
+            SELECT w.order_id, w.actual_cbm, w.actual_weight, w.actual_cartons
+            FROM warehouse_receipts w
+            INNER JOIN (
+                SELECT order_id, MAX(id) as mid
+                FROM warehouse_receipts" . $latestReceiptInnerWhere . "
+                GROUP BY order_id
+            ) x ON w.order_id = x.order_id AND w.id = x.mid" . $latestReceiptOuterWhere . "
+        ) wr ON wr.order_id = o.id
         WHERE o.status IN ('ReceivedAtWarehouse','AwaitingCustomerConfirmation','Confirmed','ReadyForConsolidation')";
     $params = [];
     if ($customerId) {

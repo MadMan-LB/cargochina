@@ -1012,3 +1012,47 @@ High-confidence completed items after this review pass:
   - PHP syntax checks passed for all changed PHP files.
   - JS syntax checks passed for all changed JS files.
   - `npm run smoke:ui` passed after updating smoke coverage for customers, suppliers, containers, and the current procurement-drafts UI.
+
+## 2026-03-25 Orders / Destination Filtering / Auto-Confirm Follow-Up / Financial Settlement Pass
+
+- Customer countries remain stored in `customer_country_shipping`, and `orders.destination_country_id` remains the canonical persisted destination field.
+  - `backend/services/OrderCountryService.php` is now the reusable source of truth for validating customer destination-country choices, deriving shipping code from customer + country, and resolving text-only container destinations into canonical `countries` rows.
+  - Orders UI now reflects the new customer-follow-up model and supports direct `customer_feedback` filtering.
+- Canonical item numbering is now centralized in `backend/services/OrderItemNumberingService.php` and applied by both orders and draft-order handlers, while frontend previews in `frontend/js/orders.js` and `frontend/js/procurement_drafts.js` mirror the same `shipping-supplierSequence-itemSequence` format.
+- Procurement Drafts quick-add supplier reuses the existing supplier master-data and upload pipeline instead of introducing a draft-only supplier model.
+  - It saves through `/suppliers`, defaults payment facility to 30 days when left empty, stores payment links on the supplier record, and uploads supplier card/photos through the existing validated upload + attachment flow.
+- Receiving no longer blocks on manual confirmation when damaged or variance receipts are recorded.
+  - Orders are auto-confirmed into stock, receive a customer follow-up token, and can later move to `CustomerDeclinedAfterAutoConfirm`.
+  - Internal UI, dashboard, pipeline, notifications, portal, and the retired confirmations page were updated to reflect customer follow-up rather than the old blocking confirmation queue.
+  - Resetting a declined-after-auto-confirm order moves it back to `Submitted` and operationally voids the receipt when the schema supports receipt void columns.
+- Container assignment and suggestion flows now respect destination country on both the backend and frontend.
+  - Containers API responses now include resolved destination-country metadata even though container records still store text destination fields.
+  - Assign-to-container screens only surface destination-compatible orders and no longer auto-suggest mixed-country fills.
+- Financial balances/profit views now consistently treat `CustomerDeclinedAfterAutoConfirm` as a declined state in default scope messaging, while settlement-aware supplier payments continue to record the expected invoice amount, actual paid amount, `settlement_delta`, `settlement_mode`, and `settlement_note`.
+
+## Delta Patch Notes — 2026-03-25
+- Froze automatic order item renumbering once a real order leaves Draft status. Orders in Submitted and later statuses now keep incoming item_no values on normal edit/resave; canonical renumbering remains active for Draft flows only.
+- Hardened supplier duplicate prevention in the shared suppliers create/update handler with likely-duplicate blocking on exact store_id and strong name+phone matches, while keeping unique supplier code enforcement intact.
+- Centralized the frontend interpretation of auto-confirmed pending-review orders so Confirmed orders with a live confirmation_token are excluded from shipment/consolidation assignment queues unless the customer follow-up is complete.
+- Kept the current warehouse stock model as workflow visibility rather than introducing a new inventory-ledger reversal path in this patch.
+
+## Delta Patch Notes — 2026-03-25 Procurement Draft Destination Country
+- `procurement_drafts.php` now includes a destination-country field in the Draft Order builder and uses the same customer-country source of truth as Orders.
+- `frontend/js/procurement_drafts.js` now auto-loads customer countries after customer selection:
+  - one customer country: auto-selects and locks it
+  - multiple customer countries: shows a restricted dropdown of only that customer’s countries
+  - no mapped customer countries: falls back to the existing country search field
+- `backend/api/handlers/draft-orders.php` now validates and persists `destination_country_id` for draft-procurement orders through `OrderCountryService`, and canonical draft item numbering now derives shipping code from the selected destination country when present.
+- Draft order reload/edit and CSV export now include the saved destination country so the builder, persistence, and exported record stay aligned.
+
+## Delta Patch Notes — 2026-03-25 Procurement Draft Visual Grouping
+- Added soft repeating background palettes for supplier sections inside the Draft Order builder so each supplier block is easier to separate visually during long drafting sessions.
+- Added lighter nested item-card surfaces inside each supplier section so product lines read as grouped within their supplier while staying distinct from adjacent sections.
+- This was implemented as a CSS-only UX pass in `frontend/css/style.css` to avoid changing draft save, collapse, totals, or numbering behavior.
+
+### 2026-03-25 - Warehouse Stock order info button
+- Added an `Info` action to [warehouse_stock.php](/c:/xampp/htdocs/cargochina/warehouse_stock.php) rows so operators can inspect the full order without leaving the stock view.
+- Reused the existing `/orders/{id}` detail payload pattern already used elsewhere instead of creating a warehouse-only endpoint.
+- Included order header details, item lines, attachments, and receipt photos in the stock modal.
+
+- 2026-03-25: Strengthened Draft an Order visual grouping so each supplier section has a clearer soft-tint panel and each item card has a nested tinted surface with an accent edge for faster scanning in large drafts.

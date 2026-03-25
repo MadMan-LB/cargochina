@@ -32,6 +32,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: /cargochina/buyers/');
       } elseif (in_array('LebanonAdmin', $roles)) {
         header('Location: /cargochina/admin/');
+      } elseif (in_array('ContainersStaff', $roles)) {
+        header('Location: /cargochina/containers.php');
       } else {
         header('Location: /cargochina/warehouse/');
       }

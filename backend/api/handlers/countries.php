@@ -8,7 +8,7 @@
 require_once __DIR__ . '/../helpers.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
-    requireRole(['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'SuperAdmin']);
+    requireRole(['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'ContainersStaff', 'SuperAdmin']);
     $pdo = getDb();
 
     if ($method !== 'GET') {

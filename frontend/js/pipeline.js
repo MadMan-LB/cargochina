@@ -16,11 +16,11 @@ const PIPELINE_STAGE_CONFIG = [
         accent: "#2563eb",
     },
     {
-        key: "awaiting_confirmation",
-        title: "Customer Confirmation",
-        subtitle: "Orders blocked on customer approval after receiving",
-        statuses: ["AwaitingCustomerConfirmation"],
-        url: "/cargochina/orders.php?status=AwaitingCustomerConfirmation",
+        key: "customer_feedback",
+        title: "Customer Feedback",
+        subtitle: "Auto-confirmed receipts still waiting for customer review",
+        query: "/orders?customer_feedback=pending",
+        url: "/cargochina/orders.php?customer_feedback=pending",
         accent: "#dc2626",
     },
     {
@@ -45,6 +45,13 @@ async function fetchOrdersByStatuses(statuses) {
     const params = new URLSearchParams();
     statuses.forEach((status) => params.append("status[]", status));
     return api("GET", "/orders?" + params.toString());
+}
+
+async function fetchPipelineStage(stage) {
+    if (stage.query) {
+        return api("GET", stage.query);
+    }
+    return fetchOrdersByStatuses(stage.statuses || []);
 }
 
 function renderMetric(id, value) {
@@ -140,15 +147,16 @@ function renderSummaryTable(stats) {
         { label: "Submitted", count: stats.submitted ?? 0, url: "/cargochina/orders.php?status=Submitted" },
         { label: "Pending receiving", count: stats.pending_receiving ?? 0, url: "/cargochina/receiving.php" },
         {
-            label: "Awaiting confirmation",
-            count: stats.awaiting_confirmation ?? 0,
-            url: "/cargochina/orders.php?status=AwaitingCustomerConfirmation",
+            label: "Customer feedback pending",
+            count: stats.customer_feedback_pending ?? 0,
+            url: "/cargochina/orders.php?customer_feedback=pending",
         },
         {
-            label: "Ready for consolidation",
-            count: stats.ready_for_consolidation ?? 0,
-            url: "/cargochina/consolidation.php",
+            label: "Declined after auto-confirm",
+            count: stats.declined_after_auto_confirm ?? 0,
+            url: "/cargochina/orders.php?customer_feedback=declined_after_auto_confirm",
         },
+        { label: "Ready for consolidation", count: stats.ready_for_consolidation ?? 0, url: "/cargochina/consolidation.php" },
         {
             label: "In shipment draft",
             count: stats.in_shipment_draft ?? 0,
@@ -211,7 +219,7 @@ function renderShippingSummary(containers) {
 async function loadPipeline() {
     try {
         const stageRequests = PIPELINE_STAGE_CONFIG.map((stage) =>
-            fetchOrdersByStatuses(stage.statuses),
+            fetchPipelineStage(stage),
         );
         const [statsRes, ...stageResponses] = await Promise.all([
             api("GET", "/dashboard/stats"),
@@ -224,9 +232,9 @@ async function loadPipeline() {
 
         renderMetric("pipeDraft", stats.draft ?? 0);
         renderMetric("pipeToReceive", stats.pending_receiving ?? 0);
-        renderMetric("pipeAwaitConfirm", stats.awaiting_confirmation ?? 0);
+        renderMetric("pipeAwaitConfirm", stats.customer_feedback_pending ?? 0);
         renderMetric("pipeFinalized", stats.finalized ?? 0);
-        renderMetric("pipelineStaleConfirm", stats.stale_awaiting_confirmation ?? 0);
+        renderMetric("pipelineStaleConfirm", stats.stale_customer_feedback ?? 0);
         renderMetric("pipelineStaleOverdue", stats.stale_overdue ?? 0);
 
         renderTaskList(stats.my_tasks || []);
@@ -243,8 +251,8 @@ async function loadPipeline() {
                         ? stats.submitted ?? data.length
                         : stage.key === "receiving"
                           ? stats.pending_receiving ?? data.length
-                          : stage.key === "awaiting_confirmation"
-                            ? stats.awaiting_confirmation ?? data.length
+                          : stage.key === "customer_feedback"
+                            ? stats.customer_feedback_pending ?? data.length
                             : (stats.ready_for_consolidation ?? 0) +
                               (stats.in_shipment_draft ?? 0) +
                               (stats.assigned_to_container ?? 0),

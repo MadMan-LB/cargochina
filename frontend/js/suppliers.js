@@ -14,6 +14,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 let additionalIdIndex = 0;
 let supplierAttachments = [];
+let supplierPaymentLinkIndex = 0;
 
 function isBuyer() {
     const card = document.querySelector(".card[data-is-buyer]");
@@ -182,6 +183,50 @@ function collectAdditionalIds() {
     return Object.keys(obj).length ? obj : null;
 }
 
+function addSupplierPaymentLinkRow(label = "", value = "") {
+    const container = document.getElementById("supplierPaymentLinksContainer");
+    if (!container) return;
+    const idx = supplierPaymentLinkIndex++;
+    const row = document.createElement("div");
+    row.className = "row g-2 align-items-center";
+    row.dataset.idx = idx;
+    row.innerHTML = `
+      <div class="col-4"><input type="text" class="form-control form-control-sm supplier-payment-link-label" placeholder="WeChat / Bank / Alipay" value="${escapeHtml(label)}"></div>
+      <div class="col-7"><input type="text" class="form-control form-control-sm supplier-payment-link-value" placeholder="Account / number / URL / QR note" value="${escapeHtml(value)}"></div>
+      <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('.row').remove()">×</button></div>
+    `;
+    container.appendChild(row);
+}
+
+function collectSupplierPaymentLinks() {
+    const rows = [];
+    document
+        .querySelectorAll("#supplierPaymentLinksContainer .row")
+        .forEach((row) => {
+            const label = row
+                .querySelector(".supplier-payment-link-label")
+                ?.value?.trim();
+            const value = row
+                .querySelector(".supplier-payment-link-value")
+                ?.value?.trim();
+            if (!label && !value) return;
+            rows.push({ label: label || "Payment", value: value || "" });
+        });
+    return rows;
+}
+
+function formatSupplierPaymentLinks(links) {
+    const rows = Array.isArray(links) ? links : [];
+    if (!rows.length) return "No stored payment links yet.";
+    return rows
+        .map((row) => {
+            const label = row?.label || row?.type || "Payment";
+            const value = row?.value || row?.link || "—";
+            return `${label}: ${value}`;
+        })
+        .join(" | ");
+}
+
 function openSupplierForm() {
     document.getElementById("supplierForm").reset();
     document.getElementById("supplierId").value = "";
@@ -192,11 +237,14 @@ function openSupplierForm() {
     document.getElementById("supplierCommissionRate").value = "";
     document.getElementById("supplierCommissionType").value = "percentage";
     document.getElementById("supplierCommissionAppliedOn").value = "buy_value";
+    document.getElementById("supplierPaymentFacilityDays").value = "";
+    document.getElementById("supplierPaymentLinksContainer").innerHTML = "";
     const attachmentInput = document.getElementById("supplierAttachmentInput");
     if (attachmentInput) attachmentInput.value = "";
     supplierAttachments = [];
     renderSupplierAttachments();
     addAdditionalIdRow();
+    addSupplierPaymentLinkRow();
 }
 
 async function editSupplier(id) {
@@ -218,10 +266,13 @@ async function editSupplier(id) {
             d.commission_type || "percentage";
         document.getElementById("supplierCommissionAppliedOn").value =
             d.commission_applied_on || "buy_value";
+        document.getElementById("supplierPaymentFacilityDays").value =
+            d.payment_facility_days ?? "";
         document.getElementById("supplierNotes").value = d.notes || "";
         document.getElementById("supplierModalTitle").textContent =
             "Edit Supplier";
         document.getElementById("additionalIdsContainer").innerHTML = "";
+        document.getElementById("supplierPaymentLinksContainer").innerHTML = "";
         const addIds = d.additional_ids || {};
         if (Object.keys(addIds).length) {
             Object.entries(addIds).forEach(([k, v]) =>
@@ -229,6 +280,13 @@ async function editSupplier(id) {
             );
         } else {
             addAdditionalIdRow();
+        }
+        if ((d.payment_links || []).length) {
+            d.payment_links.forEach((row) =>
+                addSupplierPaymentLinkRow(row.label || "", row.value || ""),
+            );
+        } else {
+            addSupplierPaymentLinkRow();
         }
         await loadSupplierAttachments(id);
         new bootstrap.Modal(document.getElementById("supplierModal")).show();
@@ -262,6 +320,9 @@ async function saveSupplier() {
         commission_applied_on:
             document.getElementById("supplierCommissionAppliedOn").value ||
             "buy_value",
+        payment_facility_days:
+            document.getElementById("supplierPaymentFacilityDays").value || null,
+        payment_links: collectSupplierPaymentLinks(),
         notes: document.getElementById("supplierNotes").value.trim() || null,
         additional_ids: collectAdditionalIds(),
     };
@@ -417,10 +478,29 @@ function openPaymentModal(supplierId, name) {
     document.getElementById("paymentSupplierName").textContent = name;
     document.getElementById("payInvoiceAmount").value = "";
     document.getElementById("payAmount").value = "";
+    document.getElementById("payChannel").value = "";
     document.getElementById("payOrderId").value = "";
     document.getElementById("payNotes").value = "";
+    document.getElementById("paySettlementNote").value = "";
     document.getElementById("payMarkedFull").checked = false;
     document.getElementById("payDiscountInfo").classList.add("d-none");
+    document.getElementById("paySettlementNoteWrap").classList.add("d-none");
+    document.getElementById("paymentSupplierContext").textContent =
+        "Loading supplier payment options…";
+    api("GET", "/suppliers/" + supplierId)
+        .then((res) => {
+            const supplier = res.data || {};
+            const facility = supplier.payment_facility_days
+                ? `Facility ${supplier.payment_facility_days} day(s)`
+                : "No payment facility saved";
+            const links = formatSupplierPaymentLinks(supplier.payment_links);
+            document.getElementById("paymentSupplierContext").textContent =
+                `${facility} | ${links}`;
+        })
+        .catch(() => {
+            document.getElementById("paymentSupplierContext").textContent =
+                "Could not load supplier payment options.";
+        });
     new bootstrap.Modal(document.getElementById("paymentModal")).show();
 }
 
@@ -430,19 +510,29 @@ document
 document
     .getElementById("payAmount")
     ?.addEventListener("input", updateDiscountPreview);
+document
+    .getElementById("payMarkedFull")
+    ?.addEventListener("change", updateDiscountPreview);
 function updateDiscountPreview() {
     const inv = parseFloat(
         document.getElementById("payInvoiceAmount")?.value || 0,
     );
     const paid = parseFloat(document.getElementById("payAmount")?.value || 0);
     const info = document.getElementById("payDiscountInfo");
+    const markedFull =
+        document.getElementById("payMarkedFull")?.checked || false;
+    const noteWrap = document.getElementById("paySettlementNoteWrap");
     if (inv > 0 && paid > 0 && inv > paid) {
         const disc = inv - paid;
         const pct = ((disc / inv) * 100).toFixed(1);
-        info.textContent = `Discount: ${disc.toFixed(2)} (${pct}%)`;
+        info.textContent = markedFull
+            ? `Settlement delta: ${disc.toFixed(2)} (${pct}%) will close the balance as fully settled by agreement.`
+            : `Short-paid amount: ${disc.toFixed(2)} (${pct}%) will remain outstanding unless you mark it fully settled.`;
         info.classList.remove("d-none");
+        noteWrap?.classList.toggle("d-none", !markedFull);
     } else {
         info.classList.add("d-none");
+        noteWrap?.classList.add("d-none");
     }
 }
 
@@ -459,13 +549,20 @@ async function submitPayment() {
             parseFloat(document.getElementById("payInvoiceAmount").value) ||
             null,
         currency: document.getElementById("payCurrency").value,
+        payment_channel:
+            document.getElementById("payChannel").value || null,
         order_id: document.getElementById("payOrderId").value || null,
         marked_full_payment: document.getElementById("payMarkedFull").checked,
         payment_type: document.getElementById("payMarkedFull").checked
             ? "full"
             : "partial",
         notes: document.getElementById("payNotes").value || null,
+        settlement_note:
+            document.getElementById("paySettlementNote").value || null,
     };
+    if (payload.marked_full_payment && payload.invoice_amount && amount < payload.invoice_amount) {
+        payload.settlement_mode = "fully_settled_by_agreement";
+    }
     const btn = document.getElementById("paySubmitBtn");
     try {
         setLoading(btn, true);
@@ -503,11 +600,11 @@ async function showPayHistory(supplierId, name) {
                 <td>${p.created_at}</td>
                 <td>${p.invoice_amount ?? "-"}</td>
                 <td>${p.amount}</td>
-                <td>${p.discount_amount > 0 ? p.discount_amount : "-"}${p.marked_full_payment ? ' <span class="badge bg-success">Full</span>' : ""}</td>
+                <td>${(parseFloat(p.settlement_delta || p.discount_amount || 0) > 0 ? parseFloat(p.settlement_delta || p.discount_amount).toFixed(2) : "-")}${p.marked_full_payment ? ' <span class="badge bg-success">Full</span>' : ""}</td>
                 <td>${p.currency}</td>
-                <td>${p.payment_type}</td>
+                <td>${escapeHtml([p.payment_type, p.payment_channel].filter(Boolean).join(" / ") || "-")}</td>
                 <td>${p.order_id ? "#" + p.order_id : "-"}</td>
-                <td>${escapeHtml(p.notes || "-")}</td>
+                <td>${escapeHtml([p.notes, p.settlement_mode ? `Settlement: ${p.settlement_mode}` : "", p.settlement_note].filter(Boolean).join(" | ") || "-")}</td>
               </tr>`,
                   )
                   .join("")

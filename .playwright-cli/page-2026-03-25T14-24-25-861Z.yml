@@ -1,0 +1,288 @@
+- generic [active] [ref=e1]:
+  - complementary [ref=e2]:
+    - link "CLMS" [ref=e4] [cursor=pointer]:
+      - /url: /cargochina/index.php
+    - navigation [ref=e5]:
+      - generic [ref=e6]: Main
+      - link "Dashboard" [ref=e7] [cursor=pointer]:
+        - /url: /cargochina/index.php
+        - img [ref=e8]
+        - text: Dashboard
+      - link "Orders" [ref=e10] [cursor=pointer]:
+        - /url: /cargochina/orders.php
+        - img [ref=e11]
+        - text: Orders
+      - link "Receiving" [ref=e13] [cursor=pointer]:
+        - /url: /cargochina/receiving.php
+        - img [ref=e14]
+        - text: Receiving
+      - link "Pipeline" [ref=e16] [cursor=pointer]:
+        - /url: /cargochina/pipeline.php
+        - img [ref=e17]
+        - text: Pipeline
+      - link "Consolidation" [ref=e19] [cursor=pointer]:
+        - /url: /cargochina/consolidation.php
+        - img [ref=e20]
+        - text: Consolidation
+      - link "Containers" [ref=e22] [cursor=pointer]:
+        - /url: /cargochina/containers.php
+        - img [ref=e23]
+        - text: Containers
+      - link "Assign to Container" [ref=e25] [cursor=pointer]:
+        - /url: /cargochina/assign_container.php
+        - img [ref=e26]
+        - text: Assign to Container
+      - link "Expenses" [ref=e28] [cursor=pointer]:
+        - /url: /cargochina/expenses.php
+        - img [ref=e29]
+        - text: Expenses
+      - link "Financials" [ref=e31] [cursor=pointer]:
+        - /url: /cargochina/financials.php
+        - img [ref=e32]
+        - text: Financials
+      - link "HS Code Tax" [ref=e34] [cursor=pointer]:
+        - /url: /cargochina/hs_code_tax.php
+        - img [ref=e35]
+        - text: HS Code Tax
+      - link "Calendar" [ref=e37] [cursor=pointer]:
+        - /url: /cargochina/calendar.php
+        - img [ref=e38]
+        - text: Calendar
+      - link "Warehouse Stock" [ref=e40] [cursor=pointer]:
+        - /url: /cargochina/warehouse_stock.php
+        - img [ref=e41]
+        - text: Warehouse Stock
+      - link "Draft an Order" [ref=e43] [cursor=pointer]:
+        - /url: /cargochina/procurement_drafts.php
+        - img [ref=e44]
+        - text: Draft an Order
+      - generic [ref=e46]: Data
+      - link "Suppliers" [ref=e47] [cursor=pointer]:
+        - /url: /cargochina/suppliers.php
+        - img [ref=e48]
+        - text: Suppliers
+      - link "Customers" [ref=e50] [cursor=pointer]:
+        - /url: /cargochina/customers.php
+        - img [ref=e51]
+        - text: Customers
+      - link "Products" [ref=e53] [cursor=pointer]:
+        - /url: /cargochina/products.php
+        - img [ref=e54]
+        - text: Products
+      - generic [ref=e56]: Notifications
+      - link "Notifications 13" [ref=e155] [cursor=pointer]:
+        - /url: /cargochina/notifications.php
+        - img [ref=e58]
+        - text: Notifications
+        - generic [ref=e156]: "13"
+      - link "Preferences" [ref=e60] [cursor=pointer]:
+        - /url: /cargochina/notification_preferences.php
+        - img [ref=e61]
+        - text: Preferences
+      - generic [ref=e63]: Administration
+      - link "Business Settings" [ref=e64] [cursor=pointer]:
+        - /url: /cargochina/business_settings.php
+        - img [ref=e65]
+        - text: Business Settings
+      - link "Configuration" [ref=e67] [cursor=pointer]:
+        - /url: /cargochina/admin_config.php
+        - img [ref=e68]
+        - text: Configuration
+      - link "Users" [ref=e71] [cursor=pointer]:
+        - /url: /cargochina/admin_users.php
+        - img [ref=e72]
+        - text: Users
+      - link "Diagnostics" [ref=e74] [cursor=pointer]:
+        - /url: /cargochina/admin_diagnostics.php
+        - img [ref=e75]
+        - text: Diagnostics
+      - link "Tracking Push Log" [ref=e77] [cursor=pointer]:
+        - /url: /cargochina/admin_tracking_push.php
+        - img [ref=e78]
+        - text: Tracking Push Log
+      - link "Audit Log" [ref=e80] [cursor=pointer]:
+        - /url: /cargochina/admin_audit_log.php
+        - img [ref=e81]
+        - text: Audit Log
+    - generic [ref=e83]:
+      - generic [ref=e84]:
+        - img [ref=e85]
+        - generic [ref=e87]: Super Admin
+      - link "Logout" [ref=e88] [cursor=pointer]:
+        - /url: /cargochina/login.php?logout=1
+        - img [ref=e89]
+        - text: Logout
+  - generic [ref=e91]:
+    - banner [ref=e92]:
+      - button "Toggle sidebar" [expanded] [ref=e93] [cursor=pointer]:
+        - img [ref=e94]
+      - generic [ref=e96]: Warehouse Stock
+      - generic [ref=e97]:
+        - group "Description language" [ref=e98]:
+          - button "EN" [ref=e99] [cursor=pointer]
+          - button "中文" [ref=e100] [cursor=pointer]
+        - generic [ref=e101]: SuperAdmin
+    - generic [ref=e102]:
+      - heading "Warehouse Stock" [level=1] [ref=e103]
+      - paragraph [ref=e104]: Current stock at warehouse — auto-confirmed and ready-to-move orders that still remain operationally in stock.
+      - generic [ref=e105]:
+        - generic [ref=e106]: Stock by Order
+        - generic [ref=e107]:
+          - generic [ref=e108]:
+            - generic [ref=e109]:
+              - generic [ref=e110]: Customer
+              - textbox "Type to search customer..." [ref=e111]
+            - generic [ref=e112]:
+              - generic [ref=e113]: Supplier
+              - textbox "Type to search supplier..." [ref=e114]
+            - generic [ref=e115]:
+              - generic [ref=e116]:
+                - generic [ref=e117]: Statuses
+                - button "Clear" [ref=e118] [cursor=pointer]
+              - generic [ref=e119]:
+                - generic [ref=e120]:
+                  - checkbox "Received" [ref=e121]
+                  - generic [ref=e122] [cursor=pointer]: Received
+                - generic [ref=e123]:
+                  - checkbox "Legacy Awaiting Confirmation" [ref=e124]
+                  - generic [ref=e125] [cursor=pointer]: Legacy Awaiting Confirmation
+                - generic [ref=e126]:
+                  - checkbox "Confirmed" [ref=e127]
+                  - generic [ref=e128] [cursor=pointer]: Confirmed
+                - generic [ref=e129]:
+                  - checkbox "Ready for Consolidation" [ref=e130]
+                  - generic [ref=e131] [cursor=pointer]: Ready for Consolidation
+              - generic [ref=e132]:
+                - combobox [ref=e134]:
+                  - option "Include selected" [selected]
+                  - option "Exclude selected"
+                - generic [ref=e136]: All statuses
+            - generic [ref=e137]:
+              - generic [ref=e138]: Search
+              - textbox "Description..." [ref=e139]
+            - button "Apply" [ref=e141] [cursor=pointer]
+          - table [ref=e143]:
+            - rowgroup [ref=e144]:
+              - row "Order Customer Supplier Status Item Qty Declared CBM Actual CBM Actions" [ref=e145]:
+                - columnheader "Order" [ref=e146]
+                - columnheader "Customer" [ref=e147]
+                - columnheader "Supplier" [ref=e148]
+                - columnheader "Status" [ref=e149]
+                - columnheader "Item" [ref=e150]
+                - columnheader "Qty" [ref=e151]
+                - columnheader "Declared CBM" [ref=e152]
+                - columnheader "Actual CBM" [ref=e153]
+                - columnheader "Actions" [ref=e154]
+            - rowgroup [ref=e157]:
+              - row "#21 Mount Line Lifestyle Xiamen Outdoor Supply Ready for Consolidation Yoga Mat - Sports & Outdoors 456.0000 3.43 6.01 Info" [ref=e158]:
+                - cell "#21" [ref=e159]:
+                  - link "#21" [ref=e160] [cursor=pointer]:
+                    - /url: /cargochina/orders.php?id=21
+                - cell "Mount Line Lifestyle" [ref=e161]
+                - cell "Xiamen Outdoor Supply" [ref=e162]
+                - cell "Ready for Consolidation" [ref=e163]:
+                  - generic [ref=e164]: Ready for Consolidation
+                - cell "Yoga Mat - Sports & Outdoors" [ref=e165]
+                - cell "456.0000" [ref=e166]
+                - cell "3.43" [ref=e167]
+                - cell "6.01" [ref=e168]
+                - cell "Info" [ref=e169]:
+                  - button "Info" [ref=e170] [cursor=pointer]
+              - row "#21 Mount Line Lifestyle Xiamen Outdoor Supply Ready for Consolidation Camp Lantern - Sports & Outdoors 540.0000 2.57 6.01 Info" [ref=e171]:
+                - cell "#21" [ref=e172]:
+                  - link "#21" [ref=e173] [cursor=pointer]:
+                    - /url: /cargochina/orders.php?id=21
+                - cell "Mount Line Lifestyle" [ref=e174]
+                - cell "Xiamen Outdoor Supply" [ref=e175]
+                - cell "Ready for Consolidation" [ref=e176]:
+                  - generic [ref=e177]: Ready for Consolidation
+                - cell "Camp Lantern - Sports & Outdoors" [ref=e178]
+                - cell "540.0000" [ref=e179]
+                - cell "2.57" [ref=e180]
+                - cell "6.01" [ref=e181]
+                - cell "Info" [ref=e182]:
+                  - button "Info" [ref=e183] [cursor=pointer]
+              - row "#24 Family Mart Lebanon Qingdao Pet Utility Legacy Awaiting Confirmation Carrier Pad - Pet & Utility 168.0000 2.26 3.80 Info" [ref=e184]:
+                - cell "#24" [ref=e185]:
+                  - link "#24" [ref=e186] [cursor=pointer]:
+                    - /url: /cargochina/orders.php?id=24
+                - cell "Family Mart Lebanon" [ref=e187]
+                - cell "Qingdao Pet Utility" [ref=e188]
+                - cell "Legacy Awaiting Confirmation" [ref=e189]:
+                  - generic [ref=e190]: Legacy Awaiting Confirmation
+                - cell "Carrier Pad - Pet & Utility" [ref=e191]
+                - cell "168.0000" [ref=e192]
+                - cell "2.26" [ref=e193]
+                - cell "3.80" [ref=e194]
+                - cell "Info" [ref=e195]:
+                  - button "Info" [ref=e196] [cursor=pointer]
+              - row "#24 Family Mart Lebanon Qingdao Pet Utility Legacy Awaiting Confirmation Litter Scoop - Pet & Utility 144.0000 1.70 3.80 Info" [ref=e197]:
+                - cell "#24" [ref=e198]:
+                  - link "#24" [ref=e199] [cursor=pointer]:
+                    - /url: /cargochina/orders.php?id=24
+                - cell "Family Mart Lebanon" [ref=e200]
+                - cell "Qingdao Pet Utility" [ref=e201]
+                - cell "Legacy Awaiting Confirmation" [ref=e202]:
+                  - generic [ref=e203]: Legacy Awaiting Confirmation
+                - cell "Litter Scoop - Pet & Utility" [ref=e204]
+                - cell "144.0000" [ref=e205]
+                - cell "1.70" [ref=e206]
+                - cell "3.80" [ref=e207]
+                - cell "Info" [ref=e208]:
+                  - button "Info" [ref=e209] [cursor=pointer]
+              - row "#26 Active Sport House Wenzhou Stationery House Received Notebook Box - Office & Stationery 252.0000 2.45 4.45 Info" [ref=e210]:
+                - cell "#26" [ref=e211]:
+                  - link "#26" [ref=e212] [cursor=pointer]:
+                    - /url: /cargochina/orders.php?id=26
+                - cell "Active Sport House" [ref=e213]
+                - cell "Wenzhou Stationery House" [ref=e214]
+                - cell "Received" [ref=e215]:
+                  - generic [ref=e216]: Received
+                - cell "Notebook Box - Office & Stationery" [ref=e217]
+                - cell "252.0000" [ref=e218]
+                - cell "2.45" [ref=e219]
+                - cell "4.45" [ref=e220]
+                - cell "Info" [ref=e221]:
+                  - button "Info" [ref=e222] [cursor=pointer]
+              - row "#26 Active Sport House Wenzhou Stationery House Received Desk File - Office & Stationery 176.0000 2.00 4.45 Info" [ref=e223]:
+                - cell "#26" [ref=e224]:
+                  - link "#26" [ref=e225] [cursor=pointer]:
+                    - /url: /cargochina/orders.php?id=26
+                - cell "Active Sport House" [ref=e226]
+                - cell "Wenzhou Stationery House" [ref=e227]
+                - cell "Received" [ref=e228]:
+                  - generic [ref=e229]: Received
+                - cell "Desk File - Office & Stationery" [ref=e230]
+                - cell "176.0000" [ref=e231]
+                - cell "2.00" [ref=e232]
+                - cell "4.45" [ref=e233]
+                - cell "Info" [ref=e234]:
+                  - button "Info" [ref=e235] [cursor=pointer]
+              - row "#27 Gift Corner Group Wenzhou Stationery House Legacy Awaiting Confirmation Marker Set - Office & Stationery 208.0000 2.75 5.27 Info" [ref=e236]:
+                - cell "#27" [ref=e237]:
+                  - link "#27" [ref=e238] [cursor=pointer]:
+                    - /url: /cargochina/orders.php?id=27
+                - cell "Gift Corner Group" [ref=e239]
+                - cell "Wenzhou Stationery House" [ref=e240]
+                - cell "Legacy Awaiting Confirmation" [ref=e241]:
+                  - generic [ref=e242]: Legacy Awaiting Confirmation
+                - cell "Marker Set - Office & Stationery" [ref=e243]
+                - cell "208.0000" [ref=e244]
+                - cell "2.75" [ref=e245]
+                - cell "5.27" [ref=e246]
+                - cell "Info" [ref=e247]:
+                  - button "Info" [ref=e248] [cursor=pointer]
+              - row "#27 Gift Corner Group Wenzhou Stationery House Legacy Awaiting Confirmation Letter Tray - Office & Stationery 210.0000 2.13 5.27 Info" [ref=e249]:
+                - cell "#27" [ref=e250]:
+                  - link "#27" [ref=e251] [cursor=pointer]:
+                    - /url: /cargochina/orders.php?id=27
+                - cell "Gift Corner Group" [ref=e252]
+                - cell "Wenzhou Stationery House" [ref=e253]
+                - cell "Legacy Awaiting Confirmation" [ref=e254]:
+                  - generic [ref=e255]: Legacy Awaiting Confirmation
+                - cell "Letter Tray - Office & Stationery" [ref=e256]
+                - cell "210.0000" [ref=e257]
+                - cell "2.13" [ref=e258]
+                - cell "5.27" [ref=e259]
+                - cell "Info" [ref=e260]:
+                  - button "Info" [ref=e261] [cursor=pointer]

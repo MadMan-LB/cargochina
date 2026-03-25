@@ -1,7 +1,7 @@
 <?php
 require_once 'includes/auth_check.php';
 require_once 'includes/page_guard.php';
-requireRoleForPage(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin']);
+requireRoleForPage(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin', 'ContainersStaff']);
 $canManageContainers = in_array('SuperAdmin', $_SESSION['user_roles'] ?? [], true);
 $currentPage = 'consolidation';
 $pageTitle = 'Consolidation';

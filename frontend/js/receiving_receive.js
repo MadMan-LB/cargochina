@@ -222,7 +222,7 @@ function updateVarianceAlert() {
     if (hasVariance) {
         vr.style.display = "block";
         vrb.innerHTML =
-            '<span class="badge bg-warning">Confirmation required</span> CBM/weight variance or damage detected. Customer confirmation needed.';
+            '<span class="badge bg-warning">Customer follow-up</span> CBM/weight variance or damage detected. The order will still enter stock and a customer review link will be sent.';
     } else {
         vr.style.display = "block";
         vrb.innerHTML =
@@ -387,7 +387,7 @@ document.getElementById("submitReceiveBtn").onclick = async () => {
         );
         showToast(
             res.data.variance_detected
-                ? "Received — confirmation required"
+                ? "Received — auto-confirmed, customer follow-up sent"
                 : "Received successfully",
         );
         window.location.href =

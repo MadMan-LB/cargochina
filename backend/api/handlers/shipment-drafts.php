@@ -7,9 +7,10 @@
 require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__, 2) . '/services/TrackingPushService.php';
 require_once dirname(__DIR__, 2) . '/services/NotificationService.php';
+require_once dirname(__DIR__, 2) . '/services/OrderCountryService.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
-    requireRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin']);
+    requireRole(['ChinaAdmin', 'LebanonAdmin', 'ContainersStaff', 'SuperAdmin']);
     $pdo = getDb();
     $userId = getAuthUserId() ?? 1;
 
@@ -132,12 +133,29 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if ($action === 'add-orders') {
                 $orderIds = $input['order_ids'] ?? [];
                 $eligible = ['ReadyForConsolidation', 'Confirmed'];
+                $draftStmt = $pdo->prepare("SELECT * FROM shipment_drafts WHERE id = ?");
+                $draftStmt->execute([$id]);
+                $draft = $draftStmt->fetch(PDO::FETCH_ASSOC);
+                if (!$draft) jsonError('Shipment draft not found', 404);
+                $container = null;
+                if (!empty($draft['container_id'])) {
+                    $containerStmt = $pdo->prepare("SELECT * FROM containers WHERE id = ?");
+                    $containerStmt->execute([(int) $draft['container_id']]);
+                    $container = $containerStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+                }
                 foreach ($orderIds as $oid) {
-                    $st = $pdo->prepare("SELECT status FROM orders WHERE id = ?");
+                    $st = $pdo->prepare("SELECT id, status, destination_country_id, confirmation_token FROM orders WHERE id = ?");
                     $st->execute([$oid]);
-                    $s = $st->fetchColumn();
-                    if (!in_array($s, $eligible)) {
+                    $order = $st->fetch(PDO::FETCH_ASSOC);
+                    $s = $order['status'] ?? null;
+                    if (!in_array($s, $eligible, true)) {
                         jsonError("Order $oid is not eligible (must be ReadyForConsolidation or Confirmed)", 400);
+                    }
+                    if (trim((string) ($order['confirmation_token'] ?? '')) !== '') {
+                        jsonError("Order $oid is still waiting for customer feedback and cannot be added to a shipment draft yet.", 400);
+                    }
+                    if ($container && !OrderCountryService::orderMatchesContainer($pdo, $order, $container)) {
+                        jsonError("Order $oid destination country does not match the assigned container destination.", 400);
                     }
                 }
                 $ins = $pdo->prepare("INSERT IGNORE INTO shipment_draft_orders (shipment_draft_id, order_id) VALUES (?,?)");
@@ -169,6 +187,24 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $so = $pdo->prepare("SELECT order_id FROM shipment_draft_orders WHERE shipment_draft_id = ?");
                 $so->execute([$id]);
                 $orderIds = array_column($so->fetchAll(PDO::FETCH_ASSOC), 'order_id');
+                $containerStmt = $pdo->prepare("SELECT * FROM containers WHERE id = ?");
+                $containerStmt->execute([$containerId]);
+                $container = $containerStmt->fetch(PDO::FETCH_ASSOC);
+                if (!$container) jsonError('Container not found', 404);
+                foreach ($orderIds as $oid) {
+                    $orderStmt = $pdo->prepare("SELECT id, status, destination_country_id, confirmation_token FROM orders WHERE id = ?");
+                    $orderStmt->execute([$oid]);
+                    $order = $orderStmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$order) {
+                        jsonError("Order $oid not found", 404);
+                    }
+                    if (trim((string) ($order['confirmation_token'] ?? '')) !== '') {
+                        jsonError("Order $oid is still waiting for customer feedback and cannot be assigned to a container yet.", 400);
+                    }
+                    if (!OrderCountryService::orderMatchesContainer($pdo, $order, $container)) {
+                        jsonError("Order $oid destination country does not match container destination.", 400);
+                    }
+                }
                 $totalCbm = 0.0;
                 $totalWeight = 0.0;
                 if (!empty($orderIds)) {
@@ -179,10 +215,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $totalCbm = (float) $row[0];
                     $totalWeight = (float) $row[1];
                 }
-                $c = $pdo->prepare("SELECT max_cbm, max_weight FROM containers WHERE id = ?");
-                $c->execute([$containerId]);
-                $cont = $c->fetch(PDO::FETCH_ASSOC);
-                if (!$cont) jsonError('Container not found', 404);
+                $cont = $container;
                 if ($totalCbm > $cont['max_cbm'] || $totalWeight > $cont['max_weight']) {
                     jsonError('Capacity exceeded: total CBM/weight exceeds container limits', 400);
                 }

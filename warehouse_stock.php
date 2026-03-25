@@ -1,13 +1,13 @@
 <?php
 require_once 'includes/auth_check.php';
 require_once 'includes/page_guard.php';
-requireRoleForPage(['WarehouseStaff', 'ChinaAdmin', 'LebanonAdmin', 'SuperAdmin']);
+requireRoleForPage(['WarehouseStaff', 'ChinaAdmin', 'LebanonAdmin', 'SuperAdmin', 'ContainersStaff']);
 $currentPage = 'warehouse_stock';
 $pageTitle = 'Warehouse Stock';
 require 'includes/layout.php';
 ?>
 <h1 class="mb-4">Warehouse Stock</h1>
-<p class="text-muted mb-4">Current stock at warehouse — orders received and awaiting consolidation.</p>
+<p class="text-muted mb-4">Current stock at warehouse — auto-confirmed and ready-to-move orders that still remain operationally in stock.</p>
 
 <div class="card">
   <div class="card-header">Stock by Order</div>
@@ -31,7 +31,7 @@ require 'includes/layout.php';
         <div class="filter-chip-grid" id="filterStatusList">
           <?php foreach ([
             'ReceivedAtWarehouse' => 'Received',
-            'AwaitingCustomerConfirmation' => 'Awaiting Confirmation',
+            'AwaitingCustomerConfirmation' => 'Legacy Awaiting Confirmation',
             'Confirmed' => 'Confirmed',
             'ReadyForConsolidation' => 'Ready for Consolidation',
           ] as $statusValue => $statusLabel): ?>
@@ -68,10 +68,25 @@ require 'includes/layout.php';
             <th>Qty</th>
             <th>Declared CBM</th>
             <th>Actual CBM</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody id="stockTableBody"></tbody>
       </table>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="stockOrderInfoModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="stockOrderInfoTitle">Order Details</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="stockOrderInfoBody">
+        <div class="text-center py-4 text-muted">Loading order details…</div>
+      </div>
     </div>
   </div>
 </div>

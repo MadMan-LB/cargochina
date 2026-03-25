@@ -85,19 +85,32 @@ require 'includes/layout.php';
                   <label class="form-label">Customer *</label>
                   <input type="text" class="form-control" id="draftOrderCustomer" placeholder="Type to search customer..." autocomplete="off">
                 </div>
-                <div class="col-12 col-md-3 col-lg-2">
+                <div class="col-12 col-md-4 col-lg-3">
+                  <label class="form-label">Country / Destination</label>
+                  <input type="hidden" id="draftOrderDestinationCountryId">
+                  <div id="draftOrderDestinationCountryInputWrap">
+                    <input type="text" class="form-control" id="draftOrderDestinationCountry" placeholder="Search country..." autocomplete="off">
+                  </div>
+                  <div id="draftOrderDestinationCountrySelectWrap" class="d-none">
+                    <select class="form-select" id="draftOrderDestinationCountrySelect">
+                      <option value="">Select country...</option>
+                    </select>
+                  </div>
+                  <div class="form-text" id="draftOrderDestinationCountryHint">Uses the customer's country by default. If the customer has multiple countries, choose one here.</div>
+                </div>
+                <div class="col-12 col-md-4 col-lg-2">
                   <label class="form-label">Expected Ready</label>
                   <input type="date" class="form-control" id="draftOrderExpectedDate">
                   <div class="form-text">Optional. You will be asked to confirm before saving without it.</div>
                 </div>
-                <div class="col-12 col-md-3 col-lg-2">
+                <div class="col-12 col-md-4 col-lg-3">
                   <label class="form-label">Currency *</label>
                   <select class="form-select" id="draftOrderCurrency">
                     <option value="USD">USD</option>
                     <option value="RMB">RMB</option>
                   </select>
                 </div>
-                <div class="col-12 col-lg-4">
+                <div class="col-12">
                   <label class="form-label">High Alert Notes</label>
                   <textarea class="form-control" id="draftOrderHighAlertNotes" rows="2" placeholder="Special handling, urgent notes, fragile warnings..."></textarea>
                 </div>
@@ -171,6 +184,65 @@ require 'includes/layout.php';
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
         <button type="button" class="btn btn-primary" id="legacyMigrationSubmitBtn" onclick="submitLegacyMigration()">Migrate</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="draftSupplierQuickAddModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h5 class="modal-title mb-1">Quick Add Supplier</h5>
+          <small class="text-muted">Create a supplier without leaving the draft. The saved supplier becomes selectable immediately in this supplier section.</small>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <form id="draftSupplierQuickForm">
+          <input type="hidden" id="draftQuickSupplierTargetSection">
+          <div class="row g-3">
+            <div class="col-12 col-md-4">
+              <label class="form-label">Code *</label>
+              <input type="text" class="form-control" id="draftQuickSupplierCode" required>
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">Store ID</label>
+              <input type="text" class="form-control" id="draftQuickSupplierStoreId">
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">Name *</label>
+              <input type="text" class="form-control" id="draftQuickSupplierName" required>
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">Phone</label>
+              <input type="text" class="form-control" id="draftQuickSupplierPhone">
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">Commission</label>
+              <input type="number" min="0" step="0.0001" class="form-control" id="draftQuickSupplierCommission" placeholder="e.g. 5">
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">Payment Facility (days)</label>
+              <input type="number" min="0" step="1" class="form-control" id="draftQuickSupplierFacility" placeholder="30">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Payment Links</label>
+              <div id="draftQuickSupplierPaymentLinks" class="d-flex flex-column gap-2"></div>
+              <button type="button" class="btn btn-outline-secondary btn-sm mt-2" onclick="addDraftQuickSupplierPaymentLink()">+ Add Payment Link</button>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Supplier Card / Photo</label>
+              <input type="file" class="form-control" id="draftQuickSupplierFiles" accept="image/*,.pdf" multiple>
+              <small class="text-muted d-block mt-1">Optional. Files upload right after the supplier record is created.</small>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="draftQuickSupplierSaveBtn" onclick="saveDraftQuickSupplier()">Save Supplier</button>
       </div>
     </div>
   </div>

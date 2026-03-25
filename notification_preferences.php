@@ -1,4 +1,7 @@
 <?php
+require_once 'includes/auth_check.php';
+require_once 'includes/page_guard.php';
+requireRoleForPage(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin']);
 $currentPage = 'notification_preferences';
 $pageTitle = 'Notification Preferences';
 require 'includes/layout.php';

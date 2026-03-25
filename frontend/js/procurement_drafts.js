@@ -1,11 +1,15 @@
 (function () {
     const API = window.API_BASE || "/cargochina/api/v1";
     let draftOrderCustomerAc = null;
+    let draftOrderDestinationCountryAc = null;
     let legacyMigrationCustomerAc = null;
     let builderModal = null;
     let migrationModal = null;
+    let quickSupplierModal = null;
     let sectionIndex = 0;
     let itemIndex = 0;
+    let quickSupplierPaymentLinkIndex = 0;
+    let draftOrderCustomerCountryShipping = [];
 
     async function api(method, path, body) {
         const opts = { method, credentials: "same-origin" };
@@ -33,7 +37,36 @@
         return (parseFloat(value || 0) || 0).toFixed(4);
     }
 
+    function getDraftDestinationCountryId() {
+        return (
+            document.getElementById("draftOrderDestinationCountryId")?.value || ""
+        ).trim();
+    }
+
+    function getDraftDestinationCountryMapping(countryId) {
+        const id = String(countryId || "");
+        if (!id) return null;
+        return (
+            draftOrderCustomerCountryShipping.find(
+                (row) => String(row.country_id || "") === id,
+            ) || null
+        );
+    }
+
     function getCustomerShipCode() {
+        const selectedCountryId = getDraftDestinationCountryId();
+        if (
+            draftOrderCustomerCountryShipping.length > 1 &&
+            !selectedCountryId
+        ) {
+            return "";
+        }
+        const selectedCountry = getDraftDestinationCountryMapping(
+            selectedCountryId,
+        );
+        if (selectedCountry?.shipping_code) {
+            return String(selectedCountry.shipping_code).trim().toUpperCase();
+        }
         return (
             draftOrderCustomerAc?.getSelected()?.default_shipping_code || ""
         )
@@ -41,12 +74,170 @@
             .toUpperCase();
     }
 
+    function setDraftDestinationInputReadOnly(readOnly) {
+        const input = document.getElementById("draftOrderDestinationCountry");
+        if (!input) return;
+        input.readOnly = !!readOnly;
+        input.classList.toggle("bg-light", !!readOnly);
+    }
+
+    function resetDraftDestinationCountry() {
+        draftOrderCustomerCountryShipping = [];
+        const idInput = document.getElementById("draftOrderDestinationCountryId");
+        const select = document.getElementById("draftOrderDestinationCountrySelect");
+        const input = document.getElementById("draftOrderDestinationCountry");
+        if (idInput) idInput.value = "";
+        if (select) {
+            select.innerHTML = '<option value="">Select country...</option>';
+            select.value = "";
+        }
+        if (input) input.value = "";
+        draftOrderDestinationCountryAc?.setValue(null);
+        showDraftDestinationSelect(false);
+        setDraftDestinationInputReadOnly(false);
+    }
+
+    function setDraftDestinationCountry(countryId, countryName, countryCode) {
+        const idValue = countryId ? String(countryId) : "";
+        const idInput = document.getElementById("draftOrderDestinationCountryId");
+        const input = document.getElementById("draftOrderDestinationCountry");
+        const select = document.getElementById("draftOrderDestinationCountrySelect");
+        if (idInput) idInput.value = idValue;
+        const display = countryName
+            ? `${countryName}${countryCode ? ` (${countryCode})` : ""}`
+            : "";
+        if (input) input.value = display;
+        if (draftOrderDestinationCountryAc && countryId && countryName) {
+            draftOrderDestinationCountryAc.setValue({
+                id: countryId,
+                name: countryName,
+                code: countryCode || "",
+            });
+        }
+        if (select && idValue) {
+            select.value = idValue;
+        }
+    }
+
+    function renderDraftDestinationSelect() {
+        const select = document.getElementById("draftOrderDestinationCountrySelect");
+        if (!select) return;
+        select.innerHTML =
+            '<option value="">Select country...</option>' +
+            draftOrderCustomerCountryShipping
+                .map(
+                    (country) =>
+                        `<option value="${country.country_id}">${escapeHtml(
+                            country.country_name || "",
+                        )}${country.country_code ? ` (${escapeHtml(country.country_code)})` : ""}</option>`,
+                )
+                .join("");
+    }
+
+    function showDraftDestinationSelect(show) {
+        const inputWrap = document.getElementById(
+            "draftOrderDestinationCountryInputWrap",
+        );
+        const selectWrap = document.getElementById(
+            "draftOrderDestinationCountrySelectWrap",
+        );
+        if (inputWrap) inputWrap.classList.toggle("d-none", !!show);
+        if (selectWrap) selectWrap.classList.toggle("d-none", !show);
+    }
+
+    async function loadDraftCustomerCountryContext(
+        customerId,
+        fallbackDefaultShip = "",
+        preferredCountry = null,
+    ) {
+        resetDraftDestinationCountry();
+        if (!customerId) {
+            setShippingHint(fallbackDefaultShip || "");
+            renumberDraftItems();
+            return;
+        }
+
+        try {
+            const res = await api("GET", `/customers/${customerId}`);
+            const customer = res.data || {};
+            draftOrderCustomerCountryShipping = customer.country_shipping || [];
+            const defaultShip =
+                customer.default_shipping_code || fallbackDefaultShip || "";
+            const preferredCountryId = preferredCountry?.id
+                ? String(preferredCountry.id)
+                : "";
+
+            if (draftOrderCustomerCountryShipping.length === 1) {
+                const country = draftOrderCustomerCountryShipping[0];
+                setDraftDestinationCountry(
+                    country.country_id,
+                    country.country_name,
+                    country.country_code,
+                );
+                showDraftDestinationSelect(false);
+                setDraftDestinationInputReadOnly(true);
+                setShippingHint(country.shipping_code || defaultShip);
+                renumberDraftItems();
+                return;
+            }
+
+            if (draftOrderCustomerCountryShipping.length > 1) {
+                renderDraftDestinationSelect();
+                showDraftDestinationSelect(true);
+                setDraftDestinationInputReadOnly(false);
+                const selected =
+                    getDraftDestinationCountryMapping(preferredCountryId) ||
+                    null;
+                if (selected) {
+                    setDraftDestinationCountry(
+                        selected.country_id,
+                        selected.country_name,
+                        selected.country_code,
+                    );
+                    setShippingHint(selected.shipping_code || defaultShip || "");
+                } else {
+                    const idInput = document.getElementById(
+                        "draftOrderDestinationCountryId",
+                    );
+                    if (idInput) idInput.value = "";
+                    setShippingHint("");
+                }
+                renumberDraftItems();
+                return;
+            }
+
+            showDraftDestinationSelect(false);
+            setDraftDestinationInputReadOnly(false);
+            if (preferredCountry?.id || preferredCountry?.name) {
+                setDraftDestinationCountry(
+                    preferredCountry?.id || "",
+                    preferredCountry?.name || "",
+                    preferredCountry?.code || "",
+                );
+            }
+            setShippingHint(defaultShip || "");
+            renumberDraftItems();
+        } catch (_) {
+            showDraftDestinationSelect(false);
+            setDraftDestinationInputReadOnly(false);
+            if (preferredCountry?.id || preferredCountry?.name) {
+                setDraftDestinationCountry(
+                    preferredCountry?.id || "",
+                    preferredCountry?.name || "",
+                    preferredCountry?.code || "",
+                );
+            }
+            setShippingHint(fallbackDefaultShip || "");
+            renumberDraftItems();
+        }
+    }
+
     function setShippingHint(prefix) {
         const hint = document.getElementById("draftOrderShippingHint");
         if (!hint) return;
         if (prefix) {
             hint.textContent =
-                `Default shipping code ${prefix} is active. New lines auto-number as ${prefix}-1, ${prefix}-2, ... until you manually override a line.`;
+                `Default shipping code ${prefix} is active. Item numbers now follow ${prefix}-supplierSequence-itemSequence and stay aligned with supplier groups.`;
             hint.className = "alert alert-info border mt-3 mb-0";
             return;
         }
@@ -70,21 +261,65 @@
     function renumberDraftItems() {
         const prefix = getCustomerShipCode();
         setShippingHint(prefix);
-        let seq = 1;
-        getAllDraftItemCards().forEach((card) => {
-            const shipInput = card.querySelector(".draft-item-shipping-code");
-            const itemNoInput = card.querySelector(".draft-item-item-no");
-            if (!shipInput || !itemNoInput) return;
-
-            if (!card.dataset.manualShippingCode) {
-                shipInput.value = prefix || "";
+        const supplierSequenceByKey = new Map();
+        const supplierItemCounts = new Map();
+        let nextSupplierSequence = 1;
+        document.querySelectorAll(".draft-order-section").forEach((section) => {
+            const supplierId =
+                section.querySelector(".draft-section-supplier-id")?.value?.trim() ||
+                "";
+            const supplierKey = supplierId || `section-${section.dataset.sectionId || nextSupplierSequence}`;
+            if (!supplierSequenceByKey.has(supplierKey)) {
+                supplierSequenceByKey.set(supplierKey, nextSupplierSequence++);
             }
-            if (!card.dataset.manualItemNo) {
-                const base = (shipInput.value || prefix || "").trim();
-                itemNoInput.value = base ? `${base}-${seq}` : "";
-            }
-            seq += 1;
+            const supplierSequence = supplierSequenceByKey.get(supplierKey);
+            let localCount = supplierItemCounts.get(supplierKey) || 0;
+            section.querySelectorAll(".draft-order-item-card").forEach((card) => {
+                const shipInput = card.querySelector(".draft-item-shipping-code");
+                const itemNoInput = card.querySelector(".draft-item-item-no");
+                if (!shipInput || !itemNoInput) return;
+                if (!card.dataset.manualShippingCode) {
+                    shipInput.value = prefix || "";
+                }
+                localCount += 1;
+                supplierItemCounts.set(supplierKey, localCount);
+                if (!card.dataset.manualItemNo) {
+                    const base = (shipInput.value || prefix || "").trim();
+                    itemNoInput.value = base
+                        ? `${base}-${supplierSequence}-${localCount}`
+                        : "";
+                }
+            });
         });
+    }
+
+    function buildDraftSupplierSectionLabel(section, collapsed = false) {
+        const supplierName =
+            section._supplierAc?.getSelected?.()?.name ||
+            section.querySelector(".draft-section-supplier")?.value?.trim() ||
+            "New supplier section";
+        const amount =
+            section.querySelector(".draft-section-amount")?.textContent || "0.00";
+        const currency =
+            section.querySelector(".draft-section-currency")?.textContent || "USD";
+        return collapsed
+            ? `${supplierName} • ${amount} ${currency}`
+            : supplierName;
+    }
+
+    function syncDraftSectionCollapse(section) {
+        const collapsed = section.dataset.collapsed === "1";
+        const body = section.querySelector(".card-body");
+        const button = section.querySelector('[data-builder-action="collapse-section"]');
+        const label = section.querySelector(".draft-section-title");
+        if (body) body.classList.toggle("d-none", collapsed);
+        if (button) {
+            button.textContent = collapsed ? "Expand" : "Collapse";
+        }
+        if (label) {
+            label.textContent = buildDraftSupplierSectionLabel(section, collapsed);
+        }
+        section.classList.toggle("draft-order-section-collapsed", collapsed);
     }
 
     async function loadDraftOrders() {
@@ -179,6 +414,7 @@
         sectionIndex = 0;
         itemIndex = 0;
         setBuilderEditable(true);
+        resetDraftDestinationCountry();
         setShippingHint("");
     }
 
@@ -221,6 +457,15 @@
             name: order.customer_name,
             default_shipping_code: order.default_shipping_code || "",
         });
+        await loadDraftCustomerCountryContext(
+            order.customer_id,
+            order.default_shipping_code || "",
+            {
+                id: order.destination_country_id || "",
+                name: order.destination_country_name || "",
+                code: order.destination_country_code || "",
+            },
+        );
         document.getElementById("draftOrderExpectedDate").value =
             order.expected_ready_date || "";
         document.getElementById("draftOrderCurrency").value =
@@ -257,12 +502,14 @@
             <div class="card draft-order-section" data-section-id="${sectionId}">
               <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <div class="d-flex align-items-center gap-2 flex-wrap">
-                  <span class="fw-semibold">Supplier Section</span>
+                  <span class="fw-semibold draft-section-title">Supplier Section</span>
                   <input type="text" class="form-control form-control-sm draft-section-supplier" placeholder="Type to search supplier..." style="width:min(320px, 100%)" autocomplete="off">
                   <input type="hidden" class="draft-section-supplier-id">
+                  <button type="button" class="btn btn-outline-primary btn-sm draft-item-action" data-builder-action="quick-add-supplier" title="Quick add supplier">+</button>
                 </div>
                 <div class="d-flex gap-2 align-items-center flex-wrap">
                   <small class="text-muted"><span class="draft-section-amount">0.00</span> <span class="draft-section-currency">USD</span> · <span class="draft-section-cbm">0.000000</span> CBM · <span class="draft-section-weight">0.0000</span> kg</small>
+                  <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="collapse-section">Collapse</button>
                   <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="move-up">↑</button>
                   <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="move-down">↓</button>
                   <button type="button" class="btn btn-outline-danger btn-sm draft-item-action" data-builder-action="remove-section">Remove Section</button>
@@ -293,11 +540,15 @@
             onSelect: (item) => {
                 supplierIdInput.value = item.id || "";
                 refreshSectionProductFilters(section);
+                syncDraftSectionCollapse(section);
+                renumberDraftItems();
             },
         });
         supplierInput.addEventListener("input", () => {
             supplierIdInput.value = "";
             refreshSectionProductFilters(section);
+            syncDraftSectionCollapse(section);
+            renumberDraftItems();
         });
         section._supplierAc = ac;
         if (initial.supplier_id && initial.supplier_name) {
@@ -308,6 +559,16 @@
             supplierIdInput.value = initial.supplier_id;
         }
 
+        section
+            .querySelector('[data-builder-action="quick-add-supplier"]')
+            ?.addEventListener("click", () => openDraftQuickSupplier(section));
+        section
+            .querySelector('[data-builder-action="collapse-section"]')
+            ?.addEventListener("click", () => {
+                section.dataset.collapsed =
+                    section.dataset.collapsed === "1" ? "0" : "1";
+                syncDraftSectionCollapse(section);
+            });
         section
             .querySelector('[data-builder-action="add-item"]')
             ?.addEventListener("click", () => addDraftOrderItem(section));
@@ -332,6 +593,7 @@
             addDraftOrderItem(section);
         }
         updateDraftOrderTotals();
+        syncDraftSectionCollapse(section);
     }
 
     function moveDraftSection(section, direction) {
@@ -654,6 +916,7 @@
                 fmtCbm(sectionCbm);
             section.querySelector(".draft-section-weight").textContent =
                 fmtWeight(sectionWeight);
+            syncDraftSectionCollapse(section);
             totalAmount += sectionAmount;
             totalCbm += sectionCbm;
             totalWeight += sectionWeight;
@@ -969,6 +1232,133 @@
         renumberDraftItems();
     }
 
+    function addDraftQuickSupplierPaymentLink(label = "", value = "") {
+        const container = document.getElementById("draftQuickSupplierPaymentLinks");
+        if (!container) return;
+        const row = document.createElement("div");
+        row.className = "row g-2 align-items-center";
+        row.dataset.idx = String(++quickSupplierPaymentLinkIndex);
+        row.innerHTML = `
+            <div class="col-4"><input type="text" class="form-control form-control-sm draft-quick-supplier-payment-label" placeholder="WeChat / Bank / Alipay" value="${escapeHtml(label)}"></div>
+            <div class="col-7"><input type="text" class="form-control form-control-sm draft-quick-supplier-payment-value" placeholder="Account / number / URL" value="${escapeHtml(value)}"></div>
+            <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('.row').remove()">×</button></div>
+        `;
+        container.appendChild(row);
+    }
+
+    function collectDraftQuickSupplierPaymentLinks() {
+        return Array.from(
+            document.querySelectorAll(
+                "#draftQuickSupplierPaymentLinks .row",
+            ),
+        )
+            .map((row) => {
+                const label = row
+                    .querySelector(".draft-quick-supplier-payment-label")
+                    ?.value?.trim();
+                const value = row
+                    .querySelector(".draft-quick-supplier-payment-value")
+                    ?.value?.trim();
+                if (!label && !value) return null;
+                return { label: label || "Payment", value: value || "" };
+            })
+            .filter(Boolean);
+    }
+
+    function resetDraftQuickSupplierForm() {
+        document.getElementById("draftSupplierQuickForm")?.reset();
+        document.getElementById("draftQuickSupplierPaymentLinks").innerHTML = "";
+        addDraftQuickSupplierPaymentLink();
+    }
+
+    function openDraftQuickSupplier(section) {
+        quickSupplierModal =
+            quickSupplierModal ||
+            bootstrap.Modal.getOrCreateInstance(
+                document.getElementById("draftSupplierQuickAddModal"),
+            );
+        resetDraftQuickSupplierForm();
+        document.getElementById("draftQuickSupplierTargetSection").value =
+            section.dataset.sectionId || "";
+        const selected = section._supplierAc?.getSelected?.();
+        if (selected?.name) {
+            document.getElementById("draftQuickSupplierName").value =
+                selected.name;
+        }
+        quickSupplierModal.show();
+    }
+
+    async function saveDraftQuickSupplier() {
+        const targetSectionId =
+            document.getElementById("draftQuickSupplierTargetSection").value;
+        const targetSection = document.querySelector(
+            `.draft-order-section[data-section-id="${CSS.escape(targetSectionId)}"]`,
+        );
+        if (!targetSection) {
+            showToast("Supplier section was not found anymore.", "danger");
+            return;
+        }
+        const payload = {
+            code: document.getElementById("draftQuickSupplierCode").value.trim(),
+            store_id:
+                document.getElementById("draftQuickSupplierStoreId").value.trim() ||
+                null,
+            name: document.getElementById("draftQuickSupplierName").value.trim(),
+            phone:
+                document.getElementById("draftQuickSupplierPhone").value.trim() ||
+                null,
+            commission_rate: document.getElementById("draftQuickSupplierCommission")
+                .value
+                ? parseFloat(
+                      document.getElementById("draftQuickSupplierCommission").value,
+                  )
+                : null,
+            payment_facility_days:
+                document.getElementById("draftQuickSupplierFacility").value || 30,
+            payment_links: collectDraftQuickSupplierPaymentLinks(),
+        };
+        if (!payload.code || !payload.name) {
+            showToast("Supplier code and name are required.", "danger");
+            return;
+        }
+        const btn = document.getElementById("draftQuickSupplierSaveBtn");
+        try {
+            btn.disabled = true;
+            const res = await api("POST", "/suppliers", payload);
+            const supplier = res.data || {};
+            const files = Array.from(
+                document.getElementById("draftQuickSupplierFiles")?.files || [],
+            );
+            for (const file of files) {
+                const path = await uploadFile(file);
+                if (!path) continue;
+                await api("POST", "/design-attachments", {
+                    entity_type: "supplier",
+                    entity_id: parseInt(supplier.id, 10),
+                    file_path: path,
+                    file_type:
+                        (file.name || "").split(".").pop()?.toLowerCase() || null,
+                    internal_note: file.name || "Supplier attachment",
+                });
+            }
+            targetSection._supplierAc?.setValue({
+                id: supplier.id,
+                name: supplier.name,
+            });
+            targetSection.querySelector(".draft-section-supplier-id").value =
+                supplier.id || "";
+            refreshSectionProductFilters(targetSection);
+            renumberDraftItems();
+            syncDraftSectionCollapse(targetSection);
+            showToast("Supplier added and selected in this section.");
+            quickSupplierModal.hide();
+        } catch (error) {
+            showToast(error.message || "Failed to save supplier.", "danger");
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
     function collectDescriptionEntries(card) {
         const input = card.querySelector(".draft-item-description-input");
         const value = input?.value?.trim() || "";
@@ -1068,6 +1458,7 @@
 
         return {
             customer_id: customerId,
+            destination_country_id: getDraftDestinationCountryId() || null,
             expected_ready_date: expectedReadyDate || null,
             currency:
                 document.getElementById("draftOrderCurrency")?.value || "USD",
@@ -1084,6 +1475,16 @@
         const payload = collectDraftOrderPayload();
         if (!payload.customer_id) {
             showToast("Customer is required.", "danger");
+            return;
+        }
+        if (
+            draftOrderCustomerCountryShipping.length > 1 &&
+            !payload.destination_country_id
+        ) {
+            showToast(
+                "Choose one of the selected customer's countries before saving.",
+                "danger",
+            );
             return;
         }
         if (!payload.supplier_sections.length) {
@@ -1197,12 +1598,76 @@
             {
                 resource: "customers",
                 placeholder: "Type to search customer...",
-                onSelect: (item) => {
-                    setShippingHint(item.default_shipping_code || "");
+                onSelect: async (item) => {
+                    await loadDraftCustomerCountryContext(
+                        item.id,
+                        item.default_shipping_code || "",
+                    );
+                },
+            },
+        );
+        draftOrderDestinationCountryAc = Autocomplete.init(
+            document.getElementById("draftOrderDestinationCountry"),
+            {
+                resource: "countries",
+                searchPath: "/search",
+                minChars: 0,
+                placeholder: "Search country...",
+                displayValue: (country) =>
+                    `${country.name || ""}${country.code ? ` (${country.code})` : ""}`,
+                renderItem: (country) =>
+                    `${country.name || ""}${country.code ? ` (${country.code})` : ""}`,
+                onSelect: (country) => {
+                    const idInput = document.getElementById(
+                        "draftOrderDestinationCountryId",
+                    );
+                    if (idInput) idInput.value = country.id || "";
+                    const mapping = getDraftDestinationCountryMapping(country.id);
+                    setShippingHint(
+                        mapping?.shipping_code || getCustomerShipCode(),
+                    );
                     renumberDraftItems();
                 },
             },
         );
+        document
+            .getElementById("draftOrderDestinationCountry")
+            ?.addEventListener("input", () => {
+                if (
+                    draftOrderCustomerCountryShipping.length > 1 ||
+                    document
+                        .getElementById("draftOrderDestinationCountry")
+                        ?.readOnly
+                ) {
+                    return;
+                }
+                const idInput = document.getElementById(
+                    "draftOrderDestinationCountryId",
+                );
+                if (idInput) idInput.value = "";
+            });
+        document
+            .getElementById("draftOrderDestinationCountrySelect")
+            ?.addEventListener("change", function () {
+                const selected = getDraftDestinationCountryMapping(this.value);
+                const idInput = document.getElementById(
+                    "draftOrderDestinationCountryId",
+                );
+                if (idInput) {
+                    idInput.value = this.value || "";
+                }
+                if (selected) {
+                    setDraftDestinationCountry(
+                        selected.country_id,
+                        selected.country_name,
+                        selected.country_code,
+                    );
+                }
+                setShippingHint(
+                    selected?.shipping_code || getCustomerShipCode(),
+                );
+                renumberDraftItems();
+            });
         legacyMigrationCustomerAc = Autocomplete.init(
             document.getElementById("legacyMigrationCustomer"),
             {
@@ -1244,6 +1709,8 @@
     window.openDraftOrderBuilder = openDraftOrderBuilder;
     window.addDraftOrderSection = addDraftOrderSection;
     window.saveDraftOrder = saveDraftOrder;
+    window.addDraftQuickSupplierPaymentLink = addDraftQuickSupplierPaymentLink;
+    window.saveDraftQuickSupplier = saveDraftQuickSupplier;
     window.submitDraftOrder = submitDraftOrder;
     window.openLegacyMigration = openLegacyMigration;
     window.submitLegacyMigration = submitLegacyMigration;

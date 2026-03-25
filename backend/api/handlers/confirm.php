@@ -1,12 +1,13 @@
 <?php
 
 /**
- * Public customer confirmation handler (no auth required)
- * GET  /confirm?token=  — Return order summary for confirmation UI
- * POST /confirm         — Body: {token} — Confirm the order
+ * Public customer warehouse-receipt review handler (no auth required)
+ * GET  /confirm?token=  — Return order summary for customer follow-up UI
+ * POST /confirm         — Body: {token} — Accept or decline the auto-confirmed receipt
  */
 
 require_once __DIR__ . '/../helpers.php';
+require_once dirname(__DIR__, 2) . '/services/OrderReceiptWorkflowService.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
@@ -16,7 +17,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if (!$token) jsonError('Token required', 400);
 
         $stmt = $pdo->prepare(
-            "SELECT o.id, o.status, o.expected_ready_date, o.currency,
+            "SELECT o.id, o.status, o.expected_ready_date, o.currency, o.confirmation_token,
              c.name as customer_name, s.name as supplier_name,
              wr.actual_cbm, wr.actual_weight, wr.actual_cartons, wr.receipt_condition
              FROM orders o
@@ -29,9 +30,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         );
         $stmt->execute([$token]);
         $order = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$order) jsonError('Invalid or expired confirmation link', 404);
-        if ($order['status'] !== 'AwaitingCustomerConfirmation') {
-            jsonError('This order has already been confirmed or is no longer awaiting confirmation', 400);
+        if (!$order) jsonError('Invalid or expired review link', 404);
+        if (trim((string) ($order['confirmation_token'] ?? '')) === '') {
+            jsonError('This order no longer has a pending customer response', 400);
+        }
+        if (($order['status'] ?? '') === 'FinalizedAndPushedToTracking') {
+            jsonError('This order has already been finalized and can no longer be updated from the portal', 400);
         }
 
         $items = $pdo->prepare(
@@ -67,48 +71,20 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $stmt = $pdo->prepare("SELECT id, status, confirmation_token, customer_id FROM orders WHERE confirmation_token = ?");
         $stmt->execute([$token]);
         $order = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$order) jsonError('Invalid or expired confirmation link', 404);
-        if ($order['status'] !== 'AwaitingCustomerConfirmation') {
-            jsonError('This order has already been confirmed or is no longer awaiting confirmation', 400);
+        if (!$order) jsonError('Invalid or expired review link', 404);
+        if (($order['status'] ?? '') === 'FinalizedAndPushedToTracking') {
+            jsonError('This order has already been finalized and can no longer be updated from the portal', 400);
         }
         if (!hash_equals((string) $order['confirmation_token'], $token)) {
-            jsonError('Invalid confirmation token', 403);
+            jsonError('Invalid customer follow-up token', 403);
         }
 
         if ($decline) {
-            $pdo->prepare("UPDATE orders SET status='CustomerDeclined', confirmation_token=NULL WHERE id=?")->execute([$order['id']]);
-            $chk = $pdo->query("SHOW COLUMNS FROM customer_confirmations LIKE 'declined_at'");
-            if ($chk && $chk->rowCount() > 0) {
-                $pdo->prepare("INSERT INTO customer_confirmations (order_id, confirmed_by, confirmed_at, accepted_actuals, declined_at, decline_reason) VALUES (?,NULL,NULL,NULL,NOW(),?)")
-                    ->execute([$order['id'], $declineReason]);
-            } else {
-                $pdo->prepare("INSERT INTO customer_confirmations (order_id, confirmed_by, accepted_actuals) VALUES (?,NULL,?)")
-                    ->execute([$order['id'], json_encode(['declined' => true, 'reason' => $declineReason])]);
-            }
-            $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order',?,'decline_by_token',?,NULL)")
-                ->execute([$order['id'], json_encode(['token_used' => true, 'reason' => $declineReason])]);
-
-            require_once dirname(__DIR__, 2) . '/services/NotificationService.php';
-            NotificationService::notifyOrderDeclined((int) $order['id'], $declineReason);
-
-            jsonResponse(['data' => ['status' => 'CustomerDeclined', 'order_id' => (int) $order['id']]]);
+            OrderReceiptWorkflowService::declineAutoConfirmedOrder($pdo, (int) $order['id'], $declineReason, null, 'decline_by_token');
+            jsonResponse(['data' => ['status' => 'CustomerDeclinedAfterAutoConfirm', 'order_id' => (int) $order['id']]]);
         } else {
-            $wr = $pdo->prepare("SELECT * FROM warehouse_receipts WHERE order_id = ? ORDER BY received_at DESC LIMIT 1");
-            $wr->execute([$order['id']]);
-            $receipt = $wr->fetch(PDO::FETCH_ASSOC);
-            $accepted = $receipt ? [
-                'actual_cbm' => $receipt['actual_cbm'],
-                'actual_weight' => $receipt['actual_weight'],
-                'actual_cartons' => $receipt['actual_cartons']
-            ] : [];
-
-            $pdo->prepare("UPDATE orders SET status='Confirmed', confirmation_token=NULL WHERE id=?")->execute([$order['id']]);
-            $pdo->prepare("INSERT INTO customer_confirmations (order_id, confirmed_by, accepted_actuals) VALUES (?,NULL,?)")
-                ->execute([$order['id'], json_encode($accepted)]);
-            $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order',?,'confirm_by_token',?,NULL)")
-                ->execute([$order['id'], json_encode(['token_used' => true])]);
-
-            jsonResponse(['data' => ['status' => 'Confirmed', 'order_id' => (int) $order['id']]]);
+            OrderReceiptWorkflowService::acceptAutoConfirmedOrder($pdo, (int) $order['id'], null, 'confirm_by_token');
+            jsonResponse(['data' => ['status' => 'ReadyForConsolidation', 'order_id' => (int) $order['id']]]);
         }
     }
 
