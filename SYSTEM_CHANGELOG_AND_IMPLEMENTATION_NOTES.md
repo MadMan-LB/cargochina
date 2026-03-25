@@ -1056,3 +1056,10 @@ High-confidence completed items after this review pass:
 - Included order header details, item lines, attachments, and receipt photos in the stock modal.
 
 - 2026-03-25: Strengthened Draft an Order visual grouping so each supplier section has a clearer soft-tint panel and each item card has a nested tinted surface with an accent edge for faster scanning in large drafts.
+
+## Delta Patch Notes — 2026-03-25 Customer Visibility and Containers Staff
+- Restricted the root Customers page to ChinaAdmin and SuperAdmin with matching sidebar/dashboard visibility changes, so non-admin users no longer see Customers in navigation and direct /customers.php access returns Access Denied.
+- Hid Notification Preferences from non-admin roles at both the sidebar and direct-page level by adding a page guard to 
+otification_preferences.php and removing the sidebar link unless the user is an admin.
+- Added the ContainersStaff role through migration  54_containers_staff_role.sql, exposed it in User Management, and granted it access only to the container-operations pages and supporting APIs needed for Consolidation, Containers, Assign to Container, and Warehouse Stock.
+
