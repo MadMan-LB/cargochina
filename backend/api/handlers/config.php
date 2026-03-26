@@ -105,6 +105,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     elseif ($k === 'PHOTO_EVIDENCE_PER_ITEM') $fileConfig['photo_evidence_per_item'] = (int) $r['key_value'];
                     elseif ($k === 'NOTIFICATION_MAX_ATTEMPTS') $fileConfig['notification_max_attempts'] = (int) ($r['key_value'] ?? 3);
                     elseif ($k === 'NOTIFICATION_RETRY_SECONDS') $fileConfig['notification_retry_seconds'] = (int) ($r['key_value'] ?? 60);
+                    elseif ($k === 'APP_URL') {
+                        $appUrl = rtrim(trim($r['key_value'] ?? ''), '/');
+                        if ($appUrl !== '') {
+                            $fileConfig['app_url'] = $appUrl;
+                        }
+                    }
                     elseif ($k === 'UPLOAD_MAX_MB') $fileConfig['upload_max_mb'] = (float) ($r['key_value'] ?? 8);
                     elseif ($k === 'UPLOAD_ALLOWED_TYPES') $fileConfig['upload_allowed_types'] = array_map('trim', explode(',', $r['key_value'] ?? ''));
                 }
@@ -157,6 +163,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             if (isset($updates['WHATSAPP_API_URL']) && $updates['WHATSAPP_API_URL'] !== '' && !preg_match('#^https?://.+#', $updates['WHATSAPP_API_URL'])) {
                 $errors['WHATSAPP_API_URL'] = 'Must be valid HTTP(S) URL';
+            }
+            if (isset($updates['APP_URL']) && $updates['APP_URL'] !== '' && !preg_match('#^https?://.+#', $updates['APP_URL'])) {
+                $errors['APP_URL'] = 'Must be valid HTTP(S) URL';
             }
             if (isset($updates['WHATSAPP_PROVIDER']) && !in_array($updates['WHATSAPP_PROVIDER'], ['generic', 'twilio'], true)) {
                 $errors['WHATSAPP_PROVIDER'] = 'Must be generic or twilio';

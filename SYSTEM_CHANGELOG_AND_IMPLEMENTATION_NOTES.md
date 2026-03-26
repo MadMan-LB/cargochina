@@ -1063,3 +1063,9 @@ High-confidence completed items after this review pass:
 otification_preferences.php and removing the sidebar link unless the user is an admin.
 - Added the ContainersStaff role through migration  54_containers_staff_role.sql, exposed it in User Management, and granted it access only to the container-operations pages and supporting APIs needed for Consolidation, Containers, Assign to Container, and Warehouse Stock.
 
+
+## Delta Patch Notes — 2026-03-26 APP_URL Runtime Fix
+- Fixed the production URL propagation gap by loading APP_URL into ackend/config/config.php as pp_url, with a normalized fallback to the current request URL or http://localhost/cargochina only when no explicit value exists.
+- Updated ackend/api/handlers/config.php so Admin Config now reads back the stored APP_URL into the pp_url field and validates that saved values are proper HTTP(S) URLs.
+- Updated ackend/api/handlers/customer-portal-tokens.php to use the shared runtime config instead of raw $_ENV, so portal links and notification links stay aligned with the same saved production base URL.
+

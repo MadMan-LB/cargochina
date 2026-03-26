@@ -27,7 +27,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $portalTokenId = (int) $pdo->lastInsertId();
             $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('customer_portal_token', ?, 'create', ?, ?)")
                 ->execute([$portalTokenId, json_encode(['customer_id' => $customerId, 'expires_at' => $expires]), $userId]);
-            $base = $_ENV['APP_URL'] ?? null;
+            $config = require dirname(__DIR__, 2) . '/config/config.php';
+            $base = trim((string) ($config['app_url'] ?? ''));
             if (!$base) {
                 $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
                 $host = $_SERVER['HTTP_HOST'] ?? 'localhost';

@@ -4,6 +4,40 @@
  * CLMS Configuration - single source of truth for thresholds and policies
  */
 
+function clmsNormalizeAppUrl(?string $value): string
+{
+    $value = trim((string) $value);
+    if ($value === '') {
+        return '';
+    }
+    return rtrim($value, '/');
+}
+
+function clmsInferAppUrl(): string
+{
+    if (!empty($_SERVER['HTTP_HOST'])) {
+        $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        $host = $_SERVER['HTTP_HOST'];
+        $requestUri = $_SERVER['REQUEST_URI'] ?? '';
+        $basePath = (strpos($requestUri, '/cargochina') === 0) ? '/cargochina' : '';
+        return $proto . '://' . $host . $basePath;
+    }
+    return 'http://localhost/cargochina';
+}
+
+function clmsResolveAppUrl(?string $value, ?string $fallback = null): string
+{
+    $normalized = clmsNormalizeAppUrl($value);
+    if ($normalized !== '') {
+        return $normalized;
+    }
+    $normalizedFallback = clmsNormalizeAppUrl($fallback);
+    if ($normalizedFallback !== '') {
+        return $normalizedFallback;
+    }
+    return clmsInferAppUrl();
+}
+
 $rootDir = dirname(__DIR__, 2);
 if (file_exists($rootDir . '/.env')) {
     $lines = file($rootDir . '/.env', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
@@ -52,6 +86,7 @@ $base = [
     'photo_evidence_per_item' => (int) ($_ENV['PHOTO_EVIDENCE_PER_ITEM'] ?? 0),
     'notification_max_attempts' => (int) ($_ENV['NOTIFICATION_MAX_ATTEMPTS'] ?? 3),
     'notification_retry_seconds' => (int) ($_ENV['NOTIFICATION_RETRY_SECONDS'] ?? 60),
+    'app_url' => clmsResolveAppUrl($_ENV['APP_URL'] ?? null),
 ];
 try {
     require_once __DIR__ . '/database.php';
@@ -88,6 +123,7 @@ try {
                 elseif ($k === 'PHOTO_EVIDENCE_PER_ITEM') $base['photo_evidence_per_item'] = (int) $r['key_value'];
                 elseif ($k === 'NOTIFICATION_MAX_ATTEMPTS') $base['notification_max_attempts'] = (int) ($r['key_value'] ?? 3);
                 elseif ($k === 'NOTIFICATION_RETRY_SECONDS') $base['notification_retry_seconds'] = (int) ($r['key_value'] ?? 60);
+                elseif ($k === 'APP_URL') $base['app_url'] = clmsResolveAppUrl($r['key_value'] ?? null, $base['app_url'] ?? null);
                 elseif ($k === 'UPLOAD_MAX_MB') $base['upload_max_mb'] = (float) $r['key_value'];
                 elseif ($k === 'UPLOAD_ALLOWED_TYPES') $base['upload_allowed_types'] = array_map('trim', explode(',', $r['key_value'] ?? ''));
             }
