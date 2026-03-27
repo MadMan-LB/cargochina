@@ -33,7 +33,7 @@ require __DIR__ . '/../../includes/area_layout.php';
           <div class="col-auto"><label class="form-label small mb-0">Date to</label><input type="date" class="form-control form-control-sm" id="filterDateTo"></div>
           <div class="col-auto"><label class="form-label small mb-0">Ship code</label><input type="text" class="form-control form-control-sm" id="filterShippingCode" placeholder="Agent code" style="width:100px"></div>
           <div class="col-auto"><button type="button" class="btn btn-primary btn-sm" onclick="loadQueue()">Apply</button></div>
-          <div class="col-auto"><button type="button" class="btn btn-outline-secondary btn-sm" onclick="exportQueueCsv()" title="Export queue to CSV">Export CSV</button></div>
+          <div class="col-auto"><button type="button" class="btn btn-outline-success btn-sm" onclick="exportQueueXlsx()" title="Export queue to XLSX">Export XLSX</button></div>
         </div>
       </div>
     </div>

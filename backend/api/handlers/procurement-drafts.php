@@ -7,6 +7,41 @@
 
 require_once __DIR__ . '/../helpers.php';
 
+function procurementDraftOutputCsv(array $draft, array $items, string $filename): void
+{
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('Cache-Control: no-cache, no-store, must-revalidate');
+
+    $out = fopen('php://output', 'w');
+    fputcsv($out, ['Procurement Draft', '#' . (int) ($draft['id'] ?? 0)]);
+    fputcsv($out, ['Name', (string) ($draft['name'] ?? '')]);
+    fputcsv($out, ['Supplier', (string) ($draft['supplier_name'] ?? '')]);
+    fputcsv($out, ['Status', (string) ($draft['status'] ?? '')]);
+    fputcsv($out, ['']);
+    fputcsv($out, ['Line', 'Description', 'Notes', 'Quantity', 'Unit Price', 'Total Amount', 'CBM Total', 'Weight Total', 'Photo Count']);
+    foreach ($items as $index => $item) {
+        $qty = (float) ($item['quantity'] ?? 0);
+        $cbm = (float) ($item['cbm'] ?? 0);
+        $weight = (float) ($item['weight'] ?? 0);
+        $unitPrice = (float) ($item['unit_price'] ?? 0);
+        $imagePaths = !empty($item['image_paths']) ? (is_string($item['image_paths']) ? (json_decode($item['image_paths'], true) ?: []) : $item['image_paths']) : [];
+        fputcsv($out, [
+            'PD-' . (int) ($draft['id'] ?? 0) . '-L' . ($index + 1),
+            trim((string) ($item['description_en'] ?? $item['description_cn'] ?? $item['notes'] ?? '')),
+            trim((string) ($item['notes'] ?? '')),
+            $qty ?: '',
+            $unitPrice ?: '',
+            ($qty > 0 && $unitPrice > 0) ? round($qty * $unitPrice, 4) : '',
+            ($qty > 0 && $cbm > 0) ? round($cbm * $qty, 6) : '',
+            ($qty > 0 && $weight > 0) ? round($weight * $qty, 4) : '',
+            count($imagePaths),
+        ]);
+    }
+    fclose($out);
+    exit;
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
     if (!getAuthUserId()) jsonError('Unauthorized', 401);
@@ -102,6 +137,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $itemsStmt = $pdo->prepare("SELECT pdi.*, p.description_cn, p.description_en, p.cbm, p.weight, p.unit_price, $imgCol $dimCol p.pieces_per_carton FROM procurement_draft_items pdi LEFT JOIN products p ON pdi.product_id = p.id WHERE pdi.draft_id = ? ORDER BY pdi.sort_order, pdi.id");
         $itemsStmt->execute([$id]);
         $draftItems = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+        $format = strtolower(trim((string) ($_GET['format'] ?? 'xlsx')));
+        $safeName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $draft['name'] ?? 'draft');
+        if ($format === 'csv') {
+            procurementDraftOutputCsv($draft, $draftItems, 'procurement_draft_' . $draft['id'] . '_' . $safeName . '.csv');
+        }
         $orderLike = ['id' => $draft['id'], 'supplier_name' => $draft['supplier_name'] ?? ''];
         $excelItems = [];
         foreach ($draftItems as $i => $it) {
@@ -128,7 +168,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             ];
         }
         require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
-        $safeName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $draft['name'] ?? 'draft');
         $filename = 'procurement_draft_' . $draft['id'] . '_' . $safeName . '.xlsx';
         (new OrderExcelService())->exportOrder($orderLike, $excelItems, $filename);
         exit;

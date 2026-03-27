@@ -131,7 +131,7 @@ async function loadHistory() {
     }
 }
 
-async function exportQueueCsv() {
+function buildQueueExportParams() {
     const orderId =
         filterOrderAc?.getSelectedId?.() ||
         document.getElementById("filterOrderId")?.value?.trim() ||
@@ -151,68 +151,21 @@ async function exportQueueCsv() {
     if (dateTo) path += "&date_to=" + encodeURIComponent(dateTo);
     if (shippingCode)
         path += "&shipping_code=" + encodeURIComponent(shippingCode);
-    try {
-        const res = await api(path);
-        const rows = res.data || [];
-        const headers = [
-            "Order ID",
-            "Customer",
-            "Supplier",
-            "Expected Ready",
-            "Status",
-            "Shipping Codes",
-            "Total Cartons",
-            "Declared CBM",
-            "Declared Weight (kg)",
-            "Items Summary",
-        ];
-        const lines = [headers.join(",")];
-        rows.forEach((o) => {
-            const items = o.items || [];
-            const shippingCodes = [
-                ...new Set(items.map((i) => i.shipping_code).filter(Boolean)),
-            ].join("; ");
-            const totalCartons = items.reduce(
-                (s, i) => s + (parseInt(i.cartons) || 0),
-                0,
-            );
-            const itemsSummary = items
-                .map(
-                    (i) =>
-                        `${i.shipping_code || "-"} ${i.cartons || 0}ctn HS:${i.hs_code || "-"}`,
-                )
-                .join("; ");
-            lines.push(
-                [
-                    o.id,
-                    '"' + (o.customer_name || "").replace(/"/g, '""') + '"',
-                    '"' + (o.supplier_name || "").replace(/"/g, '""') + '"',
-                    o.expected_ready_date || "",
-                    o.status || "",
-                    '"' + (shippingCodes || "").replace(/"/g, '""') + '"',
-                    totalCartons,
-                    parseFloat(o.declared_cbm || 0).toFixed(4),
-                    parseFloat(o.declared_weight || 0).toFixed(2),
-                    '"' + (itemsSummary || "").replace(/"/g, '""') + '"',
-                ].join(","),
-            );
-        });
-        const csv = lines.join("\n");
-        const blob = new Blob(["\ufeff" + csv], {
-            type: "text/csv;charset=utf-8",
-        });
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download =
-            "receiving_queue_" + new Date().toISOString().slice(0, 10) + ".csv";
-        a.click();
-        URL.revokeObjectURL(a.href);
-        if (typeof showToast === "function")
-            showToast("Exported " + rows.length + " orders");
-    } catch (e) {
-        if (typeof showToast === "function") showToast(e.message, "danger");
-        else alert(e.message);
-    }
+    return path.replace("/receiving/queue?", "");
+}
+
+function exportQueue(format = "xlsx") {
+    const params = new URLSearchParams(buildQueueExportParams());
+    params.set("format", format);
+    window.location.href = API + "/receiving/export/queue?" + params.toString();
+}
+
+function exportQueueXlsx() {
+    exportQueue("xlsx");
+}
+
+function exportQueueCsv() {
+    exportQueue("csv");
 }
 
 let filterOrderAc;

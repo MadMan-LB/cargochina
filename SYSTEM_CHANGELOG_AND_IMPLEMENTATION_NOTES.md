@@ -1069,3 +1069,24 @@ otification_preferences.php and removing the sidebar link unless the user is an 
 - Updated ackend/api/handlers/config.php so Admin Config now reads back the stored APP_URL into the pp_url field and validates that saved values are proper HTTP(S) URLs.
 - Updated ackend/api/handlers/customer-portal-tokens.php to use the shared runtime config instead of raw $_ENV, so portal links and notification links stay aligned with the same saved production base URL.
 
+
+## Delta Patch Notes — 2026-03-26 Downloads Page
+- Added a new internal `downloads.php` page that centralizes only verified downloadable files and existing export entry points already present in CLMS.
+- Introduced a shared whitelist registry in `includes/downloads_registry.php` so the Downloads page and the download handler stay aligned and do not expose arbitrary filesystem browsing.
+- Added `download_template.php` as a controlled file-serving endpoint for approved static files only, with role checks, slug-based lookup, and path-traversal protection.
+- Added the Downloads link to sidebar navigation for internal roles that already use the related modules, while leaving legacy order/container/draft export links unchanged.
+
+## Delta Patch Notes — 2026-03-26 Export Formats and Excel Image Sizing
+- Expanded the main live export flows so they now offer both XLSX and CSV instead of splitting modules into XLSX-only vs CSV-only behavior.
+- Added XLSX support for filtered Orders list exports and Receiving queue exports through `OrderExcelService`, while keeping CSV available for operators who still need flat-file output.
+- Added CSV support for single-order exports, container exports, draft-order exports, and procurement-draft exports so all verified export flows now expose both formats where feasible.
+- Updated page-level buttons and row actions in Orders, Receiving, Warehouse Receiving, Containers, and Draft an Order to surface both `XLSX` and `CSV` download actions explicitly.
+- Standardized Excel image sizing in `OrderExcelService` so any embedded product photo now uses a 90px photo column and a 21px image/row height for the image cell.
+
+## Delta Patch Notes — 2026-03-27 Downloads Examples and Excel-First UI
+- Added direct generated example XLSX downloads to `downloads.php` through `download_template.php` and `backend/services/DownloadExampleService.php`.
+- Example workbooks now cover order, container, draft order, orders-list, and receiving-queue exports using 10 dummy item lines across 3 suppliers, with 8 sample rows pulling real product images from `backend/uploads` when available.
+- Hid CSV from the visible export UI on Orders, Receiving, Warehouse Receiving, Containers, Procurement Drafts, and the Downloads registry so operators now see Excel-first download actions only.
+- Kept existing backend CSV endpoints intact for compatibility, while removing the CSV reference file entry from the Downloads page in favor of verified XLSX downloads.
+
+- 2026-03-27: Export customer labels now keep the customer name and append the customer/default shipping code in parentheses across shared XLSX exports and direct CSV export handlers (for example: Example Retail Group (EXAMPLE)).

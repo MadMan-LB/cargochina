@@ -525,68 +525,20 @@ function clearReceivingFilters() {
     applyFilters();
 }
 
+function exportReceivingQueue(format = "xlsx") {
+    const params = new URLSearchParams(getFilterParams());
+    params.set("format", format);
+    window.location.href =
+        `${window.API_BASE || "/cargochina/api/v1"}/receiving/export/queue?` +
+        params.toString();
+}
+
+function exportReceivingXlsx() {
+    exportReceivingQueue("xlsx");
+}
+
 function exportReceivingCsv() {
-    try {
-        const rows = warehouseQueueData || [];
-        const headers = [
-            "Order ID",
-            "Customer",
-            "Supplier",
-            "Supplier Phone",
-            "Expected Ready",
-            "Status",
-            "Shipping Codes",
-            "Total Cartons",
-            "Declared CBM",
-            "Declared Weight (kg)",
-            "Items Summary",
-        ];
-        const lines = [headers.join(",")];
-        rows.forEach((o) => {
-            const items = o.items || [];
-            const shippingCodes = [
-                ...new Set(items.map((i) => i.shipping_code).filter(Boolean)),
-            ].join("; ");
-            const totalCartons = items.reduce(
-                (s, i) => s + (parseInt(i.cartons) || 0),
-                0,
-            );
-            const itemsSummary = items
-                .map(
-                    (i) =>
-                        `${i.shipping_code || "-"} ${i.cartons || 0}ctn HS:${i.hs_code || "-"}`,
-                )
-                .join("; ");
-            lines.push(
-                [
-                    o.id,
-                    '"' + (o.customer_name || "").replace(/"/g, '""') + '"',
-                    '"' + (o.supplier_name || "").replace(/"/g, '""') + '"',
-                    '"' + (o.supplier_phone || "").replace(/"/g, '""') + '"',
-                    o.expected_ready_date || "",
-                    o.status || "",
-                    '"' + (shippingCodes || "").replace(/"/g, '""') + '"',
-                    totalCartons,
-                    parseFloat(o.declared_cbm || 0).toFixed(6),
-                    parseFloat(o.declared_weight || 0).toFixed(2),
-                    '"' + (itemsSummary || "").replace(/"/g, '""') + '"',
-                ].join(","),
-            );
-        });
-        const csv = lines.join("\n");
-        const blob = new Blob(["\ufeff" + csv], {
-            type: "text/csv;charset=utf-8",
-        });
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download =
-            "receiving_queue_" + new Date().toISOString().slice(0, 10) + ".csv";
-        a.click();
-        URL.revokeObjectURL(a.href);
-        showToast("Exported " + rows.length + " orders");
-    } catch (e) {
-        showToast(e.message, "danger");
-    }
+    exportReceivingQueue("csv");
 }
 
 function renderWarehouseList() {

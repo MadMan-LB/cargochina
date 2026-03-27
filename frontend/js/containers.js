@@ -284,7 +284,7 @@ function applyClientFilters() {
               <button class="btn btn-sm btn-outline-secondary js-edit-container" data-id="${c.id}" data-code="${escHtml(c.code || "")}" title="Edit container info">Edit</button>
               <button class="btn btn-sm btn-success js-assign-btn" data-id="${c.id}" data-code="${escHtml(c.code || "")}" data-max-cbm="${c.max_cbm}" data-max-weight="${c.max_weight}" data-used-cbm="${parseFloat(c.used_cbm || 0).toFixed(4)}" data-used-weight="${parseFloat(c.used_weight || 0).toFixed(2)}" title="Assign orders to this container">+ Assign</button>
               <button class="btn btn-sm btn-outline-info js-view-container" data-id="${c.id}" data-code="${escHtml(c.code || "")}" title="View orders in this container">View</button>
-              <a class="btn btn-sm btn-outline-success" href="${CONTAINERS_API_BASE}/containers/${c.id}/export" download title="Download Excel">Excel</a>
+              <a class="btn btn-sm btn-outline-success" href="${CONTAINERS_API_BASE}/containers/${c.id}/export?format=xlsx" download title="Download XLSX">XLSX</a>
             </td>
           </tr>`;
         })
@@ -471,7 +471,7 @@ async function viewContainer(id, code) {
         bodyEl.innerHTML =
             '<div class="text-center py-5"><div class="spinner-border text-primary"></div></div>';
     if (dlBtn)
-        dlBtn.href = CONTAINERS_API_BASE + "/containers/" + id + "/export";
+        dlBtn.href = CONTAINERS_API_BASE + "/containers/" + id + "/export?format=xlsx";
     modal.show();
 
     try {

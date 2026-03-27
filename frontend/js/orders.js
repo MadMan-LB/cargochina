@@ -546,13 +546,9 @@ async function loadOrders() {
                             r.status === "Confirmed") &&
                         !hasCustomerFeedback &&
                         !isDeclinedAfterAutoConfirm;
-                    const exportHref = isDraftBuilder
-                        ? `${window.API_BASE || "/cargochina/api/v1"}/draft-orders/${r.id}/export`
-                        : `${window.API_BASE || "/cargochina/api/v1"}/orders/${r.id}/export`;
-                    const exportLabel = isDraftBuilder ? "Draft CSV" : "Export";
-                    const exportTitle = isDraftBuilder
-                        ? "Export grouped draft order CSV"
-                        : "Export as Excel";
+                    const exportHrefXlsx = isDraftBuilder
+                        ? `${window.API_BASE || "/cargochina/api/v1"}/draft-orders/${r.id}/export?format=xlsx`
+                        : `${window.API_BASE || "/cargochina/api/v1"}/orders/${r.id}/export?format=xlsx`;
                     return `
       <tr data-order-id="${r.id}" data-status="${escapeHtml(r.status)}" class="${isDeclinedAfterAutoConfirm ? "table-danger" : ""}">
         <td class="text-center">${canBulk ? `<input type="checkbox" class="form-check-input order-bulk-cb" data-order-id="${r.id}" data-status="${escapeHtml(r.status)}">` : ""}</td>
@@ -565,7 +561,7 @@ async function loadOrders() {
           <button class="btn btn-sm btn-outline-info" onclick="showOrderInfo(${r.id})" title="View order details">ℹ</button>
           <button class="btn btn-sm btn-outline-primary" onclick="editOrder(${r.id})">${isDraftBuilder ? "Open Builder" : "Edit"}</button>
           <button class="btn btn-sm btn-outline-secondary" onclick="copyOrder(${r.id})" title="Duplicate as new draft">Copy</button>
-          <a class="btn btn-sm btn-outline-success" href="${exportHref}" download title="${exportTitle}">${exportLabel}</a>
+          <a class="btn btn-sm btn-outline-success" href="${exportHrefXlsx}" download title="Download XLSX export">XLSX</a>
           ${r.status === "Draft" ? `<button class="btn btn-sm btn-success" onclick="submitOrder(${r.id})">Submit</button>` : ""}
           ${r.status === "Submitted" ? `<button class="btn btn-sm btn-success" onclick="approveOrder(${r.id})">Approve</button>` : ""}
           ${r.status === "AwaitingCustomerConfirmation" ? `<button class="btn btn-sm btn-warning" onclick="confirmOrder(${r.id})">Confirm</button>` : ""}
@@ -587,60 +583,20 @@ async function loadOrders() {
     }
 }
 
-async function exportOrdersCsv() {
-    try {
-        const qs = buildOrderListQuery();
-        let path = "/orders";
-        if (qs) path += "?" + qs;
-        const res = await api("GET", path);
-        const rows = res.data || [];
-        const headers = [
-            "ID",
-            "Order Type",
-            "Customer",
-            "Supplier",
-            "Expected Ready",
-            "Status",
-            "Total CBM",
-            "Total Weight",
-        ];
-        const lines = [headers.join(",")];
-        rows.forEach((r) => {
-            const suppDisplay = getOrderSupplierDisplay(r);
-            const cbm = (r.items || []).reduce(
-                (s, i) => s + (parseFloat(i.declared_cbm) || 0),
-                0,
-            );
-            const wt = (r.items || []).reduce(
-                (s, i) => s + (parseFloat(i.declared_weight) || 0),
-                0,
-            );
-            lines.push(
-                [
-                    r.id,
-                    r.order_type || "standard",
-                    '"' + (r.customer_name || "").replace(/"/g, '""') + '"',
-                    '"' + (suppDisplay || "").replace(/"/g, '""') + '"',
-                    r.expected_ready_date || "",
-                    r.status || "",
-                    cbm.toFixed(4),
-                    wt.toFixed(2),
-                ].join(","),
-            );
-        });
-        const csv = lines.join("\n");
-        const blob = new Blob(["\ufeff" + csv], {
-            type: "text/csv;charset=utf-8",
-        });
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = "orders_" + new Date().toISOString().slice(0, 10) + ".csv";
-        a.click();
-        URL.revokeObjectURL(a.href);
-        showToast("Exported " + rows.length + " orders");
-    } catch (e) {
-        showToast(e.message, "danger");
-    }
+function exportOrdersList(format = "xlsx") {
+    const params = new URLSearchParams(buildOrderListQuery());
+    params.set("format", format);
+    window.location.href =
+        `${window.API_BASE || "/cargochina/api/v1"}/orders/export/list?` +
+        params.toString();
+}
+
+function exportOrdersXlsx() {
+    exportOrdersList("xlsx");
+}
+
+function exportOrdersCsv() {
+    exportOrdersList("csv");
 }
 
 function openOrderForm() {
@@ -2380,12 +2336,10 @@ async function showOrderInfo(id) {
 
         document.getElementById("orderInfoTitle").textContent =
             `Order #${id} — ${escapeHtml(o.customer_name || "")}`;
-        const exportHref =
+        const exportHrefXlsx =
             o.order_type === "draft_procurement"
-                ? `${window.API_BASE || "/cargochina/api/v1"}/draft-orders/${id}/export`
-                : `${window.API_BASE || "/cargochina/api/v1"}/orders/${id}/export`;
-        const exportLabel =
-            o.order_type === "draft_procurement" ? "Export Draft CSV" : "Export Excel";
+                ? `${window.API_BASE || "/cargochina/api/v1"}/draft-orders/${id}/export?format=xlsx`
+                : `${window.API_BASE || "/cargochina/api/v1"}/orders/${id}/export?format=xlsx`;
 
         document.getElementById("orderInfoBody").innerHTML = `
           ${o.high_alert_notes ? `<div class="alert alert-warning py-2 mb-3"><strong>⚠️ High Alert:</strong> ${escapeHtml(o.high_alert_notes)}</div>` : ""}
@@ -2427,7 +2381,7 @@ async function showOrderInfo(id) {
           ${containerHtml}
           <div class="d-flex gap-2 mt-3">
             <button class="btn btn-sm btn-outline-primary" onclick="bootstrap.Modal.getOrCreateInstance(document.getElementById('orderInfoModal')).hide(); editOrder(${id})">${o.order_type === "draft_procurement" ? "Open Draft Builder" : "Edit Order"}</button>
-            <a class="btn btn-sm btn-outline-success" href="${exportHref}" download>${exportLabel}</a>
+            <a class="btn btn-sm btn-outline-success" href="${exportHrefXlsx}" download>Export XLSX</a>
           </div>`;
     } catch (e) {
         document.getElementById("orderInfoBody").innerHTML =

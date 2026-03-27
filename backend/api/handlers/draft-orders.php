@@ -11,6 +11,7 @@ require_once dirname(__DIR__, 2) . '/services/NotificationService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderCountryService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderItemNumberingService.php';
 require_once dirname(__DIR__, 2) . '/services/TranslationService.php';
+require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
 
 function draftOrderTableHasColumn(PDO $pdo, string $table, string $column): bool
 {
@@ -959,7 +960,13 @@ function draftOrderExportCsv(PDO $pdo, int $orderId): void
 
     $out = fopen('php://output', 'w');
     fputcsv($out, ['Draft Order', '#' . $order['id']]);
-    fputcsv($out, ['Customer', $order['customer_name']]);
+    $customerItems = [];
+    foreach (($order['supplier_sections'] ?? []) as $section) {
+        foreach (($section['items'] ?? []) as $item) {
+            $customerItems[] = $item;
+        }
+    }
+    fputcsv($out, ['Customer', OrderExcelService::formatCustomerDisplay($order, $customerItems)]);
     fputcsv($out, ['Destination Country', trim((string) (($order['destination_country_name'] ?? '') . (!empty($order['destination_country_code']) ? ' (' . $order['destination_country_code'] . ')' : ''))) ?: '—']);
     fputcsv($out, ['Expected Ready', $order['expected_ready_date']]);
     fputcsv($out, ['Currency', $order['currency']]);
@@ -1001,6 +1008,56 @@ function draftOrderExportCsv(PDO $pdo, int $orderId): void
     fputcsv($out, ['', '', 'Grand total', '', '', '', '', '', $order['totals']['amount'], '', $order['totals']['cbm'], '', $order['totals']['weight'], '']);
     fclose($out);
     exit;
+}
+
+function draftOrderExportXlsx(PDO $pdo, int $orderId): void
+{
+    $order = draftOrderFetchOrderPayload($pdo, $orderId);
+    $excelItems = [];
+
+    foreach ($order['supplier_sections'] as $section) {
+        foreach (($section['items'] ?? []) as $item) {
+            $englishParts = array_values(array_filter(array_map(
+                static fn($entry) => trim((string) ($entry['description_translated'] ?? '')),
+                $item['description_entries'] ?? []
+            )));
+            $cnParts = array_values(array_filter(array_map(
+                static fn($entry) => trim((string) ($entry['description_text'] ?? '')),
+                $item['description_entries'] ?? []
+            )));
+            $multiplier = ($item['dimensions_scope'] ?? 'carton') === 'carton'
+                ? (float) ($item['cartons'] ?? 0)
+                : (float) ($item['quantity'] ?? 0);
+            $cbmPerUnit = (float) ($item['cbm'] ?? 0);
+            $weightPerUnit = (float) ($item['weight'] ?? 0);
+            $totalQty = (float) ($item['quantity'] ?? 0);
+            $unitPrice = isset($item['unit_price']) && $item['unit_price'] !== null && $item['unit_price'] !== ''
+                ? (float) $item['unit_price']
+                : null;
+
+            $excelItems[] = [
+                'item_no' => $item['item_no'] ?? '',
+                'shipping_code' => $item['shipping_code'] ?? '',
+                'description_en' => $englishParts ? implode(' | ', $englishParts) : implode(' | ', $cnParts),
+                'description_cn' => $cnParts ? implode(' | ', $cnParts) : implode(' | ', $englishParts),
+                'quantity' => $totalQty,
+                'cartons' => (float) ($item['cartons'] ?? 0),
+                'qty_per_carton' => (float) ($item['pieces_per_carton'] ?? 0),
+                'declared_cbm' => $multiplier > 0 ? round($cbmPerUnit * $multiplier, 6) : 0.0,
+                'declared_weight' => $multiplier > 0 ? round($weightPerUnit * $multiplier, 4) : 0.0,
+                'unit_price' => $unitPrice,
+                'sell_price' => $unitPrice,
+                'supplier_name' => $section['supplier_name'] ?? '',
+                'image_paths' => $item['photo_paths'] ?? [],
+                'dimensions_scope' => $item['dimensions_scope'] ?? 'piece',
+                'product_dimensions_scope' => $item['dimensions_scope'] ?? 'piece',
+            ];
+        }
+    }
+
+    require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
+    $filename = 'draft_order_' . $orderId . '.xlsx';
+    (new OrderExcelService())->exportOrder($order, $excelItems, $filename);
 }
 
 function draftOrderDeleteExistingItems(PDO $pdo, int $orderId): void
@@ -1168,6 +1225,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     }
 
     if ($method === 'GET' && $id && ctype_digit((string) $id) && $action === 'export') {
+        $format = strtolower(trim((string) ($_GET['format'] ?? 'csv')));
+        if ($format === 'xlsx') {
+            draftOrderExportXlsx($pdo, (int) $id);
+        }
         draftOrderExportCsv($pdo, (int) $id);
     }
 

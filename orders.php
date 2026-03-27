@@ -38,7 +38,7 @@ require 'includes/layout.php';
     <div class="d-flex gap-2">
       <button class="btn btn-outline-primary btn-sm d-none" id="bulkSubmitBtn" onclick="bulkSubmitOrders()" title="Submit selected draft orders">Bulk Submit</button>
       <button class="btn btn-outline-success btn-sm d-none" id="bulkApproveBtn" onclick="bulkApproveOrders()" title="Approve selected submitted orders">Bulk Approve</button>
-      <button class="btn btn-outline-secondary btn-sm" onclick="exportOrdersCsv()" title="Export current list to CSV">Export CSV</button>
+      <button class="btn btn-outline-success btn-sm" onclick="exportOrdersXlsx()" title="Export current list to XLSX">Export XLSX</button>
       <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#orderModal" onclick="openOrderForm()">+ New Order</button>
     </div>
   </div>

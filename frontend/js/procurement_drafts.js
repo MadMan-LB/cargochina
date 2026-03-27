@@ -353,7 +353,7 @@
                       <td class="table-actions">
                         <button class="btn btn-sm btn-outline-primary" type="button" onclick="openDraftOrderBuilder(${row.id})">${row.editable ? "Open" : "View"}</button>
                         ${row.status === "Draft" ? `<button class="btn btn-sm btn-success" type="button" onclick="submitDraftOrder(${row.id})">Submit</button>` : ""}
-                        <a class="btn btn-sm btn-outline-secondary" href="${API}/draft-orders/${row.id}/export" download>CSV</a>
+                        <a class="btn btn-sm btn-outline-success" href="${API}/draft-orders/${row.id}/export?format=xlsx" download>XLSX</a>
                         <a class="btn btn-sm btn-outline-secondary" href="/cargochina/procurement_draft_print.php?order_id=${row.id}" target="_blank" rel="noopener">Print</a>
                         <a class="btn btn-sm btn-outline-info" href="/cargochina/orders.php?order_type=draft_procurement">Orders</a>
                       </td>

@@ -14,7 +14,7 @@ require 'includes/layout.php';
     </div>
     <div class="d-flex flex-wrap gap-2">
       <button type="button" class="btn btn-primary" onclick="document.getElementById('receiveOrderSearch')?.focus()">Quick Receive</button>
-      <button type="button" class="btn btn-outline-secondary" onclick="exportReceivingCsv()" title="Export queue to CSV">Export Queue</button>
+      <button type="button" class="btn btn-outline-success" onclick="exportReceivingXlsx()" title="Export queue to XLSX">Export XLSX</button>
     </div>
   </div>
 </div>
@@ -113,7 +113,7 @@ require 'includes/layout.php';
       </div>
       <div class="col-12 col-md-6 col-xl-2 d-grid gap-2">
         <button type="button" class="btn btn-primary btn-sm" id="applyFiltersBtn" onclick="applyFilters()">Apply</button>
-        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="exportReceivingCsv()" title="Export queue to CSV">Export CSV</button>
+        <button type="button" class="btn btn-outline-success btn-sm" onclick="exportReceivingXlsx()" title="Export queue to XLSX">Export XLSX</button>
       </div>
     </div>
     <div class="filter-summary-row">

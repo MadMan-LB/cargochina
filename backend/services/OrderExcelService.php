@@ -19,13 +19,17 @@ use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
+use PhpOffice\PhpSpreadsheet\Shared\Drawing as SharedDrawing;
 
 class OrderExcelService
 {
     private string $backendDir;
     private const LAST_COL   = 'N';
     private const HEADER_MERGE = 'B%d:N%d'; // sprintf pattern
+    private const PHOTO_COLUMN_WIDTH = 21;
+    private const PHOTO_ROW_HEIGHT_PT = 90;
 
     public function __construct()
     {
@@ -66,10 +70,11 @@ class OrderExcelService
         foreach ($ordersWithItems as $data) {
             $order = $data['order'];
             $items = $data['items'];
+            $customerDisplay = self::formatCustomerDisplay($order, $items);
 
             // Separator: ## | customer name | customer phone
             $sheet->setCellValue('A' . $row, '##');
-            $sheet->setCellValue('B' . $row, $order['customer_name'] ?? '');
+            $sheet->setCellValue('B' . $row, $customerDisplay);
             $sheet->setCellValue('C' . $row, $order['customer_phone'] ?? '');
             $sheet->getStyle('A' . $row . ':C' . $row)->applyFromArray([
                 'font'      => ['name' => 'Arial', 'size' => 11, 'bold' => true],
@@ -86,6 +91,107 @@ class OrderExcelService
         }
 
         $this->outputXlsx($spreadsheet, $filename);
+    }
+
+    public function exportOrdersListSummary(array $rows, string $filename = 'orders_list.xlsx'): void
+    {
+        $headers = [
+            'Order ID',
+            'Order Type',
+            'Customer',
+            'Supplier',
+            'Expected Ready',
+            'Status',
+            'Total CBM',
+            'Total Weight (kg)',
+        ];
+
+        $bodyRows = array_map(function (array $row): array {
+            $items = is_array($row['items'] ?? null) ? $row['items'] : [];
+            $cbm = 0.0;
+            $weight = 0.0;
+            $supplierNames = [];
+            foreach ($items as $item) {
+                $cbm += (float) ($item['declared_cbm'] ?? 0);
+                $weight += (float) ($item['declared_weight'] ?? 0);
+                $supplierName = trim((string) ($item['supplier_name'] ?? ''));
+                if ($supplierName !== '') {
+                    $supplierNames[$supplierName] = true;
+                }
+            }
+
+            $supplierDisplay = trim((string) ($row['supplier_name'] ?? ''));
+            if ($supplierNames) {
+                $names = array_keys($supplierNames);
+                $supplierDisplay = count($names) === 1 ? $names[0] : 'Multiple (' . implode(', ', $names) . ')';
+            }
+
+            return [
+                (int) ($row['id'] ?? 0),
+                (string) ($row['order_type'] ?? 'standard'),
+                self::formatCustomerDisplay($row, $items),
+                $supplierDisplay,
+                (string) ($row['expected_ready_date'] ?? ''),
+                (string) ($row['status'] ?? ''),
+                round($cbm, 4),
+                round($weight, 2),
+            ];
+        }, $rows);
+
+        $this->exportSimpleTable('Orders Export', $headers, $bodyRows, $filename);
+    }
+
+    public function exportReceivingQueueSummary(array $rows, string $filename = 'receiving_queue.xlsx'): void
+    {
+        $headers = [
+            'Order ID',
+            'Customer',
+            'Supplier',
+            'Supplier Phone',
+            'Expected Ready',
+            'Status',
+            'Shipping Codes',
+            'Total Cartons',
+            'Declared CBM',
+            'Declared Weight (kg)',
+            'Items Summary',
+        ];
+
+        $bodyRows = array_map(function (array $row): array {
+            $items = is_array($row['items'] ?? null) ? $row['items'] : [];
+            $shippingCodes = [];
+            $totalCartons = 0;
+            $itemsSummary = [];
+            foreach ($items as $item) {
+                $shippingCode = trim((string) ($item['shipping_code'] ?? ''));
+                if ($shippingCode !== '') {
+                    $shippingCodes[$shippingCode] = true;
+                }
+                $totalCartons += (int) ($item['cartons'] ?? 0);
+                $itemsSummary[] = trim(sprintf(
+                    '%s %sctn HS:%s',
+                    $shippingCode !== '' ? $shippingCode : '-',
+                    (string) ((int) ($item['cartons'] ?? 0)),
+                    trim((string) ($item['hs_code'] ?? '')) !== '' ? (string) $item['hs_code'] : '-'
+                ));
+            }
+
+            return [
+                (int) ($row['id'] ?? 0),
+                self::formatCustomerDisplay($row, $items),
+                (string) ($row['supplier_name'] ?? ''),
+                (string) ($row['supplier_phone'] ?? ''),
+                (string) ($row['expected_ready_date'] ?? ''),
+                (string) ($row['status'] ?? ''),
+                implode('; ', array_keys($shippingCodes)),
+                $totalCartons,
+                round((float) ($row['declared_cbm'] ?? 0), 6),
+                round((float) ($row['declared_weight'] ?? 0), 2),
+                implode('; ', array_filter($itemsSummary)),
+            ];
+        }, $rows);
+
+        $this->exportSimpleTable('Receiving Queue', $headers, $bodyRows, $filename);
     }
 
     // -------------------------------------------------------------------------
@@ -113,6 +219,7 @@ class OrderExcelService
         foreach ($widths as $col => $w) {
             $sheet->getColumnDimension($col)->setWidth($w);
         }
+        $sheet->getColumnDimension('B')->setWidth(self::PHOTO_COLUMN_WIDTH);
     }
 
     private function writeSupplierHeader($sheet, array $order, int $startRow): int
@@ -254,18 +361,25 @@ class OrderExcelService
 
             // Image in column B
             $hasImage = false;
+            $sheet->getRowDimension($row)->setRowHeight(self::PHOTO_ROW_HEIGHT_PT);
             if (!empty($imagePaths) && is_array($imagePaths)) {
                 $imgPath = $this->backendDir . '/' . ($imagePaths[0] ?? '');
                 if (file_exists($imgPath) && is_readable($imgPath)) {
                     try {
+                        $defaultFont = $sheet->getParent()->getDefaultStyle()->getFont();
+                        $imageWidthPx = SharedDrawing::cellDimensionToPixels(
+                            $sheet->getColumnDimension('B')->getWidth(),
+                            $defaultFont
+                        );
+                        $imageHeightPx = SharedDrawing::pointsToPixels(self::PHOTO_ROW_HEIGHT_PT);
+
                         $drawing = new Drawing();
                         $drawing->setPath($imgPath);
                         $drawing->setCoordinates('B' . $row);
-                        $drawing->setOffsetX(4);
-                        $drawing->setOffsetY(4);
-                        $drawing->setHeight(62);
+                        $drawing->setResizeProportional(false);
+                        $drawing->setWidth($imageWidthPx);
+                        $drawing->setHeight($imageHeightPx);
                         $drawing->setWorksheet($sheet);
-                        $sheet->getRowDimension($row)->setRowHeight(54);
                         $hasImage = true;
                     } catch (Throwable $e) {
                         // fall through to text fallback
@@ -294,6 +408,39 @@ class OrderExcelService
         return $row;
     }
 
+    public static function formatCustomerDisplay(array $record, array $items = []): string
+    {
+        $name = trim((string) ($record['customer_name'] ?? $record['name'] ?? ''));
+        $codes = [];
+
+        foreach ([
+            $record['default_shipping_code'] ?? null,
+            $record['customer_shipping_code'] ?? null,
+            $record['shipping_code'] ?? null,
+        ] as $candidate) {
+            $candidate = trim((string) ($candidate ?? ''));
+            if ($candidate !== '') {
+                $codes[$candidate] = true;
+            }
+        }
+
+        if (!$codes) {
+            foreach ($items as $item) {
+                $candidate = trim((string) ($item['shipping_code'] ?? ''));
+                if ($candidate !== '') {
+                    $codes[$candidate] = true;
+                }
+            }
+        }
+
+        if (!$codes) {
+            return $name;
+        }
+
+        $suffix = implode(', ', array_keys($codes));
+        return $name !== '' ? ($name . ' (' . $suffix . ')') : $suffix;
+    }
+
     private function outputXlsx(Spreadsheet $spreadsheet, string $filename): void
     {
         $writer = new Xlsx($spreadsheet);
@@ -302,5 +449,81 @@ class OrderExcelService
         header('Cache-Control: no-cache, no-store, must-revalidate');
         $writer->save('php://output');
         exit;
+    }
+
+    private function exportSimpleTable(string $title, array $headers, array $rows, string $filename): void
+    {
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle(substr($title, 0, 31));
+        $sheet->setCellValue('A1', $title);
+        $lastColumn = Coordinate::stringFromColumnIndex(max(1, count($headers)));
+        $sheet->mergeCells("A1:{$lastColumn}1");
+        $sheet->getStyle("A1:{$lastColumn}1")->applyFromArray([
+            'font' => ['name' => 'Calibri', 'size' => 14, 'bold' => true, 'color' => ['rgb' => '1F4E79']],
+            'alignment' => [
+                'horizontal' => Alignment::HORIZONTAL_LEFT,
+                'vertical' => Alignment::VERTICAL_CENTER,
+            ],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F8FBFF']],
+        ]);
+        $sheet->getRowDimension(1)->setRowHeight(26);
+
+        foreach ($headers as $index => $header) {
+            $column = Coordinate::stringFromColumnIndex($index + 1);
+            $sheet->setCellValue($column . '2', $header);
+            $sheet->getStyle($column . '2')->applyFromArray([
+                'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true, 'color' => ['rgb' => '1F4E79']],
+                'alignment' => [
+                    'horizontal' => Alignment::HORIZONTAL_CENTER,
+                    'vertical' => Alignment::VERTICAL_CENTER,
+                    'wrapText' => true,
+                ],
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'EAF3FF']],
+                'borders' => [
+                    'allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => 'D8E2F0']],
+                ],
+            ]);
+        }
+        $sheet->getRowDimension(2)->setRowHeight(22);
+
+        $rowNumber = 3;
+        foreach ($rows as $row) {
+            foreach (array_values($row) as $index => $value) {
+                $column = Coordinate::stringFromColumnIndex($index + 1);
+                $sheet->setCellValue($column . $rowNumber, $value);
+                $sheet->getStyle($column . $rowNumber)->applyFromArray([
+                    'font' => ['name' => 'Arial', 'size' => 10],
+                    'alignment' => [
+                        'horizontal' => is_numeric($value) ? Alignment::HORIZONTAL_RIGHT : Alignment::HORIZONTAL_LEFT,
+                        'vertical' => Alignment::VERTICAL_CENTER,
+                        'wrapText' => true,
+                    ],
+                    'borders' => [
+                        'allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => 'E6ECF4']],
+                    ],
+                ]);
+            }
+            $rowNumber++;
+        }
+
+        if ($rowNumber === 3) {
+            $sheet->setCellValue('A3', 'No rows available.');
+            $sheet->mergeCells("A3:{$lastColumn}3");
+            $sheet->getStyle("A3:{$lastColumn}3")->getAlignment()
+                ->setHorizontal(Alignment::HORIZONTAL_CENTER)
+                ->setVertical(Alignment::VERTICAL_CENTER);
+            $sheet->getStyle("A3:{$lastColumn}3")->getFont()->setItalic(true);
+            $rowNumber++;
+        }
+
+        foreach (range(1, count($headers)) as $index) {
+            $column = Coordinate::stringFromColumnIndex($index);
+            $sheet->getColumnDimension($column)->setAutoSize(true);
+        }
+        $sheet->freezePane('A3');
+        $sheet->setAutoFilter("A2:{$lastColumn}2");
+
+        $this->outputXlsx($spreadsheet, $filename);
     }
 }

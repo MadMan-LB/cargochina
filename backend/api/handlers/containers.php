@@ -7,6 +7,7 @@
 
 require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__, 2) . '/services/OrderCountryService.php';
+require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
 
 function containerTableHasColumn(PDO $pdo, string $table, string $column): bool
 {
@@ -173,6 +174,54 @@ function enrichContainerDestination(PDO $pdo, array $container): array
     return $container;
 }
 
+function outputContainerOrdersCsv(array $container, array $ordersWithItems): void
+{
+    $code = preg_replace('/[^a-zA-Z0-9_.-]/', '_', (string) ($container['code'] ?? 'container'));
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="container_' . $code . '_orders.csv"');
+    header('Cache-Control: no-cache, no-store, must-revalidate');
+
+    $out = fopen('php://output', 'w');
+    fputcsv($out, ['Container', (string) ($container['code'] ?? '')]);
+    fputcsv($out, ['']);
+    fputcsv($out, ['Order ID', 'Customer', 'Supplier', 'Item No', 'Shipping Code', 'Description', 'Cartons', 'Qty/Carton', 'Total Qty', 'Unit Price', 'Total Amount', 'Declared CBM', 'Declared Weight', 'Photo Count']);
+    foreach ($ordersWithItems as $data) {
+        $order = $data['order'] ?? [];
+        foreach (($data['items'] ?? []) as $item) {
+            $imagePaths = $item['image_paths'] ?? [];
+            if (is_string($imagePaths)) {
+                $imagePaths = json_decode($imagePaths, true) ?: [];
+            }
+            $cartons = (float) ($item['cartons'] ?? 0);
+            $qtyPerCarton = (float) ($item['qty_per_carton'] ?? 0);
+            $totalQty = ($cartons > 0 && $qtyPerCarton > 0)
+                ? $cartons * $qtyPerCarton
+                : (float) ($item['quantity'] ?? 0);
+            $unitPrice = isset($item['sell_price']) && $item['sell_price'] !== null && $item['sell_price'] !== ''
+                ? (float) $item['sell_price']
+                : (float) ($item['unit_price'] ?? 0);
+            fputcsv($out, [
+                (int) ($order['id'] ?? 0),
+                OrderExcelService::formatCustomerDisplay($order, $data['items'] ?? []),
+                (string) ($item['supplier_name'] ?? $order['supplier_name'] ?? ''),
+                (string) ($item['item_no'] ?? ''),
+                (string) ($item['shipping_code'] ?? ''),
+                (string) ($item['description_en'] ?? $item['description_cn'] ?? ''),
+                $cartons ?: '',
+                $qtyPerCarton ?: '',
+                $totalQty ?: '',
+                $unitPrice ?: '',
+                $totalQty > 0 && $unitPrice ? round($totalQty * $unitPrice, 4) : '',
+                round((float) ($item['declared_cbm'] ?? 0), 6),
+                round((float) ($item['declared_weight'] ?? 0), 4),
+                count($imagePaths),
+            ]);
+        }
+    }
+    fclose($out);
+    exit;
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
 
@@ -294,7 +343,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $items = normalizeOrderItems(fetchOrderItems($pdo, (int) $oid));
                     $ordersWithItems[] = ['order' => $order, 'items' => $items];
                 }
+                $format = strtolower(trim((string) ($_GET['format'] ?? 'xlsx')));
                 $code = preg_replace('/[^a-zA-Z0-9_-]/', '_', $container['code'] ?? 'container');
+                if ($format === 'csv') {
+                    outputContainerOrdersCsv($container, $ordersWithItems);
+                }
                 (new OrderExcelService())->exportOrders($ordersWithItems, 'container_' . $code . '_orders.xlsx');
             }
 

@@ -10,6 +10,7 @@ require_once dirname(__DIR__, 2) . '/services/NotificationService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderCountryService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderItemNumberingService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderReceiptWorkflowService.php';
+require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
 
 function normalizeOrderItems(array $items): array
 {
@@ -209,6 +210,207 @@ function fetchOrderItems(PDO $pdo, int $orderId): array
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$orderId]);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function fetchOrdersListRowsForRequest(PDO $pdo): array
+{
+    $statusParam = $_GET['status'] ?? null;
+    $statuses = is_array($statusParam) ? array_filter($statusParam) : ($statusParam ? [$statusParam] : []);
+    $statusMode = strtolower(trim((string) ($_GET['status_mode'] ?? 'include')));
+    $statusMode = $statusMode === 'exclude' ? 'exclude' : 'include';
+    $customerFeedback = trim((string) ($_GET['customer_feedback'] ?? ''));
+    $customerId = $_GET['customer_id'] ?? null;
+    $supplierId = $_GET['supplier_id'] ?? null;
+    $dateFrom = $_GET['date_from'] ?? null;
+    $dateTo = $_GET['date_to'] ?? null;
+    $orderId = $_GET['order_id'] ?? null;
+    $shippingCode = trim($_GET['shipping_code'] ?? '');
+    $q = trim($_GET['q'] ?? '');
+    $orderType = trim((string) ($_GET['order_type'] ?? ''));
+    $custCols = 'c.name as customer_name';
+    $chkPrio = @$pdo->query("SHOW COLUMNS FROM customers LIKE 'priority_level'");
+    if ($chkPrio && $chkPrio->rowCount() > 0) {
+        $custCols .= ', c.priority_level as customer_priority_level, c.priority_note as customer_priority_note';
+    }
+    $destCols = orderTableHasColumn($pdo, 'orders', 'destination_country_id')
+        ? ', co.id as destination_country_id, co.name as destination_country_name, co.code as destination_country_code'
+        : '';
+    $destJoin = orderTableHasColumn($pdo, 'orders', 'destination_country_id')
+        ? ' LEFT JOIN countries co ON o.destination_country_id = co.id'
+        : '';
+    $sql = "SELECT o.*, $custCols, s.name as supplier_name,
+        (SELECT c.code FROM containers c JOIN shipment_drafts sd ON sd.container_id = c.id JOIN shipment_draft_orders sdo ON sdo.shipment_draft_id = sd.id WHERE sdo.order_id = o.id LIMIT 1) as container_code,
+        (SELECT c.eta_date FROM containers c JOIN shipment_drafts sd ON sd.container_id = c.id JOIN shipment_draft_orders sdo ON sdo.shipment_draft_id = sd.id WHERE sdo.order_id = o.id LIMIT 1) as container_eta
+        $destCols
+        FROM orders o
+        JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id$destJoin WHERE 1=1";
+    $params = [];
+    if (!empty($statuses)) {
+        $placeholders = implode(',', array_fill(0, count($statuses), '?'));
+        $sql .= $statusMode === 'exclude'
+            ? " AND o.status NOT IN ($placeholders)"
+            : " AND o.status IN ($placeholders)";
+        $params = array_merge($params, $statuses);
+    }
+    if ($customerId) {
+        $sql .= " AND o.customer_id = ?";
+        $params[] = $customerId;
+    }
+    if ($supplierId) {
+        $chkItemSupp = @$pdo->query("SHOW COLUMNS FROM order_items LIKE 'supplier_id'");
+        if ($chkItemSupp && $chkItemSupp->rowCount() > 0) {
+            $sql .= " AND (o.supplier_id = ? OR EXISTS (SELECT 1 FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = o.id AND COALESCE(oi.supplier_id, p.supplier_id) = ?))";
+            $params[] = $supplierId;
+            $params[] = $supplierId;
+        } else {
+            $sql .= " AND o.supplier_id = ?";
+            $params[] = $supplierId;
+        }
+    }
+    if ($orderType !== '') {
+        $sql .= " AND o.order_type = ?";
+        $params[] = $orderType;
+    }
+    if ($dateFrom) {
+        $sql .= " AND o.expected_ready_date >= ?";
+        $params[] = $dateFrom;
+    }
+    if ($dateTo) {
+        $sql .= " AND o.expected_ready_date <= ?";
+        $params[] = $dateTo;
+    }
+    if ($orderId) {
+        $sql .= " AND o.id = ?";
+        $params[] = (int) $orderId;
+    }
+    if ($shippingCode !== '') {
+        $sql .= " AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND (oi.shipping_code COLLATE utf8mb4_unicode_ci) LIKE ?)";
+        $params[] = '%' . $shippingCode . '%';
+    }
+    if ($q !== '') {
+        $sql .= " AND " . buildOrderSearchSql($pdo, $q, $params, 'o', 'c', 's');
+    }
+    if ($customerFeedback !== '') {
+        if ($customerFeedback === 'pending') {
+            $sql .= " AND COALESCE(o.confirmation_token, '') <> ''";
+        } elseif ($customerFeedback === 'declined_after_auto_confirm') {
+            $sql .= " AND o.status = 'CustomerDeclinedAfterAutoConfirm'";
+        }
+    }
+    $sql .= " ORDER BY o.expected_ready_date IS NULL ASC, o.expected_ready_date ASC, o.created_at DESC";
+    $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
+    if ($params) {
+        $stmt->execute($params);
+    }
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as &$row) {
+        $row['items'] = normalizeOrderItems(fetchOrderItems($pdo, (int) $row['id']));
+    }
+    unset($row);
+
+    return $rows;
+}
+
+function outputOrdersListCsv(array $rows, ?string $filename = null): void
+{
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . ($filename ?: ('orders_' . date('Y-m-d') . '.csv')) . '"');
+    header('Cache-Control: no-cache, no-store, must-revalidate');
+
+    $out = fopen('php://output', 'w');
+    fputcsv($out, ['ID', 'Order Type', 'Customer', 'Supplier', 'Expected Ready', 'Status', 'Total CBM', 'Total Weight']);
+    foreach ($rows as $row) {
+        $cbm = 0.0;
+        $weight = 0.0;
+        $supplierNames = [];
+        foreach (($row['items'] ?? []) as $item) {
+            $cbm += (float) ($item['declared_cbm'] ?? 0);
+            $weight += (float) ($item['declared_weight'] ?? 0);
+            $supplierName = trim((string) ($item['supplier_name'] ?? ''));
+            if ($supplierName !== '') {
+                $supplierNames[$supplierName] = true;
+            }
+        }
+        $supplierDisplay = trim((string) ($row['supplier_name'] ?? ''));
+        if ($supplierNames) {
+            $names = array_keys($supplierNames);
+            $supplierDisplay = count($names) === 1 ? $names[0] : 'Multiple (' . implode(', ', $names) . ')';
+        }
+        fputcsv($out, [
+            (int) ($row['id'] ?? 0),
+            (string) ($row['order_type'] ?? 'standard'),
+            OrderExcelService::formatCustomerDisplay($row, $row['items'] ?? []),
+            $supplierDisplay,
+            (string) ($row['expected_ready_date'] ?? ''),
+            (string) ($row['status'] ?? ''),
+            round($cbm, 4),
+            round($weight, 2),
+        ]);
+    }
+    fclose($out);
+    exit;
+}
+
+function outputOrderCsv(array $order, array $items, ?string $filename = null): void
+{
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . ($filename ?: ('order_' . (int) ($order['id'] ?? 0) . '.csv')) . '"');
+    header('Cache-Control: no-cache, no-store, must-revalidate');
+
+    $out = fopen('php://output', 'w');
+    fputcsv($out, ['Order', '#' . (int) ($order['id'] ?? 0)]);
+    fputcsv($out, ['Customer', OrderExcelService::formatCustomerDisplay($order, $items)]);
+    fputcsv($out, ['Supplier', (string) ($order['supplier_name'] ?? '')]);
+    fputcsv($out, ['Expected Ready', (string) ($order['expected_ready_date'] ?? '')]);
+    fputcsv($out, ['Status', (string) ($order['status'] ?? '')]);
+    fputcsv($out, ['Currency', (string) ($order['currency'] ?? '')]);
+    fputcsv($out, ['']);
+    fputcsv($out, ['Photo Count', 'Item No', 'Supplier', 'Description', 'Total CTNS', 'QTY/CTN', 'TOTAL QTY', 'UNIT PRICE', 'TOTAL AMOUNT', 'CBM', 'TOTAL CBM', 'GWKG', 'TOTAL GW']);
+
+    foreach ($items as $item) {
+        $imagePaths = $item['image_paths'] ?? [];
+        if (is_string($imagePaths)) {
+            $imagePaths = json_decode($imagePaths, true) ?: [];
+        }
+        $itemNo = (string) ($item['item_no'] ?? '');
+        if ($itemNo === '') {
+            $itemNo = (string) ($item['shipping_code'] ?? '');
+        }
+        $desc = (string) ($item['description_en'] ?? $item['description_cn'] ?? '');
+        $cartons = (float) ($item['cartons'] ?? 0);
+        $qtyPerCtn = (float) ($item['qty_per_carton'] ?? 0);
+        $unitPrice = isset($item['sell_price']) && $item['sell_price'] !== null && $item['sell_price'] !== ''
+            ? (float) $item['sell_price']
+            : (float) ($item['unit_price'] ?? 0);
+        $scope = strtolower(trim((string) ($item['product_dimensions_scope'] ?? $item['dimensions_scope'] ?? 'piece')));
+        $totalQty = ($cartons > 0 && $qtyPerCtn > 0) ? $cartons * $qtyPerCtn : (float) ($item['quantity'] ?? 0);
+        $denom = ($scope === 'carton' && $cartons > 0) ? $cartons : ($totalQty > 0 ? $totalQty : 0);
+        $cbmPer = ($item['declared_cbm'] ?? null) && $denom > 0
+            ? round((float) $item['declared_cbm'] / $denom, 6)
+            : 0;
+        $gwPer = ($item['declared_weight'] ?? null) && $denom > 0
+            ? round((float) $item['declared_weight'] / $denom, 4)
+            : 0;
+        $multiplier = $scope === 'carton' ? $cartons : $totalQty;
+
+        fputcsv($out, [
+            count($imagePaths),
+            $itemNo,
+            (string) ($item['supplier_name'] ?? ''),
+            $desc,
+            $cartons ?: '',
+            $qtyPerCtn ?: '',
+            $totalQty ?: '',
+            $unitPrice ?: '',
+            $totalQty > 0 && $unitPrice ? round($totalQty * $unitPrice, 4) : '',
+            $cbmPer ?: '',
+            $multiplier > 0 && $cbmPer ? round($cbmPer * $multiplier, 6) : '',
+            $gwPer ?: '',
+            $multiplier > 0 && $gwPer ? round($gwPer * $multiplier, 4) : '',
+        ]);
+    }
+    fclose($out);
+    exit;
 }
 
 /** Check for duplicate shipping codes (same customer, other orders). Returns warning message or null. */
@@ -525,6 +727,18 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 jsonResponse(['data' => $rows]);
             }
+            if ($id === 'export' && $action === 'list') {
+                $rows = fetchOrdersListRowsForRequest($pdo);
+                $format = strtolower(trim((string) ($_GET['format'] ?? 'xlsx')));
+                if ($format === 'csv') {
+                    outputOrdersListCsv($rows);
+                }
+                require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
+                (new OrderExcelService())->exportOrdersListSummary(
+                    $rows,
+                    'orders_' . date('Y-m-d') . '.xlsx'
+                );
+            }
             if ($id && $action === 'export') {
                 $suppCols = 's.name as supplier_name, s.phone as supplier_phone, s.factory_location as supplier_factory';
                 $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'address'");
@@ -536,99 +750,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $order = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$order) jsonError('Order not found', 404);
                 $items = normalizeOrderItems(fetchOrderItems($pdo, (int) $id));
+                $format = strtolower(trim((string) ($_GET['format'] ?? 'xlsx')));
+                if ($format === 'csv') {
+                    outputOrderCsv($order, $items, 'order_' . (int) $id . '.csv');
+                }
                 require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
-                (new OrderExcelService())->exportOrder($order, $items);
+                (new OrderExcelService())->exportOrder($order, $items, 'order_' . (int) $id . '_goods_details.xlsx');
             }
             if ($id === null) {
-                $statusParam = $_GET['status'] ?? null;
-                $statuses = is_array($statusParam) ? array_filter($statusParam) : ($statusParam ? [$statusParam] : []);
-                $statusMode = strtolower(trim((string) ($_GET['status_mode'] ?? 'include')));
-                $statusMode = $statusMode === 'exclude' ? 'exclude' : 'include';
-                $customerFeedback = trim((string) ($_GET['customer_feedback'] ?? ''));
-                $customerId = $_GET['customer_id'] ?? null;
-                $supplierId = $_GET['supplier_id'] ?? null;
-                $dateFrom = $_GET['date_from'] ?? null;
-                $dateTo = $_GET['date_to'] ?? null;
-                $orderId = $_GET['order_id'] ?? null;
-                $shippingCode = trim($_GET['shipping_code'] ?? '');
-                $q = trim($_GET['q'] ?? '');
-                $orderType = trim((string) ($_GET['order_type'] ?? ''));
-                $custCols = 'c.name as customer_name';
-                $chkPrio = @$pdo->query("SHOW COLUMNS FROM customers LIKE 'priority_level'");
-                if ($chkPrio && $chkPrio->rowCount() > 0) $custCols .= ', c.priority_level as customer_priority_level, c.priority_note as customer_priority_note';
-                $destCols = orderTableHasColumn($pdo, 'orders', 'destination_country_id')
-                    ? ', co.id as destination_country_id, co.name as destination_country_name, co.code as destination_country_code'
-                    : '';
-                $destJoin = orderTableHasColumn($pdo, 'orders', 'destination_country_id')
-                    ? ' LEFT JOIN countries co ON o.destination_country_id = co.id'
-                    : '';
-                $sql = "SELECT o.*, $custCols, s.name as supplier_name,
-                    (SELECT c.code FROM containers c JOIN shipment_drafts sd ON sd.container_id = c.id JOIN shipment_draft_orders sdo ON sdo.shipment_draft_id = sd.id WHERE sdo.order_id = o.id LIMIT 1) as container_code,
-                    (SELECT c.eta_date FROM containers c JOIN shipment_drafts sd ON sd.container_id = c.id JOIN shipment_draft_orders sdo ON sdo.shipment_draft_id = sd.id WHERE sdo.order_id = o.id LIMIT 1) as container_eta
-                    $destCols
-                    FROM orders o
-                    JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id$destJoin WHERE 1=1";
-                $params = [];
-                if (!empty($statuses)) {
-                    $placeholders = implode(',', array_fill(0, count($statuses), '?'));
-                    $sql .= $statusMode === 'exclude'
-                        ? " AND o.status NOT IN ($placeholders)"
-                        : " AND o.status IN ($placeholders)";
-                    $params = array_merge($params, $statuses);
-                }
-                if ($customerId) {
-                    $sql .= " AND o.customer_id = ?";
-                    $params[] = $customerId;
-                }
-                if ($supplierId) {
-                    $chkItemSupp = @$pdo->query("SHOW COLUMNS FROM order_items LIKE 'supplier_id'");
-                    if ($chkItemSupp && $chkItemSupp->rowCount() > 0) {
-                        $sql .= " AND (o.supplier_id = ? OR EXISTS (SELECT 1 FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = o.id AND COALESCE(oi.supplier_id, p.supplier_id) = ?))";
-                        $params[] = $supplierId;
-                        $params[] = $supplierId;
-                    } else {
-                        $sql .= " AND o.supplier_id = ?";
-                        $params[] = $supplierId;
-                    }
-                }
-                if ($orderType !== '') {
-                    $sql .= " AND o.order_type = ?";
-                    $params[] = $orderType;
-                }
-                if ($dateFrom) {
-                    $sql .= " AND o.expected_ready_date >= ?";
-                    $params[] = $dateFrom;
-                }
-                if ($dateTo) {
-                    $sql .= " AND o.expected_ready_date <= ?";
-                    $params[] = $dateTo;
-                }
-                if ($orderId) {
-                    $sql .= " AND o.id = ?";
-                    $params[] = (int) $orderId;
-                }
-                if ($shippingCode !== '') {
-                    $sql .= " AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND (oi.shipping_code COLLATE utf8mb4_unicode_ci) LIKE ?)";
-                    $params[] = '%' . $shippingCode . '%';
-                }
-                if ($q !== '') {
-                    $sql .= " AND " . buildOrderSearchSql($pdo, $q, $params, 'o', 'c', 's');
-                }
-                if ($customerFeedback !== '') {
-                    if ($customerFeedback === 'pending') {
-                        $sql .= " AND COALESCE(o.confirmation_token, '') <> ''";
-                    } elseif ($customerFeedback === 'declined_after_auto_confirm') {
-                        $sql .= " AND o.status = 'CustomerDeclinedAfterAutoConfirm'";
-                    }
-                }
-                $sql .= " ORDER BY o.expected_ready_date IS NULL ASC, o.expected_ready_date ASC, o.created_at DESC";
-                $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
-                if ($params) $stmt->execute($params);
-                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                foreach ($rows as &$r) {
-                    $r['items'] = normalizeOrderItems(fetchOrderItems($pdo, (int) $r['id']));
-                }
-                jsonResponse(['data' => $rows]);
+                jsonResponse(['data' => fetchOrdersListRowsForRequest($pdo)]);
             }
             $custCols = 'c.name as customer_name';
             $chkPrio = @$pdo->query("SHOW COLUMNS FROM customers LIKE 'priority_level'");

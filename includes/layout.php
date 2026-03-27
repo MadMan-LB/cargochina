@@ -22,6 +22,7 @@ $canViewPreferences = $isAdmin;
 $canViewContainerOps = $isAdmin || $hasContainersStaffRole || $isSuperAdmin;
 $canViewWarehouseStock = $isAdmin || $isWarehouse || $hasContainersStaffRole;
 $canViewNotifications = !$isContainersOnly;
+$canViewDownloads = $isAdmin || $isBuyer || $isWarehouse || $hasContainersStaffRole;
 $basePath = '/cargochina';
 $breadcrumbs = $breadcrumbs ?? [];
 $layoutCssVersion = @filemtime(__DIR__ . '/../frontend/css/style.css') ?: time();
@@ -145,6 +146,14 @@ $layoutCssVersion = @filemtime(__DIR__ . '/../frontend/css/style.css') ?: time()
             <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm4 18H6V4h7v5h5v11z" />
           </svg>
           Draft an Order
+        </a>
+      <?php endif; ?>
+      <?php if ($canViewDownloads): ?>
+        <a class="sidebar-link <?= $currentPage === 'downloads' ? 'active' : '' ?>" href="<?= $basePath ?>/downloads.php">
+          <svg class="sidebar-icon" viewBox="0 0 24 24">
+            <path d="M5 20h14v-2H5v2zm7-18l-5 5h3v6h4V7h3l-5-5zm-7 9H3v6c0 1.1.9 2 2 2h2v-2H5v-6zm16 0h-2v6h-2v2h2c1.1 0 2-.9 2-2v-6z" />
+          </svg>
+          Downloads
         </a>
       <?php endif; ?>
 

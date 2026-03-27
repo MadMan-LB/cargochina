@@ -155,7 +155,7 @@ require 'includes/layout.php';
         </div>
       </div>
       <div class="modal-footer">
-        <a id="containerViewDownload" class="btn btn-outline-success" href="#" download>Download Excel</a>
+        <a id="containerViewDownload" class="btn btn-outline-success" href="#" download>Download XLSX</a>
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
       </div>
     </div>
