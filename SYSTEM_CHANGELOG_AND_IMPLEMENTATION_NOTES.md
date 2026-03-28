@@ -1090,3 +1090,16 @@ otification_preferences.php and removing the sidebar link unless the user is an 
 - Kept existing backend CSV endpoints intact for compatibility, while removing the CSV reference file entry from the Downloads page in favor of verified XLSX downloads.
 
 - 2026-03-27: Export customer labels now keep the customer name and append the customer/default shipping code in parentheses across shared XLSX exports and direct CSV export handlers (for example: Example Retail Group (EXAMPLE)).
+
+- 2026-03-27: Fixed newly created user login reliability by aligning create/reset credential handling with login lookup. User creation now stores the login identifier with normalized trim-only handling, preserves passwords exactly as entered, performs case-insensitive duplicate checks on the login identifier, and login now accepts the saved identifier as email or username. Also made user creation transactional so failed role resolution cannot leave half-created accounts.
+
+## Delta Patch Notes - 2026-03-27 Role-Based Sidebar Customization
+- Added a centralized role-based sidebar/page visibility system through includes/sidebar_permissions.php, with SuperAdmin always seeing all pages and other roles limited to customizable subsets of their existing allowed page scope.
+- Wired the shared sidebar, login landing, 403 redirects, page guards, area guards, and dashboard shortcut cards to the same effective page-visibility source of truth so hidden pages are both removed from navigation and blocked on direct access.
+- Extended User Management with a new per-role sidebar access panel in dmin_users.php and rontend/js/admin_users.js, showing one role card per role with grouped page toggles, defaults reset, and persisted settings saved through /users/sidebar-access.
+
+- 2026-03-27: Hardened the new role-based sidebar system downstream by filtering Admin dashboard shortcuts and Dashboard API task links through the same page-visibility rules, protecting direct static-example downloads behind Downloads page visibility, and improving the User Management role cards for roles with little or no assignable page scope.
+- 2026-03-27: Expanded the User Management sidebar/page editor so non-SuperAdmin roles now see every standard CLMS page as a selectable option instead of only their historical scope, while Super Admin-only pages remain locked. Updated page guards so saved role selections now control direct page access for registered CLMS pages, and added per-role collapse/expand controls in the editor for easier management.
+
+
+- 2026-03-27: Updated the User Management sidebar/page editor to render all registered CLMS sidebar pages for each role, while keeping SuperAdmin-only pages visibly locked for non-SuperAdmin roles. Also added section-level collapse/expand controls inside each role card so long page lists stay manageable.

@@ -5,6 +5,17 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
+require_once dirname(__DIR__, 3) . '/includes/sidebar_permissions.php';
+
+function normalizeUserLoginIdentifier(string $value): string
+{
+    return trim($value);
+}
+
+function normalizeUserPassword($value): string
+{
+    return (string) ($value ?? '');
+}
 
 return function (string $method, ?string $id, ?string $action, array $input) {
     requireRole(['SuperAdmin']);
@@ -12,6 +23,25 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
 
     if ($method === 'GET') {
+        if ($id === 'sidebar-access' && $action === null) {
+            $roles = $pdo->query("SELECT id, code, name FROM roles ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
+            $defaults = [];
+            $assignable = [];
+            foreach ($roles as $role) {
+                $defaults[$role['code']] = clmsGetDefaultPageIdsForRole($role['code']);
+                $assignable[$role['code']] = clmsGetAssignablePageIdsForRole($role['code']);
+            }
+            jsonResponse([
+                'data' => [
+                    'roles' => $roles,
+                    'registry' => clmsSidebarPageRegistry(),
+                    'sections' => clmsSidebarSectionLabels(),
+                    'assignable' => $assignable,
+                    'defaults' => $defaults,
+                    'settings' => clmsLoadRoleSidebarPageSettings($pdo),
+                ],
+            ]);
+        }
         if ($id === null) {
             $stmt = $pdo->query("SELECT u.id, u.email, u.full_name, u.is_active, u.created_at FROM users u ORDER BY u.id");
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -191,14 +221,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     }
 
     if ($method === 'POST' && $id === null) {
-        $email = trim($input['email'] ?? '');
+        $email = normalizeUserLoginIdentifier((string) ($input['email'] ?? ''));
         $fullName = trim($input['full_name'] ?? '');
-        $password = trim($input['password'] ?? '');
+        $password = normalizeUserPassword($input['password'] ?? '');
         $roles = $input['roles'] ?? [];
         $departmentIds = $input['department_ids'] ?? [];
 
         if ($email === '') {
-            jsonError('Email is required', 400);
+            jsonError('Email/username is required', 400);
         }
         if ($fullName === '') {
             jsonError('Full name is required', 400);
@@ -210,55 +240,76 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             jsonError('At least one role is required', 400);
         }
 
-        $chk = $pdo->prepare("SELECT 1 FROM users WHERE email = ?");
+        $chk = $pdo->prepare("SELECT 1 FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM(?))");
         $chk->execute([$email]);
         if ($chk->fetch()) {
-            jsonError('Email already in use', 400);
+            jsonError('Email/username already in use', 400);
         }
 
         $hash = password_hash($password, PASSWORD_DEFAULT);
-        $pdo->prepare("INSERT INTO users (email, password_hash, full_name, is_active) VALUES (?, ?, ?, 1)")
-            ->execute([$email, $hash, $fullName]);
-        $newId = (int) $pdo->lastInsertId();
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare("INSERT INTO users (email, password_hash, full_name, is_active) VALUES (?, ?, ?, 1)")
+                ->execute([$email, $hash, $fullName]);
+            $newId = (int) $pdo->lastInsertId();
 
-        $roleMap = [];
-        foreach ($pdo->query("SELECT id, code FROM roles")->fetchAll(PDO::FETCH_ASSOC) as $r) {
-            $roleMap[$r['code']] = $r['id'];
-        }
-        $insRole = $pdo->prepare("INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)");
-        foreach ($roles as $code) {
-            if (isset($roleMap[$code])) {
-                $insRole->execute([$newId, $roleMap[$code]]);
+            $roleMap = [];
+            foreach ($pdo->query("SELECT id, code FROM roles")->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $roleMap[$r['code']] = $r['id'];
             }
-        }
-
-        if (is_array($departmentIds) && !empty($departmentIds)) {
-            $insDept = $pdo->prepare("INSERT INTO user_departments (user_id, department_id, is_primary) VALUES (?, ?, ?)");
-            foreach ($departmentIds as $i => $deptId) {
-                if ($deptId) {
-                    $insDept->execute([$newId, (int) $deptId, $i === 0 ? 1 : 0]);
+            $validRoleIds = [];
+            foreach ($roles as $code) {
+                if (isset($roleMap[$code])) {
+                    $validRoleIds[] = (int) $roleMap[$code];
                 }
             }
+            $validRoleIds = array_values(array_unique($validRoleIds));
+            if (!$validRoleIds) {
+                throw new RuntimeException('At least one valid role is required');
+            }
+
+            $insRole = $pdo->prepare("INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)");
+            foreach ($validRoleIds as $roleId) {
+                $insRole->execute([$newId, $roleId]);
+            }
+
+            if (is_array($departmentIds) && !empty($departmentIds)) {
+                $insDept = $pdo->prepare("INSERT INTO user_departments (user_id, department_id, is_primary) VALUES (?, ?, ?)");
+                foreach ($departmentIds as $i => $deptId) {
+                    if ($deptId) {
+                        $insDept->execute([$newId, (int) $deptId, $i === 0 ? 1 : 0]);
+                    }
+                }
+            }
+
+            $userId = getAuthUserId();
+            $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('user', ?, 'create', ?, ?)")
+                ->execute([$newId, json_encode(['email' => $email, 'full_name' => $fullName]), $userId]);
+
+            $stmt = $pdo->prepare("SELECT id, email, full_name, is_active, created_at FROM users WHERE id = ?");
+            $stmt->execute([$newId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $roleStmt = $pdo->prepare("SELECT r.code FROM roles r JOIN user_roles ur ON r.id = ur.role_id WHERE ur.user_id = ?");
+            $roleStmt->execute([$newId]);
+            $row['roles'] = array_column($roleStmt->fetchAll(PDO::FETCH_ASSOC), 'code');
+            $deptStmt = $pdo->prepare("SELECT d.id, d.code, d.name FROM departments d JOIN user_departments ud ON d.id = ud.department_id WHERE ud.user_id = ? ORDER BY ud.is_primary DESC");
+            $deptStmt->execute([$newId]);
+            $row['departments'] = $deptStmt->fetchAll(PDO::FETCH_ASSOC);
+            $pdo->commit();
+            jsonResponse(['data' => $row]);
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            if ($e instanceof RuntimeException) {
+                jsonError($e->getMessage(), 400);
+            }
+            throw $e;
         }
-
-        $userId = getAuthUserId();
-        $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('user', ?, 'create', ?, ?)")
-            ->execute([$newId, json_encode(['email' => $email, 'full_name' => $fullName]), $userId]);
-
-        $stmt = $pdo->prepare("SELECT id, email, full_name, is_active, created_at FROM users WHERE id = ?");
-        $stmt->execute([$newId]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        $roleStmt = $pdo->prepare("SELECT r.code FROM roles r JOIN user_roles ur ON r.id = ur.role_id WHERE ur.user_id = ?");
-        $roleStmt->execute([$newId]);
-        $row['roles'] = array_column($roleStmt->fetchAll(PDO::FETCH_ASSOC), 'code');
-        $deptStmt = $pdo->prepare("SELECT d.id, d.code, d.name FROM departments d JOIN user_departments ud ON d.id = ud.department_id WHERE ud.user_id = ? ORDER BY ud.is_primary DESC");
-        $deptStmt->execute([$newId]);
-        $row['departments'] = $deptStmt->fetchAll(PDO::FETCH_ASSOC);
-        jsonResponse(['data' => $row]);
     }
 
     if ($method === 'POST' && $id && $action === 'reset-password') {
-        $newPassword = trim($input['password'] ?? '');
+        $newPassword = normalizeUserPassword($input['password'] ?? '');
         if (strlen($newPassword) < 6) {
             jsonError('Password must be at least 6 characters', 400);
         }
@@ -272,6 +323,27 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     }
 
     if ($method === 'PUT' && $id) {
+        if ($id === 'sidebar-access') {
+            $settings = $input['settings'] ?? null;
+            if (!is_array($settings)) {
+                jsonError('Sidebar settings payload is required', 400);
+            }
+
+            $oldSettings = clmsLoadRoleSidebarPageSettings($pdo);
+            $sanitizedSettings = clmsSanitizeRoleSidebarPageSettings($settings);
+            clmsSaveRoleSidebarPageSettings($pdo, $sanitizedSettings);
+
+            $userId = getAuthUserId();
+            $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, old_value, new_value, user_id) VALUES ('system_config', 0, 'update', ?, ?, ?)")
+                ->execute([
+                    json_encode(['key' => clmsSidebarConfigKey(), 'settings' => $oldSettings], JSON_UNESCAPED_UNICODE),
+                    json_encode(['key' => clmsSidebarConfigKey(), 'settings' => $sanitizedSettings], JSON_UNESCAPED_UNICODE),
+                    $userId,
+                ]);
+
+            jsonResponse(['data' => ['settings' => $sanitizedSettings]]);
+        }
+
         $roles = $input['roles'] ?? null;
         $departmentIds = $input['department_ids'] ?? null;
         $isActive = isset($input['is_active']) ? (int) (bool) $input['is_active'] : null;

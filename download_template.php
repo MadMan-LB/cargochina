@@ -1,9 +1,17 @@
 <?php
 require_once __DIR__ . '/includes/auth_check.php';
 require_once __DIR__ . '/includes/downloads_registry.php';
+require_once __DIR__ . '/includes/sidebar_permissions.php';
 
 $slug = trim((string) ($_GET['slug'] ?? ''));
 $userRoles = $_SESSION['user_roles'] ?? [];
+
+if (!clmsCanRolesAccessPage($userRoles, 'downloads')) {
+    http_response_code(403);
+    echo 'Access denied.';
+    exit;
+}
+
 $entry = $slug !== '' ? clmsFindDownloadEntry($slug, $userRoles) : null;
 
 if (!$entry) {

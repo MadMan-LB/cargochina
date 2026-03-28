@@ -36,6 +36,26 @@ require 'includes/layout.php';
   </div>
 </div>
 
+<div class="card mt-4 shadow-sm" id="sidebarAccessPanel">
+  <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-3 py-3 bg-light">
+    <div>
+      <h5 class="mb-1">Sidebar / Page Access by Role</h5>
+      <p class="text-muted mb-0 small">Super Admin always sees everything. For every other role, choose which standard CLMS pages should be visible and directly accessible.</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      <button type="button" class="btn btn-outline-secondary btn-sm" id="sidebarAccessDefaultBtn">Reset All to Default</button>
+      <button type="button" class="btn btn-primary btn-sm" id="sidebarAccessSaveBtn">Save Sidebar Settings</button>
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="alert alert-info py-2 small mb-3">
+      A user with multiple roles sees the union of pages enabled across those roles. All registered CLMS pages are shown below for each role, while Super Admin-only administration pages stay visible but locked for non-SuperAdmin roles. Page visibility here controls navigation and direct page access; sensitive actions inside modules still follow their own workflow permissions.
+    </div>
+    <div id="sidebarAccessLoading" class="text-center py-4 text-muted">Loading sidebar access…</div>
+    <div id="sidebarAccessGrid" class="row g-3 d-none"></div>
+  </div>
+</div>
+
 <div class="card mt-4 shadow-sm" id="activityPanel" style="display:none">
   <div class="card-header d-flex justify-content-between align-items-center py-3 bg-light">
     <div class="d-flex align-items-center gap-2">
@@ -182,8 +202,8 @@ require 'includes/layout.php';
       </div>
       <div class="modal-body">
         <div class="mb-3">
-          <label class="form-label">Email</label>
-          <input type="email" class="form-control" id="createEmail" placeholder="user@example.com" required>
+          <label class="form-label">Email or Username</label>
+          <input type="text" class="form-control" id="createEmail" placeholder="user@example.com or staff.login" autocomplete="username" required>
         </div>
         <div class="mb-3">
           <label class="form-label">Full name</label>

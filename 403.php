@@ -3,17 +3,9 @@
  * Access Denied page. Included when user lacks role for requested area.
  * Expects $userRoles, $area in scope when included from area_bootstrap.php.
  */
+require_once __DIR__ . '/includes/sidebar_permissions.php';
 $roles = $userRoles ?? $_SESSION['user_roles'] ?? [];
-$homeUrl = '/cargochina/warehouse/';
-if (in_array('SuperAdmin', $roles)) {
-    $homeUrl = '/cargochina/superadmin/';
-} elseif (in_array('WarehouseStaff', $roles) && !in_array('SuperAdmin', $roles)) {
-    $homeUrl = '/cargochina/warehouse/';
-} elseif (in_array('ChinaAdmin', $roles) || in_array('ChinaEmployee', $roles)) {
-    $homeUrl = '/cargochina/buyers/';
-} elseif (in_array('LebanonAdmin', $roles)) {
-    $homeUrl = '/cargochina/admin/';
-}
+$homeUrl = clmsGetAccessibleHomeUrl($roles);
 ?>
 <!DOCTYPE html>
 <html lang="en">

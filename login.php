@@ -1,6 +1,12 @@
 <?php
 session_start();
 require 'backend/config/database.php';
+require_once __DIR__ . '/includes/sidebar_permissions.php';
+
+function normalizeLoginIdentifier(string $value): string
+{
+  return trim($value);
+}
 
 if (!empty($_GET['logout'])) {
   $_SESSION = [];
@@ -10,11 +16,11 @@ if (!empty($_GET['logout'])) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-  $email = trim($_POST['email'] ?? '');
+  $email = normalizeLoginIdentifier((string) ($_POST['email'] ?? ''));
   $pass = $_POST['password'] ?? '';
   if ($email && $pass) {
     $pdo = getDb();
-    $stmt = $pdo->prepare("SELECT id, password_hash, full_name FROM users WHERE email = ? AND is_active = 1");
+    $stmt = $pdo->prepare("SELECT id, email, password_hash, full_name FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM(?)) AND is_active = 1 LIMIT 1");
     $stmt->execute([$email]);
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($user && password_verify($pass, $user['password_hash'])) {
@@ -24,23 +30,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $roleStmt->execute([$user['id']]);
       $_SESSION['user_roles'] = array_column($roleStmt->fetchAll(PDO::FETCH_ASSOC), 'code');
       $roles = $_SESSION['user_roles'];
-      if (in_array('SuperAdmin', $roles)) {
-        header('Location: /cargochina/superadmin/');
-      } elseif (in_array('WarehouseStaff', $roles) && !in_array('SuperAdmin', $roles)) {
-        header('Location: /cargochina/warehouse/');
-      } elseif (in_array('ChinaAdmin', $roles) || in_array('ChinaEmployee', $roles)) {
-        header('Location: /cargochina/buyers/');
-      } elseif (in_array('LebanonAdmin', $roles)) {
-        header('Location: /cargochina/admin/');
-      } elseif (in_array('ContainersStaff', $roles)) {
-        header('Location: /cargochina/containers.php');
-      } else {
-        header('Location: /cargochina/warehouse/');
-      }
+      header('Location: ' . clmsGetAccessibleHomeUrl($roles, $pdo));
       exit;
     }
   }
-  $error = 'Invalid email or password';
+  $error = 'Invalid email/username or password';
 }
 ?>
 <!DOCTYPE html>
@@ -63,8 +57,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <?php if (!empty($error)): ?><div class="alert alert-danger"><?= htmlspecialchars($error) ?>
                         </div><?php endif; ?>
                         <form method="post">
-                            <div class="mb-3"><label class="form-label" for="loginEmail">Email</label><input type="text"
-                                    id="loginEmail" name="email" class="form-control" autocomplete="email" required>
+                            <div class="mb-3"><label class="form-label" for="loginEmail">Email or Username</label><input type="text"
+                                    id="loginEmail" name="email" class="form-control" autocomplete="username" required>
                             </div>
                             <div class="mb-3"><label class="form-label" for="loginPassword">Password</label><input
                                     type="password" id="loginPassword" name="password" class="form-control"

@@ -1,6 +1,9 @@
 <?php
 $area = 'warehouse';
 require __DIR__ . '/../includes/area_bootstrap.php';
+$roles = $_SESSION['user_roles'] ?? [];
+$canViewReceiving = clmsCanRolesAccessPage($roles, 'receiving');
+$canViewExpenses = clmsCanRolesAccessPage($roles, 'expenses');
 $currentPage = 'dashboard';
 $pageTitle = 'Warehouse Dashboard';
 $breadcrumbs = [['Warehouse', '/cargochina/warehouse/'], ['Dashboard', '']];
@@ -11,6 +14,7 @@ require __DIR__ . '/../includes/area_layout.php';
     <h1 class="mb-4">Warehouse Dashboard</h1>
     <p class="lead text-muted">Record receiving, manage queue and history.</p>
   </div>
+  <?php if ($canViewReceiving): ?>
   <div class="col-md-6">
     <div class="card h-100">
       <div class="card-body">
@@ -29,6 +33,8 @@ require __DIR__ . '/../includes/area_layout.php';
       </div>
     </div>
   </div>
+  <?php endif; ?>
+  <?php if ($canViewExpenses): ?>
   <div class="col-md-6">
     <div class="card h-100">
       <div class="card-body">
@@ -38,5 +44,6 @@ require __DIR__ . '/../includes/area_layout.php';
       </div>
     </div>
   </div>
+  <?php endif; ?>
 </div>
 <?php require __DIR__ . '/../includes/area_footer.php'; ?>

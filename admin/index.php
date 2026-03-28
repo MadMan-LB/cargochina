@@ -1,6 +1,9 @@
 <?php
 $area = 'admin';
 require __DIR__ . '/../includes/area_bootstrap.php';
+$roles = $_SESSION['user_roles'] ?? [];
+$canViewConsolidation = clmsCanRolesAccessPage($roles, 'consolidation');
+$canViewNotifications = clmsCanRolesAccessPage($roles, 'notifications');
 $currentPage = 'dashboard';
 $pageTitle = 'Admin Dashboard';
 $breadcrumbs = [['Admin', '/cargochina/admin/'], ['Dashboard', '']];
@@ -11,6 +14,7 @@ require __DIR__ . '/../includes/area_layout.php';
         <h1 class="mb-4">Admin Dashboard</h1>
         <p class="lead text-muted">Consolidation and notifications.</p>
     </div>
+    <?php if ($canViewConsolidation): ?>
     <div class="col-md-6">
         <div class="card h-100">
             <div class="card-body">
@@ -20,6 +24,8 @@ require __DIR__ . '/../includes/area_layout.php';
             </div>
         </div>
     </div>
+    <?php endif; ?>
+    <?php if ($canViewNotifications): ?>
     <div class="col-md-6">
         <div class="card h-100">
             <div class="card-body">
@@ -29,5 +35,13 @@ require __DIR__ . '/../includes/area_layout.php';
             </div>
         </div>
     </div>
+    <?php endif; ?>
+    <?php if (!$canViewConsolidation && !$canViewNotifications): ?>
+    <div class="col-12">
+        <div class="alert alert-light border mb-0">
+            No dashboard shortcuts are currently enabled for this role. Use User Management to enable pages for this admin role.
+        </div>
+    </div>
+    <?php endif; ?>
 </div>
 <?php require __DIR__ . '/../includes/area_footer.php'; ?>

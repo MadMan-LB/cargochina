@@ -1,6 +1,8 @@
 <?php
 $area = 'admin';
 require __DIR__ . '/../includes/area_bootstrap.php';
+$roles = $_SESSION['user_roles'] ?? [];
+$canViewPreferences = clmsCanRolesAccessPage($roles, 'notification_preferences');
 $currentPage = 'notifications';
 $pageTitle = 'Notifications';
 $breadcrumbs = [['Admin', '/cargochina/admin/'], ['Notifications', '']];
@@ -9,7 +11,9 @@ require __DIR__ . '/../includes/area_layout.php';
 <link rel="stylesheet" href="/cargochina/frontend/css/style.css">
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="h3 mb-0">Notifications</h1>
-    <a href="<?= $areaBase ?>/notification_preferences.php" class="btn btn-outline-secondary btn-sm">Preferences</a>
+    <?php if ($canViewPreferences): ?>
+      <a href="<?= $areaBase ?>/notification_preferences.php" class="btn btn-outline-secondary btn-sm">Preferences</a>
+    <?php endif; ?>
 </div>
 <div class="card">
     <div class="card-body">

@@ -6,6 +6,7 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
+require_once dirname(__DIR__, 3) . '/includes/sidebar_permissions.php';
 
 function dashboardWarehouseReceiptHasColumn(PDO $pdo, string $column): bool
 {
@@ -32,6 +33,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
     $pdo = getDb();
     $userRoles = getUserRoles();
+    $canSeePage = static fn(string $pageId) => clmsCanRolesAccessPage($userRoles, $pageId, $pdo);
 
     $stats = [];
     foreach (
@@ -75,7 +77,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
     // My tasks — role-scoped actionable counts
     $stats['my_tasks'] = [];
-    if (in_array('ChinaAdmin', $userRoles) || in_array('ChinaEmployee', $userRoles) || in_array('SuperAdmin', $userRoles)) {
+    if ((in_array('ChinaAdmin', $userRoles) || in_array('ChinaEmployee', $userRoles) || in_array('SuperAdmin', $userRoles)) && $canSeePage('orders')) {
         $stmt = $pdo->query("SELECT COUNT(*) FROM orders WHERE status = 'Submitted'");
         $submitted = (int) $stmt->fetchColumn();
         if ($submitted > 0) {
@@ -87,14 +89,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $stats['my_tasks'][] = ['label' => 'Customer feedback pending', 'count' => $feedbackPending, 'url' => '/cargochina/orders.php?customer_feedback=pending'];
         }
     }
-    if (in_array('WarehouseStaff', $userRoles) || in_array('SuperAdmin', $userRoles)) {
+    if ((in_array('WarehouseStaff', $userRoles) || in_array('SuperAdmin', $userRoles)) && $canSeePage('receiving')) {
         $stmt = $pdo->query("SELECT COUNT(*) FROM orders WHERE status IN ('Approved','InTransitToWarehouse')");
         $toReceive = (int) $stmt->fetchColumn();
         if ($toReceive > 0) {
             $stats['my_tasks'][] = ['label' => 'To receive', 'count' => $toReceive, 'url' => '/cargochina/receiving.php'];
         }
     }
-    if (in_array('ChinaAdmin', $userRoles) || in_array('LebanonAdmin', $userRoles) || in_array('SuperAdmin', $userRoles)) {
+    if ((in_array('ChinaAdmin', $userRoles) || in_array('LebanonAdmin', $userRoles) || in_array('SuperAdmin', $userRoles)) && $canSeePage('consolidation')) {
         $stmt = $pdo->query("SELECT COUNT(*) FROM orders WHERE status = 'ReadyForConsolidation'");
         $ready = (int) $stmt->fetchColumn();
         if ($ready > 0) {
@@ -105,6 +107,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if ($drafts > 0) {
             $stats['my_tasks'][] = ['label' => 'Shipment drafts', 'count' => $drafts, 'url' => '/cargochina/consolidation.php'];
         }
+    }
+    if ((in_array('ChinaAdmin', $userRoles) || in_array('ChinaEmployee', $userRoles) || in_array('LebanonAdmin', $userRoles) || in_array('SuperAdmin', $userRoles)) && $canSeePage('orders')) {
         $stmt = $pdo->query("SELECT COUNT(*) FROM orders WHERE status = 'CustomerDeclinedAfterAutoConfirm'");
         $declinedAfter = (int) $stmt->fetchColumn();
         if ($declinedAfter > 0) {

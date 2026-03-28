@@ -17,6 +17,7 @@ require 'includes/layout.php';
 
 <!-- Key stats -->
 <div class="row g-3 mb-4" id="dashboardStats">
+  <?php if (in_array('receiving', $visiblePageIds ?? [], true)): ?>
   <div class="col-6 col-md-3">
     <div class="card border-0 h-100" style="background:linear-gradient(135deg,#eff6ff,#dbeafe);">
       <div class="card-body py-3">
@@ -28,6 +29,8 @@ require 'includes/layout.php';
       </div>
     </div>
   </div>
+  <?php endif; ?>
+  <?php if (in_array('orders', $visiblePageIds ?? [], true)): ?>
   <div class="col-6 col-md-3">
     <div class="card border-0 h-100" style="background:linear-gradient(135deg,#fffbeb,#fef3c7);">
       <div class="card-body py-3">
@@ -39,6 +42,8 @@ require 'includes/layout.php';
       </div>
     </div>
   </div>
+  <?php endif; ?>
+  <?php if (in_array('consolidation', $visiblePageIds ?? [], true)): ?>
   <div class="col-6 col-md-3">
     <div class="card border-0 h-100" style="background:linear-gradient(135deg,#f0fdf4,#dcfce7);">
       <div class="card-body py-3">
@@ -50,6 +55,8 @@ require 'includes/layout.php';
       </div>
     </div>
   </div>
+  <?php endif; ?>
+  <?php if (in_array('notifications', $visiblePageIds ?? [], true)): ?>
   <div class="col-6 col-md-3">
     <div class="card border-0 h-100" style="background:linear-gradient(135deg,#f8fafc,#f1f5f9);">
       <div class="card-body py-3">
@@ -61,6 +68,7 @@ require 'includes/layout.php';
       </div>
     </div>
   </div>
+  <?php endif; ?>
 </div>
 
 <!-- My tasks -->
@@ -73,7 +81,7 @@ require 'includes/layout.php';
 
 <!-- Quick navigation -->
 <div class="row g-3 mb-4">
-  <?php if ($isBuyer): ?>
+  <?php if ($isBuyer && in_array('orders', $visiblePageIds ?? [], true)): ?>
     <div class="col-6 col-md-3">
       <a href="orders.php" class="card text-decoration-none h-100 border-0 shadow-sm" style="background:#fff;">
         <div class="card-body py-3 d-flex align-items-center gap-3">
@@ -85,6 +93,7 @@ require 'includes/layout.php';
         </div>
       </a>
     </div>
+    <?php if (in_array('suppliers', $visiblePageIds ?? [], true)): ?>
     <div class="col-6 col-md-3">
       <a href="suppliers.php" class="card text-decoration-none h-100 border-0 shadow-sm" style="background:#fff;">
         <div class="card-body py-3 d-flex align-items-center gap-3">
@@ -96,6 +105,8 @@ require 'includes/layout.php';
         </div>
       </a>
     </div>
+    <?php endif; ?>
+    <?php if (in_array('customers', $visiblePageIds ?? [], true)): ?>
     <div class="col-6 col-md-3">
       <a href="customers.php" class="card text-decoration-none h-100 border-0 shadow-sm" style="background:#fff;">
         <div class="card-body py-3 d-flex align-items-center gap-3">
@@ -107,6 +118,8 @@ require 'includes/layout.php';
         </div>
       </a>
     </div>
+    <?php endif; ?>
+    <?php if (in_array('products', $visiblePageIds ?? [], true)): ?>
     <div class="col-6 col-md-3">
       <a href="products.php" class="card text-decoration-none h-100 border-0 shadow-sm" style="background:#fff;">
         <div class="card-body py-3 d-flex align-items-center gap-3">
@@ -118,8 +131,9 @@ require 'includes/layout.php';
         </div>
       </a>
     </div>
+    <?php endif; ?>
   <?php endif; ?>
-  <?php if ($isWarehouse): ?>
+  <?php if ($isWarehouse && in_array('receiving', $visiblePageIds ?? [], true)): ?>
     <div class="col-6 col-md-3">
       <a href="receiving.php" class="card text-decoration-none h-100 border-0 shadow-sm" style="background:#fff;">
         <div class="card-body py-3 d-flex align-items-center gap-3">
@@ -132,7 +146,7 @@ require 'includes/layout.php';
       </a>
     </div>
   <?php endif; ?>
-  <?php if ($isAdmin): ?>
+  <?php if ($isAdmin && in_array('consolidation', $visiblePageIds ?? [], true)): ?>
     <div class="col-6 col-md-3">
       <a href="consolidation.php" class="card text-decoration-none h-100 border-0 shadow-sm" style="background:#fff;">
         <div class="card-body py-3 d-flex align-items-center gap-3">
@@ -144,6 +158,8 @@ require 'includes/layout.php';
         </div>
       </a>
     </div>
+  <?php endif; ?>
+  <?php if ($isAdmin && in_array('pipeline', $visiblePageIds ?? [], true)): ?>
     <div class="col-6 col-md-3">
       <a href="pipeline.php" class="card text-decoration-none h-100 border-0 shadow-sm" style="background:#fff;">
         <div class="card-body py-3 d-flex align-items-center gap-3">
