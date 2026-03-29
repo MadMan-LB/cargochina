@@ -54,7 +54,14 @@ class DownloadExampleService
     {
         $this->excel->exportOrders(
             $this->buildExampleOrdersWithItems(),
-            'example_container_orders_export.xlsx'
+            'example_container_orders_export.xlsx',
+            [
+                'container' => [
+                    'id' => 1,
+                    'code' => 'EXAMPLE-CTR-001',
+                ],
+                'expenses' => $this->buildExampleContainerExpenses(),
+            ]
         );
     }
 
@@ -99,33 +106,54 @@ class DownloadExampleService
             [
                 'order' => [
                     'id' => 9101,
+                    'customer_id' => 101,
                     'customer_name' => 'Example Retail Group',
+                    'default_shipping_code' => 'EXA-RETAIL',
                     'customer_phone' => '+961-70-000100',
                     'supplier_name' => 'Jinhua Gift Creations',
+                    'supplier_phone' => '+86-579-85178151',
+                    'supplier_payment_links' => json_encode([
+                        ['label' => 'Bank', 'account_number' => 'CN-ACC-001-8891'],
+                    ], JSON_UNESCAPED_SLASHES),
                     'expected_ready_date' => '2026-04-15',
                     'status' => 'ReadyForConsolidation',
+                    'currency' => 'USD',
                 ],
                 'items' => array_slice($items, 0, 4),
             ],
             [
                 'order' => [
                     'id' => 9102,
-                    'customer_name' => 'Example Retail Group',
-                    'customer_phone' => '+961-70-000100',
+                    'customer_id' => 102,
+                    'customer_name' => 'Family Mart Lebanon',
+                    'default_shipping_code' => 'FMLB',
+                    'customer_phone' => '+961-71-440220',
                     'supplier_name' => 'Qingdao Pet Utility',
+                    'supplier_phone' => '+86-532-77001234',
+                    'supplier_payment_links' => json_encode([
+                        ['label' => 'Alipay', 'account_number' => 'ALI-QD-557700'],
+                    ], JSON_UNESCAPED_SLASHES),
                     'expected_ready_date' => '2026-04-16',
                     'status' => 'ReadyForConsolidation',
+                    'currency' => 'USD',
                 ],
                 'items' => array_slice($items, 4, 3),
             ],
             [
                 'order' => [
                     'id' => 9103,
-                    'customer_name' => 'Example Retail Group',
-                    'customer_phone' => '+961-70-000100',
+                    'customer_id' => 103,
+                    'customer_name' => 'Active Sport House',
+                    'default_shipping_code' => 'ASH',
+                    'customer_phone' => '+961-76-123456',
                     'supplier_name' => 'Wenzhou Stationery House',
+                    'supplier_phone' => '+86-577-65008810',
+                    'supplier_payment_links' => json_encode([
+                        ['label' => 'WeChat', 'account_number' => 'WC-WSH-90088'],
+                    ], JSON_UNESCAPED_SLASHES),
                     'expected_ready_date' => '2026-04-17',
                     'status' => 'AssignedToContainer',
+                    'currency' => 'USD',
                 ],
                 'items' => array_slice($items, 7, 3),
             ],
@@ -143,6 +171,7 @@ class DownloadExampleService
                     'id' => $order['id'],
                     'order_type' => 'standard',
                     'customer_name' => $order['customer_name'],
+                    'default_shipping_code' => $order['default_shipping_code'] ?? '',
                     'supplier_name' => $order['supplier_name'],
                     'expected_ready_date' => $order['expected_ready_date'],
                     'status' => $order['status'],
@@ -169,8 +198,9 @@ class DownloadExampleService
                 return [
                     'id' => $order['id'],
                     'customer_name' => $order['customer_name'],
+                    'default_shipping_code' => $order['default_shipping_code'] ?? '',
                     'supplier_name' => $order['supplier_name'],
-                    'supplier_phone' => '+86-579-000000',
+                    'supplier_phone' => $order['supplier_phone'] ?? '',
                     'expected_ready_date' => $order['expected_ready_date'],
                     'status' => 'Approved',
                     'declared_cbm' => $declaredCbm,
@@ -215,6 +245,18 @@ class DownloadExampleService
                 'item_no' => $row['item_no'],
                 'shipping_code' => $shippingCode,
                 'supplier_name' => $row['supplier'],
+                'supplier_phone' => match ($row['supplier']) {
+                    'Jinhua Gift Creations' => '+86-579-85178151',
+                    'Qingdao Pet Utility' => '+86-532-77001234',
+                    'Wenzhou Stationery House' => '+86-577-65008810',
+                    default => '+86-000-000000',
+                },
+                'supplier_payment_links' => match ($row['supplier']) {
+                    'Jinhua Gift Creations' => json_encode([['label' => 'Bank', 'account_number' => 'CN-ACC-001-8891']], JSON_UNESCAPED_SLASHES),
+                    'Qingdao Pet Utility' => json_encode([['label' => 'Alipay', 'account_number' => 'ALI-QD-557700']], JSON_UNESCAPED_SLASHES),
+                    'Wenzhou Stationery House' => json_encode([['label' => 'WeChat', 'account_number' => 'WC-WSH-90088']], JSON_UNESCAPED_SLASHES),
+                    default => '',
+                },
                 'description_en' => $row['description'],
                 'description_cn' => $row['description'],
                 'cartons' => $cartons,
@@ -222,6 +264,8 @@ class DownloadExampleService
                 'quantity' => $quantity,
                 'sell_price' => $unitPrice,
                 'unit_price' => $unitPrice,
+                'effective_buy_price' => round($unitPrice * 0.72, 4),
+                'product_buy_price' => round($unitPrice * 0.72, 4),
                 'declared_cbm' => round($cbmPerUnit * $quantity, 6),
                 'declared_weight' => round($weightPerUnit * $quantity, 4),
                 'image_paths' => $imagePaths,
@@ -229,6 +273,56 @@ class DownloadExampleService
                 'product_dimensions_scope' => 'piece',
             ];
         }, $rows, array_keys($rows));
+    }
+
+    private function buildExampleContainerExpenses(): array
+    {
+        return [
+            [
+                'id' => 7001,
+                'customer_id' => 101,
+                'currency' => 'USD',
+                'amount' => 420,
+                'category_name' => 'Freight to Yiwu',
+                'supplier_name' => '',
+                'notes' => 'Freight to Yiwu',
+            ],
+            [
+                'id' => 7002,
+                'customer_id' => 101,
+                'currency' => 'USD',
+                'amount' => 50,
+                'category_name' => 'Forklift unloading',
+                'supplier_name' => '',
+                'notes' => 'Forklift unloading 24 pallets',
+            ],
+            [
+                'id' => 7003,
+                'customer_id' => 102,
+                'currency' => 'USD',
+                'amount' => 80,
+                'category_name' => 'Inspection',
+                'supplier_name' => '',
+                'notes' => 'Pet utilities inspection fee',
+            ],
+            [
+                'id' => 7004,
+                'customer_id' => 103,
+                'currency' => 'USD',
+                'amount' => 65,
+                'category_name' => 'Loading',
+                'supplier_name' => '',
+                'notes' => 'Stationery loading support',
+            ],
+            [
+                'id' => 7005,
+                'currency' => 'USD',
+                'amount' => 150,
+                'category_name' => 'Container charge',
+                'supplier_name' => '',
+                'notes' => 'Container-wide handling charge',
+            ],
+        ];
     }
 
     private function getExampleImagePool(): array

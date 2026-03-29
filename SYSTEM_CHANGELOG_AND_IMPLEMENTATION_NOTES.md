@@ -1103,3 +1103,14 @@ otification_preferences.php and removing the sidebar link unless the user is an 
 
 
 - 2026-03-27: Updated the User Management sidebar/page editor to render all registered CLMS sidebar pages for each role, while keeping SuperAdmin-only pages visibly locked for non-SuperAdmin roles. Also added section-level collapse/expand controls inside each role card so long page lists stay manageable.
+
+- 2026-03-28 Codex: Upgraded container Excel exports to include supplier phone, account reference, factory price, per-customer expense/need-to-pay subtotals, and light-yellow/light-red financial highlighting. Synced the direct example container export so it now uses 3 customers, 3 suppliers, buy-price fields, supplier payment references, 8 photos, and section-level expenses through the same shared OrderExcelService path.
+
+- 2026-03-28 Codex: Expanded the countries catalog from the original 52 seeded entries to a full 248-country ISO-style list, backfilled the live database with a new world-countries migration, updated the original country seed for fresh installs, added Palestine (`PS`) to the canonical dataset, and kept existing customer-country / order-destination foreign-key mappings stable by inserting missing rows instead of rebuilding the table.
+
+## 2026-03-28 Palestine Country Hardening
+
+- Added migration `056_palestine_country_hardening.sql` to make the world-country expansion safe across mixed deployments, not only the current local DB.
+- The migration ensures `PS` exists and is named `Palestine`, remaps legacy `IL` foreign-key references in `orders.destination_country_id` and `customer_country_shipping.country_id` to `PS`, merges duplicate customer-country rows safely before remapping, normalizes legacy container text fields (`containers.destination_country`, `containers.destination`) from `IL`/`Israel` to `PS`/`Palestine`, and deletes the legacy `IL` country row if present.
+- `OrderCountryService::normalizeCountryToken()` now treats legacy `IL` / `Israel` tokens as `PS` during runtime country resolution, which protects container matching and other legacy text-based country flows even before all records are cleaned.
+- Full downstream review confirmed that customer country selection, order destination persistence, draft-order destination handling, container-country matching, countries autocomplete, and export/render paths all continue to use the `countries` table as the source of truth, so no further workflow or UI code changes were needed for this hardening pass.

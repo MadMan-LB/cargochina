@@ -186,6 +186,7 @@ function fetchOrderItems(PDO $pdo, int $orderId): array
 {
     $chk = @$pdo->query("SHOW COLUMNS FROM order_items LIKE 'supplier_id'");
     $hasSupplier = $chk && $chk->rowCount() > 0;
+    $hasProductSupplier = orderTableHasColumn($pdo, 'products', 'supplier_id');
     $chkProductAlert = @$pdo->query("SHOW COLUMNS FROM products LIKE 'high_alert_note'");
     $chkRequiredDesign = @$pdo->query("SHOW COLUMNS FROM products LIKE 'required_design'");
     $chkDimensionsScope = @$pdo->query("SHOW COLUMNS FROM products LIKE 'dimensions_scope'");
@@ -198,14 +199,33 @@ function fetchOrderItems(PDO $pdo, int $orderId): array
     if ($chkDimensionsScope && $chkDimensionsScope->rowCount() > 0) {
         $productAlertCol .= ", p.dimensions_scope as product_dimensions_scope";
     }
+    if (orderTableHasColumn($pdo, 'products', 'buy_price')) {
+        $productAlertCol .= ", p.buy_price as product_buy_price";
+        if (orderTableHasColumn($pdo, 'order_items', 'buy_price')) {
+            $productAlertCol .= ", COALESCE(oi.buy_price, p.buy_price) as effective_buy_price";
+        }
+    }
     if (orderTableHasColumn($pdo, 'products', 'hs_code')) {
         $productAlertCol .= ", p.hs_code as product_hs_code";
         if (orderTableHasColumn($pdo, 'order_items', 'hs_code')) {
             $productAlertCol .= ", COALESCE(oi.hs_code, p.hs_code) as effective_hs_code";
         }
     }
+    $supplierCols = '';
+    if ($hasSupplier) {
+        $supplierCols = ", s.name as supplier_name";
+        if (orderTableHasColumn($pdo, 'suppliers', 'phone')) {
+            $supplierCols .= ", s.phone as supplier_phone";
+        }
+        if (orderTableHasColumn($pdo, 'suppliers', 'payment_links')) {
+            $supplierCols .= ", s.payment_links as supplier_payment_links";
+        }
+    }
+    $supplierJoinTarget = $hasProductSupplier
+        ? 'COALESCE(oi.supplier_id, p.supplier_id)'
+        : 'oi.supplier_id';
     $sql = $hasSupplier
-        ? "SELECT oi.*, s.name as supplier_name$productAlertCol FROM order_items oi LEFT JOIN suppliers s ON oi.supplier_id = s.id LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?"
+        ? "SELECT oi.*$supplierCols$productAlertCol FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id LEFT JOIN suppliers s ON $supplierJoinTarget = s.id WHERE oi.order_id = ?"
         : "SELECT oi.*$productAlertCol FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?";
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$orderId]);

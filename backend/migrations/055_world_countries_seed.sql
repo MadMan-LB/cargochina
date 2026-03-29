@@ -1,19 +1,9 @@
--- Migration 041: Countries table for destination country dropdown (consolidation, containers)
--- Rollback: DROP TABLE IF EXISTS countries;
+-- Migration 055: Expand countries catalog to full ISO-style list (excluding Israel, using Palestine)
+-- Rollback: DELETE FROM countries WHERE code IN (...newly added world-country codes...);
 
-CREATE TABLE
-IF NOT EXISTS countries
-(
-    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    code VARCHAR
-(10) NOT NULL UNIQUE,
-    name VARCHAR
-(100) NOT NULL,
-    INDEX idx_countries_code
-(code),
-    INDEX idx_countries_name
-(name)
-);
+UPDATE countries
+SET name = 'Palestine'
+WHERE code = 'PS';
 
 INSERT IGNORE
 INTO countries

@@ -222,6 +222,45 @@ function outputContainerOrdersCsv(array $container, array $ordersWithItems): voi
     exit;
 }
 
+function fetchContainerExportExpenses(PDO $pdo, int $containerId, array $orderIds): array
+{
+    if ($containerId <= 0 && !$orderIds) {
+        return [];
+    }
+
+    $clauses = [];
+    $params = [];
+    if ($containerId > 0) {
+        $clauses[] = 'e.container_id = ?';
+        $params[] = $containerId;
+    }
+    if ($orderIds) {
+        $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
+        $clauses[] = "e.order_id IN ($placeholders)";
+        foreach ($orderIds as $orderId) {
+            $params[] = (int) $orderId;
+        }
+    }
+
+    $sql = "SELECT e.*,
+                ec.name as category_name,
+                ec.category_type,
+                o.customer_id as order_customer_id,
+                c.name as customer_name,
+                s.name as supplier_name
+            FROM expenses e
+            JOIN expense_categories ec ON e.category_id = ec.id
+            LEFT JOIN orders o ON e.order_id = o.id
+            LEFT JOIN customers c ON e.customer_id = c.id
+            LEFT JOIN suppliers s ON e.supplier_id = s.id
+            WHERE (" . implode(' OR ', $clauses) . ")
+            ORDER BY e.expense_date ASC, e.id ASC";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
 
@@ -329,11 +368,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if ($chk && $chk->rowCount() > 0) $suppCols .= ', s.address as supplier_address';
                 $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'fax'");
                 if ($chk && $chk->rowCount() > 0) $suppCols .= ', s.fax as supplier_fax';
+                $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'payment_links'");
+                if ($chk && $chk->rowCount() > 0) $suppCols .= ', s.payment_links as supplier_payment_links';
+                $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'payment_facility_days'");
+                if ($chk && $chk->rowCount() > 0) $suppCols .= ', s.payment_facility_days as supplier_payment_facility_days';
                 $custCols = 'c.name as customer_name';
                 $chk = @$pdo->query("SHOW COLUMNS FROM customers LIKE 'phone'");
                 if ($chk && $chk->rowCount() > 0) $custCols .= ', c.phone as customer_phone';
                 require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
                 require_once __DIR__ . '/orders.php';
+                $expenses = fetchContainerExportExpenses($pdo, (int) $id, array_map('intval', $orderIds));
                 $ordersWithItems = [];
                 foreach ($orderIds as $oid) {
                     $stmt = $pdo->prepare("SELECT o.*, $custCols, $suppCols FROM orders o JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id WHERE o.id = ?");
@@ -348,7 +392,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if ($format === 'csv') {
                     outputContainerOrdersCsv($container, $ordersWithItems);
                 }
-                (new OrderExcelService())->exportOrders($ordersWithItems, 'container_' . $code . '_orders.xlsx');
+                (new OrderExcelService())->exportOrders(
+                    $ordersWithItems,
+                    'container_' . $code . '_orders.xlsx',
+                    [
+                        'container' => $container,
+                        'expenses' => $expenses,
+                    ]
+                );
             }
 
             if ($id === null) {

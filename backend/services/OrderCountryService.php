@@ -140,6 +140,9 @@ final class OrderCountryService
     {
         $value = mb_strtolower(trim($value), 'UTF-8');
         $value = preg_replace('/[^\p{L}\p{N}]+/u', '', $value) ?? '';
+        if ($value === 'il' || $value === 'israel') {
+            return 'ps';
+        }
         return $value;
     }
 }
