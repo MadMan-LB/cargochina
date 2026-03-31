@@ -25,6 +25,12 @@ function printDraftEntryRows(array $sections): string
                 static fn($entry) => trim((string) ($entry['description_text'] ?? '')),
                 $item['description_entries'] ?? []
             ));
+            $factoryPrice = isset($item['unit_price']) && $item['unit_price'] !== null
+                ? (float) $item['unit_price']
+                : null;
+            $customerPrice = isset($item['sell_price']) && $item['sell_price'] !== null
+                ? (float) $item['sell_price']
+                : $factoryPrice;
             $multiplier = (($item['dimensions_scope'] ?? 'carton') === 'carton')
                 ? (float) ($item['cartons'] ?? 0)
                 : (float) ($item['quantity'] ?? 0);
@@ -34,19 +40,21 @@ function printDraftEntryRows(array $sections): string
             <tr>
               <td><?= $itemIndex + 1 ?></td>
               <td><?= htmlspecialchars($item['item_no'] ?? '—') ?></td>
-              <td><?= htmlspecialchars($item['shipping_code'] ?? '—') ?></td>
               <td><?= htmlspecialchars($desc ?: '—') ?></td>
               <td><?= htmlspecialchars($item['hs_code'] ?? '—') ?></td>
               <td><?= htmlspecialchars((string) ($item['pieces_per_carton'] ?? '—')) ?></td>
               <td><?= htmlspecialchars((string) ($item['cartons'] ?? '—')) ?></td>
               <td><?= htmlspecialchars((string) ($item['quantity'] ?? '—')) ?></td>
-              <td><?= $item['unit_price'] !== null ? number_format((float) $item['unit_price'], 2) : '—' ?></td>
+              <td><?= $factoryPrice !== null ? number_format($factoryPrice, 2) : '—' ?></td>
+              <td><?= $customerPrice !== null ? number_format($customerPrice, 2) : '—' ?></td>
+              <td><?= number_format((float) ($item['total_amount'] ?? 0), 2) ?></td>
               <td><?= number_format($totalCbm, 6) ?></td>
               <td><?= number_format($totalWeight, 4) ?></td>
             </tr>
         <?php endforeach; ?>
         <tr class="table-secondary">
           <td colspan="8"><strong>Supplier subtotal</strong></td>
+          <td>—</td>
           <td><strong><?= number_format((float) ($section['totals']['amount'] ?? 0), 2) ?></strong></td>
           <td><strong><?= number_format((float) ($section['totals']['cbm'] ?? 0), 6) ?></strong></td>
           <td><strong><?= number_format((float) ($section['totals']['weight'] ?? 0), 4) ?></strong></td>
@@ -113,13 +121,14 @@ if ($orderId > 0) {
             : (float) (($row['quantity'] ?? 0) ?: 0);
         $sections[$key]['items'][] = [
             'item_no' => $row['item_no'] ?: null,
-            'shipping_code' => $row['shipping_code'] ?: null,
             'description_entries' => $entries,
             'hs_code' => $row['hs_code'] ?? $row['product_hs_code'] ?? null,
             'pieces_per_carton' => $row['qty_per_carton'] ?? null,
             'cartons' => $row['cartons'] ?? null,
             'quantity' => $row['quantity'] ?? null,
             'unit_price' => $row['unit_price'] !== null ? (float) $row['unit_price'] : null,
+            'sell_price' => isset($row['sell_price']) && $row['sell_price'] !== null ? (float) $row['sell_price'] : null,
+            'total_amount' => $row['total_amount'] !== null ? (float) $row['total_amount'] : 0,
             'cbm' => $multiplier > 0 ? round(((float) ($row['declared_cbm'] ?? 0)) / $multiplier, 6) : 0,
             'weight' => $multiplier > 0 ? round(((float) ($row['declared_weight'] ?? 0)) / $multiplier, 4) : 0,
             'dimensions_scope' => $scope,
@@ -158,7 +167,6 @@ if ($orderId > 0) {
             $qty = (float) ($item['quantity'] ?? 0);
             return [
                 'item_no' => null,
-                'shipping_code' => null,
                 'description_entries' => [[
                     'description_text' => $desc,
                     'description_translated' => $desc,
@@ -168,6 +176,8 @@ if ($orderId > 0) {
                 'cartons' => 1,
                 'quantity' => $qty ?: null,
                 'unit_price' => isset($item['unit_price']) ? (float) $item['unit_price'] : null,
+                'sell_price' => isset($item['unit_price']) ? (float) $item['unit_price'] : null,
+                'total_amount' => (float) (($item['unit_price'] ?? 0) * ($item['quantity'] ?? 0)),
                 'cbm' => isset($item['cbm']) ? (float) $item['cbm'] : 0,
                 'weight' => isset($item['weight']) ? (float) $item['weight'] : 0,
                 'dimensions_scope' => 'piece',
@@ -230,13 +240,14 @@ if ($orderId > 0) {
         <tr>
           <th>#</th>
           <th>Item No</th>
-          <th>Ship Code</th>
-          <th>Description</th>
+          <th>Product / Names</th>
           <th>HS Code</th>
           <th>Pieces/Carton</th>
           <th>Cartons</th>
           <th>Quantity</th>
-          <th>Unit Price</th>
+          <th>Factory Price</th>
+          <th>Customer Price</th>
+          <th>Total Amount</th>
           <th>Total CBM</th>
           <th>Total Weight</th>
         </tr>
@@ -244,7 +255,7 @@ if ($orderId > 0) {
       <tbody>
         <?= printDraftEntryRows($sections) ?>
         <tr class="table-dark">
-          <td colspan="8"><strong>Grand total</strong></td>
+          <td colspan="9"><strong>Grand total</strong></td>
           <td><strong><?= number_format($grandAmount, 2) ?></strong></td>
           <td><strong><?= number_format($grandCbm, 6) ?></strong></td>
           <td><strong><?= number_format($grandWeight, 4) ?></strong></td>

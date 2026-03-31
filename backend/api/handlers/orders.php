@@ -70,6 +70,58 @@ function normalizeOrderDestinationCountryId(PDO $pdo, int $customerId, ?int $req
     return OrderCountryService::resolveDestinationCountryId($pdo, $customerId, $requestedCountryId);
 }
 
+function supplierExists(PDO $pdo, int $supplierId): bool
+{
+    static $cache = [];
+
+    if ($supplierId <= 0) {
+        return false;
+    }
+
+    if (array_key_exists($supplierId, $cache)) {
+        return $cache[$supplierId];
+    }
+
+    try {
+        $stmt = $pdo->prepare("SELECT 1 FROM suppliers WHERE id = ? LIMIT 1");
+        $stmt->execute([$supplierId]);
+        $cache[$supplierId] = (bool) $stmt->fetchColumn();
+    } catch (Throwable $e) {
+        $cache[$supplierId] = false;
+    }
+
+    return $cache[$supplierId];
+}
+
+function normalizeExistingSupplierId(PDO $pdo, $supplierId, string $field = 'supplier_id'): ?int
+{
+    $normalized = (int) ($supplierId ?? 0);
+    if ($normalized <= 0) {
+        return null;
+    }
+
+    if (!supplierExists($pdo, $normalized)) {
+        jsonError(
+            'Selected supplier no longer exists. Please reselect the supplier and try again.',
+            400,
+            [$field => 'Selected supplier was not found.']
+        );
+    }
+
+    return $normalized;
+}
+
+function validateOrderItemSupplierIds(PDO $pdo, array $items): void
+{
+    foreach ($items as $idx => $item) {
+        if (empty($item['supplier_id'])) {
+            continue;
+        }
+        $supplierId = normalizeExistingSupplierId($pdo, $item['supplier_id'], "items.$idx.supplier_id");
+        $items[$idx]['supplier_id'] = $supplierId;
+    }
+}
+
 function normalizeOrderItemsForPersistence(PDO $pdo, int $customerId, ?int $destinationCountryId, ?int $defaultSupplierId, array $items, ?string $currentStatus = 'Draft'): array
 {
     $shippingCode = OrderCountryService::resolveShippingCode($pdo, $customerId, $destinationCountryId);
@@ -831,7 +883,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $order = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$order) jsonError('Order not found', 404);
             $customerId = (int) ($input['customer_id'] ?? $order['customer_id']);
-            $supplierId = isset($input['supplier_id']) ? ($input['supplier_id'] ? (int) $input['supplier_id'] : null) : ($order['supplier_id'] ?? null);
+            $supplierId = isset($input['supplier_id'])
+                ? normalizeExistingSupplierId($pdo, $input['supplier_id'], 'supplier_id')
+                : normalizeExistingSupplierId($pdo, $order['supplier_id'] ?? null, 'supplier_id');
             $expectedDate = resolveOrderExpectedReadyDate($input, $order);
             $highAlertNotes = isset($input['high_alert_notes']) ? (trim($input['high_alert_notes']) ?: null) : ($order['high_alert_notes'] ?? null);
             $requestedDestinationCountryId = array_key_exists('destination_country_id', $input) ? (!empty($input['destination_country_id']) ? (int) $input['destination_country_id'] : null) : ($order['destination_country_id'] ?? null);
@@ -839,6 +893,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 ? normalizeOrderDestinationCountryId($pdo, $customerId, $requestedDestinationCountryId)
                 : $requestedDestinationCountryId;
             $items = normalizeOrderItemsForPersistence($pdo, $customerId, $destinationCountryId, $supplierId ? (int) $supplierId : null, $input['items'] ?? [], (string) ($order['status'] ?? 'Draft'));
+            validateOrderItemSupplierIds($pdo, $items);
             $dupWarn = enforceDuplicateShippingCodePolicy($pdo, $customerId, (int) $id, $items);
             $pdo->beginTransaction();
             try {
@@ -971,7 +1026,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         case 'POST':
             if ($id === null) {
                 $customerId = (int) ($input['customer_id'] ?? 0);
-                $supplierId = (int) ($input['supplier_id'] ?? 0);
+                $supplierId = normalizeExistingSupplierId($pdo, $input['supplier_id'] ?? null, 'supplier_id');
                 $expectedDate = normalizeOptionalExpectedReadyDate($input['expected_ready_date'] ?? null);
                 $currency = trim($input['currency'] ?? 'USD');
                 if (!$customerId) {
@@ -986,6 +1041,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     ? normalizeOrderDestinationCountryId($pdo, $customerId, $requestedDestinationCountryId)
                     : $requestedDestinationCountryId;
                 $items = normalizeOrderItemsForPersistence($pdo, $customerId, $destinationCountryId, $supplierId ?: null, $input['items'] ?? [], 'Draft');
+                validateOrderItemSupplierIds($pdo, $items);
                 $dupWarn = enforceDuplicateShippingCodePolicy($pdo, $customerId, 0, $items);
                 foreach ($items as $it) {
                     $qty = (float) ($it['quantity'] ?? 0);

@@ -25,16 +25,60 @@
         return data;
     }
 
+    function trimDisplayNumber(value, maxDecimals = 2) {
+        if (typeof window.formatDisplayNumber === "function") {
+            return window.formatDisplayNumber(value, { maxDecimals }) || "0";
+        }
+        const numeric = parseFloat(value);
+        if (!Number.isFinite(numeric)) return "0";
+        return String(numeric);
+    }
+
     function fmtAmount(value) {
-        return (parseFloat(value || 0) || 0).toFixed(2);
+        if (typeof window.formatDisplayAmount === "function") {
+            return window.formatDisplayAmount(value) || "0";
+        }
+        return trimDisplayNumber(value, 2);
     }
 
     function fmtCbm(value) {
-        return (parseFloat(value || 0) || 0).toFixed(6);
+        if (typeof window.formatDisplayCbm === "function") {
+            return window.formatDisplayCbm(value, 6) || "0";
+        }
+        return trimDisplayNumber(value, 6);
     }
 
     function fmtWeight(value) {
-        return (parseFloat(value || 0) || 0).toFixed(4);
+        if (typeof window.formatDisplayWeight === "function") {
+            return window.formatDisplayWeight(value, 4) || "0";
+        }
+        return trimDisplayNumber(value, 4);
+    }
+
+    function fmtQty(value) {
+        if (typeof window.formatDisplayQuantity === "function") {
+            return window.formatDisplayQuantity(value, 4) || "0";
+        }
+        return trimDisplayNumber(value, 4);
+    }
+
+    function fmtFieldNumber(value, maxDecimals = 4) {
+        if (value === null || value === undefined) return "";
+        const raw = String(value).trim();
+        if (!raw) return "";
+        return trimDisplayNumber(raw, maxDecimals);
+    }
+
+    function parseStructuredItemNo(value) {
+        const match = String(value || "")
+            .trim()
+            .match(/^(.+)-(\d+)-(\d+)$/);
+        if (!match) return null;
+        return {
+            prefix: match[1].trim(),
+            supplierSequence: parseInt(match[2], 10),
+            itemSequence: parseInt(match[3], 10),
+        };
     }
 
     function getDraftDestinationCountryId() {
@@ -238,12 +282,11 @@
         if (prefix) {
             hint.textContent =
                 `Default shipping code ${prefix} is active. Item numbers now follow ${prefix}-supplierSequence-itemSequence and stay aligned with supplier groups.`;
-            hint.className = "alert alert-info border mt-3 mb-0";
+            hint.className = "alert alert-info border mt-3 mb-0 py-2";
             return;
         }
-        hint.textContent =
-            "This customer has no default shipping code yet. Shipping code and item number stay blank until you fill them manually.";
-        hint.className = "alert alert-warning border mt-3 mb-0";
+        hint.textContent = "";
+        hint.className = "d-none";
     }
 
     function confirmMissingDraftExpectedReadyDate(actionLabel) {
@@ -261,34 +304,99 @@
     function renumberDraftItems() {
         const prefix = getCustomerShipCode();
         setShippingHint(prefix);
+        const supplierOrder = [];
         const supplierSequenceByKey = new Map();
+        const manualSupplierSequenceByKey = new Map();
+        const usedSupplierSequences = new Set();
         const supplierItemCounts = new Map();
-        let nextSupplierSequence = 1;
         document.querySelectorAll(".draft-order-section").forEach((section) => {
             const supplierId =
                 section.querySelector(".draft-section-supplier-id")?.value?.trim() ||
                 "";
-            const supplierKey = supplierId || `section-${section.dataset.sectionId || nextSupplierSequence}`;
-            if (!supplierSequenceByKey.has(supplierKey)) {
-                supplierSequenceByKey.set(supplierKey, nextSupplierSequence++);
+            const supplierKey = supplierId || `section-${section.dataset.sectionId || ""}`;
+            if (!supplierOrder.includes(supplierKey)) {
+                supplierOrder.push(supplierKey);
             }
-            const supplierSequence = supplierSequenceByKey.get(supplierKey);
-            let localCount = supplierItemCounts.get(supplierKey) || 0;
             section.querySelectorAll(".draft-order-item-card").forEach((card) => {
                 const shipInput = card.querySelector(".draft-item-shipping-code");
                 const itemNoInput = card.querySelector(".draft-item-item-no");
                 if (!shipInput || !itemNoInput) return;
-                if (!card.dataset.manualShippingCode) {
-                    shipInput.value = prefix || "";
+                shipInput.value = prefix || "";
+                if (card.dataset.manualItemNo) {
+                    const parsed = parseStructuredItemNo(itemNoInput.value);
+                    if (
+                        parsed &&
+                        !manualSupplierSequenceByKey.has(supplierKey)
+                    ) {
+                        manualSupplierSequenceByKey.set(
+                            supplierKey,
+                            parsed.supplierSequence,
+                        );
+                        usedSupplierSequences.add(parsed.supplierSequence);
+                    }
                 }
-                localCount += 1;
-                supplierItemCounts.set(supplierKey, localCount);
-                if (!card.dataset.manualItemNo) {
-                    const base = (shipInput.value || prefix || "").trim();
-                    itemNoInput.value = base
-                        ? `${base}-${supplierSequence}-${localCount}`
-                        : "";
+            });
+        });
+
+        let nextSupplierSequence = 1;
+        supplierOrder.forEach((supplierKey) => {
+            if (manualSupplierSequenceByKey.has(supplierKey)) {
+                supplierSequenceByKey.set(
+                    supplierKey,
+                    manualSupplierSequenceByKey.get(supplierKey),
+                );
+                return;
+            }
+            while (usedSupplierSequences.has(nextSupplierSequence)) {
+                nextSupplierSequence += 1;
+            }
+            supplierSequenceByKey.set(supplierKey, nextSupplierSequence);
+            usedSupplierSequences.add(nextSupplierSequence);
+            nextSupplierSequence += 1;
+        });
+
+        document.querySelectorAll(".draft-order-section").forEach((section) => {
+            const supplierId =
+                section.querySelector(".draft-section-supplier-id")?.value?.trim() ||
+                "";
+            const supplierKey = supplierId || `section-${section.dataset.sectionId || ""}`;
+            const supplierSequence = supplierSequenceByKey.get(supplierKey) || 1;
+            section.querySelectorAll(".draft-order-item-card").forEach((card) => {
+                const itemNoInput = card.querySelector(".draft-item-item-no");
+                const parsed = parseStructuredItemNo(itemNoInput?.value);
+                if (parsed && parsed.supplierSequence === supplierSequence) {
+                    supplierItemCounts.set(
+                        supplierKey,
+                        Math.max(
+                            supplierItemCounts.get(supplierKey) || 0,
+                            parsed.itemSequence,
+                        ),
+                    );
                 }
+            });
+        });
+
+        document.querySelectorAll(".draft-order-section").forEach((section) => {
+            const supplierId =
+                section.querySelector(".draft-section-supplier-id")?.value?.trim() ||
+                "";
+            const supplierKey = supplierId || `section-${section.dataset.sectionId || ""}`;
+            const supplierSequence = supplierSequenceByKey.get(supplierKey) || 1;
+            section.querySelectorAll(".draft-order-item-card").forEach((card) => {
+                const shipInput = card.querySelector(".draft-item-shipping-code");
+                const itemNoInput = card.querySelector(".draft-item-item-no");
+                if (!shipInput || !itemNoInput) return;
+                shipInput.value = prefix || "";
+                if (card.dataset.manualItemNo) {
+                    return;
+                }
+                const nextItemSequence =
+                    (supplierItemCounts.get(supplierKey) || 0) + 1;
+                supplierItemCounts.set(supplierKey, nextItemSequence);
+                const base = (shipInput.value || prefix || "").trim();
+                itemNoInput.value = base
+                    ? `${base}-${supplierSequence}-${nextItemSequence}`
+                    : "";
             });
         });
     }
@@ -404,12 +512,13 @@
         document.getElementById("draftOrderModalTitle").textContent =
             "Draft an Order";
         document.getElementById("draftOrderModalSubtitle").textContent =
-            "One customer, multiple supplier sections, live totals.";
+            "One customer, multiple supplier sections, compact item cards, live totals.";
         document.getElementById("draftOrderSections").innerHTML = "";
-        document.getElementById("draftOrderTotalAmount").textContent = "0.00";
+        document.getElementById("draftOrderTotalAmount").textContent = "0";
         document.getElementById("draftOrderTotalCurrency").textContent = "USD";
-        document.getElementById("draftOrderTotalCbm").textContent = "0.000000";
-        document.getElementById("draftOrderTotalWeight").textContent = "0.0000";
+        document.getElementById("draftOrderTotalQty").textContent = "0";
+        document.getElementById("draftOrderTotalCbm").textContent = "0";
+        document.getElementById("draftOrderTotalWeight").textContent = "0";
         draftOrderCustomerAc?.setValue(null);
         sectionIndex = 0;
         itemIndex = 0;
@@ -508,7 +617,7 @@
                   <button type="button" class="btn btn-outline-primary btn-sm draft-item-action" data-builder-action="quick-add-supplier" title="Quick add supplier">+</button>
                 </div>
                 <div class="d-flex gap-2 align-items-center flex-wrap">
-                  <small class="text-muted"><span class="draft-section-amount">0.00</span> <span class="draft-section-currency">USD</span> · <span class="draft-section-cbm">0.000000</span> CBM · <span class="draft-section-weight">0.0000</span> kg</small>
+                  <small class="text-muted"><span class="draft-section-amount">0</span> <span class="draft-section-currency">USD</span> · <span class="draft-section-qty">0</span> qty · <span class="draft-section-cbm">0</span> CBM · <span class="draft-section-weight">0</span> kg</small>
                   <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="collapse-section">Collapse</button>
                   <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="move-up">↑</button>
                   <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="move-down">↓</button>
@@ -645,20 +754,186 @@
     }
 
     function setDraftDescriptionValue(card, entries = []) {
-        const input = card.querySelector(".draft-item-description-input");
-        if (!input) return;
-        const { cn, en } = collapseDescriptionEntries(entries);
-        input.value = draftDescriptionDisplayValue(cn, en);
-        input.dataset.descriptionCn = cn;
-        input.dataset.descriptionEn = en;
+        renderDraftDescriptionEntries(card, entries);
     }
 
     function seedDraftDescriptionFromText(card, text = "") {
-        const input = card.querySelector(".draft-item-description-input");
-        if (!input) return;
-        input.value = String(text || "").trim();
-        input.dataset.descriptionCn = "";
-        input.dataset.descriptionEn = "";
+        renderDraftDescriptionEntries(
+            card,
+            text
+                ? [
+                      {
+                          description_text: text,
+                          description_translated: "",
+                      },
+                  ]
+                : [],
+        );
+    }
+
+    function descriptionEntryMarkup(entry = {}) {
+        const cn = (entry?.description_text || entry?.text || "").trim();
+        const en =
+            (
+                entry?.description_translated ||
+                entry?.translated ||
+                entry?.description_en ||
+                ""
+            ).trim();
+        const display = draftDescriptionDisplayValue(cn, en);
+        return `
+            <div class="draft-item-description-row">
+              <input
+                type="text"
+                class="form-control form-control-sm draft-item-description-entry-input"
+                placeholder="Product name / description"
+                value="${escapeHtml(display)}"
+                data-description-cn="${escapeHtml(cn).replace(/"/g, "&quot;")}"
+                data-description-en="${escapeHtml(en).replace(/"/g, "&quot;")}"
+              >
+              <button type="button" class="btn btn-outline-danger btn-sm draft-item-action draft-item-description-remove" title="Remove row">×</button>
+            </div>
+        `;
+    }
+
+    function attachDraftDescriptionRowEvents(card, row) {
+        row.querySelector(".draft-item-description-entry-input")?.addEventListener(
+            "input",
+            (event) => {
+                event.currentTarget.dataset.descriptionCn = "";
+                event.currentTarget.dataset.descriptionEn = "";
+            },
+        );
+        row.querySelector(".draft-item-description-remove")?.addEventListener(
+            "click",
+            () => {
+                const container = card.querySelector(
+                    ".draft-item-description-entries",
+                );
+                row.remove();
+                if (container && !container.children.length) {
+                    addDraftDescriptionEntry(card);
+                } else {
+                    syncDraftPrimaryDescriptionInput(
+                        card,
+                        card.closest(".draft-order-section"),
+                    );
+                }
+            },
+        );
+    }
+
+    function addDraftDescriptionEntry(card, entry = {}, focus = false) {
+        const container = card.querySelector(".draft-item-description-entries");
+        if (!container) return;
+        const wrapper = document.createElement("div");
+        wrapper.innerHTML = descriptionEntryMarkup(entry);
+        const row = wrapper.firstElementChild;
+        container.appendChild(row);
+        attachDraftDescriptionRowEvents(card, row);
+        syncDraftPrimaryDescriptionInput(card, card.closest(".draft-order-section"));
+        if (focus) {
+            row.querySelector(".draft-item-description-entry-input")?.focus();
+        }
+    }
+
+    function renderDraftDescriptionEntries(card, entries = []) {
+        const container = card.querySelector(".draft-item-description-entries");
+        if (!container) return;
+        container.innerHTML = "";
+        const list = Array.isArray(entries) ? entries.filter(Boolean) : [];
+        if (!list.length) {
+            addDraftDescriptionEntry(card);
+            return;
+        }
+        list.forEach((entry) => addDraftDescriptionEntry(card, entry));
+        syncDraftPrimaryDescriptionInput(card, card.closest(".draft-order-section"));
+    }
+
+    function syncDraftPrimaryDescriptionInput(card, section) {
+        const inputs = Array.from(
+            card.querySelectorAll(".draft-item-description-entry-input"),
+        );
+        if (!inputs.length) return;
+
+        inputs.forEach((input, index) => {
+            input.classList.toggle(
+                "draft-item-description-primary",
+                index === 0,
+            );
+            input.placeholder =
+                index === 0
+                    ? "Type description — search existing products or enter manually"
+                    : "Additional name / description";
+        });
+
+        const primaryInput = inputs[0];
+        if (!primaryInput) return;
+
+        if (!primaryInput.dataset.productSearchBound) {
+            primaryInput.dataset.productSearchBound = "1";
+            const productIdInput = card.querySelector(".draft-item-product-id");
+            primaryInput.addEventListener("input", () => {
+                productIdInput.value = "";
+                const meta = card.querySelector(".draft-item-product-meta");
+                if (meta) meta.textContent = "";
+            });
+        }
+
+        if (card._draftPrimaryDescriptionInput === primaryInput) {
+            return;
+        }
+
+        card._draftPrimaryDescriptionInput = primaryInput;
+        card._productAc = Autocomplete.init(primaryInput, {
+            resource: "products",
+            searchPath: "/search",
+            placeholder:
+                "Type description — search existing products or enter manually",
+            extraParams: () => ({
+                supplier_id:
+                    section?.querySelector(".draft-section-supplier-id")?.value ||
+                    "",
+            }),
+            renderItem: (product) =>
+                `${product.description_cn || product.description_en || ""}${product.high_alert_note || product.required_design ? " — Alert" : ""}${product.hs_code ? ` — HS ${product.hs_code}` : ""}`
+                    .replace(/^ — | — $/g, "")
+                    .trim() || `#${product.id}`,
+            onSelect: (item) => populateFromProduct(card, item),
+        });
+    }
+
+    function draftDescriptionHasContent(card) {
+        return Array.from(
+            card.querySelectorAll(".draft-item-description-entry-input"),
+        ).some((input) => input.value.trim());
+    }
+
+    function renderDraftPhotoThumbs(container, paths, removable = true) {
+        container.innerHTML = (paths || [])
+            .map(
+                (path, index) => `
+                    <div class="draft-item-photo-thumb" data-path="${escapeHtml(path).replace(/"/g, "&quot;")}">
+                      <a href="/cargochina/backend/${escapeHtml(path)}" target="_blank" rel="noopener">
+                        <img src="/cargochina/backend/${escapeHtml(path)}" alt="Item photo">
+                      </a>
+                      ${
+                          removable
+                              ? `<button type="button" class="btn btn-sm btn-light border draft-item-action draft-item-photo-remove" data-remove-index="${index}" title="Remove photo">×</button>`
+                              : ""
+                      }
+                    </div>
+                `,
+            )
+            .join("");
+        container.querySelectorAll("[data-remove-index]").forEach((btn) => {
+            btn.addEventListener("click", () => {
+                const idx = parseInt(btn.dataset.removeIndex || "-1", 10);
+                if (idx < 0) return;
+                paths.splice(idx, 1);
+                renderDraftPhotoThumbs(container, paths, removable);
+            });
+        });
     }
 
     function itemMarkup(idx) {
@@ -666,108 +941,154 @@
             <div class="border rounded p-3 draft-order-item-card" data-item-id="${idx}" data-dimensions-scope="carton">
               <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
                 <div>
-                  <div class="fw-semibold">Item Line</div>
-                  <small class="text-muted">Product match or free-text item, then one description, packaging, pricing, dimensions, and photos.</small>
+                  <div class="fw-semibold text-dark">Item Line</div>
+                  <small class="text-muted">Compact draft item with photo, description, auto numbering, and live totals.</small>
                 </div>
                 <button type="button" class="btn btn-outline-danger btn-sm draft-item-action" data-builder-action="remove-item">Remove Item</button>
               </div>
-              <div class="row g-3">
-                <div class="col-12 col-xl-4">
-                  <label class="form-label">Product</label>
-                  <input type="text" class="form-control draft-item-product-search" placeholder="Search existing products or type a new item name..." autocomplete="off">
-                  <input type="hidden" class="draft-item-product-id">
-                  <div class="form-text draft-item-product-meta"></div>
-                </div>
-                <div class="col-6 col-xl-2">
-                  <label class="form-label">Shipping Code</label>
-                  <input type="text" class="form-control draft-item-shipping-code" placeholder="Auto from customer">
-                </div>
-                <div class="col-6 col-xl-2">
-                  <label class="form-label">Item No</label>
-                  <input type="text" class="form-control draft-item-item-no" placeholder="CODE-1">
-                </div>
-                <div class="col-6 col-xl-2">
-                  <label class="form-label">Pieces / Carton</label>
-                  <input type="number" step="0.0001" min="0" class="form-control draft-item-pieces-per-carton" placeholder="0">
-                </div>
-                <div class="col-6 col-xl-2">
-                  <label class="form-label">Cartons</label>
-                  <input type="number" step="1" min="0" class="form-control draft-item-cartons" placeholder="0">
-                </div>
-                <div class="col-12">
-                  <label class="form-label">Description</label>
-                  <input type="text" class="form-control draft-item-description-input" placeholder="Type one description. Chinese and English are filled automatically.">
-                  <div class="form-text">Use one description only. The system stores Chinese and English automatically for this item.</div>
-                </div>
-                <div class="col-6 col-lg-3">
-                  <label class="form-label">Unit Price</label>
-                  <input type="number" step="0.0001" min="0" class="form-control draft-item-unit-price" placeholder="0">
-                </div>
-                <div class="col-6 col-lg-3">
-                  <label class="form-label">Optional HS Code</label>
-                  <input type="text" class="form-control draft-item-hs-code" placeholder="HS code">
-                </div>
-                <div class="col-6 col-lg-3">
-                  <label class="form-label">CBM / unit or carton</label>
-                  <input type="number" step="0.000001" min="0" class="form-control draft-item-cbm" placeholder="CBM">
-                </div>
-                <div class="col-6 col-lg-3">
-                  <label class="form-label">Weight / unit or carton (kg)</label>
-                  <input type="number" step="0.0001" min="0" class="form-control draft-item-weight" placeholder="Weight">
-                </div>
-                <div class="col-4 col-lg-2">
-                  <label class="form-label">L (cm)</label>
-                  <input type="number" step="0.01" min="0" class="form-control draft-item-length" placeholder="L">
-                </div>
-                <div class="col-4 col-lg-2">
-                  <label class="form-label">W (cm)</label>
-                  <input type="number" step="0.01" min="0" class="form-control draft-item-width" placeholder="W">
-                </div>
-                <div class="col-4 col-lg-2">
-                  <label class="form-label">H (cm)</label>
-                  <input type="number" step="0.01" min="0" class="form-control draft-item-height" placeholder="H">
-                </div>
-                <div class="col-12 col-lg-6">
-                  <div class="border rounded p-3 h-100">
-                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                      <div>
-                        <div class="fw-semibold">Photos</div>
-                        <small class="text-muted">Attach product photos or use the camera on mobile.</small>
-                      </div>
-                      <div class="d-flex gap-2">
-                        <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="camera-photo">Take Photo</button>
-                        <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="upload-photo">Upload Photo</button>
+              <div class="row g-2 align-items-start">
+                <div class="col-12 col-xl-3 col-xxl-2">
+                  <div class="draft-item-sidebar">
+                    <div class="draft-item-panel draft-item-photo-panel">
+                      <label class="form-label form-label-sm">Photo</label>
+                      <div class="draft-item-photos"></div>
+                      <input type="file" class="d-none draft-item-photo-upload" accept="image/*" multiple>
+                      <input type="file" class="d-none draft-item-photo-camera" accept="image/*" capture="environment">
+                      <div class="d-grid gap-2 mt-2">
+                        <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action draft-item-photo-btn" data-builder-action="upload-photo">+ Add</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="camera-photo">Camera</button>
                       </div>
                     </div>
-                    <input type="file" class="d-none draft-item-photo-upload" accept="image/*" multiple>
-                    <input type="file" class="d-none draft-item-photo-camera" accept="image/*" capture="environment">
-                    <div class="draft-item-photos d-flex flex-wrap gap-2 mt-3"></div>
-                  </div>
-                </div>
-                <div class="col-12 col-lg-6">
-                  <div class="border rounded p-3 h-100">
-                    <div class="form-check mb-3">
-                      <input class="form-check-input draft-item-custom-design-required" type="checkbox" id="draftItemCustomDesign${idx}">
-                      <label class="form-check-label fw-semibold" for="draftItemCustomDesign${idx}">Custom design</label>
-                    </div>
-                    <div class="draft-item-custom-design-fields d-none">
-                      <label class="form-label">Custom design note</label>
-                      <textarea class="form-control draft-item-custom-design-note" rows="2" placeholder="Reference design note or internal reminder..."></textarea>
-                      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-3">
-                        <small class="text-muted">Attach custom design files if the supplier needs them.</small>
-                        <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="upload-design">Upload Design</button>
+                    <div class="draft-item-stats draft-item-sidebar-stats">
+                      <div class="draft-item-stat">
+                        <span class="draft-item-stat-label">Total Qty</span>
+                        <div class="draft-item-computed draft-item-total-qty">0</div>
                       </div>
-                      <input type="file" class="d-none draft-item-design-upload" accept="image/*,application/pdf,.pdf" multiple>
-                      <div class="draft-item-design-files d-flex flex-wrap gap-2 mt-3"></div>
+                      <div class="draft-item-stat">
+                        <span class="draft-item-stat-label">Total Amount</span>
+                        <div class="draft-item-computed draft-item-total-amount">0</div>
+                      </div>
+                      <div class="draft-item-stat">
+                        <span class="draft-item-stat-label">Total CBM</span>
+                        <div class="draft-item-computed draft-item-total-cbm">0</div>
+                      </div>
+                      <div class="draft-item-stat">
+                        <span class="draft-item-stat-label">Total Weight</span>
+                        <div class="draft-item-computed draft-item-total-weight">0</div>
+                      </div>
                     </div>
                   </div>
                 </div>
-                <div class="col-12">
-                  <div class="d-flex gap-4 flex-wrap">
-                    <div><strong class="draft-item-total-amount">0.00</strong> <span class="text-muted">total</span></div>
-                    <div><strong class="draft-item-total-cbm">0.000000</strong> <span class="text-muted">CBM</span></div>
-                    <div><strong class="draft-item-total-weight">0.0000</strong> <span class="text-muted">kg</span></div>
-                    <div><strong class="draft-item-total-qty">0</strong> <span class="text-muted">pcs</span></div>
+                <div class="col-12 col-xl-9 col-xxl-10">
+                  <div class="row g-2">
+                    <div class="col-12 col-lg-3 col-xl-3">
+                      <div class="draft-item-panel draft-item-identity-panel h-100">
+                        <label class="form-label form-label-sm">Item No</label>
+                        <input type="text" class="form-control form-control-sm draft-item-item-no" placeholder="Auto">
+                        <input type="hidden" class="draft-item-shipping-code">
+                        <label class="form-label form-label-sm mt-2">Optional HS Code</label>
+                        <input type="text" class="form-control form-control-sm draft-item-hs-code" placeholder="HS code">
+                      </div>
+                    </div>
+                    <div class="col-12 col-lg-9 col-xl-9">
+                      <div class="draft-item-panel draft-item-descriptions-panel">
+                        <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-2">
+                          <div class="d-flex align-items-center gap-2 flex-wrap">
+                            <div class="draft-item-panel-title mb-0">Description</div>
+                            <small class="text-muted">Search for a product or add a new one.</small>
+                          </div>
+                          <button type="button" class="btn btn-outline-primary btn-sm draft-item-action" data-builder-action="add-description-entry">+ Add name</button>
+                        </div>
+                        <input type="hidden" class="draft-item-product-id">
+                        <div class="draft-item-description-entries d-flex flex-column gap-2"></div>
+                        <div class="form-text draft-item-product-meta"></div>
+                      </div>
+                    </div>
+                    <div class="col-12">
+                      <div class="draft-item-panel draft-item-subgrid">
+                        <div class="draft-item-subgrid-block">
+                          <div class="draft-item-subgrid-title">Packaging</div>
+                          <div class="row g-2">
+                            <div class="col-4">
+                              <label class="form-label draft-item-label">Total Cartons</label>
+                              <input type="number" step="1" min="0" class="form-control form-control-sm draft-item-cartons" placeholder="0">
+                            </div>
+                            <div class="col-4">
+                              <label class="form-label draft-item-label">Pieces / Carton</label>
+                              <input type="number" step="0.0001" min="0" class="form-control form-control-sm draft-item-pieces-per-carton" placeholder="0">
+                            </div>
+                            <div class="col-4">
+                              <label class="form-label draft-item-label">Total Qty</label>
+                              <div class="draft-item-computed draft-item-total-qty-inline">0</div>
+                            </div>
+                          </div>
+                        </div>
+                        <div class="draft-item-subgrid-block">
+                          <div class="draft-item-subgrid-title">Pricing</div>
+                          <div class="row g-2">
+                            <div class="col-6">
+                              <label class="form-label draft-item-label">Factory Price</label>
+                              <input type="number" step="0.0001" min="0" class="form-control form-control-sm draft-item-unit-price" placeholder="0">
+                            </div>
+                            <div class="col-6">
+                              <label class="form-label draft-item-label">Total Amount</label>
+                              <div class="draft-item-computed draft-item-total-amount-inline">0</div>
+                            </div>
+                          </div>
+                          <div class="form-text draft-item-pricing-hint">Total amount follows customer price when set, otherwise factory price.</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="col-12">
+                      <div class="draft-item-panel draft-item-volume-panel">
+                        <div class="draft-item-subgrid-title mb-2">Volume & Weight</div>
+                        <div class="draft-item-volume-fields">
+                          <div class="draft-item-volume-field">
+                            <label class="form-label draft-item-label">CBM</label>
+                            <input type="number" step="0.000001" min="0" class="form-control form-control-sm draft-item-cbm" placeholder="CBM">
+                          </div>
+                          <span class="draft-item-or">or</span>
+                          <div class="draft-item-volume-field">
+                            <label class="form-label draft-item-label">Length</label>
+                            <input type="number" step="0.01" min="0" class="form-control form-control-sm draft-item-length" placeholder="L">
+                          </div>
+                          <div class="draft-item-volume-field">
+                            <label class="form-label draft-item-label">Width</label>
+                            <input type="number" step="0.01" min="0" class="form-control form-control-sm draft-item-width" placeholder="W">
+                          </div>
+                          <div class="draft-item-volume-field">
+                            <label class="form-label draft-item-label">Height</label>
+                            <input type="number" step="0.01" min="0" class="form-control form-control-sm draft-item-height" placeholder="H">
+                          </div>
+                          <div class="draft-item-volume-field">
+                            <label class="form-label draft-item-label">Weight (kg)</label>
+                            <input type="number" step="0.0001" min="0" class="form-control form-control-sm draft-item-weight" placeholder="Weight">
+                          </div>
+                          <div class="draft-item-volume-field">
+                            <label class="form-label draft-item-label">Customer Price</label>
+                            <input type="number" step="0.0001" min="0" class="form-control form-control-sm draft-item-customer-price" placeholder="Export">
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="col-12">
+                      <div class="draft-item-panel draft-item-design-panel">
+                        <div class="form-check mb-2">
+                          <input class="form-check-input draft-item-custom-design-required" type="checkbox" id="draftItemCustomDesign${idx}">
+                          <label class="form-check-label fw-semibold" for="draftItemCustomDesign${idx}">Custom design</label>
+                        </div>
+                        <div class="draft-item-custom-design-fields d-none">
+                          <label class="form-label form-label-sm">Custom design note</label>
+                          <textarea class="form-control form-control-sm draft-item-custom-design-note" rows="2" placeholder="Reference design note or internal reminder..."></textarea>
+                          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-2">
+                            <small class="text-muted">Attach custom design files if the supplier needs them.</small>
+                            <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="upload-design">Upload Design</button>
+                          </div>
+                          <input type="file" class="d-none draft-item-design-upload" accept="image/*,application/pdf,.pdf" multiple>
+                          <div class="draft-item-design-files d-flex flex-wrap gap-2 mt-3"></div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -813,7 +1134,7 @@
         const uploaded = await uploadFiles(files, true);
         uploaded.forEach((path) => paths.push(path));
         card._photoPaths = paths;
-        renderFilePills(card.querySelector(".draft-item-photos"), paths);
+        renderDraftPhotoThumbs(card.querySelector(".draft-item-photos"), paths);
     }
 
     async function uploadDesignFiles(card, files) {
@@ -825,9 +1146,9 @@
     }
 
     function refreshSectionProductFilters(section) {
-        section
-            .querySelectorAll(".draft-item-product-search")
-            .forEach((input) => input.dispatchEvent(new Event("input")));
+        section.querySelectorAll(".draft-order-item-card").forEach((card) => {
+            syncDraftPrimaryDescriptionInput(card, section);
+        });
     }
 
     function updateDraftItemTotals(card) {
@@ -843,6 +1164,11 @@
             parseFloat(
                 card.querySelector(".draft-item-unit-price")?.value || 0,
             ) || 0;
+        const customerPrice =
+            parseFloat(
+                card.querySelector(".draft-item-customer-price")?.value || 0,
+            ) || 0;
+        const priceForTotal = customerPrice > 0 ? customerPrice : unitPrice;
         let cbm =
             parseFloat(card.querySelector(".draft-item-cbm")?.value || 0) || 0;
         const l =
@@ -863,18 +1189,33 @@
                 ? "piece"
                 : "carton";
         const multiplier = scope === "carton" ? cartons : qty;
-        card.querySelector(".draft-item-total-qty").textContent = qty
-            ? qty.toFixed(4).replace(/\.?0+$/, "")
-            : "0";
+        card.querySelector(".draft-item-total-qty").textContent = fmtQty(qty);
+        const qtyInline = card.querySelector(".draft-item-total-qty-inline");
+        if (qtyInline) {
+            qtyInline.textContent = fmtQty(qty);
+        }
         card.querySelector(".draft-item-total-amount").textContent = fmtAmount(
-            qty * unitPrice,
+            qty * priceForTotal,
         );
+        const amountInline = card.querySelector(
+            ".draft-item-total-amount-inline",
+        );
+        if (amountInline) {
+            amountInline.textContent = fmtAmount(qty * priceForTotal);
+        }
         card.querySelector(".draft-item-total-cbm").textContent = fmtCbm(
             cbm * multiplier,
         );
         card.querySelector(".draft-item-total-weight").textContent = fmtWeight(
             weight * multiplier,
         );
+        const pricingHint = card.querySelector(".draft-item-pricing-hint");
+        if (pricingHint) {
+            pricingHint.textContent =
+                customerPrice > 0
+                    ? "Total amount follows customer price."
+                    : "Total amount follows factory price until customer price is set.";
+        }
         updateDraftOrderTotals();
     }
 
@@ -884,11 +1225,13 @@
         document.getElementById("draftOrderTotalCurrency").textContent =
             currency;
         let totalAmount = 0;
+        let totalQty = 0;
         let totalCbm = 0;
         let totalWeight = 0;
 
         document.querySelectorAll(".draft-order-section").forEach((section) => {
             let sectionAmount = 0;
+            let sectionQty = 0;
             let sectionCbm = 0;
             let sectionWeight = 0;
             section.querySelectorAll(".draft-order-item-card").forEach((card) => {
@@ -896,6 +1239,11 @@
                     parseFloat(
                         card.querySelector(".draft-item-total-amount")
                             ?.textContent || 0,
+                    ) || 0;
+                sectionQty +=
+                    parseFloat(
+                        card.querySelector(".draft-item-total-qty")?.textContent ||
+                            0,
                     ) || 0;
                 sectionCbm +=
                     parseFloat(
@@ -912,18 +1260,23 @@
                 fmtAmount(sectionAmount);
             section.querySelector(".draft-section-currency").textContent =
                 currency;
+            section.querySelector(".draft-section-qty").textContent =
+                fmtQty(sectionQty);
             section.querySelector(".draft-section-cbm").textContent =
                 fmtCbm(sectionCbm);
             section.querySelector(".draft-section-weight").textContent =
                 fmtWeight(sectionWeight);
             syncDraftSectionCollapse(section);
             totalAmount += sectionAmount;
+            totalQty += sectionQty;
             totalCbm += sectionCbm;
             totalWeight += sectionWeight;
         });
 
         document.getElementById("draftOrderTotalAmount").textContent =
             fmtAmount(totalAmount);
+        document.getElementById("draftOrderTotalQty").textContent =
+            fmtQty(totalQty);
         document.getElementById("draftOrderTotalCbm").textContent =
             fmtCbm(totalCbm);
         document.getElementById("draftOrderTotalWeight").textContent =
@@ -983,16 +1336,24 @@
             card.querySelector(".draft-item-pieces-per-carton").value =
                 product.pieces_per_carton;
         }
-        if (product.unit_price != null) {
+        const factoryPrice =
+            product.buy_price != null && product.buy_price !== ""
+                ? product.buy_price
+                : product.unit_price;
+        if (factoryPrice != null && factoryPrice !== "") {
             card.querySelector(".draft-item-unit-price").value =
-                product.unit_price;
+                factoryPrice;
+        }
+        if (product.sell_price != null && product.sell_price !== "") {
+            card.querySelector(".draft-item-customer-price").value =
+                product.sell_price;
         }
         if (product.cbm != null) {
             card.querySelector(".draft-item-cbm").value = fmtCbm(product.cbm);
         }
         if (product.weight != null) {
             card.querySelector(".draft-item-weight").value =
-                parseFloat(product.weight).toFixed(4);
+                String(parseFloat(product.weight) || 0);
         }
         card.querySelector(".draft-item-length").value =
             product.length_cm ?? "";
@@ -1015,7 +1376,7 @@
             ? product.image_paths.slice(0, 1)
             : [];
         card._photoPaths = photoPaths;
-        renderFilePills(card.querySelector(".draft-item-photos"), photoPaths);
+        renderDraftPhotoThumbs(card.querySelector(".draft-item-photos"), photoPaths);
         updateDraftItemTotals(card);
         renumberDraftItems();
     }
@@ -1063,6 +1424,8 @@
             initial.pieces_per_carton ?? "";
         card.querySelector(".draft-item-unit-price").value =
             initial.unit_price ?? "";
+        card.querySelector(".draft-item-customer-price").value =
+            initial.sell_price ?? initial.customer_price ?? "";
         card.querySelector(".draft-item-cbm").value = initial.cbm ?? "";
         card.querySelector(".draft-item-weight").value = initial.weight ?? "";
         card.querySelector(".draft-item-length").value =
@@ -1074,7 +1437,6 @@
         card.querySelector(".draft-item-shipping-code").value =
             initial.shipping_code || "";
         card.querySelector(".draft-item-item-no").value = initial.item_no || "";
-        if (initial.shipping_code) card.dataset.manualShippingCode = "1";
         if (initial.item_no) card.dataset.manualItemNo = "1";
         card.dataset.dimensionsScope = (
             initial.dimensions_scope || "carton"
@@ -1084,52 +1446,20 @@
         card.querySelector(".draft-item-custom-design-note").value =
             initial.custom_design_note || "";
         toggleCustomDesignFields(card);
-        renderFilePills(card.querySelector(".draft-item-photos"), card._photoPaths);
+        renderDraftPhotoThumbs(
+            card.querySelector(".draft-item-photos"),
+            card._photoPaths,
+        );
         renderFilePills(
             card.querySelector(".draft-item-design-files"),
             card._designPaths,
         );
 
-        const productInput = card.querySelector(".draft-item-product-search");
         const productIdInput = card.querySelector(".draft-item-product-id");
-        const productAc = Autocomplete.init(productInput, {
-            resource: "products",
-            searchPath: "/search",
-            placeholder: "Search existing products or type a new item name...",
-            extraParams: () => ({
-                supplier_id:
-                    section.querySelector(".draft-section-supplier-id")?.value ||
-                    "",
-            }),
-            onSelect: (item) => populateFromProduct(card, item),
-        });
         if (initial.product_id) {
             productIdInput.value = initial.product_id;
-            productAc?.setValue({
-                id: initial.product_id,
-                description_en:
-                    initial.description_entries?.[0]?.description_translated ||
-                    initial.description_entries?.[0]?.description_text ||
-                    "Product",
-            });
         }
-        productInput.addEventListener("input", () => {
-            productIdInput.value = "";
-            card.querySelector(".draft-item-product-meta").textContent = "";
-        });
-        productInput.addEventListener("blur", () => {
-            const descriptionInput = card.querySelector(
-                ".draft-item-description-input",
-            );
-            if (
-                !productIdInput.value &&
-                descriptionInput &&
-                !descriptionInput.value.trim() &&
-                productInput.value.trim()
-            ) {
-                seedDraftDescriptionFromText(card, productInput.value.trim());
-            }
-        });
+        syncDraftPrimaryDescriptionInput(card, section);
 
         card.querySelector('[data-builder-action="remove-item"]')?.addEventListener(
             "click",
@@ -1146,6 +1476,10 @@
         card.querySelector('[data-builder-action="camera-photo"]')?.addEventListener(
             "click",
             () => PHOTO_UPLOADER.pickPhotos(card.querySelector(".draft-item-photo-camera"), { capture: "environment" }),
+        );
+        card.querySelector('[data-builder-action="add-description-entry"]')?.addEventListener(
+            "click",
+            () => addDraftDescriptionEntry(card, {}, true),
         );
         card.querySelector('[data-builder-action="upload-design"]')?.addEventListener(
             "click",
@@ -1193,17 +1527,11 @@
             "change",
             () => toggleCustomDesignFields(card),
         );
-        card.querySelector(".draft-item-description-input")?.addEventListener(
-            "input",
-            (event) => {
-                event.currentTarget.dataset.descriptionCn = "";
-                event.currentTarget.dataset.descriptionEn = "";
-            },
-        );
         [
             ".draft-item-cartons",
             ".draft-item-pieces-per-carton",
             ".draft-item-unit-price",
+            ".draft-item-customer-price",
             ".draft-item-cbm",
             ".draft-item-weight",
             ".draft-item-length",
@@ -1214,18 +1542,15 @@
                 updateDraftItemTotals(card),
             );
         });
-        card.querySelector(".draft-item-shipping-code")?.addEventListener(
-            "input",
-            () => {
-                card.dataset.manualShippingCode = "1";
-                delete card.dataset.manualItemNo;
-                renumberDraftItems();
-            },
-        );
         card.querySelector(".draft-item-item-no")?.addEventListener(
             "input",
             () => {
-                card.dataset.manualItemNo = "1";
+                card.dataset.manualItemNo = card
+                    .querySelector(".draft-item-item-no")
+                    ?.value?.trim()
+                    ? "1"
+                    : "";
+                renumberDraftItems();
             },
         );
         updateDraftItemTotals(card);
@@ -1360,37 +1685,35 @@
     }
 
     function collectDescriptionEntries(card) {
-        const input = card.querySelector(".draft-item-description-input");
-        const value = input?.value?.trim() || "";
-        const storedCn = input?.dataset?.descriptionCn?.trim() || "";
-        const storedEn = input?.dataset?.descriptionEn?.trim() || "";
-        if (!value && !storedCn && !storedEn) {
-            return [];
-        }
-        if (
-            storedCn ||
-            storedEn
-        ) {
-            const storedDisplay = draftDescriptionDisplayValue(
-                storedCn,
-                storedEn,
-            );
-            if (!value || value === storedDisplay) {
-                return [
-                    {
-                        description_text: storedCn || storedEn || value,
-                        description_translated:
-                            storedEn || storedCn || value,
-                    },
-                ];
-            }
-        }
-        return [
-            {
-                description_text: value,
-                description_translated: "",
-            },
-        ];
+        return Array.from(
+            card.querySelectorAll(".draft-item-description-entry-input"),
+        )
+            .map((input) => {
+                const value = input?.value?.trim() || "";
+                const storedCn = input?.dataset?.descriptionCn?.trim() || "";
+                const storedEn = input?.dataset?.descriptionEn?.trim() || "";
+                if (!value && !storedCn && !storedEn) {
+                    return null;
+                }
+                if (storedCn || storedEn) {
+                    const storedDisplay = draftDescriptionDisplayValue(
+                        storedCn,
+                        storedEn,
+                    );
+                    if (!value || value === storedDisplay) {
+                        return {
+                            description_text: storedCn || storedEn || value,
+                            description_translated:
+                                storedEn || storedCn || value,
+                        };
+                    }
+                }
+                return {
+                    description_text: value,
+                    description_translated: "",
+                };
+            })
+            .filter(Boolean);
     }
 
     function collectDraftOrderPayload() {
@@ -1410,6 +1733,7 @@
                 item_no:
                     card.querySelector(".draft-item-item-no")?.value?.trim() ||
                     null,
+                item_no_manual: card.dataset.manualItemNo ? 1 : 0,
                 shipping_code:
                     card
                         .querySelector(".draft-item-shipping-code")
@@ -1422,6 +1746,9 @@
                     card.querySelector(".draft-item-cartons")?.value || null,
                 unit_price:
                     card.querySelector(".draft-item-unit-price")?.value || null,
+                sell_price:
+                    card.querySelector(".draft-item-customer-price")?.value ||
+                    null,
                 cbm_mode:
                     parseFloat(
                         card.querySelector(".draft-item-cbm")?.value || 0,

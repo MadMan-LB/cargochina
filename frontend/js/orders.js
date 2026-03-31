@@ -8,6 +8,34 @@ function roundCbm6(val) {
     const n = parseFloat(val);
     return Number.isNaN(n) ? 0 : Math.round(n * 1e6) / 1e6;
 }
+const fmtOrderAmount = (value) =>
+    typeof window.formatDisplayAmount === "function"
+        ? window.formatDisplayAmount(value)
+        : String(parseFloat(value || 0) || 0);
+const fmtOrderCbm = (value, maxDecimals = 6) =>
+    typeof window.formatDisplayCbm === "function"
+        ? window.formatDisplayCbm(value, maxDecimals)
+        : String(parseFloat(value || 0) || 0);
+const fmtOrderWeight = (value, maxDecimals = 2) =>
+    typeof window.formatDisplayWeight === "function"
+        ? window.formatDisplayWeight(value, maxDecimals)
+        : String(parseFloat(value || 0) || 0);
+const fmtOrderQty = (value, maxDecimals = 4) =>
+    typeof window.formatDisplayQuantity === "function"
+        ? window.formatDisplayQuantity(value, maxDecimals)
+        : String(parseFloat(value || 0) || 0);
+
+function parseStructuredItemNo(value) {
+    const match = String(value || "")
+        .trim()
+        .match(/^(.+)-(\d+)-(\d+)$/);
+    if (!match) return null;
+    return {
+        prefix: match[1].trim(),
+        supplierSequence: parseInt(match[2], 10),
+        itemSequence: parseInt(match[3], 10),
+    };
+}
 const RECENT_KEY_CUSTOMERS = "cargochina_recent_customers";
 const RECENT_KEY_SUPPLIERS = "cargochina_recent_suppliers";
 const RECENT_MAX = 8;
@@ -118,6 +146,12 @@ function setItemSupplierValue(card, supplierId, supplierName) {
     if (supplierInput) supplierInput.value = supplierName || "";
 }
 
+function clearAutocompleteSelection(inputEl) {
+    if (!inputEl) return;
+    delete inputEl.dataset.selectedId;
+    delete inputEl.dataset.selectedJson;
+}
+
 function productAlertTextFromItem(it) {
     const req = it?.product_required_design || it?.required_design;
     const note = it?.product_high_alert_note || it?.high_alert_note || "";
@@ -143,9 +177,11 @@ function applyCustomerDefaultShippingCode(code) {
 
 function renumberOrderItemNumbers() {
     const baseShippingCode = (orderEffectiveShippingCode || "").trim();
+    const supplierOrder = [];
     const supplierSequenceByKey = new Map();
+    const manualSupplierSequenceByKey = new Map();
+    const usedSupplierSequences = new Set();
     const supplierItemCounts = new Map();
-    let nextSupplierSequence = 1;
     document.querySelectorAll("#orderItemsBody .order-item-card").forEach((card) => {
         const supplierId =
             card.querySelector(".item-supplier-id")?.value?.trim() || "";
@@ -153,22 +189,89 @@ function renumberOrderItemNumbers() {
             card._supplierAc?.getSelected?.()?.name ||
             card.querySelector(".item-supplier")?.value?.trim() ||
             "";
-        const supplierKey = supplierId || supplierName || `item-${card.dataset.idx || nextSupplierSequence}`;
-        if (!supplierSequenceByKey.has(supplierKey)) {
-            supplierSequenceByKey.set(supplierKey, nextSupplierSequence++);
+        const supplierKey = supplierId || supplierName || "supplier:none";
+        if (!supplierOrder.includes(supplierKey)) {
+            supplierOrder.push(supplierKey);
         }
-        const supplierSequence = supplierSequenceByKey.get(supplierKey);
-        const itemCount = (supplierItemCounts.get(supplierKey) || 0) + 1;
-        supplierItemCounts.set(supplierKey, itemCount);
+        const shipInput = card.querySelector(".item-shipping-code");
+        const itemNoInput = card.querySelector(".item-item-no");
+        if (shipInput && !card.dataset.manualShippingCode) {
+            shipInput.value = baseShippingCode || shipInput.value || "";
+        }
+        const parsed = parseStructuredItemNo(itemNoInput?.value);
+        if (
+            card.dataset.manualItemNo &&
+            parsed &&
+            !manualSupplierSequenceByKey.has(supplierKey)
+        ) {
+            manualSupplierSequenceByKey.set(
+                supplierKey,
+                parsed.supplierSequence,
+            );
+            usedSupplierSequences.add(parsed.supplierSequence);
+        }
+    });
+
+    let nextSupplierSequence = 1;
+    supplierOrder.forEach((supplierKey) => {
+        if (manualSupplierSequenceByKey.has(supplierKey)) {
+            supplierSequenceByKey.set(
+                supplierKey,
+                manualSupplierSequenceByKey.get(supplierKey),
+            );
+            return;
+        }
+        while (usedSupplierSequences.has(nextSupplierSequence)) {
+            nextSupplierSequence += 1;
+        }
+        supplierSequenceByKey.set(supplierKey, nextSupplierSequence);
+        usedSupplierSequences.add(nextSupplierSequence);
+        nextSupplierSequence += 1;
+    });
+
+    document.querySelectorAll("#orderItemsBody .order-item-card").forEach((card) => {
+        const supplierId =
+            card.querySelector(".item-supplier-id")?.value?.trim() || "";
+        const supplierName =
+            card._supplierAc?.getSelected?.()?.name ||
+            card.querySelector(".item-supplier")?.value?.trim() ||
+            "";
+        const supplierKey = supplierId || supplierName || "supplier:none";
+        const supplierSequence = supplierSequenceByKey.get(supplierKey) || 1;
+        const itemNoInput = card.querySelector(".item-item-no");
+        const parsed = parseStructuredItemNo(itemNoInput?.value);
+        if (parsed && parsed.supplierSequence === supplierSequence) {
+            supplierItemCounts.set(
+                supplierKey,
+                Math.max(
+                    supplierItemCounts.get(supplierKey) || 0,
+                    parsed.itemSequence,
+                ),
+            );
+        }
+    });
+
+    document.querySelectorAll("#orderItemsBody .order-item-card").forEach((card) => {
+        const supplierId =
+            card.querySelector(".item-supplier-id")?.value?.trim() || "";
+        const supplierName =
+            card._supplierAc?.getSelected?.()?.name ||
+            card.querySelector(".item-supplier")?.value?.trim() ||
+            "";
+        const supplierKey = supplierId || supplierName || "supplier:none";
+        const supplierSequence = supplierSequenceByKey.get(supplierKey) || 1;
         const shipInput = card.querySelector(".item-shipping-code");
         const itemNoInput = card.querySelector(".item-item-no");
         if (shipInput && !card.dataset.manualShippingCode) {
             shipInput.value = baseShippingCode || shipInput.value || "";
         }
         if (itemNoInput && !card.dataset.manualItemNo) {
+            const nextItemSequence =
+                (supplierItemCounts.get(supplierKey) || 0) + 1;
+            supplierItemCounts.set(supplierKey, nextItemSequence);
             const prefix = (shipInput?.value || baseShippingCode || "").trim();
             itemNoInput.value = prefix
-                ? `${prefix}-${supplierSequence}-${itemCount}`
+                ? `${prefix}-${supplierSequence}-${nextItemSequence}`
                 : "";
         }
     });
@@ -203,7 +306,7 @@ function getItemQuantityFromData(it) {
 function getItemWeightPerQty(it) {
     const totalWeight = parseFloat(it?.declared_weight ?? 0) || 0;
     const denom = getItemPerUnitDenom(it);
-    return totalWeight > 0 && denom > 0 ? (totalWeight / denom).toFixed(4) : "";
+    return totalWeight > 0 && denom > 0 ? fmtOrderWeight(totalWeight / denom, 4) : "";
 }
 
 /** Returns denominator for per-unit CBM/weight when loading item. Uses dimensions_scope when available. */
@@ -443,6 +546,12 @@ document.addEventListener("DOMContentLoaded", () => {
             },
         },
     );
+    const orderSupplierInput = document.getElementById("orderSupplier");
+    if (orderSupplierInput) {
+        orderSupplierInput.addEventListener("input", () => {
+            clearAutocompleteSelection(orderSupplierInput);
+        });
+    }
     const orderSearchEl = document.getElementById("orderSearch");
     if (orderSearchEl) {
         orderSearchAc = Autocomplete.init(orderSearchEl, {
@@ -1258,6 +1367,7 @@ function addOrderItem() {
             ?.trim()
             ? "1"
             : "";
+        renumberOrderItemNumbers();
     });
     card.querySelector(".item-photo-input").addEventListener("change", (e) =>
         handleItemPhoto(e, idx),
@@ -1457,7 +1567,7 @@ function updateItemComputed(idx) {
         const rowAmount = totalQty > 0 && priceForTotal > 0 ? totalQty * priceForTotal : 0;
         sumAmount += rowAmount;
         const amtEl = row.querySelector(".item-total-amount");
-        if (amtEl) amtEl.textContent = rowAmount > 0 ? rowAmount.toFixed(2) : "0";
+        if (amtEl) amtEl.textContent = rowAmount > 0 ? fmtOrderAmount(rowAmount) : "0";
 
         let cbmPerUnit = parseFloat(row.querySelector(".item-cbm")?.value || 0);
         const l = parseFloat(row.querySelector(".item-l")?.value) || 0;
@@ -1477,8 +1587,8 @@ function updateItemComputed(idx) {
         const rowGw = weightPc * scopeMultiplier;
         sumGw += rowGw;
     });
-    tr.querySelector(".item-total-cbm").textContent = sumCbm.toFixed(6);
-    tr.querySelector(".item-total-gw").textContent = sumGw.toFixed(0);
+    tr.querySelector(".item-total-cbm").textContent = fmtOrderCbm(sumCbm, 6);
+    tr.querySelector(".item-total-gw").textContent = fmtOrderWeight(sumGw, 0);
     updateOrderTotals();
 }
 
@@ -1504,9 +1614,9 @@ function updateOrderTotals() {
     const elAmount = document.getElementById("orderTotalAmount");
     const elCbm = document.getElementById("orderTotalCbm");
     const elWeight = document.getElementById("orderTotalWeight");
-    if (elAmount) elAmount.textContent = sym + totalAmount.toFixed(2);
-    if (elCbm) elCbm.textContent = totalCbm.toFixed(6);
-    if (elWeight) elWeight.textContent = totalWeight.toFixed(0);
+    if (elAmount) elAmount.textContent = sym + fmtOrderAmount(totalAmount);
+    if (elCbm) elCbm.textContent = fmtOrderCbm(totalCbm, 6);
+    if (elWeight) elWeight.textContent = fmtOrderWeight(totalWeight, 0);
 }
 
 let _orderItemDesignItemId = null;
@@ -1888,8 +1998,15 @@ function collectOrderItems() {
             const itemNo = tr.querySelector(".item-item-no")?.value?.trim();
             const shippingCode = tr.querySelector(".item-shipping-code")?.value?.trim() || orderEffectiveShippingCode || "";
             const supplierId = tr.querySelector(".item-supplier-id")?.value?.trim() || null;
+            const supplierName = tr.querySelector(".item-supplier")?.value?.trim() || "";
             const photoDivs = tr.querySelectorAll(".item-photos [data-path]");
             const imagePaths = Array.from(photoDivs).map((d) => d.dataset.path).filter(Boolean);
+            if (supplierName && !supplierId) {
+                showToast("Please select a valid supplier from the suggestions for each item, or clear the supplier field.", "danger");
+                tr.querySelector(".item-supplier")?.focus();
+                hasError = true;
+                return;
+            }
             const rows = tr.querySelectorAll(".order-item-packaging-row");
             rows.forEach((row) => {
                 const cartons = parseInt(row.querySelector(".item-cartons")?.value || 0, 10);
@@ -1922,6 +2039,7 @@ function collectOrderItems() {
                     product_id: productId || null,
                     supplier_id: supplierId || null,
                     item_no: itemNo || null,
+                    item_no_manual: tr.dataset.manualItemNo ? 1 : 0,
                     shipping_code: shippingCode || null,
                     cartons: cartons || null,
                     qty_per_carton: qtyPerCtn || null,
@@ -1949,9 +2067,17 @@ async function saveOrder() {
     const items = collectOrderItems();
     if (!items) return;
     const destCountryId = document.getElementById("orderDestinationCountryId")?.value?.trim();
+    const orderSupplierInput = document.getElementById("orderSupplier");
+    const orderSupplierText = orderSupplierInput?.value?.trim() || "";
+    const orderSupplierId = orderSupplierAc?.getSelectedId() || "";
+    if (orderSupplierText && !orderSupplierId) {
+        showToast("Please select the order supplier from the suggestions, or clear the supplier field.", "danger");
+        orderSupplierInput?.focus();
+        return;
+    }
     const payload = {
         customer_id: orderCustomerAc?.getSelectedId() || "",
-        supplier_id: orderSupplierAc?.getSelectedId() || "",
+        supplier_id: orderSupplierId,
         expected_ready_date:
             document.getElementById("orderExpectedDate").value || null,
         currency: document.getElementById("orderCurrency")?.value || "USD",
@@ -2115,8 +2241,8 @@ async function showOrderFinance(id) {
             <td class="small text-muted">${escapeHtml(it.item_no || "—")}</td>
             <td class="text-end small">${it.cartons || "—"}</td>
             <td class="text-end small">${it.quantity || "—"}</td>
-            <td class="text-end small">${it.unit_price != null ? parseFloat(it.unit_price).toFixed(2) : "—"}</td>
-            <td class="text-end small fw-semibold">${it.total_amount != null ? parseFloat(it.total_amount).toFixed(2) : "—"}</td>
+            <td class="text-end small">${it.unit_price != null ? fmtOrderAmount(it.unit_price) : "—"}</td>
+            <td class="text-end small fw-semibold">${it.total_amount != null ? fmtOrderAmount(it.total_amount) : "—"}</td>
           </tr>`,
             )
             .join("");
@@ -2125,8 +2251,8 @@ async function showOrderFinance(id) {
         const receiptHtml = receipt
             ? `
           <div class="row g-2 mb-3">
-            <div class="col-3"><div class="border rounded p-2 text-center"><div class="small text-muted">Actual CBM</div><div class="fw-bold text-warning">${parseFloat(receipt.actual_cbm || 0).toFixed(4)}</div></div></div>
-            <div class="col-3"><div class="border rounded p-2 text-center"><div class="small text-muted">Actual Weight</div><div class="fw-bold text-warning">${parseFloat(receipt.actual_weight || 0).toFixed(2)} kg</div></div></div>
+            <div class="col-3"><div class="border rounded p-2 text-center"><div class="small text-muted">Actual CBM</div><div class="fw-bold text-warning">${fmtOrderCbm(receipt.actual_cbm || 0, 4)}</div></div></div>
+            <div class="col-3"><div class="border rounded p-2 text-center"><div class="small text-muted">Actual Weight</div><div class="fw-bold text-warning">${fmtOrderWeight(receipt.actual_weight || 0, 2)} kg</div></div></div>
             <div class="col-3"><div class="border rounded p-2 text-center"><div class="small text-muted">Actual Cartons</div><div class="fw-bold">${receipt.actual_cartons ?? "—"}</div></div></div>
             <div class="col-3"><div class="border rounded p-2 text-center"><div class="small text-muted">Condition</div><div class="fw-bold">${escapeHtml(receipt.receipt_condition || "—")}</div></div></div>
           </div>`
@@ -2134,9 +2260,9 @@ async function showOrderFinance(id) {
 
         document.getElementById("financeModalBody").innerHTML = `
           <div class="row g-3 mb-3">
-            <div class="col-6 col-md-3"><div class="card border-0 bg-primary bg-opacity-10 p-2 text-center"><div class="small text-muted">Total Cost</div><div class="fs-5 fw-bold text-primary">${totalCost > 0 ? totalCost.toFixed(2) + " " + currency : "—"}</div></div></div>
-            <div class="col-6 col-md-3"><div class="card border-0 bg-light p-2 text-center"><div class="small text-muted">Total CBM</div><div class="fs-5 fw-bold">${totalCbm.toFixed(4)}</div></div></div>
-            <div class="col-6 col-md-3"><div class="card border-0 bg-light p-2 text-center"><div class="small text-muted">Total Weight</div><div class="fs-5 fw-bold">${totalWeight.toFixed(2)} kg</div></div></div>
+            <div class="col-6 col-md-3"><div class="card border-0 bg-primary bg-opacity-10 p-2 text-center"><div class="small text-muted">Total Cost</div><div class="fs-5 fw-bold text-primary">${totalCost > 0 ? fmtOrderAmount(totalCost) + " " + currency : "—"}</div></div></div>
+            <div class="col-6 col-md-3"><div class="card border-0 bg-light p-2 text-center"><div class="small text-muted">Total CBM</div><div class="fs-5 fw-bold">${fmtOrderCbm(totalCbm, 4)}</div></div></div>
+            <div class="col-6 col-md-3"><div class="card border-0 bg-light p-2 text-center"><div class="small text-muted">Total Weight</div><div class="fs-5 fw-bold">${fmtOrderWeight(totalWeight, 2)} kg</div></div></div>
             <div class="col-6 col-md-3"><div class="card border-0 bg-light p-2 text-center"><div class="small text-muted">Total Cartons</div><div class="fs-5 fw-bold">${totalCartons}</div></div></div>
           </div>
           <div class="d-flex gap-2 mb-2 flex-wrap">
@@ -2151,7 +2277,7 @@ async function showOrderFinance(id) {
             <table class="table table-sm table-hover">
               <thead class="table-light"><tr><th>Description</th><th>Item No</th><th class="text-end">Cartons</th><th class="text-end">Qty</th><th class="text-end">Unit Price</th><th class="text-end">Total (${escapeHtml(currency)})</th></tr></thead>
               <tbody>${itemRows || '<tr><td colspan="6" class="text-muted text-center">No items</td></tr>'}</tbody>
-              <tfoot class="table-light"><tr><td colspan="5" class="text-end fw-semibold">Total Cost</td><td class="text-end fw-bold text-primary">${totalCost > 0 ? totalCost.toFixed(2) : "—"} ${escapeHtml(currency)}</td></tr></tfoot>
+              <tfoot class="table-light"><tr><td colspan="5" class="text-end fw-semibold">Total Cost</td><td class="text-end fw-bold text-primary">${totalCost > 0 ? fmtOrderAmount(totalCost) : "—"} ${escapeHtml(currency)}</td></tr></tfoot>
             </table>
           </div>
           <p class="text-muted small mt-2 mb-0">Supplier cost only. Customer deposits and P&L margin view coming soon.</p>`;
@@ -2284,11 +2410,11 @@ async function showOrderInfo(id) {
                         : getItemQuantityFromData(it) || 1;
                 const cbmPer =
                     it.declared_cbm && denom > 0
-                        ? (parseFloat(it.declared_cbm) / denom).toFixed(4)
+                        ? fmtOrderCbm(parseFloat(it.declared_cbm) / denom, 4)
                         : "—";
                 const gwPer =
                     it.declared_weight && denom > 0
-                        ? (parseFloat(it.declared_weight) / denom).toFixed(4)
+                        ? fmtOrderWeight(parseFloat(it.declared_weight) / denom, 4)
                         : "—";
                 return `<tr>
               <td>${thumb}</td>
@@ -2296,8 +2422,8 @@ async function showOrderInfo(id) {
               <td class="small">${desc}${productAlert}</td>
               <td class="small text-muted">${supplier}</td>
               <td class="text-end small">${it.cartons || "—"} × ${it.qty_per_carton || "—"} = ${it.quantity || "—"}</td>
-              <td class="text-end small">${it.unit_price != null ? parseFloat(it.unit_price).toFixed(2) : "—"}</td>
-              <td class="text-end small fw-semibold">${it.total_amount != null ? parseFloat(it.total_amount).toFixed(2) : "—"}</td>
+              <td class="text-end small">${it.unit_price != null ? fmtOrderAmount(it.unit_price) : "—"}</td>
+              <td class="text-end small fw-semibold">${it.total_amount != null ? fmtOrderAmount(it.total_amount) : "—"}</td>
               <td class="text-end small">${cbmPer} / ${escapeHtml(String(it.declared_cbm ?? "—"))}</td>
               <td class="text-end small">${gwPer} / ${escapeHtml(String(it.declared_weight ?? "—"))}</td>
             </tr>`;
@@ -2309,8 +2435,8 @@ async function showOrderInfo(id) {
           <div class="mt-3">
             <h6 class="fw-semibold mb-2">Warehouse Receipt</h6>
             <div class="row g-2 mb-2">
-              <div class="col-6 col-md-3"><div class="order-info-stat-card"><div class="label">Actual CBM</div><div class="value text-warning">${parseFloat(receipt.actual_cbm || 0).toFixed(4)}</div></div></div>
-              <div class="col-6 col-md-3"><div class="order-info-stat-card"><div class="label">Actual Weight</div><div class="value text-warning">${parseFloat(receipt.actual_weight || 0).toFixed(2)} kg</div></div></div>
+              <div class="col-6 col-md-3"><div class="order-info-stat-card"><div class="label">Actual CBM</div><div class="value text-warning">${fmtOrderCbm(receipt.actual_cbm || 0, 4)}</div></div></div>
+              <div class="col-6 col-md-3"><div class="order-info-stat-card"><div class="label">Actual Weight</div><div class="value text-warning">${fmtOrderWeight(receipt.actual_weight || 0, 2)} kg</div></div></div>
               <div class="col-6 col-md-3"><div class="order-info-stat-card"><div class="label">Actual Cartons</div><div class="value">${receipt.actual_cartons ?? "—"}</div></div></div>
               <div class="col-6 col-md-3"><div class="order-info-stat-card"><div class="label">Condition</div><div class="value">${escapeHtml(receipt.receipt_condition || "—")}</div></div></div>
             </div>
@@ -2352,9 +2478,9 @@ async function showOrderInfo(id) {
             <div class="col-auto"><span class="badge bg-light text-dark border">${escapeHtml(currency)}</span></div>
           </div>
           <div class="row g-2 mb-3">
-            <div class="col-6 col-md-2"><div class="order-info-stat-card"><div class="label">Total Amount</div><div class="value text-primary">${totalCost.toFixed(2)} ${escapeHtml(currency)}</div></div></div>
-            <div class="col-6 col-md-2"><div class="order-info-stat-card"><div class="label">Total CBM</div><div class="value">${totalCbm.toFixed(4)}</div></div></div>
-            <div class="col-6 col-md-2"><div class="order-info-stat-card"><div class="label">Total Weight</div><div class="value">${totalWeight.toFixed(2)} kg</div></div></div>
+            <div class="col-6 col-md-2"><div class="order-info-stat-card"><div class="label">Total Amount</div><div class="value text-primary">${fmtOrderAmount(totalCost)} ${escapeHtml(currency)}</div></div></div>
+            <div class="col-6 col-md-2"><div class="order-info-stat-card"><div class="label">Total CBM</div><div class="value">${fmtOrderCbm(totalCbm, 4)}</div></div></div>
+            <div class="col-6 col-md-2"><div class="order-info-stat-card"><div class="label">Total Weight</div><div class="value">${fmtOrderWeight(totalWeight, 2)} kg</div></div></div>
             <div class="col-6 col-md-2"><div class="order-info-stat-card"><div class="label">Total Cartons</div><div class="value">${totalCtns}</div></div></div>
             <div class="col-6 col-md-2"><div class="order-info-stat-card"><div class="label">Total Qty</div><div class="value">${totalQty}</div></div></div>
             <div class="col-6 col-md-2"><div class="order-info-stat-card"><div class="label">Items</div><div class="value">${items.length}</div></div></div>

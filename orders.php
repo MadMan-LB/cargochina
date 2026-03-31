@@ -169,8 +169,8 @@ require 'includes/layout.php';
               <div class="col-4 col-md-1">
                 <label class="form-label form-label-sm">Currency</label>
                 <select class="form-select form-select-sm" id="orderCurrency">
-                  <option value="USD">USD</option>
-                  <option value="RMB">RMB</option>
+                <option value="RMB">RMB</option>  
+                <option value="USD">USD</option>
                 </select>
               </div>
               <div class="col-4 col-md-2" id="orderDestinationCountryWrap">

@@ -1114,3 +1114,11 @@ otification_preferences.php and removing the sidebar link unless the user is an 
 - The migration ensures `PS` exists and is named `Palestine`, remaps legacy `IL` foreign-key references in `orders.destination_country_id` and `customer_country_shipping.country_id` to `PS`, merges duplicate customer-country rows safely before remapping, normalizes legacy container text fields (`containers.destination_country`, `containers.destination`) from `IL`/`Israel` to `PS`/`Palestine`, and deletes the legacy `IL` country row if present.
 - `OrderCountryService::normalizeCountryToken()` now treats legacy `IL` / `Israel` tokens as `PS` during runtime country resolution, which protects container matching and other legacy text-based country flows even before all records are cleaned.
 - Full downstream review confirmed that customer country selection, order destination persistence, draft-order destination handling, container-country matching, countries autocomplete, and export/render paths all continue to use the `countries` table as the source of truth, so no further workflow or UI code changes were needed for this hardening pass.
+
+- 2026-03-31 Codex: Reworked the Draft an Order builder in procurement_drafts.php to use a compact order-style layout with photo-first item cards, hidden customer-derived shipping codes, multi-entry product names/descriptions, factory vs customer pricing, computed totals, updated print/export terminology, and downstream persistence/product-sync support for sell_price across draft save, reopen, print, CSV, XLSX, and legacy draft export paths.
+
+## 2026-03-31 - Draft Builder Compact Layout + Manual Item Number Sequencing
+- Reworked procurement_drafts.php item cards into a tighter order-style layout with photo-first sidebar stats, hidden shipping code, description-first entry rows, and live qty/amount/CBM/weight summaries at item, supplier, and order level.
+- Updated draft product autofill to prefer factory price from uy_price and customer price from sell_price when available.
+- Extended shared item numbering so manual item number jumps in both Orders and Draft Orders advance the next auto-generated number instead of restarting from the old sequence.
+

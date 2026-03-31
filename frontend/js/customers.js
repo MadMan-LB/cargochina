@@ -2,6 +2,18 @@ let searchTimeout = null;
 let customerPaymentLinks = [];
 let customerCountryShipping = [];
 let customerPorValues = [];
+const fmtCustomerAmount = (value) =>
+    typeof window.formatDisplayAmount === "function"
+        ? window.formatDisplayAmount(value)
+        : String(parseFloat(value || 0) || 0);
+const fmtCustomerCbm = (value, maxDecimals = 2) =>
+    typeof window.formatDisplayCbm === "function"
+        ? window.formatDisplayCbm(value, maxDecimals)
+        : String(parseFloat(value || 0) || 0);
+const fmtCustomerWeight = (value, maxDecimals = 0) =>
+    typeof window.formatDisplayWeight === "function"
+        ? window.formatDisplayWeight(value, maxDecimals)
+        : String(parseFloat(value || 0) || 0);
 
 function customerPageEl() {
     return document.getElementById("customersPage");
@@ -489,7 +501,7 @@ async function showBalance(customerId, name) {
         const balance = balRes.data || {};
         let balHtml = "";
         Object.entries(balance).forEach(([cur, total]) => {
-            balHtml += `<span class="badge bg-primary me-2">${cur}: ${total.toFixed(2)}</span>`;
+            balHtml += `<span class="badge bg-primary me-2">${cur}: ${fmtCustomerAmount(total)}</span>`;
         });
         document.getElementById("balSummary").innerHTML =
             balHtml || '<span class="text-muted">No deposits</span>';
@@ -580,8 +592,8 @@ function renderOrders(orders) {
                 <td>${esc(o.supplier_name || "-")}</td>
                 <td>${o.expected_ready_date || "-"}</td>
                 <td><span class="badge ${statusClass}">${esc(typeof statusLabel === "function" ? statusLabel(o.status) : o.status || "-")}</span></td>
-                <td>${oCbm.toFixed(2)}</td>
-                <td>${oWt.toFixed(0)} kg</td>
+                <td>${fmtCustomerCbm(oCbm, 2)}</td>
+                <td>${fmtCustomerWeight(oWt, 0)} kg</td>
               </tr>`;
                   })
                   .join("")

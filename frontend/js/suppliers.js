@@ -15,6 +15,14 @@ document.addEventListener("DOMContentLoaded", () => {
 let additionalIdIndex = 0;
 let supplierAttachments = [];
 let supplierPaymentLinkIndex = 0;
+const fmtSupplierAmount = (value) =>
+    typeof window.formatDisplayAmount === "function"
+        ? window.formatDisplayAmount(value)
+        : String(parseFloat(value || 0) || 0);
+const fmtSupplierPercent = (value, maxDecimals = 1) =>
+    typeof window.formatDisplayPercent === "function"
+        ? window.formatDisplayPercent(value, maxDecimals)
+        : String(parseFloat(value || 0) || 0);
 
 function isBuyer() {
     const card = document.querySelector(".card[data-is-buyer]");
@@ -68,7 +76,7 @@ async function loadSuppliers() {
                     }
                     const scoreHtml =
                         r.reliability_score != null
-                            ? `<span class="badge ${r.reliability_score >= 4 ? "bg-success" : r.reliability_score >= 2.5 ? "bg-warning text-dark" : "bg-danger"}" title="Reliability score based on orders, payments, variance rate">${parseFloat(r.reliability_score).toFixed(1)} ★</span>`
+                            ? `<span class="badge ${r.reliability_score >= 4 ? "bg-success" : r.reliability_score >= 2.5 ? "bg-warning text-dark" : "bg-danger"}" title="Reliability score based on orders, payments, variance rate">${fmtSupplierPercent(r.reliability_score, 1)} ★</span>`
                             : "";
                     const commissionHtml =
                         buyer && r.commission_rate != null
@@ -524,10 +532,10 @@ function updateDiscountPreview() {
     const noteWrap = document.getElementById("paySettlementNoteWrap");
     if (inv > 0 && paid > 0 && inv > paid) {
         const disc = inv - paid;
-        const pct = ((disc / inv) * 100).toFixed(1);
+        const pct = fmtSupplierPercent((disc / inv) * 100, 1);
         info.textContent = markedFull
-            ? `Settlement delta: ${disc.toFixed(2)} (${pct}%) will close the balance as fully settled by agreement.`
-            : `Short-paid amount: ${disc.toFixed(2)} (${pct}%) will remain outstanding unless you mark it fully settled.`;
+            ? `Settlement delta: ${fmtSupplierAmount(disc)} (${pct}%) will close the balance as fully settled by agreement.`
+            : `Short-paid amount: ${fmtSupplierAmount(disc)} (${pct}%) will remain outstanding unless you mark it fully settled.`;
         info.classList.remove("d-none");
         noteWrap?.classList.toggle("d-none", !markedFull);
     } else {
@@ -589,7 +597,7 @@ async function showPayHistory(supplierId, name) {
         const balance = balRes.data || {};
         let balHtml = "";
         Object.entries(balance).forEach(([cur, b]) => {
-            balHtml += `<span class="badge bg-secondary me-2">${cur}: Paid ${b.total_paid.toFixed(2)} / Invoiced ${b.total_invoiced.toFixed(2)} | Discount ${b.total_discount.toFixed(2)} | Outstanding ${b.outstanding.toFixed(2)}</span>`;
+            balHtml += `<span class="badge bg-secondary me-2">${cur}: Paid ${fmtSupplierAmount(b.total_paid)} / Invoiced ${fmtSupplierAmount(b.total_invoiced)} | Discount ${fmtSupplierAmount(b.total_discount)} | Outstanding ${fmtSupplierAmount(b.outstanding)}</span>`;
         });
         document.getElementById("balanceSummary").innerHTML =
             balHtml || '<span class="text-muted">No payments yet</span>';
@@ -600,7 +608,7 @@ async function showPayHistory(supplierId, name) {
                 <td>${p.created_at}</td>
                 <td>${p.invoice_amount ?? "-"}</td>
                 <td>${p.amount}</td>
-                <td>${(parseFloat(p.settlement_delta || p.discount_amount || 0) > 0 ? parseFloat(p.settlement_delta || p.discount_amount).toFixed(2) : "-")}${p.marked_full_payment ? ' <span class="badge bg-success">Full</span>' : ""}</td>
+                <td>${(parseFloat(p.settlement_delta || p.discount_amount || 0) > 0 ? fmtSupplierAmount(p.settlement_delta || p.discount_amount) : "-")}${p.marked_full_payment ? ' <span class="badge bg-success">Full</span>' : ""}</td>
                 <td>${p.currency}</td>
                 <td>${escapeHtml([p.payment_type, p.payment_channel].filter(Boolean).join(" / ") || "-")}</td>
                 <td>${p.order_id ? "#" + p.order_id : "-"}</td>

@@ -11,6 +11,26 @@ const CONTAINER_STATUS = {
 
 let _allContainers = [];
 let _searchTimer = null;
+const fmtContainerAmount = (value) =>
+    typeof window.formatDisplayAmount === "function"
+        ? window.formatDisplayAmount(value)
+        : String(parseFloat(value || 0) || 0);
+const fmtContainerCbm = (value, maxDecimals = 3) =>
+    typeof window.formatDisplayCbm === "function"
+        ? window.formatDisplayCbm(value, maxDecimals)
+        : String(parseFloat(value || 0) || 0);
+const fmtContainerWeight = (value, maxDecimals = 2) =>
+    typeof window.formatDisplayWeight === "function"
+        ? window.formatDisplayWeight(value, maxDecimals)
+        : String(parseFloat(value || 0) || 0);
+const fmtContainerQty = (value, maxDecimals = 2) =>
+    typeof window.formatDisplayQuantity === "function"
+        ? window.formatDisplayQuantity(value, maxDecimals)
+        : String(parseFloat(value || 0) || 0);
+const fmtContainerPercent = (value, maxDecimals = 1) =>
+    typeof window.formatDisplayPercent === "function"
+        ? window.formatDisplayPercent(value, maxDecimals)
+        : String(parseFloat(value || 0) || 0);
 
 function containerStatusDisplay(status) {
     return CONTAINER_STATUS[status]?.label || status || "—";
@@ -250,9 +270,9 @@ function applyClientFilters() {
             const barC = (p) =>
                 p >= 100 ? "#dc2626" : p >= 85 ? "#d97706" : "#16a34a";
             const bar = (p) =>
-                `<div style="height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;"><div style="height:100%;width:${Math.min(100, p)}%;background:${barC(p)};border-radius:3px;"></div></div><small class="text-muted">${parseFloat(c.used_cbm || 0).toFixed(2)}/${c.max_cbm}</small>`;
+                `<div style="height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;"><div style="height:100%;width:${Math.min(100, p)}%;background:${barC(p)};border-radius:3px;"></div></div><small class="text-muted">${fmtContainerCbm(c.used_cbm || 0, 2)}/${fmtContainerCbm(c.max_cbm, 2)}</small>`;
             const wBar = (p) =>
-                `<div style="height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;"><div style="height:100%;width:${Math.min(100, p)}%;background:${barC(p)};border-radius:3px;"></div></div><small class="text-muted">${parseFloat(c.used_weight || 0).toFixed(0)}/${c.max_weight} kg</small>`;
+                `<div style="height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;"><div style="height:100%;width:${Math.min(100, p)}%;background:${barC(p)};border-radius:3px;"></div></div><small class="text-muted">${fmtContainerWeight(c.used_weight || 0, 0)}/${fmtContainerWeight(c.max_weight, 0)} kg</small>`;
             const destination = getContainerDestinationDisplay(c);
             const eta = c.eta_date || "";
             const shipDate = c.expected_ship_date || "";
@@ -535,11 +555,11 @@ async function viewContainer(id, code) {
               <td>${escHtml(o.expected_ready_date || "—")}</td>
               <td>${sBadge}</td>
               <td class="text-end">${o.items || 0}</td>
-              <td class="text-end">${parseFloat(o.total_ctns || 0).toFixed(2)}</td>
-              <td class="text-end">${parseFloat(o.total_qty || 0).toFixed(2)}</td>
-              <td class="text-end">${parseFloat(o.total_cbm || 0).toFixed(3)}</td>
-              <td class="text-end">${parseFloat(o.total_weight || 0).toFixed(2)} kg</td>
-              <td class="text-end">${parseFloat(o.total_amount || 0).toFixed(2)}</td>
+              <td class="text-end">${fmtContainerQty(o.total_ctns || 0, 2)}</td>
+              <td class="text-end">${fmtContainerQty(o.total_qty || 0, 2)}</td>
+              <td class="text-end">${fmtContainerCbm(o.total_cbm || 0, 3)}</td>
+              <td class="text-end">${fmtContainerWeight(o.total_weight || 0, 2)} kg</td>
+              <td class="text-end">${fmtContainerAmount(o.total_amount || 0)}</td>
             </tr>`;
             })
             .join("");
@@ -549,18 +569,18 @@ async function viewContainer(id, code) {
           <div class="row g-3 mb-3">
             <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">Orders</div><div class="value">${totalOrders}</div></div></div>
             <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">Items</div><div class="value">${totalItems}</div></div></div>
-            <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">Cartons</div><div class="value">${totalCartons.toFixed(2)}</div></div></div>
-            <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">Quantity</div><div class="value">${totalQty.toFixed(2)}</div></div></div>
-            <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">CBM Used</div><div class="value">${totalCbm.toFixed(3)}</div><div class="small text-muted">${container.max_cbm} max</div></div></div>
-            <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">Weight Used</div><div class="value">${totalWeight.toFixed(2)}</div><div class="small text-muted">${container.max_weight} kg max</div></div></div>
+            <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">Cartons</div><div class="value">${fmtContainerQty(totalCartons, 2)}</div></div></div>
+            <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">Quantity</div><div class="value">${fmtContainerQty(totalQty, 2)}</div></div></div>
+            <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">CBM Used</div><div class="value">${fmtContainerCbm(totalCbm, 3)}</div><div class="small text-muted">${fmtContainerCbm(container.max_cbm, 3)} max</div></div></div>
+            <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">Weight Used</div><div class="value">${fmtContainerWeight(totalWeight, 2)}</div><div class="small text-muted">${fmtContainerWeight(container.max_weight, 2)} kg max</div></div></div>
           </div>
           <div class="row g-3 mb-3">
-            <div class="col-12 col-md-4"><div class="order-info-stat-card"><div class="label">Sell-side amount</div><div class="value">${totalAmt.toFixed(2)}</div></div></div>
+            <div class="col-12 col-md-4"><div class="order-info-stat-card"><div class="label">Sell-side amount</div><div class="value">${fmtContainerAmount(totalAmt)}</div></div></div>
           </div>
           <div class="mb-3">
-            <div class="d-flex justify-content-between small text-muted mb-1"><span>CBM Fill</span><span>${cbmPct.toFixed(1)}%</span></div>
+            <div class="d-flex justify-content-between small text-muted mb-1"><span>CBM Fill</span><span>${fmtContainerPercent(cbmPct, 1)}%</span></div>
             <div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;"><div style="height:100%;width:${cbmPct}%;background:${barColor(cbmPct)};border-radius:4px;transition:width .4s;"></div></div>
-            <div class="d-flex justify-content-between small text-muted mt-2 mb-1"><span>Weight Fill</span><span>${wtPct.toFixed(1)}%</span></div>
+            <div class="d-flex justify-content-between small text-muted mt-2 mb-1"><span>Weight Fill</span><span>${fmtContainerPercent(wtPct, 1)}%</span></div>
             <div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;"><div style="height:100%;width:${wtPct}%;background:${barColor(wtPct)};border-radius:4px;transition:width .4s;"></div></div>
           </div>
           <div class="table-responsive">
@@ -574,11 +594,11 @@ async function viewContainer(id, code) {
               <tfoot class="table-light fw-semibold"><tr>
                 <td colspan="5" class="text-end">Totals:</td>
                 <td class="text-end">${totalItems}</td>
-                <td class="text-end">${totalCartons.toFixed(2)}</td>
-                <td class="text-end">${totalQty.toFixed(2)}</td>
-                <td class="text-end">${totalCbm.toFixed(3)}</td>
-                <td class="text-end">${totalWeight.toFixed(2)} kg</td>
-                <td class="text-end">${totalAmt.toFixed(2)}</td>
+                <td class="text-end">${fmtContainerQty(totalCartons, 2)}</td>
+                <td class="text-end">${fmtContainerQty(totalQty, 2)}</td>
+                <td class="text-end">${fmtContainerCbm(totalCbm, 3)}</td>
+                <td class="text-end">${fmtContainerWeight(totalWeight, 2)} kg</td>
+                <td class="text-end">${fmtContainerAmount(totalAmt)}</td>
               </tr></tfoot>
             </table>
           </div>
@@ -796,8 +816,8 @@ function _renderAssignOrders() {
           <td class="fw-semibold">${o.id}</td>
           <td>${escHtml(o.customer_name || "—")}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escHtml(o.customer_priority_note || "")}">${escHtml(o.customer_priority_level)}</span>` : ""}${o.high_alert_notes ? ` <span class="badge bg-danger-subtle text-danger border border-danger-subtle ms-1" title="${escHtml(o.high_alert_notes)}">Alert</span>` : ""}<div class="small text-muted">${escHtml(getOrderDestinationDisplay(o))}</div></td>
           <td class="small text-muted">${escHtml((o.supplier_name || "—").substring(0, 22))}</td>
-          <td class="text-end">${o.total_cbm.toFixed(3)}</td>
-          <td class="text-end">${o.total_weight.toFixed(2)} kg</td>
+          <td class="text-end">${fmtContainerCbm(o.total_cbm, 3)}</td>
+          <td class="text-end">${fmtContainerWeight(o.total_weight, 2)} kg</td>
           <td><span class="badge ${statusCls(o.status)}">${escHtml(statusLbl(o.status))}</span></td>
         </tr>`,
         )
@@ -870,13 +890,13 @@ function _updateAssignBars(addCbm, addWeight) {
     const barC = (p) =>
         p >= 100 ? "#dc2626" : p >= 85 ? "#d97706" : "#16a34a";
     document.getElementById("assignCbmLabel").textContent =
-        `${afterCbm.toFixed(2)} / ${maxCbm} CBM (${Math.min(120, cbmPct).toFixed(0)}%)`;
+        `${fmtContainerCbm(afterCbm, 2)} / ${fmtContainerCbm(maxCbm, 2)} CBM (${fmtContainerPercent(Math.min(120, cbmPct), 0)}%)`;
     document.getElementById("assignCbmLabel").style.color =
         cbmPct >= 100 ? "#dc2626" : "inherit";
     document.getElementById("assignCbmBar").style.cssText =
         `height:100%;width:${Math.min(100, cbmPct)}%;background:${barC(cbmPct)};border-radius:4px;`;
     document.getElementById("assignWLabel").textContent =
-        `${afterWt.toFixed(0)} / ${maxWt} kg (${Math.min(120, wPct).toFixed(0)}%)`;
+        `${fmtContainerWeight(afterWt, 0)} / ${fmtContainerWeight(maxWt, 0)} kg (${fmtContainerPercent(Math.min(120, wPct), 0)}%)`;
     document.getElementById("assignWLabel").style.color =
         wPct >= 100 ? "#dc2626" : "inherit";
     document.getElementById("assignWBar").style.cssText =

@@ -7,7 +7,7 @@ $pageTitle = 'Draft an Order';
 require 'includes/layout.php';
 ?>
 <h1 class="mb-3">Draft an Order</h1>
-<p class="text-muted mb-4">Build one customer order across multiple suppliers, save it directly as a real order, and migrate any old procurement drafts that still need customer details or optional scheduling info.</p>
+<p class="text-muted mb-4">Build one customer order across multiple suppliers with a compact, order-style layout, photo-first item cards, and live totals.</p>
 
 <div class="card mb-4">
   <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -70,61 +70,60 @@ require 'includes/layout.php';
       <div class="modal-header">
         <div>
           <h5 class="modal-title mb-1" id="draftOrderModalTitle">Draft an Order</h5>
-          <small class="text-muted" id="draftOrderModalSubtitle">One customer, multiple supplier sections, live totals.</small>
+          <small class="text-muted" id="draftOrderModalSubtitle">One customer, multiple supplier sections, compact item cards, live totals.</small>
         </div>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
-      <div class="modal-body">
+      <div class="modal-body draft-order-builder-body">
         <form id="draftOrderForm">
           <input type="hidden" id="draftOrderId">
           <input type="hidden" id="draftOrderEditable" value="1">
-          <div class="card mb-4">
+          <div class="card mb-4 draft-order-meta-card">
             <div class="card-body">
               <div class="row g-3">
                 <div class="col-12 col-lg-4">
                   <label class="form-label">Customer *</label>
-                  <input type="text" class="form-control" id="draftOrderCustomer" placeholder="Type to search customer..." autocomplete="off">
+                  <input type="text" class="form-control form-control-sm" id="draftOrderCustomer" placeholder="Type to search customer..." autocomplete="off">
                 </div>
                 <div class="col-12 col-md-4 col-lg-3">
                   <label class="form-label">Country / Destination</label>
                   <input type="hidden" id="draftOrderDestinationCountryId">
                   <div id="draftOrderDestinationCountryInputWrap">
-                    <input type="text" class="form-control" id="draftOrderDestinationCountry" placeholder="Search country..." autocomplete="off">
+                    <input type="text" class="form-control form-control-sm" id="draftOrderDestinationCountry" placeholder="Search country..." autocomplete="off">
                   </div>
                   <div id="draftOrderDestinationCountrySelectWrap" class="d-none">
-                    <select class="form-select" id="draftOrderDestinationCountrySelect">
+                    <select class="form-select form-select-sm" id="draftOrderDestinationCountrySelect">
                       <option value="">Select country...</option>
                     </select>
                   </div>
-                  <div class="form-text" id="draftOrderDestinationCountryHint">Uses the customer's country by default. If the customer has multiple countries, choose one here.</div>
                 </div>
                 <div class="col-12 col-md-4 col-lg-2">
                   <label class="form-label">Expected Ready</label>
-                  <input type="date" class="form-control" id="draftOrderExpectedDate">
-                  <div class="form-text">Optional. You will be asked to confirm before saving without it.</div>
+                  <input type="date" class="form-control form-control-sm" id="draftOrderExpectedDate">
                 </div>
                 <div class="col-12 col-md-4 col-lg-3">
                   <label class="form-label">Currency *</label>
-                  <select class="form-select" id="draftOrderCurrency">
-                    <option value="USD">USD</option>
-                    <option value="RMB">RMB</option>
+                  <select class="form-select form-select-sm" id="draftOrderCurrency">
+                     <option value="RMB">RMB</option>
+                     <option value="USD">USD</option>
+                   
                   </select>
                 </div>
                 <div class="col-12">
                   <label class="form-label">High Alert Notes</label>
-                  <textarea class="form-control" id="draftOrderHighAlertNotes" rows="2" placeholder="Special handling, urgent notes, fragile warnings..."></textarea>
+                  <textarea class="form-control form-control-sm" id="draftOrderHighAlertNotes" rows="2" placeholder="Special handling, urgent notes, fragile warnings..."></textarea>
                 </div>
               </div>
-              <div class="alert alert-light border mt-3 mb-0" id="draftOrderShippingHint">
-                Select a customer to load the default shipping code.
+              <div class="alert alert-info border mt-3 mb-0 py-2" id="draftOrderShippingHint">
+                Select a customer to load the customer shipping code and item-number prefix automatically.
               </div>
             </div>
           </div>
 
           <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
             <div>
-              <div class="fw-semibold">Supplier Sections</div>
-              <small class="text-muted">Each section is one supplier. Add as many suppliers as this customer order needs.</small>
+              <div class="fw-semibold text-dark">Supplier Sections</div>
+              <small class="text-muted">Photo-first item cards, auto item numbers, compact fields, and supplier-level totals stay live while you build.</small>
             </div>
             <button type="button" class="btn btn-outline-primary btn-sm" id="draftOrderAddSectionBtn" onclick="addDraftOrderSection()">+ Add Supplier Section</button>
           </div>
@@ -138,9 +137,10 @@ require 'includes/layout.php';
                 <small class="text-muted">Auto-calculated across all supplier sections.</small>
               </div>
               <div class="d-flex gap-4 flex-wrap">
-                <div><strong id="draftOrderTotalAmount">0.00</strong> <span class="text-muted" id="draftOrderTotalCurrency">USD</span></div>
-                <div><strong id="draftOrderTotalCbm">0.000000</strong> <span class="text-muted">CBM</span></div>
-                <div><strong id="draftOrderTotalWeight">0.0000</strong> <span class="text-muted">kg</span></div>
+                <div><strong id="draftOrderTotalAmount">0</strong> <span class="text-muted" id="draftOrderTotalCurrency">USD</span></div>
+                <div><strong id="draftOrderTotalQty">0</strong> <span class="text-muted">qty</span></div>
+                <div><strong id="draftOrderTotalCbm">0</strong> <span class="text-muted">CBM</span></div>
+                <div><strong id="draftOrderTotalWeight">0</strong> <span class="text-muted">kg</span></div>
               </div>
             </div>
           </div>

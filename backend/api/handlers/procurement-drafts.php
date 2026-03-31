@@ -19,7 +19,7 @@ function procurementDraftOutputCsv(array $draft, array $items, string $filename)
     fputcsv($out, ['Supplier', (string) ($draft['supplier_name'] ?? '')]);
     fputcsv($out, ['Status', (string) ($draft['status'] ?? '')]);
     fputcsv($out, ['']);
-    fputcsv($out, ['Line', 'Description', 'Notes', 'Quantity', 'Unit Price', 'Total Amount', 'CBM Total', 'Weight Total', 'Photo Count']);
+    fputcsv($out, ['Line', 'Product / Names', 'Notes', 'Quantity', 'Factory Price', 'Customer Price', 'Total Amount', 'CBM Total', 'Weight Total', 'Photo Count']);
     foreach ($items as $index => $item) {
         $qty = (float) ($item['quantity'] ?? 0);
         $cbm = (float) ($item['cbm'] ?? 0);
@@ -31,6 +31,7 @@ function procurementDraftOutputCsv(array $draft, array $items, string $filename)
             trim((string) ($item['description_en'] ?? $item['description_cn'] ?? $item['notes'] ?? '')),
             trim((string) ($item['notes'] ?? '')),
             $qty ?: '',
+            $unitPrice ?: '',
             $unitPrice ?: '',
             ($qty > 0 && $unitPrice > 0) ? round($qty * $unitPrice, 4) : '',
             ($qty > 0 && $cbm > 0) ? round($cbm * $qty, 6) : '',

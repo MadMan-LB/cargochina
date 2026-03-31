@@ -51,6 +51,145 @@ function orderIsShipmentEligible(order) {
     const status = order?.status || "";
     return status === "ReadyForConsolidation" || orderIsOperationallyConfirmed(order);
 }
+function formatDisplayNumber(value, options = {}) {
+    const {
+        maxDecimals = 2,
+        minDecimals = 0,
+        useGrouping = false,
+    } = options || {};
+    if (value === null || value === undefined || value === "") return "";
+    const num = Number(value);
+    if (!Number.isFinite(num)) {
+        return String(value);
+    }
+    const safeMax = Math.max(0, Number(maxDecimals) || 0);
+    const safeMin = Math.max(0, Math.min(safeMax, Number(minDecimals) || 0));
+    const epsilon = safeMax > 0 ? Math.pow(10, -safeMax) / 2 : 0.5;
+    const normalized = Math.abs(num) < epsilon ? 0 : num;
+    return normalized.toLocaleString(undefined, {
+        minimumFractionDigits: safeMin,
+        maximumFractionDigits: safeMax,
+        useGrouping: !!useGrouping,
+    });
+}
+function formatDisplayAmount(value, options = {}) {
+    return formatDisplayNumber(value, {
+        maxDecimals: 2,
+        ...options,
+    });
+}
+function formatDisplayCbm(value, maxDecimals = 6, options = {}) {
+    return formatDisplayNumber(value, {
+        maxDecimals,
+        ...options,
+    });
+}
+function formatDisplayWeight(value, maxDecimals = 2, options = {}) {
+    return formatDisplayNumber(value, {
+        maxDecimals,
+        ...options,
+    });
+}
+function formatDisplayPercent(value, maxDecimals = 1, options = {}) {
+    return formatDisplayNumber(value, {
+        maxDecimals,
+        ...options,
+    });
+}
+function formatDisplayQuantity(value, maxDecimals = 4, options = {}) {
+    return formatDisplayNumber(value, {
+        maxDecimals,
+        ...options,
+    });
+}
+function isSearchLikeInput(el) {
+    if (!el) return false;
+    const type = (el.getAttribute("type") || "").toLowerCase();
+    if (type === "search") return true;
+    const haystack = [
+        el.name,
+        el.id,
+        el.className,
+        el.getAttribute("placeholder"),
+        el.getAttribute("aria-label"),
+    ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+    return /(search|filter|query|lookup)/.test(haystack);
+}
+function isElementVisible(el) {
+    if (!el) return false;
+    return !!(
+        el.offsetWidth ||
+        el.offsetHeight ||
+        el.getClientRects?.().length
+    );
+}
+function isEnterNavigationDisabled(el) {
+    return !!el?.closest(
+        "[data-enter-submit='true'], .js-allow-enter-submit, [data-enter-navigation='off']",
+    );
+}
+function getEnterNavigationScope(el) {
+    return (
+        el.closest("[data-enter-scope]") ||
+        el.closest(".modal.show .modal-content") ||
+        el.closest(".offcanvas.show") ||
+        el.closest("form") ||
+        el.closest(".card, .panel, .accordion-item") ||
+        document
+    );
+}
+function isNavigableEnterField(el) {
+    if (!(el instanceof HTMLElement)) return false;
+    if (!isElementVisible(el)) return false;
+    if (el.matches("textarea, button, [type='button'], [type='submit'], [type='reset'], [type='hidden'], [type='file'], [type='checkbox'], [type='radio']")) {
+        return false;
+    }
+    if (el.matches("[disabled], [readonly], [aria-disabled='true']")) {
+        return false;
+    }
+    if (isSearchLikeInput(el)) return false;
+    if (isEnterNavigationDisabled(el)) return false;
+    if (el.closest(".autocomplete-dropdown")) return false;
+    return el.matches("input, select, [contenteditable='true']");
+}
+function getNextEnterField(current) {
+    const scope = getEnterNavigationScope(current);
+    const fields = Array.from(
+        scope.querySelectorAll("input, select, textarea, [contenteditable='true'], button"),
+    ).filter(isNavigableEnterField);
+    const currentIndex = fields.indexOf(current);
+    if (currentIndex === -1) return null;
+    return fields[currentIndex + 1] || null;
+}
+function focusNextEnterField(current) {
+    const next = getNextEnterField(current);
+    if (!next) return false;
+    next.focus({ preventScroll: false });
+    if (typeof next.select === "function" && next.matches("input:not([type='date']):not([type='time']):not([type='datetime-local'])")) {
+        next.select();
+    }
+    return true;
+}
+function closeActiveModalOrPanel(source) {
+    const modalEl = source?.closest?.(".modal");
+    if (modalEl && typeof bootstrap !== "undefined" && bootstrap.Modal) {
+        bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+        return true;
+    }
+    const collapseToggle = source?.closest?.("[data-collapse-target]");
+    const targetSelector = collapseToggle?.getAttribute?.("data-collapse-target");
+    if (targetSelector) {
+        const target = document.querySelector(targetSelector);
+        if (target && typeof bootstrap !== "undefined" && bootstrap.Collapse) {
+            bootstrap.Collapse.getOrCreateInstance(target).hide();
+            return true;
+        }
+    }
+    return false;
+}
 /** Description language: 'en' or 'cn'. Stored in localStorage. Default 'en'. */
 function descLang() {
     return (
@@ -81,6 +220,13 @@ if (typeof window !== "undefined") {
     window.orderHasPendingCustomerReview = orderHasPendingCustomerReview;
     window.orderIsOperationallyConfirmed = orderIsOperationallyConfirmed;
     window.orderIsShipmentEligible = orderIsShipmentEligible;
+    window.formatDisplayNumber = formatDisplayNumber;
+    window.formatDisplayAmount = formatDisplayAmount;
+    window.formatDisplayCbm = formatDisplayCbm;
+    window.formatDisplayWeight = formatDisplayWeight;
+    window.formatDisplayPercent = formatDisplayPercent;
+    window.formatDisplayQuantity = formatDisplayQuantity;
+    window.closeActiveModalOrPanel = closeActiveModalOrPanel;
 }
 
 const UPLOAD_BASE = "/cargochina/api/v1/upload";
@@ -220,4 +366,30 @@ document.addEventListener("change", function (e) {
         };
         r.readAsText(f);
     }
+});
+
+document.addEventListener("keydown", function (e) {
+    if (
+        e.key !== "Enter" ||
+        e.defaultPrevented ||
+        e.isComposing ||
+        e.shiftKey ||
+        e.ctrlKey ||
+        e.altKey ||
+        e.metaKey
+    ) {
+        return;
+    }
+
+    const target = e.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.matches("textarea")) return;
+    if (!isNavigableEnterField(target)) return;
+    if (target.closest("[data-enter-submit='true'], .js-allow-enter-submit")) return;
+
+    const next = getNextEnterField(target);
+    if (!next) return;
+
+    e.preventDefault();
+    focusNextEnterField(target);
 });

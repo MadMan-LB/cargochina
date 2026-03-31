@@ -389,6 +389,14 @@ function draftOrderCreateProduct(PDO $pdo, array $item): int
         $columns[] = 'unit_price';
         $values[] = $item['unit_price'];
     }
+    if (draftOrderTableHasColumn($pdo, 'products', 'buy_price')) {
+        $columns[] = 'buy_price';
+        $values[] = $item['unit_price'];
+    }
+    if (draftOrderTableHasColumn($pdo, 'products', 'sell_price')) {
+        $columns[] = 'sell_price';
+        $values[] = $item['sell_price'];
+    }
 
     $placeholders = implode(',', array_fill(0, count($columns), '?'));
     $stmt = $pdo->prepare("INSERT INTO products (" . implode(', ', $columns) . ") VALUES ($placeholders)");
@@ -452,6 +460,18 @@ function draftOrderSafeSyncProduct(PDO $pdo, array $item): void
         && $item['unit_price'] !== null) {
         $sets[] = 'unit_price = ?';
         $values[] = $item['unit_price'];
+    }
+    if (draftOrderTableHasColumn($pdo, 'products', 'buy_price')
+        && $assignIfEmpty($product['buy_price'] ?? null)
+        && $item['unit_price'] !== null) {
+        $sets[] = 'buy_price = ?';
+        $values[] = $item['unit_price'];
+    }
+    if (draftOrderTableHasColumn($pdo, 'products', 'sell_price')
+        && $assignIfEmpty($product['sell_price'] ?? null)
+        && $item['sell_price'] !== null) {
+        $sets[] = 'sell_price = ?';
+        $values[] = $item['sell_price'];
     }
     if ($assignIfEmpty($product['hs_code'] ?? null) && !empty($item['hs_code'])) {
         $sets[] = 'hs_code = ?';
@@ -563,7 +583,9 @@ function draftOrderNormalizeItem(PDO $pdo, array $rawItem, int $supplierId, ?arr
     $declaredCbm = round($cbmPerUnit * $multiplier, 6);
     $declaredWeight = round($weightPerUnit * $multiplier, 4);
     $unitPrice = isset($rawItem['unit_price']) && $rawItem['unit_price'] !== '' ? round((float) $rawItem['unit_price'], 4) : null;
-    $totalAmount = $unitPrice !== null ? round($unitPrice * $quantity, 4) : null;
+    $sellPrice = isset($rawItem['sell_price']) && $rawItem['sell_price'] !== '' ? round((float) $rawItem['sell_price'], 4) : null;
+    $priceForTotal = $sellPrice ?? $unitPrice;
+    $totalAmount = $priceForTotal !== null ? round($priceForTotal * $quantity, 4) : null;
     $photoPaths = normalizeStoredUploadPathList($rawItem['photo_paths'] ?? []);
     $customDesignPaths = normalizeStoredUploadPathList($rawItem['custom_design_paths'] ?? []);
     $customDesignRequired = !empty($rawItem['custom_design_required']) ? 1 : 0;
@@ -580,12 +602,14 @@ function draftOrderNormalizeItem(PDO $pdo, array $rawItem, int $supplierId, ?arr
         'product_id' => !empty($rawItem['product_id']) ? (int) $rawItem['product_id'] : null,
         'supplier_id' => $supplierId,
         'item_no' => trim((string) ($rawItem['item_no'] ?? '')) ?: null,
+        'item_no_manual' => !empty($rawItem['item_no_manual']) ? 1 : 0,
         'shipping_code' => trim((string) ($rawItem['shipping_code'] ?? '')) ?: null,
         'cartons' => $cartons,
         'pieces_per_carton' => round($piecesPerCarton, 4),
         'quantity' => $quantity,
         'unit' => 'pieces',
         'unit_price' => $unitPrice,
+        'sell_price' => $sellPrice,
         'total_amount' => $totalAmount,
         'cbm_mode' => ($rawItem['cbm_mode'] ?? 'direct') === 'dimensions' ? 'dimensions' : 'direct',
         'dimensions_scope' => $dimensionsScope,
@@ -662,6 +686,7 @@ function draftOrderInsertDesignAttachments(PDO $pdo, int $itemId, array $paths, 
 function draftOrderInsertItems(PDO $pdo, int $orderId, ?int $defaultSupplierId, array $items, ?int $userId): array
 {
     $hasItemSupplier = draftOrderTableHasColumn($pdo, 'order_items', 'supplier_id');
+    $hasBuyPrice = draftOrderTableHasColumn($pdo, 'order_items', 'buy_price');
     $hasSellPrice = draftOrderTableHasColumn($pdo, 'order_items', 'sell_price');
     $hasOrderCartons = draftOrderTableHasColumn($pdo, 'order_items', 'order_cartons');
     $hasOrderQtyPerCarton = draftOrderTableHasColumn($pdo, 'order_items', 'order_qty_per_carton');
@@ -673,6 +698,10 @@ function draftOrderInsertItems(PDO $pdo, int $orderId, ?int $defaultSupplierId, 
     $placeholders = "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?";
     if ($hasItemSupplier) {
         $columns .= ", supplier_id";
+        $placeholders .= ",?";
+    }
+    if ($hasBuyPrice) {
+        $columns .= ", buy_price";
         $placeholders .= ",?";
     }
     if ($hasSellPrice) {
@@ -733,8 +762,11 @@ function draftOrderInsertItems(PDO $pdo, int $orderId, ?int $defaultSupplierId, 
         if ($hasItemSupplier) {
             $params[] = $itemSupplierId ?: null;
         }
+        if ($hasBuyPrice) {
+            $params[] = $item['unit_price'];
+        }
         if ($hasSellPrice) {
-            $params[] = null;
+            $params[] = $item['sell_price'];
         }
         if ($hasOrderCartons) {
             $params[] = $item['cartons'];
@@ -844,6 +876,7 @@ function draftOrderBuildSupplierSections(array $items): array
             'pieces_per_carton' => isset($item['qty_per_carton']) ? (float) $item['qty_per_carton'] : null,
             'quantity' => draftOrderGetQuantity($item),
             'unit_price' => $item['unit_price'] !== null ? (float) $item['unit_price'] : null,
+            'sell_price' => isset($item['sell_price']) && $item['sell_price'] !== null ? (float) $item['sell_price'] : null,
             'total_amount' => $item['total_amount'] !== null ? (float) $item['total_amount'] : null,
             'cbm_mode' => (!empty($item['item_length']) && !empty($item['item_width']) && !empty($item['item_height'])) ? 'dimensions' : 'direct',
             'cbm' => $item['cbm_per_unit'],
@@ -975,24 +1008,27 @@ function draftOrderExportCsv(PDO $pdo, int $orderId): void
 
     foreach ($order['supplier_sections'] as $section) {
         fputcsv($out, ['Supplier', $section['supplier_name']]);
-        fputcsv($out, ['Item No', 'Shipping Code', 'Description', 'HS Code', 'Pieces/Carton', 'Cartons', 'Quantity', 'Unit Price', 'Total Amount', 'CBM/Unit', 'Total CBM', 'Weight/Unit', 'Total Weight', 'Custom Design']);
+        fputcsv($out, ['Item No', 'Product / Names', 'HS Code', 'Pieces/Carton', 'Cartons', 'Quantity', 'Factory Price', 'Customer Price', 'Total Amount', 'CBM/Unit', 'Total CBM', 'Weight/Unit', 'Total Weight', 'Custom Design']);
         foreach ($section['items'] as $item) {
             $desc = implode(' | ', array_map(
-                static fn($entry) => trim((string) ($entry['description_text'] ?? '')),
+                static fn($entry) => trim((string) (($entry['description_translated'] ?? '') ?: ($entry['description_text'] ?? ''))),
                 $item['description_entries'] ?? []
             ));
             $multiplier = ($item['dimensions_scope'] ?? 'carton') === 'carton'
                 ? (float) ($item['cartons'] ?? 0)
                 : (float) ($item['quantity'] ?? 0);
+            $customerPrice = isset($item['sell_price']) && $item['sell_price'] !== null && $item['sell_price'] !== ''
+                ? (float) $item['sell_price']
+                : (isset($item['unit_price']) && $item['unit_price'] !== null ? (float) $item['unit_price'] : null);
             fputcsv($out, [
                 $item['item_no'] ?: '',
-                $item['shipping_code'] ?: '',
                 $desc,
                 $item['hs_code'] ?: '',
                 $item['pieces_per_carton'] ?? '',
                 $item['cartons'] ?? '',
                 $item['quantity'] ?? '',
                 $item['unit_price'] ?? '',
+                $customerPrice ?? '',
                 $item['total_amount'] ?? '',
                 $item['cbm'] ?? '',
                 round((float) (($item['cbm'] ?? 0) * $multiplier), 6),
@@ -1001,11 +1037,11 @@ function draftOrderExportCsv(PDO $pdo, int $orderId): void
                 !empty($item['custom_design_required']) ? 'Yes' : 'No',
             ]);
         }
-        fputcsv($out, ['', '', 'Supplier subtotal', '', '', '', '', '', $section['totals']['amount'], '', $section['totals']['cbm'], '', $section['totals']['weight'], '']);
+        fputcsv($out, ['', 'Supplier subtotal', '', '', '', '', '', '', $section['totals']['amount'], '', $section['totals']['cbm'], '', $section['totals']['weight'], '']);
         fputcsv($out, ['']);
     }
 
-    fputcsv($out, ['', '', 'Grand total', '', '', '', '', '', $order['totals']['amount'], '', $order['totals']['cbm'], '', $order['totals']['weight'], '']);
+    fputcsv($out, ['', 'Grand total', '', '', '', '', '', '', $order['totals']['amount'], '', $order['totals']['cbm'], '', $order['totals']['weight'], '']);
     fclose($out);
     exit;
 }
@@ -1034,6 +1070,9 @@ function draftOrderExportXlsx(PDO $pdo, int $orderId): void
             $unitPrice = isset($item['unit_price']) && $item['unit_price'] !== null && $item['unit_price'] !== ''
                 ? (float) $item['unit_price']
                 : null;
+            $sellPrice = isset($item['sell_price']) && $item['sell_price'] !== null && $item['sell_price'] !== ''
+                ? (float) $item['sell_price']
+                : $unitPrice;
 
             $excelItems[] = [
                 'item_no' => $item['item_no'] ?? '',
@@ -1046,7 +1085,7 @@ function draftOrderExportXlsx(PDO $pdo, int $orderId): void
                 'declared_cbm' => $multiplier > 0 ? round($cbmPerUnit * $multiplier, 6) : 0.0,
                 'declared_weight' => $multiplier > 0 ? round($weightPerUnit * $multiplier, 4) : 0.0,
                 'unit_price' => $unitPrice,
-                'sell_price' => $unitPrice,
+                'sell_price' => $sellPrice,
                 'supplier_name' => $section['supplier_name'] ?? '',
                 'image_paths' => $item['photo_paths'] ?? [],
                 'dimensions_scope' => $item['dimensions_scope'] ?? 'piece',
@@ -1167,6 +1206,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     'quantity' => $qty,
                     'unit' => 'pieces',
                     'unit_price' => isset($legacyItem['unit_price']) ? (float) $legacyItem['unit_price'] : null,
+                    'sell_price' => isset($legacyItem['unit_price']) ? (float) $legacyItem['unit_price'] : null,
                     'total_amount' => isset($legacyItem['unit_price']) ? round((float) $legacyItem['unit_price'] * $qty, 4) : null,
                     'cbm_mode' => 'direct',
                     'dimensions_scope' => 'piece',

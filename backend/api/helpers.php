@@ -27,6 +27,56 @@ function jsonError(string $message, int $status = 400, array $errors = [], ?stri
     jsonResponse($body, $status);
 }
 
+function format_display_number($value, int $maxDecimals, int $minDecimals = 0): string
+{
+    if ($value === null || $value === '') {
+        return '';
+    }
+    if (!is_numeric($value)) {
+        return trim((string) $value);
+    }
+
+    $maxDecimals = max(0, $maxDecimals);
+    $minDecimals = max(0, min($maxDecimals, $minDecimals));
+    $number = (float) $value;
+    $epsilon = $maxDecimals > 0 ? pow(10, -$maxDecimals) / 2 : 0.5;
+    if (abs($number) < $epsilon) {
+        $number = 0.0;
+    }
+
+    $formatted = number_format(round($number, $maxDecimals), $maxDecimals, '.', '');
+    if ($maxDecimals > $minDecimals && str_contains($formatted, '.')) {
+        [$whole, $fraction] = explode('.', $formatted, 2);
+        $fraction = rtrim($fraction, '0');
+        if ($minDecimals > 0 && strlen($fraction) < $minDecimals) {
+            $fraction = str_pad($fraction, $minDecimals, '0');
+        }
+        $formatted = $fraction === '' ? $whole : ($whole . '.' . $fraction);
+    }
+
+    return $formatted;
+}
+
+function format_display_amount($value, int $minDecimals = 0): string
+{
+    return format_display_number($value, 2, $minDecimals);
+}
+
+function format_display_cbm($value, int $maxDecimals = 6, int $minDecimals = 0): string
+{
+    return format_display_number($value, $maxDecimals, $minDecimals);
+}
+
+function format_display_weight($value, int $maxDecimals = 2, int $minDecimals = 0): string
+{
+    return format_display_number($value, $maxDecimals, $minDecimals);
+}
+
+function format_display_percent($value, int $maxDecimals = 1, int $minDecimals = 0): string
+{
+    return format_display_number($value, $maxDecimals, $minDecimals);
+}
+
 function ensureSession(): void
 {
     if (session_status() === PHP_SESSION_NONE) {
