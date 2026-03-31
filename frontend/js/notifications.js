@@ -1,21 +1,25 @@
 document.addEventListener("DOMContentLoaded", loadNotifications);
 
+function notificationsT(text, replacements = null) {
+    return typeof t === "function" ? t(text, replacements) : text;
+}
+
 function copyConfirmationLink(link) {
     if (!link) return;
     navigator.clipboard
         ?.writeText(link)
-        .then(() => showToast("Link copied to clipboard"))
-        .catch(() => showToast("Copy failed", "danger"));
+        .then(() => showToast(notificationsT("Link copied to clipboard")))
+        .catch(() => showToast(notificationsT("Copy failed"), "danger"));
 }
 
 function openWhatsApp(phone, link) {
     if (!phone) {
-        showToast("Customer phone not available", "danger");
+        showToast(notificationsT("Customer phone not available"), "danger");
         return;
     }
-    const msg = link
-        ? encodeURIComponent("Please confirm variance: " + link)
-        : "";
+    const promptText =
+        uiLocale?.() === "zh-CN" ? "请确认差异：" : "Please confirm variance: ";
+    const msg = link ? encodeURIComponent(promptText + link) : "";
     const url = msg
         ? `https://wa.me/${phone}?text=${msg}`
         : `https://wa.me/${phone}`;
@@ -26,8 +30,10 @@ function openWeChat(link) {
     if (link) copyConfirmationLink(link);
     showToast(
         link
-            ? "Link copied — paste in WeChat to share with customer"
-            : "No link to share",
+            ? notificationsT(
+                  "Link copied — paste in WeChat to share with customer",
+              )
+            : notificationsT("No link to share"),
         link ? "success" : "danger",
     );
 }
@@ -48,10 +54,10 @@ async function loadNotifications() {
                           ? `
             <div class="d-flex flex-wrap gap-1 mt-2">
               <button class="btn btn-sm btn-outline-secondary" data-copy-link="${link}" onclick="copyConfirmationLink(this.dataset.copyLink)" title="Copy confirmation link">
-                Copy link
+                ${escapeHtml(notificationsT("Copy link"))}
               </button>
-              ${hasCustomerPhone ? `<button class="btn btn-sm btn-outline-success" data-phone="${escapeHtml(n.customer_phone)}" data-link="${link}" onclick="openWhatsApp(this.dataset.phone, this.dataset.link)" title="Open WhatsApp to message customer">WhatsApp</button>` : ""}
-              <button class="btn btn-sm btn-outline-primary" data-link="${link}" onclick="openWeChat(this.dataset.link)" title="Copy link to share in WeChat">WeChat</button>
+              ${hasCustomerPhone ? `<button class="btn btn-sm btn-outline-success" data-phone="${escapeHtml(n.customer_phone)}" data-link="${link}" onclick="openWhatsApp(this.dataset.phone, this.dataset.link)" title="${escapeHtml(notificationsT("Open WhatsApp to message customer"))}">${escapeHtml(notificationsT("WhatsApp"))}</button>` : ""}
+              <button class="btn btn-sm btn-outline-primary" data-link="${link}" onclick="openWeChat(this.dataset.link)" title="${escapeHtml(notificationsT("Copy link to share in WeChat"))}">${escapeHtml(notificationsT("WeChat"))}</button>
             </div>`
                           : "";
                       return `
@@ -60,12 +66,12 @@ async function loadNotifications() {
           ${n.body ? "<br>" + escapeHtml(n.body) : ""}
           ${actionBtns}
           <br><small class="text-muted">${n.created_at}</small>
-          ${!n.read_at ? `<button class="btn btn-sm btn-outline-primary ms-2" onclick="markRead(${n.id}); loadNotifications();">Mark read</button>` : ""}
+          ${!n.read_at ? `<button class="btn btn-sm btn-outline-primary ms-2" onclick="markRead(${n.id}); loadNotifications();">${escapeHtml(notificationsT("Mark read"))}</button>` : ""}
         </div>
       `;
                   })
                   .join("")
-            : '<p class="text-muted">No notifications</p>';
+            : `<p class="text-muted">${escapeHtml(notificationsT("No notifications"))}</p>`;
     } catch (e) {
         showToast(e.message, "danger");
     }

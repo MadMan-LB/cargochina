@@ -7,6 +7,10 @@ let calMonth = new Date().getMonth();
 let calYear = new Date().getFullYear();
 const RECEIVING_DEFAULT_STATUSES = ["Approved", "InTransitToWarehouse"];
 
+function receivingT(text, replacements = null) {
+    return typeof t === "function" ? t(text, replacements) : text;
+}
+
 function setReceivingMetric(id, value) {
     const el = document.getElementById(id);
     if (el) el.textContent = value;
@@ -67,12 +71,12 @@ function updateReceivingStatusSummary() {
     const statuses = getSelectedReceivingStatuses();
     const { priorityOnly, alertsOnly } = getReceivingFocusFilters();
     const focus = [];
-    if (priorityOnly) focus.push("priority accounts only");
-    if (alertsOnly) focus.push("high-alert orders only");
+    if (priorityOnly) focus.push(receivingT("priority accounts only"));
+    if (alertsOnly) focus.push(receivingT("high-alert orders only"));
 
     let text;
     if (!statuses.length) {
-        text = "No intake statuses selected.";
+        text = receivingT("No intake statuses selected.");
     } else {
         const labels = statuses
             .map((status) =>
@@ -80,12 +84,12 @@ function updateReceivingStatusSummary() {
             )
             .join(", ");
         text = isDefaultReceivingStatusSelection(statuses)
-            ? `Core intake statuses: ${labels}.`
-            : `Statuses: ${labels}.`;
+            ? receivingT("Core intake statuses: {labels}.", { labels })
+            : receivingT("Statuses: {labels}.", { labels });
     }
 
     if (focus.length) {
-        text += ` Focus: ${focus.join(", ")}.`;
+        text += ` ${receivingT("Focus: {focus}.", { focus: focus.join(", ") })}`;
     }
 
     summaryEl.textContent = text;
@@ -141,34 +145,58 @@ function updateReceivingOverview() {
     setReceivingMetric(
         "receiveVisibleDetail",
         visibleCount
-            ? `${uniqueSuppliers} suppliers across ${uniqueDates} planned dates.`
-            : "No orders match the current filters.",
+            ? receivingT("{suppliers} suppliers across {dates} planned dates.", {
+                  suppliers: uniqueSuppliers,
+                  dates: uniqueDates,
+              })
+            : receivingT("No orders match the current filters."),
     );
     setReceivingMetric(
         "receivePriorityDetail",
         priorityCount
-            ? `${priorityCount} orders come from flagged customer accounts.`
-            : "No priority customers in the current queue.",
+            ? receivingT("{count} orders come from flagged customer accounts.", {
+                  count: priorityCount,
+              })
+            : receivingT("No priority customers in the current queue."),
     );
     setReceivingMetric(
         "receiveCartonDetail",
         visibleCount
-            ? `${totalCbm.toFixed(2)} declared CBM across the visible queue.`
-            : "Carton totals will appear once orders are visible.",
+            ? receivingT("{cbm} declared CBM across the visible queue.", {
+                  cbm:
+                      typeof formatDisplayCbm === "function"
+                          ? formatDisplayCbm(totalCbm, 2)
+                          : totalCbm.toFixed(2),
+              })
+            : receivingT("Carton totals will appear once orders are visible."),
     );
     setReceivingMetric(
         "receiveAlertDetail",
         alertCount
-            ? `${alertCount} orders need extra handling attention.`
-            : "No high-alert receiving notes in this view.",
+            ? receivingT("{count} orders need extra handling attention.", {
+                  count: alertCount,
+              })
+            : receivingT("No high-alert receiving notes in this view."),
     );
     setReceivingMetric(
         "receiveFilterSummary",
         visibleCount
-            ? `Showing ${visibleCount} order(s) with ${totalCartons} cartons${activeFilters ? ` after ${activeFilters} active filter(s)` : ""}.`
+            ? activeFilters
+                ? receivingT(
+                      "Showing {orders} order(s) with {cartons} cartons after {filters} active filter(s).",
+                      {
+                          orders: visibleCount,
+                          cartons: totalCartons,
+                          filters: activeFilters,
+                      },
+                  )
+                : receivingT("Showing {orders} order(s) with {cartons} cartons.", {
+                      orders: visibleCount,
+                      cartons: totalCartons,
+                  })
             : activeFilters
-              ? "No orders match the active receiving filters."
-              : "Showing the full inbound receiving queue.",
+              ? receivingT("No orders match the active receiving filters.")
+              : receivingT("Showing the full inbound receiving queue."),
     );
 }
 
@@ -260,8 +288,9 @@ function setupReceiveOrderSearch() {
     Autocomplete.init(searchEl, {
         resource: "receiving",
         searchPath: "/search",
-        placeholder:
+        placeholder: receivingT(
             "Search: #ID, customer, supplier, phone, shipping code, items — verify then enter actuals",
+        ),
         renderItem: (o) => {
             const items = (o.items || [])
                 .map((i) => `${i.shipping_code || "-"} ${i.cartons || 0}ctn`)
@@ -351,7 +380,12 @@ async function handleReceivePhotos(files) {
         renderReceivePhotoPreview();
         updateVariancePhotoAlert();
     } catch (e) {
-        showToast("Upload failed: " + (e.message || "Unknown error"), "danger");
+        showToast(
+            receivingT("Upload failed: {message}", {
+                message: e.message || receivingT("Unknown error"),
+            }),
+            "danger",
+        );
     } finally {
         setLoading(btn, false);
         if (btn) btn.textContent = "Add Photo";
@@ -409,7 +443,7 @@ function setupFilterAutocomplete() {
     if (typeof Autocomplete === "undefined") return;
     Autocomplete.init(supInput, {
         resource: "suppliers",
-        placeholder: "Type to search supplier...",
+        placeholder: receivingT("Type to search supplier..."),
         onSelect: (item) => {
             if (supId) supId.value = item.id;
             applyFilters();
@@ -420,7 +454,7 @@ function setupFilterAutocomplete() {
     });
     Autocomplete.init(custInput, {
         resource: "customers",
-        placeholder: "Type to search customer...",
+        placeholder: receivingT("Type to search customer..."),
         renderItem: (c) =>
             `${c.name || ""} — ${c.code || ""}`
                 .replace(/^ — | — $/g, "")
@@ -552,7 +586,9 @@ function renderWarehouseList() {
             ].join(", ");
             function itemAlertText(it) {
                 return (
-                    (it.product_required_design ? "Required design. " : "") +
+                    (it.product_required_design
+                        ? `${receivingT("Required design.")} `
+                        : "") +
                     (it.product_high_alert_note || "")
                 ).trim();
             }
@@ -572,24 +608,24 @@ function renderWarehouseList() {
                 <span class="badge ${typeof statusBadgeClass === "function" ? statusBadgeClass(o.status) : "bg-secondary"}">${typeof statusLabel === "function" ? statusLabel(o.status) : escapeHtml(o.status)}</span>
               </div>
               <div class="small text-muted mb-2">${escapeHtml(o.expected_ready_date)}</div>
-              ${o.high_alert_notes ? `<div class="alert alert-danger py-2 px-2 small mb-2"><strong>High alert:</strong> ${escapeHtml(o.high_alert_notes)}</div>` : ""}
+              ${o.high_alert_notes ? `<div class="alert alert-danger py-2 px-2 small mb-2"><strong>${escapeHtml(receivingT("High Alert:"))}</strong> ${escapeHtml(o.high_alert_notes)}</div>` : ""}
               ${
                   productAlerts.length
-                      ? `<div class="product-alert-inline mb-2"><strong>Product alerts:</strong> ${productAlerts
+                      ? `<div class="product-alert-inline mb-2"><strong>${escapeHtml(receivingT("Product alerts:"))}</strong> ${productAlerts
                             .map((note) => escapeHtml(note))
                             .join(" | ")}</div>`
                       : ""
               }
               <dl class="row mb-0 small">
-                <dt class="col-5">Supplier</dt><dd class="col-7">${escapeHtml(o.supplier_name || "-")}</dd>
-                <dt class="col-5">Supplier phone</dt><dd class="col-7">${escapeHtml(o.supplier_phone || "-")}</dd>
-                <dt class="col-5">Shipping code</dt><dd class="col-7">${escapeHtml(shippingCodes || "-")}</dd>
-                <dt class="col-5">Cartons</dt><dd class="col-7">${totalCartons}</dd>
-                <dt class="col-5">CBM / Weight</dt><dd class="col-7">${parseFloat(o.declared_cbm || 0).toFixed(6)} / ${parseFloat(o.declared_weight || 0)} kg</dd>
+                <dt class="col-5">${escapeHtml(receivingT("Supplier"))}</dt><dd class="col-7">${escapeHtml(o.supplier_name || "-")}</dd>
+                <dt class="col-5">${escapeHtml(receivingT("Supplier phone"))}</dt><dd class="col-7">${escapeHtml(o.supplier_phone || "-")}</dd>
+                <dt class="col-5">${escapeHtml(receivingT("Shipping Code"))}</dt><dd class="col-7">${escapeHtml(shippingCodes || "-")}</dd>
+                <dt class="col-5">${escapeHtml(receivingT("Cartons"))}</dt><dd class="col-7">${totalCartons}</dd>
+                <dt class="col-5">${escapeHtml(receivingT("CBM / Weight"))}</dt><dd class="col-7">${typeof formatDisplayCbm === "function" ? formatDisplayCbm(parseFloat(o.declared_cbm || 0), 6) : parseFloat(o.declared_cbm || 0).toFixed(6)} / ${typeof formatDisplayWeight === "function" ? formatDisplayWeight(parseFloat(o.declared_weight || 0), 2) : parseFloat(o.declared_weight || 0)} kg</dd>
               </dl>
-              ${items.length ? `<div class="mt-2 pt-2 border-top"><small class="text-muted">Items:</small> ${items.map((it) => `<span class="badge bg-light text-dark me-1">${escapeHtml(it.shipping_code || "—")} ${it.cartons || 0}ctn ${it.qty_per_carton || ""}/ctn HS:${escapeHtml(it.hs_code || "-")}${it.product_high_alert_note || it.product_required_design ? " ALERT" : ""}</span>`).join("")}</div>` : ""}
+              ${items.length ? `<div class="mt-2 pt-2 border-top"><small class="text-muted">${escapeHtml(receivingT("Items"))}:</small> ${items.map((it) => `<span class="badge bg-light text-dark me-1">${escapeHtml(it.shipping_code || "—")} ${it.cartons || 0}ctn ${it.qty_per_carton || ""}/ctn HS:${escapeHtml(it.hs_code || "-")}${it.product_high_alert_note || it.product_required_design ? ` ${escapeHtml(receivingT("ALERT"))}` : ""}</span>`).join("")}</div>` : ""}
               <div class="mt-2 pt-2">
-                <button type="button" class="btn btn-sm btn-primary js-receive-btn" data-order-id="${o.id}">Receive</button>
+                <button type="button" class="btn btn-sm btn-primary js-receive-btn" data-order-id="${o.id}">${escapeHtml(receivingT("Receive"))}</button>
               </div>
             </div>
           </div>
@@ -645,21 +681,39 @@ function renderCalendar() {
     const grid = document.getElementById("calendarGrid");
     const label = document.getElementById("calMonthLabel");
     if (!grid || !label) return;
-    const monthNames = [
-        "Jan",
-        "Feb",
-        "Mar",
-        "Apr",
-        "May",
-        "Jun",
-        "Jul",
-        "Aug",
-        "Sep",
-        "Oct",
-        "Nov",
-        "Dec",
-    ];
-    label.textContent = `${monthNames[calMonth]} ${calYear}`;
+    const isZh = typeof uiLocale === "function" && uiLocale() === "zh-CN";
+    const monthNames = isZh
+        ? [
+              "1月",
+              "2月",
+              "3月",
+              "4月",
+              "5月",
+              "6月",
+              "7月",
+              "8月",
+              "9月",
+              "10月",
+              "11月",
+              "12月",
+          ]
+        : [
+              "Jan",
+              "Feb",
+              "Mar",
+              "Apr",
+              "May",
+              "Jun",
+              "Jul",
+              "Aug",
+              "Sep",
+              "Oct",
+              "Nov",
+              "Dec",
+          ];
+    label.textContent = isZh
+        ? `${calYear}年 ${monthNames[calMonth]}`
+        : `${monthNames[calMonth]} ${calYear}`;
     const first = new Date(calYear, calMonth, 1);
     const last = new Date(calYear, calMonth + 1, 0);
     const startPad = first.getDay();
@@ -677,8 +731,12 @@ function renderCalendar() {
             byDate[day].push(o);
         }
     });
-    let html =
-        "<div class='cal-day-header'>Sun</div><div class='cal-day-header'>Mon</div><div class='cal-day-header'>Tue</div><div class='cal-day-header'>Wed</div><div class='cal-day-header'>Thu</div><div class='cal-day-header'>Fri</div><div class='cal-day-header'>Sat</div>";
+    const dayHeaders = isZh
+        ? ["日", "一", "二", "三", "四", "五", "六"]
+        : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    let html = dayHeaders
+        .map((day) => `<div class='cal-day-header'>${day}</div>`)
+        .join("");
     const today = new Date();
     const todayYear = today.getFullYear();
     const todayMonth = today.getMonth();
@@ -734,7 +792,14 @@ function renderSchedule() {
         <div class="filter-toolbar-head">
           <div>
             <h6>${d}</h6>
-            <div class="filter-toolbar-subtext">${dayOrders.length} order(s) · ${dayCartons} cartons · ${dayCbm.toFixed(2)} CBM</div>
+                <div class="filter-toolbar-subtext">${escapeHtml(receivingT("{orders} order(s) · {cartons} cartons · {cbm} CBM", {
+                    orders: dayOrders.length,
+                    cartons: dayCartons,
+                    cbm:
+                        typeof formatDisplayCbm === "function"
+                            ? formatDisplayCbm(dayCbm, 2)
+                            : dayCbm.toFixed(2),
+                }))}</div>
           </div>
         </div>
         <div class="stack-card-list">
@@ -744,9 +809,9 @@ function renderSchedule() {
             <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 border rounded-3 px-3 py-2 bg-white">
               <div>
                 <div class="fw-semibold">#${o.id} — ${escapeHtml(o.customer_name)}</div>
-                <div class="small text-muted">${escapeHtml(o.supplier_name || "-")} · ${parseFloat(o.declared_cbm || 0).toFixed(2)} CBM</div>
+                <div class="small text-muted">${escapeHtml(o.supplier_name || "-")} · ${typeof formatDisplayCbm === "function" ? formatDisplayCbm(parseFloat(o.declared_cbm || 0), 2) : parseFloat(o.declared_cbm || 0).toFixed(2)} CBM</div>
               </div>
-              <button type="button" class="btn btn-sm btn-outline-primary js-receive-btn" data-order-id="${o.id}">Receive</button>
+              <button type="button" class="btn btn-sm btn-outline-primary js-receive-btn" data-order-id="${o.id}">${escapeHtml(receivingT("Receive"))}</button>
             </div>
           `,
               )
@@ -756,7 +821,7 @@ function renderSchedule() {
     `;
               })
               .join("")
-        : '<div class="filter-toolbar-card"><p class="text-muted mb-0">No shipments in the filtered range.</p></div>';
+        : `<div class="filter-toolbar-card"><p class="text-muted mb-0">${escapeHtml(receivingT("No shipments in the filtered range."))}</p></div>`;
 }
 
 async function loadReceivableOrders() {
@@ -789,7 +854,7 @@ function updateDeclaredSummary(order) {
         const acbm = document.getElementById("actualCbm");
         const aw = document.getElementById("actualWeight");
         if (ac) ac.placeholder = "";
-        if (acbm) acbm.placeholder = "Direct or from L×W×H";
+        if (acbm) acbm.placeholder = receivingT("Direct or from L×W×H");
         if (aw) aw.placeholder = "";
         return;
     }
@@ -899,7 +964,7 @@ function removeItemPhoto(orderItemId, index) {
 async function submitReceive() {
     const orderId = document.getElementById("receiveOrderId")?.value;
     if (!orderId) {
-        showToast("Select an order", "danger");
+        showToast(receivingT("Select an order"), "danger");
         return;
     }
     const actualCartons =
@@ -916,7 +981,7 @@ async function submitReceive() {
 
     if (actualCbm <= 0) {
         showToast(
-            "Enter Actual CBM directly or L/H/W (cm) to calculate",
+            receivingT("Enter Actual CBM directly or L/H/W (cm) to calculate"),
             "danger",
         );
         return;
@@ -937,7 +1002,7 @@ async function submitReceive() {
         variancePct >= 10 || varianceAbs >= 0.1 || condition !== "good";
     if (hasVariance && photoPaths.length === 0) {
         showToast(
-            "Evidence photos required when variance or damage is present",
+            receivingT("Evidence photos required when variance or damage is present"),
             "danger",
         );
         document
@@ -1000,8 +1065,10 @@ async function submitReceive() {
         );
         showToast(
             res.data.variance_detected
-                ? "Received — auto-confirmed, customer follow-up sent"
-                : "Received successfully",
+                ? receivingT(
+                      "Received — auto-confirmed, customer follow-up sent",
+                  )
+                : receivingT("Received successfully"),
         );
         loadReceivableOrders();
         document.getElementById("receiveForm").classList.add("d-none");
@@ -1011,7 +1078,7 @@ async function submitReceive() {
         receiveItemPhotos = {};
         renderReceivePhotoPreview();
     } catch (e) {
-        showToast(e.message || "Request failed", "danger");
+        showToast(e.message || receivingT("Request failed"), "danger");
     } finally {
         setLoading(submitBtn, false);
     }

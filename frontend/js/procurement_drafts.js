@@ -11,6 +11,10 @@
     let quickSupplierPaymentLinkIndex = 0;
     let draftOrderCustomerCountryShipping = [];
 
+    function draftT(text, replacements = null) {
+        return typeof t === "function" ? t(text, replacements) : text;
+    }
+
     async function api(method, path, body) {
         const opts = { method, credentials: "same-origin" };
         if (body && (method === "POST" || method === "PUT")) {
@@ -132,7 +136,7 @@
         const input = document.getElementById("draftOrderDestinationCountry");
         if (idInput) idInput.value = "";
         if (select) {
-            select.innerHTML = '<option value="">Select country...</option>';
+            select.innerHTML = `<option value="">${escapeHtml(draftT("Select country..."))}</option>`;
             select.value = "";
         }
         if (input) input.value = "";
@@ -167,7 +171,7 @@
         const select = document.getElementById("draftOrderDestinationCountrySelect");
         if (!select) return;
         select.innerHTML =
-            '<option value="">Select country...</option>' +
+            `<option value="">${escapeHtml(draftT("Select country..."))}</option>` +
             draftOrderCustomerCountryShipping
                 .map(
                     (country) =>
@@ -281,7 +285,10 @@
         if (!hint) return;
         if (prefix) {
             hint.textContent =
-                `Default shipping code ${prefix} is active. Item numbers now follow ${prefix}-supplierSequence-itemSequence and stay aligned with supplier groups.`;
+                draftT(
+                    "Default shipping code {prefix} is active. Item numbers now follow {prefix}-supplierSequence-itemSequence and stay aligned with supplier groups.",
+                    { prefix },
+                );
             hint.className = "alert alert-info border mt-3 mb-0 py-2";
             return;
         }
@@ -291,7 +298,10 @@
 
     function confirmMissingDraftExpectedReadyDate(actionLabel) {
         return window.confirm(
-            `Expected Ready Date is empty. Continue ${actionLabel} without it? Date-based reminders, overdue tracking, and date filters will skip it until you fill it later.`,
+            draftT(
+                "Expected Ready Date is empty. Continue {action} without it? Date-based reminders, overdue tracking, and date filters will skip it until you fill it later.",
+                { action: actionLabel },
+            ),
         );
     }
 
@@ -405,7 +415,7 @@
         const supplierName =
             section._supplierAc?.getSelected?.()?.name ||
             section.querySelector(".draft-section-supplier")?.value?.trim() ||
-            "New supplier section";
+            draftT("New supplier section");
         const amount =
             section.querySelector(".draft-section-amount")?.textContent || "0.00";
         const currency =
@@ -422,7 +432,7 @@
         const label = section.querySelector(".draft-section-title");
         if (body) body.classList.toggle("d-none", collapsed);
         if (button) {
-            button.textContent = collapsed ? "Expand" : "Collapse";
+            button.textContent = collapsed ? draftT("Expand") : draftT("Collapse");
         }
         if (label) {
             label.textContent = buildDraftSupplierSectionLabel(section, collapsed);
@@ -440,7 +450,7 @@
         if (!tbody) return;
         if (!rows.length) {
             tbody.innerHTML =
-                '<tr><td colspan="8" class="text-center text-muted py-4">No draft orders yet.</td></tr>';
+                `<tr><td colspan="8" class="text-center text-muted py-4">${escapeHtml(draftT("No draft orders yet."))}</td></tr>`;
             return;
         }
         tbody.innerHTML = rows
@@ -459,11 +469,11 @@
                         <small class="text-muted">${fmtCbm(row.totals?.cbm)} CBM · ${fmtWeight(row.totals?.weight)} kg</small>
                       </td>
                       <td class="table-actions">
-                        <button class="btn btn-sm btn-outline-primary" type="button" onclick="openDraftOrderBuilder(${row.id})">${row.editable ? "Open" : "View"}</button>
-                        ${row.status === "Draft" ? `<button class="btn btn-sm btn-success" type="button" onclick="submitDraftOrder(${row.id})">Submit</button>` : ""}
+                        <button class="btn btn-sm btn-outline-primary" type="button" onclick="openDraftOrderBuilder(${row.id})">${escapeHtml(draftT(row.editable ? "Open" : "View"))}</button>
+                        ${row.status === "Draft" ? `<button class="btn btn-sm btn-success" type="button" onclick="submitDraftOrder(${row.id})">${escapeHtml(draftT("Submit"))}</button>` : ""}
                         <a class="btn btn-sm btn-outline-success" href="${API}/draft-orders/${row.id}/export?format=xlsx" download>XLSX</a>
-                        <a class="btn btn-sm btn-outline-secondary" href="/cargochina/procurement_draft_print.php?order_id=${row.id}" target="_blank" rel="noopener">Print</a>
-                        <a class="btn btn-sm btn-outline-info" href="/cargochina/orders.php?order_type=draft_procurement">Orders</a>
+                        <a class="btn btn-sm btn-outline-secondary" href="/cargochina/procurement_draft_print.php?order_id=${row.id}" target="_blank" rel="noopener">${escapeHtml(draftT("Print"))}</a>
+                        <a class="btn btn-sm btn-outline-info" href="/cargochina/orders.php?order_type=draft_procurement">${escapeHtml(draftT("Orders"))}</a>
                       </td>
                     </tr>
                 `;
@@ -481,7 +491,7 @@
         if (!tbody) return;
         if (!rows.length) {
             tbody.innerHTML =
-                '<tr><td colspan="6" class="text-center text-muted py-4">No legacy procurement drafts found.</td></tr>';
+                `<tr><td colspan="6" class="text-center text-muted py-4">${escapeHtml(draftT("No legacy procurement drafts found."))}</td></tr>`;
             return;
         }
         tbody.innerHTML = rows
@@ -493,11 +503,11 @@
                       <td>${row.id}</td>
                       <td>${escapeHtml(row.name || "—")}</td>
                       <td>${escapeHtml(row.supplier_name || "—")}</td>
-                      <td><span class="badge ${migrated ? "bg-success" : "bg-secondary"}">${escapeHtml(migrated ? "Migrated" : row.status || "draft")}</span></td>
+                      <td><span class="badge ${migrated ? "bg-success" : "bg-secondary"}">${escapeHtml(migrated ? draftT("Migrated") : row.status || "draft")}</span></td>
                       <td>${(row.items || []).length}</td>
                       <td class="table-actions">
-                        ${migrated && row.converted_order_id ? `<button class="btn btn-sm btn-outline-success" type="button" onclick="openDraftOrderBuilder(${row.converted_order_id})">Open Order</button>` : `<button class="btn btn-sm btn-outline-primary" type="button" onclick="openLegacyMigration(${row.id})">Migrate</button>`}
-                        <a class="btn btn-sm btn-outline-secondary" href="/cargochina/procurement_draft_print.php?id=${row.id}" target="_blank" rel="noopener">Print</a>
+                        ${migrated && row.converted_order_id ? `<button class="btn btn-sm btn-outline-success" type="button" onclick="openDraftOrderBuilder(${row.converted_order_id})">${escapeHtml(draftT("Open Order"))}</button>` : `<button class="btn btn-sm btn-outline-primary" type="button" onclick="openLegacyMigration(${row.id})">${escapeHtml(draftT("Migrate"))}</button>`}
+                        <a class="btn btn-sm btn-outline-secondary" href="/cargochina/procurement_draft_print.php?id=${row.id}" target="_blank" rel="noopener">${escapeHtml(draftT("Print"))}</a>
                       </td>
                     </tr>
                 `;
@@ -510,9 +520,11 @@
         document.getElementById("draftOrderId").value = "";
         document.getElementById("draftOrderEditable").value = "1";
         document.getElementById("draftOrderModalTitle").textContent =
-            "Draft an Order";
+            draftT("Draft an Order");
         document.getElementById("draftOrderModalSubtitle").textContent =
-            "One customer, multiple supplier sections, compact item cards, live totals.";
+            draftT(
+                "One customer, multiple supplier sections, compact item cards, live totals.",
+            );
         document.getElementById("draftOrderSections").innerHTML = "";
         document.getElementById("draftOrderTotalAmount").textContent = "0";
         document.getElementById("draftOrderTotalCurrency").textContent = "USD";
@@ -557,8 +569,8 @@
         document.getElementById("draftOrderId").value = order.id;
         document.getElementById("draftOrderModalTitle").textContent =
             order.editable
-                ? `Edit Draft Order #${order.id}`
-                : `View Draft Order #${order.id}`;
+                ? draftT("Edit Draft Order #{id}", { id: order.id })
+                : draftT("View Draft Order #{id}", { id: order.id });
         document.getElementById("draftOrderModalSubtitle").textContent =
             `${order.customer_name || "Customer"} · ${order.status}`;
         draftOrderCustomerAc?.setValue({
@@ -611,22 +623,22 @@
             <div class="card draft-order-section" data-section-id="${sectionId}">
               <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <div class="d-flex align-items-center gap-2 flex-wrap">
-                  <span class="fw-semibold draft-section-title">Supplier Section</span>
-                  <input type="text" class="form-control form-control-sm draft-section-supplier" placeholder="Type to search supplier..." style="width:min(320px, 100%)" autocomplete="off">
+                  <span class="fw-semibold draft-section-title">${escapeHtml(draftT("Supplier Section"))}</span>
+                  <input type="text" class="form-control form-control-sm draft-section-supplier" placeholder="${escapeHtml(draftT("Type to search supplier..."))}" style="width:min(320px, 100%)" autocomplete="off">
                   <input type="hidden" class="draft-section-supplier-id">
-                  <button type="button" class="btn btn-outline-primary btn-sm draft-item-action" data-builder-action="quick-add-supplier" title="Quick add supplier">+</button>
+                  <button type="button" class="btn btn-outline-primary btn-sm draft-item-action" data-builder-action="quick-add-supplier" title="${escapeHtml(draftT("Quick add supplier"))}">+</button>
                 </div>
                 <div class="d-flex gap-2 align-items-center flex-wrap">
                   <small class="text-muted"><span class="draft-section-amount">0</span> <span class="draft-section-currency">USD</span> · <span class="draft-section-qty">0</span> qty · <span class="draft-section-cbm">0</span> CBM · <span class="draft-section-weight">0</span> kg</small>
-                  <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="collapse-section">Collapse</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="collapse-section">${escapeHtml(draftT("Collapse"))}</button>
                   <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="move-up">↑</button>
                   <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="move-down">↓</button>
-                  <button type="button" class="btn btn-outline-danger btn-sm draft-item-action" data-builder-action="remove-section">Remove Section</button>
+                  <button type="button" class="btn btn-outline-danger btn-sm draft-item-action" data-builder-action="remove-section">${escapeHtml(draftT("Remove Section"))}</button>
                 </div>
               </div>
               <div class="card-body">
                 <div class="draft-section-items d-flex flex-column gap-3"></div>
-                <button type="button" class="btn btn-outline-primary btn-sm mt-3 draft-item-action" data-builder-action="add-item">+ Add Item</button>
+                <button type="button" class="btn btn-outline-primary btn-sm mt-3 draft-item-action" data-builder-action="add-item">${escapeHtml(draftT("+ Add Item"))}</button>
               </div>
             </div>
         `;
@@ -645,7 +657,7 @@
         const supplierIdInput = section.querySelector(".draft-section-supplier-id");
         const ac = Autocomplete.init(supplierInput, {
             resource: "suppliers",
-            placeholder: "Type to search supplier...",
+            placeholder: draftT("Type to search supplier..."),
             onSelect: (item) => {
                 supplierIdInput.value = item.id || "";
                 refreshSectionProductFilters(section);
@@ -791,7 +803,7 @@
                 data-description-cn="${escapeHtml(cn).replace(/"/g, "&quot;")}"
                 data-description-en="${escapeHtml(en).replace(/"/g, "&quot;")}"
               >
-              <button type="button" class="btn btn-outline-danger btn-sm draft-item-action draft-item-description-remove" title="Remove row">×</button>
+              <button type="button" class="btn btn-outline-danger btn-sm draft-item-action draft-item-description-remove" title="${escapeHtml(draftT("Remove row"))}">×</button>
             </div>
         `;
     }

@@ -3,16 +3,17 @@
  * Access Denied page. Included when user lacks role for requested area.
  * Expects $userRoles, $area in scope when included from area_bootstrap.php.
  */
+require_once __DIR__ . '/includes/i18n.php';
 require_once __DIR__ . '/includes/sidebar_permissions.php';
 $roles = $userRoles ?? $_SESSION['user_roles'] ?? [];
 $homeUrl = clmsGetAccessibleHomeUrl($roles);
 ?>
 <!DOCTYPE html>
-<html lang="en">
+<html lang="<?= htmlspecialchars(clmsGetUiLocale()) ?>">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Access Denied | CLMS</title>
+  <title><?= htmlspecialchars(clmsT('Access Denied')) ?> | CLMS</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body class="bg-light d-flex align-items-center min-vh-100">
@@ -27,9 +28,9 @@ $homeUrl = clmsGetAccessibleHomeUrl($roles);
                 <path d="M10.646 7.646a.5.5 0 0 1 .708 0L13 9.293l1.646-1.647a.5.5 0 0 1 .708.708L13.707 10l1.647 1.646a.5.5 0 0 1-.708.708L13 10.707l-1.646 1.647a.5.5 0 0 1-.708-.708L12.293 10z"/>
               </svg>
             </div>
-            <h1 class="h3 mb-3">Access Denied</h1>
-            <p class="text-muted mb-4">You do not have permission to access this area.</p>
-            <a href="<?= htmlspecialchars($homeUrl) ?>" class="btn btn-primary">Return to My Area</a>
+            <h1 class="h3 mb-3"><?= htmlspecialchars(clmsT('Access Denied')) ?></h1>
+            <p class="text-muted mb-4"><?= htmlspecialchars(clmsT('You do not have permission to access this area.')) ?></p>
+            <a href="<?= htmlspecialchars($homeUrl) ?>" class="btn btn-primary"><?= htmlspecialchars(clmsT('Return to My Area')) ?></a>
           </div>
         </div>
       </div>

@@ -3,6 +3,9 @@
  */
 (function () {
     const API = window.API_BASE || "/cargochina/api/v1";
+    function financialsT(text, replacements = null) {
+        return typeof t === "function" ? t(text, replacements) : text;
+    }
     let profitCustomerAc = null;
     let profitSupplierAc = null;
     let balanceCustomerAc = null;
@@ -114,21 +117,24 @@
         if (!summaryEl) return;
         const statuses = getSelectedProfitStatuses();
         if (!statuses.length) {
-            summaryEl.textContent =
-                "Default scope: all except Draft and declined orders.";
+            summaryEl.textContent = financialsT(
+                "Default scope: all except Draft and declined orders.",
+            );
             return;
         }
         const labels = formatProfitStatusLabels(statuses);
         summaryEl.textContent =
             getProfitStatusMode() === "exclude"
-                ? `Default scope plus excluding: ${labels}.`
-                : `Including: ${labels}.`;
+                ? financialsT("Default scope plus exclude: {labels}.", {
+                      labels,
+                  })
+                : financialsT("Include: {labels}.", { labels });
     }
 
     function renderLoadingRows(bodyId, cols, message) {
         const tbody = document.getElementById(bodyId);
         if (!tbody) return;
-        tbody.innerHTML = `<tr><td colspan="${cols}" class="text-center text-muted py-4">${escapeHtml(message || "Loading…")}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${cols}" class="text-center text-muted py-4">${escapeHtml(message || financialsT("Loading…"))}</td></tr>`;
     }
 
     function buildProfitSummary(summary) {
@@ -187,18 +193,35 @@
         const filters = [];
         if (df || dt) {
             filters.push(
-                `Ready date ${df || "any"} → ${dt || "any"}`,
+                financialsT("Ready date {from} → {to}", {
+                    from: df || "any",
+                    to: dt || "any",
+                }),
             );
         }
-        if (customerText) filters.push(`Customer: ${customerText}`);
-        if (supplierText) filters.push(`Supplier: ${supplierText}`);
+        if (customerText) {
+            filters.push(
+                financialsT("Customer: {customer}", {
+                    customer: customerText,
+                }),
+            );
+        }
+        if (supplierText) {
+            filters.push(
+                financialsT("Supplier: {supplier}", {
+                    supplier: supplierText,
+                }),
+            );
+        }
         if (statuses.length) {
             filters.push(
-                `${
-                    getProfitStatusMode() === "exclude"
-                        ? "Default scope plus exclude"
-                        : "Include"
-                }: ${formatProfitStatusLabels(statuses)}`,
+                getProfitStatusMode() === "exclude"
+                    ? financialsT("Default scope plus exclude: {labels}.", {
+                          labels: formatProfitStatusLabels(statuses),
+                      })
+                    : financialsT("Include: {labels}.", {
+                          labels: formatProfitStatusLabels(statuses),
+                      }),
             );
         }
 
@@ -206,18 +229,27 @@
         setText(
             "profitOrderDetail",
             rows.length === 1
-                ? "1 order matches the current filters."
-                : `${rows.length} orders match the current filters.`,
+                ? financialsT("{count} order matches the current filters.", {
+                      count: rows.length,
+                  })
+                : financialsT("{count} orders match the current filters.", {
+                      count: rows.length,
+                  }),
         );
         setText("profitGrossCount", formatNum(summary?.gross_profit || 0));
         setText(
             "profitGrossDetail",
-            `Sell ${formatNum(summary?.total_sell || 0)} minus buy ${formatNum(summary?.total_buy || 0)}.`,
+            financialsT("Sell {sell} minus buy {buy}.", {
+                sell: formatNum(summary?.total_sell || 0),
+                buy: formatNum(summary?.total_buy || 0),
+            }),
         );
         setText("profitNetCount", formatNum(summary?.net_profit || 0));
         setText(
             "profitNetDetail",
-            `After ${formatNum(summary?.total_commission || 0)} commission.`,
+            financialsT("After {commission} commission.", {
+                commission: formatNum(summary?.total_commission || 0),
+            }),
         );
         setText(
             "profitCommissionCount",
@@ -226,21 +258,32 @@
         setText(
             "profitCommissionDetail",
             summary?.total_commission
-                ? "Commission is being deducted from the visible margin."
-                : "No commission impact in the current result set.",
+                ? financialsT(
+                      "Commission is being deducted from the visible margin.",
+                  )
+                : financialsT(
+                      "No commission impact in the current result set.",
+                  ),
         );
         setText(
             "profitFilterSummary",
             getFilterSummary(
                 filters,
-                "Showing the default finance scope: all except Draft and declined orders.",
+                financialsT(
+                    "Showing the default finance scope: all except Draft and declined orders.",
+                ),
             ),
         );
         setText(
             "profitTableSummary",
             rows.length
-                ? `${rows.length} order${rows.length === 1 ? "" : "s"} in view`
-                : "No matching orders",
+                ? financialsT(
+                      rows.length === 1
+                          ? "{count} order in view"
+                          : "{count} orders in view",
+                      { count: rows.length },
+                  )
+                : financialsT("No matching orders"),
         );
         const expenses = summary?.expenses || [];
         setText(
@@ -251,7 +294,7 @@
                           return `${expense.currency}: ${formatNum(expense.total)}`;
                       })
                       .join(" | ")
-                : "No expenses recorded for the visible period.",
+                : financialsT("No expenses recorded for the visible period."),
         );
     }
 
@@ -271,15 +314,15 @@
             params.set("status_mode", getProfitStatusMode());
         }
         try {
-            renderLoadingRows("profitTableBody", 8, "Loading profit data…");
+            renderLoadingRows("profitTableBody", 8, financialsT("Loading profit data…"));
             setHtml(
                 "profitSummary",
-                '<div class="text-muted small">Refreshing the profit summary…</div>',
+                `<div class="text-muted small">${escapeHtml(financialsT("Refreshing the profit summary…"))}</div>`,
             );
             const d = await api("/financials/profit?" + params.toString());
             renderProfit(d.data, d.summary);
         } catch (e) {
-            alert(e.message || "Failed to load profit data");
+            alert(e.message || financialsT("Failed to load profit data"));
             renderProfit([], null);
         }
     };
@@ -288,10 +331,10 @@
         const tbody = document.getElementById("profitTableBody");
         if (!rows || rows.length === 0) {
             tbody.innerHTML =
-                '<tr><td colspan="8" class="text-center text-muted py-4">No orders in range.</td></tr>';
+                `<tr><td colspan="8" class="text-center text-muted py-4">${escapeHtml(financialsT("No orders in range."))}</td></tr>`;
             setHtml(
                 "profitSummary",
-                '<div class="text-muted small">No profit data for the selected filters.</div>',
+                `<div class="text-muted small">${escapeHtml(financialsT("No profit data for the selected filters."))}</div>`,
             );
             updateProfitOverview([], summary);
             return;
@@ -326,12 +369,12 @@
             renderLoadingRows(
                 "customerBalancesBody",
                 5,
-                "Loading customer balances…",
+                financialsT("Loading customer balances…"),
             );
             renderLoadingRows(
                 "supplierPayablesBody",
                 5,
-                "Loading supplier payables…",
+                financialsT("Loading supplier payables…"),
             );
             const d = await api(
                 "/financials/balances" +
@@ -340,7 +383,7 @@
             renderBalances(d.data);
             balancesLoadedOnce = true;
         } catch (e) {
-            alert(e.message || "Failed to load balances");
+            alert(e.message || financialsT("Failed to load balances"));
             renderBalances({ customers: [], suppliers: [] });
         }
     };
@@ -383,12 +426,12 @@
                 <td><a href="/cargochina/customers.php?id=${c.id}">${escapeHtml(c.name || c.code)}</a></td>
                 <td>${renderBalanceBreakdown(c, { currency: "USD", primary: "balance", secondary: "deposits", tertiary: "receivable", secondaryLabel: "Deposits", tertiaryLabel: "Receivable", signed: true }, "balance")}</td>
                 <td>${renderBalanceBreakdown(c, { currency: "RMB", primary: "balance", secondary: "deposits", tertiary: "receivable", secondaryLabel: "Deposits", tertiaryLabel: "Receivable", signed: true }, "balance")}</td>
-                <td><button class="btn btn-sm btn-outline-primary" onclick="openFinDepositModal(${c.id}, '${nameEsc(c.name || c.code)}')">Record Deposit</button></td>
+                <td><button class="btn btn-sm btn-outline-primary" onclick="openFinDepositModal(${c.id}, '${nameEsc(c.name || c.code)}')">${escapeHtml(financialsT("Record Deposit"))}</button></td>
             </tr>
         `,
                   )
                   .join("")
-            : '<tr><td colspan="4" class="text-center text-muted">No customers.</td></tr>';
+            : `<tr><td colspan="4" class="text-center text-muted">${escapeHtml(financialsT("No customers."))}</td></tr>`;
         suppBody.innerHTML = supp.length
             ? supp
                   .map(
@@ -397,12 +440,12 @@
                 <td><a href="/cargochina/suppliers.php?id=${s.id}">${escapeHtml(s.name || s.code)}</a></td>
                 <td>${renderBalanceBreakdown(s, { currency: "USD", primary: "payable", secondary: "invoiced", tertiary: "settlement_delta", secondaryLabel: "Invoiced", tertiaryLabel: "Settlement delta", signed: false })}</td>
                 <td>${renderBalanceBreakdown(s, { currency: "RMB", primary: "payable", secondary: "invoiced", tertiary: "settlement_delta", secondaryLabel: "Invoiced", tertiaryLabel: "Settlement delta", signed: false })}</td>
-                <td><button class="btn btn-sm btn-outline-success" onclick="openFinPaymentModal(${s.id}, '${nameEsc(s.name || s.code)}')">Record Payment</button></td>
+                <td><button class="btn btn-sm btn-outline-success" onclick="openFinPaymentModal(${s.id}, '${nameEsc(s.name || s.code)}')">${escapeHtml(financialsT("Record Payment"))}</button></td>
             </tr>
         `,
                   )
                   .join("")
-            : '<tr><td colspan="4" class="text-center text-muted">No suppliers.</td></tr>';
+            : `<tr><td colspan="4" class="text-center text-muted">${escapeHtml(financialsT("No suppliers."))}</td></tr>`;
         updateBalanceOverview(cust, supp);
     }
 
@@ -414,8 +457,20 @@
             .getElementById("balanceSupplierSearch")
             .value.trim();
         const filters = [];
-        if (customerText) filters.push(`Customer: ${customerText}`);
-        if (supplierText) filters.push(`Supplier: ${supplierText}`);
+        if (customerText) {
+            filters.push(
+                financialsT("Customer: {customer}", {
+                    customer: customerText,
+                }),
+            );
+        }
+        if (supplierText) {
+            filters.push(
+                financialsT("Supplier: {supplier}", {
+                    supplier: supplierText,
+                }),
+            );
+        }
 
         const customerCurrencyTotals = { USD: { credit: 0, outstanding: 0, receivable: 0 }, RMB: { credit: 0, outstanding: 0, receivable: 0 } };
         const supplierCurrencyTotals = { USD: { payable: 0 }, RMB: { payable: 0 } };
@@ -446,8 +501,11 @@
         setText(
             "balanceCustomerDetail",
             customers.length
-                ? `${customers.length} customer account(s) split across RMB and USD without FX conversion.`
-                : "No customers in the current balance view.",
+                ? financialsT(
+                      "{count} customer account(s) split across RMB and USD without FX conversion.",
+                      { count: customers.length },
+                  )
+                : financialsT("No customers in the current balance view."),
         );
         setText(
             "balanceCreditCount",
@@ -456,8 +514,10 @@
         setText(
             "balanceCreditDetail",
             customers.length
-                ? "Prepaid customer credit is shown separately by currency."
-                : "No prepaid customer balances in the visible set.",
+                ? financialsT(
+                      "Prepaid customer credit is shown separately by currency.",
+                  )
+                : financialsT("No prepaid customer balances in the visible set."),
         );
         setText(
             "balanceOutstandingCount",
@@ -466,8 +526,12 @@
         setText(
             "balanceOutstandingDetail",
             customers.length
-                ? "Outstanding customer exposure is tracked per currency."
-                : "No outstanding customer receivables in the visible set.",
+                ? financialsT(
+                      "Outstanding customer exposure is tracked per currency.",
+                  )
+                : financialsT(
+                      "No outstanding customer receivables in the visible set.",
+                  ),
         );
         setText(
             "balanceSupplierPayableCount",
@@ -476,33 +540,64 @@
         setText(
             "balanceSupplierPayableDetail",
             suppliers.length
-                ? `${suppliers.length} supplier account(s) are in the current payables view.`
-                : "No suppliers in the current payable view.",
+                ? financialsT(
+                      "{count} supplier account(s) are in the current payables view.",
+                      { count: suppliers.length },
+                  )
+                : financialsT("No suppliers in the current payable view."),
         );
         setText(
             "balancesFilterSummary",
             getFilterSummary(
                 filters,
-                "Showing customer receivables and supplier payables for the full list.",
+                financialsT(
+                    "Showing customer receivables and supplier payables for the full list.",
+                ),
             ),
         );
         setText(
             "balancesSummaryText",
             customers.length || suppliers.length
-                ? `Receivable USD ${formatNum(customerCurrencyTotals.USD.receivable)} / RMB ${formatNum(customerCurrencyTotals.RMB.receivable)} | Payables USD ${formatNum(supplierCurrencyTotals.USD.payable)} / RMB ${formatNum(supplierCurrencyTotals.RMB.payable)}.`
-                : "No balance data loaded yet.",
+                ? financialsT(
+                      "Receivable USD {usdReceivable} / RMB {rmbReceivable} | Payables USD {usdPayable} / RMB {rmbPayable}.",
+                      {
+                          usdReceivable: formatNum(
+                              customerCurrencyTotals.USD.receivable,
+                          ),
+                          rmbReceivable: formatNum(
+                              customerCurrencyTotals.RMB.receivable,
+                          ),
+                          usdPayable: formatNum(
+                              supplierCurrencyTotals.USD.payable,
+                          ),
+                          rmbPayable: formatNum(
+                              supplierCurrencyTotals.RMB.payable,
+                          ),
+                      },
+                  )
+                : financialsT("No balance data loaded yet."),
         );
         setText(
             "customerBalancesSummary",
             customers.length
-                ? `${customers.length} customer account${customers.length === 1 ? "" : "s"}`
-                : "No customers",
+                ? financialsT(
+                      customers.length === 1
+                          ? "{count} customer account"
+                          : "{count} customer accounts",
+                      { count: customers.length },
+                  )
+                : financialsT("No customers"),
         );
         setText(
             "supplierPayablesSummary",
             suppliers.length
-                ? `${suppliers.length} supplier account${suppliers.length === 1 ? "" : "s"}`
-                : "No suppliers",
+                ? financialsT(
+                      suppliers.length === 1
+                          ? "{count} supplier account"
+                          : "{count} supplier accounts",
+                      { count: suppliers.length },
+                  )
+                : financialsT("No suppliers"),
         );
     }
 
@@ -553,7 +648,7 @@
             finDepOrderAc = Autocomplete.init(orderInput, {
                 resource: "orders",
                 searchPath: "/search",
-                placeholder: "Type to search order (optional)…",
+                placeholder: financialsT("Type to search order (optional)…"),
                 extraParams: () => ({ customer_id: document.getElementById("finDepCustomerId")?.value || "" }),
                 minChars: 0,
             });
@@ -577,11 +672,11 @@
             .getElementById("finPaySettlementPreview")
             .classList.add("d-none");
         document.getElementById("finPaySupplierContext").textContent =
-            "Loading supplier payment options…";
+            financialsT("Loading supplier payment options…");
         document.getElementById("finPayOrdersBody").innerHTML =
-            '<tr><td colspan="6" class="text-center text-muted py-3">Loading order context…</td></tr>';
+            `<tr><td colspan="6" class="text-center text-muted py-3">${escapeHtml(financialsT("Loading order context…"))}</td></tr>`;
         document.getElementById("finPayOrdersSummary").textContent =
-            "Loading order context…";
+            financialsT("Loading order context…");
         const orderInput = document.getElementById("finPayOrderId");
         if (orderInput) orderInput.value = "";
         if (finPayOrderAc && typeof finPayOrderAc.setValue === "function") finPayOrderAc.setValue(null);
@@ -589,7 +684,7 @@
             finPayOrderAc = Autocomplete.init(orderInput, {
                 resource: "orders",
                 searchPath: "/search",
-                placeholder: "Type to search order (optional)…",
+                placeholder: financialsT("Type to search order (optional)…"),
                 extraParams: () => ({ supplier_id: document.getElementById("finPaySupplierId")?.value || "" }),
                 minChars: 0,
             });
@@ -601,8 +696,10 @@
             .then(([supplierRes, ordersRes]) => {
                 const supplier = supplierRes.data || {};
                 const facility = supplier.payment_facility_days
-                    ? `Facility ${supplier.payment_facility_days} day(s)`
-                    : "No payment facility saved";
+                    ? financialsT("Facility {days} day(s)", {
+                          days: supplier.payment_facility_days,
+                      })
+                    : financialsT("No payment facility saved");
                 const links = (supplier.payment_links || [])
                     .map((row) => `${row.label || "Payment"}: ${row.value || "—"}`)
                     .join(" | ");
@@ -612,9 +709,9 @@
             })
             .catch(() => {
                 document.getElementById("finPaySupplierContext").textContent =
-                    "Could not load supplier payment options.";
+                    financialsT("Could not load supplier payment options.");
                 document.getElementById("finPayOrdersBody").innerHTML =
-                    '<tr><td colspan="6" class="text-center text-muted py-3">Could not load supplier orders.</td></tr>';
+                    `<tr><td colspan="6" class="text-center text-muted py-3">${escapeHtml(financialsT("Could not load supplier orders."))}</td></tr>`;
             });
         new bootstrap.Modal(document.getElementById("finPaymentModal")).show();
     };
@@ -637,8 +734,8 @@
         if (!tbody || !summary) return;
         if (!orders.length) {
             tbody.innerHTML =
-                '<tr><td colspan="6" class="text-center text-muted py-3">No supplier-linked orders found.</td></tr>';
-            summary.textContent = "No supplier-linked orders";
+                `<tr><td colspan="6" class="text-center text-muted py-3">${escapeHtml(financialsT("No supplier-linked orders found."))}</td></tr>`;
+            summary.textContent = financialsT("No supplier-linked orders");
             return;
         }
         const orderRows = [...orders].sort((a, b) => {
@@ -652,8 +749,8 @@
                 const total = calcOrderSellTotal(order);
                 const state =
                     ["FinalizedAndPushedToTracking", "CustomerDeclined", "CustomerDeclinedAfterAutoConfirm"].includes(order.status)
-                        ? "Closed / historical"
-                        : "Open / review";
+                        ? financialsT("Closed / historical")
+                        : financialsT("Open / review");
                 return `
                     <tr>
                         <td><a href="/cargochina/orders.php?id=${order.id}">#${order.id}</a><div class="small text-muted">${escapeHtml(order.customer_name || "")}</div></td>
@@ -661,7 +758,7 @@
                         <td>${escapeHtml(order.expected_ready_date || "—")}</td>
                         <td>${escapeHtml(order.currency || "USD")} ${formatNum(total)}</td>
                         <td>${escapeHtml(state)}</td>
-                        <td><button type="button" class="btn btn-sm btn-outline-secondary" onclick="openFinOrderInfo(${order.id})">Info</button></td>
+                        <td><button type="button" class="btn btn-sm btn-outline-secondary" onclick="openFinOrderInfo(${order.id})">${escapeHtml(financialsT("Info"))}</button></td>
                     </tr>
                 `;
             })
@@ -670,14 +767,17 @@
             (order) =>
                 !["FinalizedAndPushedToTracking", "CustomerDeclined", "CustomerDeclinedAfterAutoConfirm"].includes(order.status),
         ).length;
-        summary.textContent = `${openCount} open / ${orderRows.length - openCount} historical`;
+        summary.textContent = financialsT("{open} open / {historical} historical", {
+            open: openCount,
+            historical: orderRows.length - openCount,
+        });
     }
 
     window.openFinOrderInfo = async function (orderId) {
         document.getElementById("finOrderInfoTitle").textContent =
-            `Order #${orderId}`;
+            financialsT("Order #{id}", { id: orderId });
         document.getElementById("finOrderInfoBody").innerHTML =
-            '<div class="text-center py-4 text-muted">Loading order details…</div>';
+            `<div class="text-center py-4 text-muted">${escapeHtml(financialsT("Loading order details…"))}</div>`;
         const modal = new bootstrap.Modal(
             document.getElementById("finOrderInfoModal"),
         );
@@ -726,7 +826,7 @@
                                                 <td>${escapeHtml(order.currency || "USD")} ${formatNum(item.total_amount || (parseFloat(item.quantity || 0) * parseFloat(item.sell_price || item.unit_price || 0)))}</td>
                                             </tr>`,
                                             )
-                                            .join("") || '<tr><td colspan="4" class="text-muted">No items.</td></tr>'}
+                                            .join("") || `<tr><td colspan="4" class="text-muted">${escapeHtml(financialsT("No items."))}</td></tr>`}
                                     </tbody>
                                 </table>
                             </div>
@@ -744,7 +844,7 @@
             `;
         } catch (error) {
             document.getElementById("finOrderInfoBody").innerHTML =
-                `<div class="alert alert-danger mb-0">${escapeHtml(error.message || "Failed to load order details")}</div>`;
+                `<div class="alert alert-danger mb-0">${escapeHtml(error.message || financialsT("Failed to load order details"))}</div>`;
         }
     };
 
@@ -752,7 +852,7 @@
         const customerId = document.getElementById("finDepCustomerId").value;
         const amount = parseFloat(document.getElementById("finDepAmount").value || 0);
         if (amount <= 0) {
-            alert("Amount must be positive");
+            alert(financialsT("Amount must be positive"));
             return;
         }
         const orderVal = (finDepOrderAc?.getSelectedId?.() || document.getElementById("finDepOrderId").value?.trim() || "").replace(/^#/, "");
@@ -769,12 +869,12 @@
         try {
             btn.disabled = true;
             await api("/customers/" + customerId + "/deposits", { method: "POST", body: JSON.stringify(payload) });
-            if (typeof showToast === "function") showToast("Deposit recorded");
-            else alert("Deposit recorded");
+            if (typeof showToast === "function") showToast(financialsT("Deposit recorded"));
+            else alert(financialsT("Deposit recorded"));
             bootstrap.Modal.getInstance(document.getElementById("finDepositModal")).hide();
             loadBalances();
         } catch (e) {
-            alert(e.message || "Failed to record deposit");
+            alert(e.message || financialsT("Failed to record deposit"));
         } finally {
             btn.disabled = false;
         }
@@ -784,7 +884,7 @@
         const supplierId = document.getElementById("finPaySupplierId").value;
         const amount = parseFloat(document.getElementById("finPayAmount").value || 0);
         if (amount <= 0) {
-            alert("Amount must be positive");
+            alert(financialsT("Amount must be positive"));
             return;
         }
         const orderVal = (finPayOrderAc?.getSelectedId?.() || document.getElementById("finPayOrderId").value?.trim() || "").replace(/^#/, "");
@@ -813,12 +913,12 @@
         try {
             btn.disabled = true;
             await api("/suppliers/" + supplierId + "/payments", { method: "POST", body: JSON.stringify(payload) });
-            if (typeof showToast === "function") showToast("Payment recorded");
-            else alert("Payment recorded");
+            if (typeof showToast === "function") showToast(financialsT("Payment recorded"));
+            else alert(financialsT("Payment recorded"));
             bootstrap.Modal.getInstance(document.getElementById("finPaymentModal")).hide();
             loadBalances();
         } catch (e) {
-            alert(e.message || "Failed to record payment");
+            alert(e.message || financialsT("Failed to record payment"));
         } finally {
             btn.disabled = false;
         }
@@ -859,25 +959,25 @@
             "profitCustomerSearch",
             "profitCustomerId",
             "customers",
-            "Type to search customer...",
+            financialsT("Type to search customer..."),
         );
         profitSupplierAc = bindEntityAutocomplete(
             "profitSupplierSearch",
             "profitSupplierId",
             "suppliers",
-            "Type to search supplier...",
+            financialsT("Type to search supplier..."),
         );
         balanceCustomerAc = bindEntityAutocomplete(
             "balanceCustomerSearch",
             "balanceCustomerId",
             "customers",
-            "Type to search customer...",
+            financialsT("Type to search customer..."),
         );
         balanceSupplierAc = bindEntityAutocomplete(
             "balanceSupplierSearch",
             "balanceSupplierId",
             "suppliers",
-            "Type to search supplier...",
+            financialsT("Type to search supplier..."),
         );
         attachSubmitOnEnter("profitDateFrom", loadProfit);
         attachSubmitOnEnter("profitDateTo", loadProfit);
@@ -927,8 +1027,14 @@
         if (invoiceAmount > 0 && amount > 0 && invoiceAmount > amount) {
             const delta = invoiceAmount - amount;
             preview.textContent = markedFull
-                ? `Settlement delta ${formatNum(delta)} will be stored explicitly and this payable will be closed as fully settled by agreement.`
-                : `Short-paid amount ${formatNum(delta)} will remain payable unless you mark this as fully settled.`;
+                ? financialsT(
+                      "Settlement delta {delta} will be stored explicitly and this payable will be closed as fully settled by agreement.",
+                      { delta: formatNum(delta) },
+                  )
+                : financialsT(
+                      "Short-paid amount {delta} will remain payable unless you mark this as fully settled.",
+                      { delta: formatNum(delta) },
+                  );
             preview.classList.remove("d-none");
             noteWrap.classList.toggle("d-none", !markedFull);
             return;

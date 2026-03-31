@@ -1,3 +1,14 @@
+function pipelineT(text, replacements = null) {
+    return typeof t === "function" ? t(text, replacements) : text;
+}
+
+function buildPipelineMoreOrdersText(count) {
+    if ((typeof uiLocale === "function" ? uiLocale() : "en") === "zh-CN") {
+        return `${count} 个订单仍在完整队列中等待处理。`;
+    }
+    return `${count} more order${count === 1 ? "" : "s"} are waiting in the full queue.`;
+}
+
 const PIPELINE_STAGE_CONFIG = [
     {
         key: "submitted",
@@ -63,7 +74,9 @@ function renderTaskList(tasks) {
     const el = document.getElementById("pipelineTasksList");
     if (!el) return;
     if (!tasks?.length) {
-        el.innerHTML = '<div class="text-muted">No immediate queued tasks for your role.</div>';
+        el.innerHTML = `<div class="text-muted">${escapeHtml(
+            pipelineT("No immediate queued tasks for your role."),
+        )}</div>`;
         return;
     }
     el.innerHTML = tasks
@@ -72,7 +85,9 @@ function renderTaskList(tasks) {
         <a class="pipeline-focus-item" href="${task.url}">
           <div class="pipeline-focus-copy">
             <div class="pipeline-focus-title">${escapeHtml(task.label)}</div>
-            <div class="pipeline-focus-meta">Open the live queue for action.</div>
+            <div class="pipeline-focus-meta">${escapeHtml(
+                pipelineT("Open the live queue for action."),
+            )}</div>
           </div>
           <span class="pipeline-focus-count">${task.count}</span>
         </a>`,
@@ -96,33 +111,43 @@ function renderStageBoard(stagePayloads) {
                     <div class="pipeline-stage-order-ref">#${order.id}</div>
                     <span class="badge ${statusBadgeClass(order.status)} pipeline-stage-status">${escapeHtml(statusLabel(order.status))}</span>
                   </div>
-                  <div class="pipeline-stage-primary">${escapeHtml(order.customer_name || "Unnamed customer")}</div>
-                  <div class="pipeline-stage-secondary">${escapeHtml(order.supplier_name || "No supplier linked yet")}</div>
+                  <div class="pipeline-stage-primary">${escapeHtml(order.customer_name || pipelineT("Unnamed customer"))}</div>
+                  <div class="pipeline-stage-secondary">${escapeHtml(order.supplier_name || pipelineT("No supplier linked yet"))}</div>
                   <div class="pipeline-stage-meta-row">
-                    <span>Expected ready</span>
+                    <span>${escapeHtml(pipelineT("Expected ready"))}</span>
                     <strong>${escapeHtml(order.expected_ready_date || "-")}</strong>
                   </div>
                 </a>`,
                       )
                       .join("")
-                : '<div class="text-muted small">Nothing in this queue right now.</div>';
+                : `<div class="text-muted small">${escapeHtml(
+                      pipelineT("Nothing in this queue right now."),
+                  )}</div>`;
             return `
           <div class="pipeline-stage-card">
             <div class="stage-head" style="--stage-accent:${stage.accent}">
               <div class="pipeline-stage-topline">
                 <div>
-                  <div class="small text-uppercase text-muted fw-semibold">${escapeHtml(stage.title)}</div>
-                  <div class="small text-muted mt-2">${escapeHtml(stage.subtitle)}</div>
+                  <div class="small text-uppercase text-muted fw-semibold">${escapeHtml(
+                      pipelineT(stage.title),
+                  )}</div>
+                  <div class="small text-muted mt-2">${escapeHtml(
+                      pipelineT(stage.subtitle),
+                  )}</div>
                 </div>
                 <div class="stage-count-pill">${stage.count}</div>
               </div>
               <div class="pipeline-stage-inline-metrics">
                 <div class="pipeline-stage-inline-metric">
-                  <span class="label">Previewing</span>
+                  <span class="label">${escapeHtml(
+                      pipelineT("Previewing"),
+                  )}</span>
                   <strong>${preview.length}</strong>
                 </div>
                 <div class="pipeline-stage-inline-metric">
-                  <span class="label">Still waiting</span>
+                  <span class="label">${escapeHtml(
+                      pipelineT("Still waiting"),
+                  )}</span>
                   <strong>${hiddenCount}</strong>
                 </div>
               </div>
@@ -131,10 +156,12 @@ function renderStageBoard(stagePayloads) {
               <div class="pipeline-stage-list">${listHtml}</div>
               ${
                   hiddenCount
-                      ? `<div class="pipeline-stage-more">${hiddenCount} more order${hiddenCount === 1 ? "" : "s"} are waiting in the full queue.</div>`
+                      ? `<div class="pipeline-stage-more">${escapeHtml(buildPipelineMoreOrdersText(hiddenCount))}</div>`
                       : ""
               }
-              <a href="${stage.url}" class="btn btn-outline-secondary btn-sm w-100 pipeline-stage-cta">Open Queue</a>
+              <a href="${stage.url}" class="btn btn-outline-secondary btn-sm w-100 pipeline-stage-cta">${escapeHtml(
+                  pipelineT("Open Queue"),
+              )}</a>
             </div>
           </div>`;
         })
@@ -174,7 +201,9 @@ function renderSummaryTable(stats) {
     tbody.innerHTML = stages
         .map(
             (stage) =>
-                `<tr><td>${escapeHtml(stage.label)}</td><td>${stage.count}</td><td><a href="${stage.url}">View</a></td></tr>`,
+                `<tr><td>${escapeHtml(pipelineT(stage.label))}</td><td>${stage.count}</td><td><a href="${stage.url}">${escapeHtml(
+                    pipelineT("View"),
+                )}</a></td></tr>`,
         )
         .join("");
 }
@@ -184,7 +213,9 @@ function renderShippingSummary(containers) {
     if (!el) return;
     const rows = containers || [];
     if (!rows.length) {
-        el.innerHTML = '<div class="text-muted">No containers found.</div>';
+        el.innerHTML = `<div class="text-muted">${escapeHtml(
+            pipelineT("No containers found."),
+        )}</div>`;
         return;
     }
     const counts = rows.reduce(
@@ -199,19 +230,23 @@ function renderShippingSummary(containers) {
         .filter((container) => (parseFloat(container.fill_pct_cbm) || 0) >= 85)
         .slice(0, 3);
     el.innerHTML = `
-      <div class="d-flex justify-content-between align-items-center py-2 border-bottom"><span>Planning / To Go</span><strong>${(counts.planning || 0) + (counts.to_go || 0)}</strong></div>
-      <div class="d-flex justify-content-between align-items-center py-2 border-bottom"><span>On Route</span><strong>${counts.on_route || 0}</strong></div>
-      <div class="d-flex justify-content-between align-items-center py-2 border-bottom"><span>Arrived / Available</span><strong>${(counts.arrived || 0) + (counts.available || 0)}</strong></div>
+      <div class="d-flex justify-content-between align-items-center py-2 border-bottom"><span>${escapeHtml(pipelineT("Planning / To Go"))}</span><strong>${(counts.planning || 0) + (counts.to_go || 0)}</strong></div>
+      <div class="d-flex justify-content-between align-items-center py-2 border-bottom"><span>${escapeHtml(pipelineT("On Route"))}</span><strong>${counts.on_route || 0}</strong></div>
+      <div class="d-flex justify-content-between align-items-center py-2 border-bottom"><span>${escapeHtml(pipelineT("Arrived / Available"))}</span><strong>${(counts.arrived || 0) + (counts.available || 0)}</strong></div>
       <div class="pt-2">
-        <div class="small text-uppercase text-muted fw-semibold mb-2">Most Loaded</div>
+        <div class="small text-uppercase text-muted fw-semibold mb-2">${escapeHtml(
+            pipelineT("Most Loaded"),
+        )}</div>
         ${
             hottest.length
                 ? hottest
                       .map(
-                          (container) => `<div class="mb-1">${escapeHtml(container.code || `Container #${container.id}`)} <span class="text-muted">${parseFloat(container.fill_pct_cbm || 0).toFixed(1)}%</span></div>`,
+                          (container) => `<div class="mb-1">${escapeHtml(container.code || pipelineT("Container #{id}", { id: container.id }))} <span class="text-muted">${typeof formatDisplayPercent === "function" ? formatDisplayPercent(parseFloat(container.fill_pct_cbm || 0), 1) : parseFloat(container.fill_pct_cbm || 0).toFixed(1)}%</span></div>`,
                       )
                       .join("")
-                : '<div class="text-muted">No containers above 85% fill.</div>'
+                : `<div class="text-muted">${escapeHtml(
+                      pipelineT("No containers above 85% fill."),
+                  )}</div>`
         }
       </div>`;
 }

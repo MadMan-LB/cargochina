@@ -29,18 +29,20 @@ $breadcrumbs = $breadcrumbs ?? [];
 $layoutCssVersion = @filemtime(__DIR__ . '/../frontend/css/style.css') ?: time();
 $sidebarSections = clmsGetSidebarSectionsForRoles($userRoles);
 $visiblePageIds = clmsGetEffectivePageIdsForRoles($userRoles);
+$uiLocale = clmsGetUiLocale();
+$clientTranslations = clmsGetClientTranslationPayload();
 $canViewCustomersPage = in_array('customers', $visiblePageIds, true);
 $canViewPreferences = in_array('notification_preferences', $visiblePageIds, true);
 $canViewNotifications = in_array('notifications', $visiblePageIds, true);
 $canViewDownloads = in_array('downloads', $visiblePageIds, true);
 ?>
 <!DOCTYPE html>
-<html lang="en">
+<html lang="<?= htmlspecialchars($uiLocale) ?>">
 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title><?= htmlspecialchars($pageTitle) ?> | CLMS</title>
+  <title><?= htmlspecialchars(clmsT($pageTitle)) ?> | CLMS</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -53,15 +55,15 @@ $canViewDownloads = in_array('downloads', $visiblePageIds, true);
   <aside class="clms-sidebar" id="sidebar">
     <div class="sidebar-brand">
       <a href="<?= $basePath ?>/index.php">CLMS</a>
-      <button class="sidebar-close" id="sidebarClose" aria-label="Close sidebar">&times;</button>
+      <button class="sidebar-close" id="sidebarClose" aria-label="<?= htmlspecialchars(clmsT('Close sidebar')) ?>">&times;</button>
     </div>
     <nav class="sidebar-nav">
       <?php foreach ($sidebarSections as $section): ?>
-        <div class="sidebar-section-label"><?= htmlspecialchars($section['label']) ?></div>
+        <div class="sidebar-section-label"><?= htmlspecialchars(clmsT($section['label'])) ?></div>
         <?php foreach ($section['pages'] as $pageId => $pageMeta): ?>
           <a class="sidebar-link <?= $currentPage === $pageId ? 'active' : '' ?>" href="<?= htmlspecialchars($pageMeta['href']) ?>">
             <?= $pageMeta['icon_svg'] ?>
-            <?= htmlspecialchars($pageMeta['title']) ?>
+            <?= htmlspecialchars(clmsT($pageMeta['title'])) ?>
             <?php if ($pageId === 'notifications'): ?>
               <span class="badge bg-danger ms-auto d-none" id="notifBadge">0</span>
             <?php endif; ?>
@@ -92,11 +94,11 @@ $canViewDownloads = in_array('downloads', $visiblePageIds, true);
           <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" fill="currentColor" />
         </svg>
       </button>
-      <div class="topbar-title"><?= htmlspecialchars($pageTitle) ?></div>
+      <div class="topbar-title"><?= htmlspecialchars(clmsT($pageTitle)) ?></div>
       <div class="topbar-actions d-flex align-items-center gap-2">
-        <span class="btn-group btn-group-sm" role="group" title="Description language">
-          <button type="button" class="btn btn-outline-secondary btn-sm desc-lang-btn" data-lang="en">EN</button>
-          <button type="button" class="btn btn-outline-secondary btn-sm desc-lang-btn" data-lang="cn">中文</button>
+        <span class="btn-group btn-group-sm" role="group" title="<?= htmlspecialchars(clmsT('UI language')) ?>">
+          <a href="<?= htmlspecialchars(clmsCurrentUrlWithUiLocale('en')) ?>" class="btn btn-outline-secondary btn-sm<?= $uiLocale === 'en' ? ' active' : '' ?>" data-ui-lang="en">EN</a>
+          <a href="<?= htmlspecialchars(clmsCurrentUrlWithUiLocale('zh-CN')) ?>" class="btn btn-outline-secondary btn-sm<?= $uiLocale === 'zh-CN' ? ' active' : '' ?>" data-ui-lang="zh-CN">中文</a>
         </span>
         <span class="topbar-role badge bg-primary bg-opacity-10 text-primary"><?= htmlspecialchars(implode(', ', $userRoles)) ?></span>
       </div>

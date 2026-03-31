@@ -3,6 +3,153 @@
  */
 
 const API_BASE = "/cargochina/api/v1";
+const CLMS_UI = window.CLMS_UI || { locale: "en", strings: {}, statuses: {} };
+
+function uiLocale() {
+    return CLMS_UI.locale || "en";
+}
+
+function uiStrings() {
+    return CLMS_UI.strings || {};
+}
+
+function uiStatuses() {
+    return CLMS_UI.statuses || {};
+}
+
+function t(text, replacements = null) {
+    if (text === null || text === undefined) return "";
+    const original = String(text);
+    const translated = uiStrings()[original] || original;
+    if (!replacements || typeof replacements !== "object") {
+        return translated;
+    }
+    return Object.entries(replacements).reduce((acc, [key, value]) => {
+        return acc.replaceAll(`{${key}}`, String(value));
+    }, translated);
+}
+
+function translateTextNode(node) {
+    if (!node || node.nodeType !== Node.TEXT_NODE) return;
+    const parent = node.parentElement;
+    if (
+        !parent ||
+        parent.closest("[data-no-translate]") ||
+        parent.matches("script, style, textarea, code, pre, option[data-no-translate]")
+    ) {
+        return;
+    }
+    const shouldTranslateParent = parent.matches(
+        "h1, h2, h3, h4, h5, h6, p, label, th, button, a, option, legend, strong, small, dt, .card-header, .eyebrow, .sidebar-section-label, .sidebar-link, .topbar-title, .modal-title, .modal-subtitle, .form-text, .text-muted, .badge, .btn, .alert, .detail, .title, .subtitle, .summary-text, .filter-toolbar-subtext, .fw-semibold, .small, .label, td.text-muted, td.text-center, [data-i18n]",
+    );
+    if (!shouldTranslateParent) {
+        return;
+    }
+    const raw = node.nodeValue || "";
+    const trimmed = raw.trim();
+    if (!trimmed) return;
+    const translated = uiStrings()[trimmed];
+    if (!translated || translated === trimmed) return;
+    const prefixLength = raw.indexOf(trimmed);
+    const suffixLength = raw.length - prefixLength - trimmed.length;
+    node.nodeValue =
+        raw.slice(0, prefixLength) + translated + raw.slice(raw.length - suffixLength);
+}
+
+function translateElementAttributes(element) {
+    if (!(element instanceof HTMLElement) || element.closest("[data-no-translate]")) {
+        return;
+    }
+    ["placeholder", "title", "aria-label", "alt", "data-bs-original-title"].forEach(
+        (attribute) => {
+            const value = element.getAttribute(attribute);
+            if (!value) return;
+            const translated = uiStrings()[value];
+            if (translated && translated !== value) {
+                element.setAttribute(attribute, translated);
+            }
+        },
+    );
+    if (
+        element instanceof HTMLInputElement &&
+        ["button", "submit", "reset"].includes((element.type || "").toLowerCase())
+    ) {
+        const translated = uiStrings()[element.value];
+        if (translated && translated !== element.value) {
+            element.value = translated;
+        }
+    }
+}
+
+function translateTree(root = document.body) {
+    if (uiLocale() === "en" || !root) return;
+    const container =
+        root instanceof Document
+            ? root.body
+            : root instanceof HTMLElement
+              ? root
+              : root.parentElement;
+    if (!container) return;
+
+    if (container.nodeType === Node.TEXT_NODE) {
+        translateTextNode(container);
+        return;
+    }
+
+    translateElementAttributes(container);
+    const walker = document.createTreeWalker(
+        container,
+        NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
+        null,
+    );
+    let current;
+    while ((current = walker.nextNode())) {
+        if (current.nodeType === Node.TEXT_NODE) {
+            translateTextNode(current);
+        } else if (current.nodeType === Node.ELEMENT_NODE) {
+            translateElementAttributes(current);
+        }
+    }
+}
+
+let translationObserverStarted = false;
+function startUiTranslationObserver() {
+    if (translationObserverStarted || uiLocale() === "en" || !document.body) return;
+    translationObserverStarted = true;
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            if (mutation.type === "characterData") {
+                translateTextNode(mutation.target);
+                return;
+            }
+            if (mutation.type === "attributes") {
+                translateElementAttributes(mutation.target);
+                return;
+            }
+            mutation.addedNodes.forEach((node) => {
+                if (node.nodeType === Node.TEXT_NODE) {
+                    translateTextNode(node);
+                } else if (node.nodeType === Node.ELEMENT_NODE) {
+                    translateTree(node);
+                }
+            });
+        });
+    });
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: [
+            "placeholder",
+            "title",
+            "aria-label",
+            "alt",
+            "data-bs-original-title",
+            "value",
+        ],
+    });
+}
 
 /** Humanized order status labels (backend values unchanged) */
 const ORDER_STATUS_LABELS = {
@@ -21,7 +168,10 @@ const ORDER_STATUS_LABELS = {
     FinalizedAndPushedToTracking: "Finalized",
 };
 function statusLabel(s) {
-    return (s && ORDER_STATUS_LABELS[s]) || s || "—";
+    if (!s) return t("—");
+    const localized = uiStatuses()[s];
+    if (localized) return localized;
+    return t(ORDER_STATUS_LABELS[s] || s);
 }
 function statusBadgeClass(s) {
     const map = {
@@ -195,7 +345,7 @@ function descLang() {
     return (
         (typeof localStorage !== "undefined" &&
             localStorage.getItem("clms_desc_lang")) ||
-        "en"
+        (uiLocale() === "zh-CN" ? "cn" : "en")
     );
 }
 function descText(item) {
@@ -211,6 +361,8 @@ function setDescLang(lang) {
 }
 
 if (typeof window !== "undefined") {
+    window.uiLocale = uiLocale;
+    window.t = t;
     window.statusLabel = statusLabel;
     window.statusBadgeClass = statusBadgeClass;
     window.API_BASE = API_BASE;
@@ -227,6 +379,29 @@ if (typeof window !== "undefined") {
     window.formatDisplayPercent = formatDisplayPercent;
     window.formatDisplayQuantity = formatDisplayQuantity;
     window.closeActiveModalOrPanel = closeActiveModalOrPanel;
+    window.translateTree = translateTree;
+}
+
+if (typeof window !== "undefined") {
+    if (typeof localStorage !== "undefined") {
+        localStorage.setItem("clms_ui_lang", uiLocale());
+        localStorage.setItem("clms_desc_lang", uiLocale() === "zh-CN" ? "cn" : "en");
+    }
+    if (!window.__clmsTranslatedDialogsPatched) {
+        const originalConfirm = window.confirm?.bind(window);
+        const originalAlert = window.alert?.bind(window);
+        if (originalConfirm) {
+            window.confirm = function (message) {
+                return originalConfirm(t(String(message)));
+            };
+        }
+        if (originalAlert) {
+            window.alert = function (message) {
+                return originalAlert(t(String(message)));
+            };
+        }
+        window.__clmsTranslatedDialogsPatched = true;
+    }
 }
 
 const UPLOAD_BASE = "/cargochina/api/v1/upload";
@@ -281,12 +456,13 @@ async function api(method, path, body = null) {
 function showToast(message, type = "success") {
     const container =
         document.querySelector(".toast-container") || createToastContainer();
+    const translatedMessage = t(message);
     const toast = document.createElement("div");
     toast.className = `toast align-items-center text-bg-${type} border-0`;
     toast.setAttribute("role", "alert");
     toast.innerHTML = `
     <div class="d-flex">
-      <div class="toast-body">${escapeHtml(message)}</div>
+      <div class="toast-body">${escapeHtml(translatedMessage)}</div>
       <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
     </div>`;
     container.appendChild(toast);
@@ -392,4 +568,11 @@ document.addEventListener("keydown", function (e) {
 
     e.preventDefault();
     focusNextEnterField(target);
+});
+
+document.addEventListener("DOMContentLoaded", function () {
+    translateTree(document);
+    startUiTranslationObserver();
+    document.documentElement.lang = uiLocale();
+    document.title = t(document.title);
 });

@@ -9,7 +9,7 @@ function renderCapacityBars(cbm, weight, container, hintEl) {
     if (!hintEl) return;
     if (!container) {
         hintEl.innerHTML =
-            '<span class="text-muted small">Assign a container to see capacity</span>';
+            `<span class="text-muted small">${typeof t === "function" ? t("Assign a container to see capacity") : "Assign a container to see capacity"}</span>`;
         return;
     }
     const maxCbm = parseFloat(container.max_cbm) || 1;
@@ -21,22 +21,22 @@ function renderCapacityBars(cbm, weight, container, hintEl) {
     const wtColor =
         wtPct >= 100 ? "#dc2626" : wtPct >= 85 ? "#d97706" : "#16a34a";
     hintEl.innerHTML = `
-      <div class="mt-2">
+        <div class="mt-2">
         <div class="d-flex justify-content-between align-items-center mb-1">
-          <small class="text-muted fw-semibold">CBM Fill</small>
+          <small class="text-muted fw-semibold">${typeof t === "function" ? t("CBM Fill") : "CBM Fill"}</small>
           <small style="color:${cbmColor};font-weight:600">${cbm.toFixed(2)} / ${maxCbm} m³ (${cbmPct.toFixed(0)}%)</small>
         </div>
         <div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;">
           <div style="height:100%;width:${cbmPct}%;background:${cbmColor};border-radius:4px;transition:width .4s;"></div>
         </div>
         <div class="d-flex justify-content-between align-items-center mb-1 mt-2">
-          <small class="text-muted fw-semibold">Weight Fill</small>
+          <small class="text-muted fw-semibold">${typeof t === "function" ? t("Weight Fill") : "Weight Fill"}</small>
           <small style="color:${wtColor};font-weight:600">${weight.toFixed(0)} / ${maxWt} kg (${wtPct.toFixed(0)}%)</small>
         </div>
         <div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;">
           <div style="height:100%;width:${wtPct}%;background:${wtColor};border-radius:4px;transition:width .4s;"></div>
         </div>
-        ${cbmPct >= 100 || wtPct >= 100 ? '<div class="text-danger small fw-semibold mt-1">⚠ Capacity exceeded</div>' : cbmPct >= 85 || wtPct >= 85 ? '<div class="text-warning small fw-semibold mt-1">Almost full</div>' : '<div class="text-success small fw-semibold mt-1">✓ Within capacity</div>'}
+        ${cbmPct >= 100 || wtPct >= 100 ? `<div class="text-danger small fw-semibold mt-1">${typeof t === "function" ? t("Capacity exceeded") : "Capacity exceeded"}</div>` : cbmPct >= 85 || wtPct >= 85 ? `<div class="text-warning small fw-semibold mt-1">${typeof t === "function" ? t("Almost full") : "Almost full"}</div>` : `<div class="text-success small fw-semibold mt-1">${typeof t === "function" ? t("Within capacity") : "Within capacity"}</div>`}
       </div>`;
 }
 
@@ -79,7 +79,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 resource: "countries",
                 displayValue: (c) => c.code || "",
                 renderItem: (c) => (c.name ? `${c.name} (${c.code})` : c.code),
-                placeholder: "Type country name or code (e.g. LB, Lebanon)",
+                placeholder:
+                    typeof t === "function"
+                        ? t("Type country name or code (e.g. LB, Lebanon)")
+                        : "Type country name or code (e.g. LB, Lebanon)",
             });
         }
         const containerSearchInput = el("draftContainerSearch");
@@ -90,7 +93,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 displayValue: (c) => c?.code || "",
                 renderItem: (c) =>
                     c ? `${c.code || ""} (${c.max_cbm || 0} CBM, ${c.max_weight || 0} kg)` : "",
-                placeholder: "Search containers by code...",
+                placeholder:
+                    typeof t === "function"
+                        ? t("Search containers by code...")
+                        : "Search containers by code...",
                 onSelect: (item) => {
                     if (item?.id) {
                         el("draftContainer").value = item.id;
@@ -111,7 +117,11 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (e) {
         console.error("Consolidation init:", e);
         if (typeof showToast === "function")
-            showToast(e.message || "Load error", "danger");
+            showToast(
+                e.message ||
+                    (typeof t === "function" ? t("Load error") : "Load error"),
+                "danger",
+            );
     }
 });
 

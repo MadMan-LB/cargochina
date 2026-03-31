@@ -25,6 +25,10 @@ const fmtOrderQty = (value, maxDecimals = 4) =>
         ? window.formatDisplayQuantity(value, maxDecimals)
         : String(parseFloat(value || 0) || 0);
 
+function orderT(text, replacements = null) {
+    return typeof t === "function" ? t(text, replacements) : text;
+}
+
 function parseStructuredItemNo(value) {
     const match = String(value || "")
         .trim()
@@ -130,7 +134,9 @@ function selectRecentSupplier(id, name) {
 
 function confirmMissingOrderExpectedReadyDate() {
     return window.confirm(
-        "Expected Ready Date is empty. Continue saving this order without it? Date-based reminders, overdue tracking, and date filters will skip it until you fill it later.",
+        orderT(
+            "Expected Ready Date is empty. Continue saving this order without it? Date-based reminders, overdue tracking, and date filters will skip it until you fill it later.",
+        ),
     );
 }
 
@@ -377,7 +383,9 @@ function renderOrderSearchMatch(order) {
         parts.push(itemPreview);
     }
     if (order.expected_ready_date)
-        parts.push(`Ready ${order.expected_ready_date}`);
+        parts.push(
+            orderT("Ready {date}", { date: order.expected_ready_date }),
+        );
     if (order.status) parts.push(orderStatusDisplay(order.status));
 
     return parts.filter(Boolean).join(" — ");
@@ -426,12 +434,14 @@ function updateOrderStatusFilterSummary() {
     const mode =
         document.getElementById("filterStatusMode")?.value || "include";
     if (!selected.length) {
-        summaryEl.textContent = "All statuses";
+        summaryEl.textContent = orderT("All statuses");
         return;
     }
+    const labels = selected.map(orderStatusDisplay).join(", ");
     summaryEl.textContent =
-        (mode === "exclude" ? "Excluding: " : "Including: ") +
-        selected.map(orderStatusDisplay).join(", ");
+        mode === "exclude"
+            ? orderT("Excluding: {labels}", { labels })
+            : orderT("Including: {labels}", { labels });
 }
 
 function setOrderStatusFilter(statuses = [], mode = "include") {
@@ -484,7 +494,7 @@ document.addEventListener("DOMContentLoaded", () => {
         document.getElementById("orderCustomer"),
         {
             resource: "customers",
-            placeholder: "Type customer name or code...",
+            placeholder: orderT("Type customer name or code..."),
             onSelect: async (item) => {
                 saveRecent(RECENT_KEY_CUSTOMERS, item);
                 try {
@@ -518,7 +528,7 @@ document.addEventListener("DOMContentLoaded", () => {
             resource: "countries",
             searchPath: "/search",
             minChars: 0,
-            placeholder: "Search country...",
+            placeholder: orderT("Search country..."),
             displayValue: (c) => (c.name || "") + " (" + (c.code || "") + ")",
             renderItem: (c) => (c.name || "") + " (" + (c.code || "") + ")",
             onSelect: (c) => {
@@ -539,7 +549,7 @@ document.addEventListener("DOMContentLoaded", () => {
         document.getElementById("orderSupplier"),
         {
             resource: "suppliers",
-            placeholder: "Type supplier name or code...",
+            placeholder: orderT("Type supplier name or code..."),
             onSelect: (item) => {
                 saveRecent(RECENT_KEY_SUPPLIERS, item);
                 applySelectedSupplierToItems(item, { onlyBlank: true });
@@ -556,7 +566,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (orderSearchEl) {
         orderSearchAc = Autocomplete.init(orderSearchEl, {
             resource: "orders",
-            placeholder: "Customer, phone, shipping code, items...",
+            placeholder: orderT("Customer, phone, shipping code, items..."),
             renderItem: renderOrderSearchMatch,
             displayValue: getOrderSearchDisplayValue,
             onSelect: () => loadOrders(),
@@ -667,22 +677,22 @@ async function loadOrders() {
         <td>${r.expected_ready_date || "—"}${r.destination_country_name ? `<div class="small text-muted">${escapeHtml(r.destination_country_name)}${r.destination_country_code ? ` (${escapeHtml(r.destination_country_code)})` : ""}</div>` : ""}</td>
         <td><span class="badge ${typeof statusBadgeClass === "function" ? statusBadgeClass(r.status) : "bg-secondary"}">${escapeHtml(typeof statusLabel === "function" ? statusLabel(r.status) : r.status)}</span>${hasCustomerFeedback ? ' <span class="badge bg-warning text-dark ms-1" title="This warehouse receipt is already in stock and still waiting on customer review.">Customer Feedback Pending</span>' : ""}${isDraftBuilder ? ' <span class="badge bg-dark-subtle text-dark border">Draft Order</span>' : ""}${r.high_alert_notes ? ' <span class="badge bg-warning text-dark" title="' + escapeHtml(r.high_alert_notes) + '">⚠️</span>' : ""}${r.container_code || r.container_eta ? ' <span class="badge bg-info text-dark ms-1" title="Container ' + escapeHtml(r.container_code || "—") + (r.container_eta ? ", ETA " + escapeHtml(r.container_eta) : "") + '">📦 ' + escapeHtml(r.container_code || "—") + (r.container_eta ? " · " + escapeHtml(r.container_eta) : "") + "</span>" : ""}</td>
         <td class="table-actions">
-          <button class="btn btn-sm btn-outline-info" onclick="showOrderInfo(${r.id})" title="View order details">ℹ</button>
-          <button class="btn btn-sm btn-outline-primary" onclick="editOrder(${r.id})">${isDraftBuilder ? "Open Builder" : "Edit"}</button>
-          <button class="btn btn-sm btn-outline-secondary" onclick="copyOrder(${r.id})" title="Duplicate as new draft">Copy</button>
-          <a class="btn btn-sm btn-outline-success" href="${exportHrefXlsx}" download title="Download XLSX export">XLSX</a>
-          ${r.status === "Draft" ? `<button class="btn btn-sm btn-success" onclick="submitOrder(${r.id})">Submit</button>` : ""}
-          ${r.status === "Submitted" ? `<button class="btn btn-sm btn-success" onclick="approveOrder(${r.id})">Approve</button>` : ""}
-          ${r.status === "AwaitingCustomerConfirmation" ? `<button class="btn btn-sm btn-warning" onclick="confirmOrder(${r.id})">Confirm</button>` : ""}
-          ${canAssignToDraft ? `<button class="btn btn-sm btn-outline-primary" onclick="openAssignDraftModal(${r.id}, '${escapeHtml(r.customer_name)}')" title="Assign to Shipment Draft">→ Draft</button>` : ""}
-          ${isDeclinedAfterAutoConfirm ? `<button class="btn btn-sm btn-outline-danger" onclick="resetOrderAfterDecline(${r.id})" title="Undo the receipt result and move the order back to Submitted">Reset</button>` : ""}
+          <button class="btn btn-sm btn-outline-info" onclick="showOrderInfo(${r.id})" title="${escapeHtml(orderT("View order details"))}">ℹ</button>
+          <button class="btn btn-sm btn-outline-primary" onclick="editOrder(${r.id})">${escapeHtml(orderT(isDraftBuilder ? "Open Builder" : "Edit"))}</button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="copyOrder(${r.id})" title="${escapeHtml(orderT("Duplicate as new draft"))}">${escapeHtml(orderT("Copy"))}</button>
+          <a class="btn btn-sm btn-outline-success" href="${exportHrefXlsx}" download title="${escapeHtml(orderT("Download XLSX export"))}">XLSX</a>
+          ${r.status === "Draft" ? `<button class="btn btn-sm btn-success" onclick="submitOrder(${r.id})">${escapeHtml(orderT("Submit"))}</button>` : ""}
+          ${r.status === "Submitted" ? `<button class="btn btn-sm btn-success" onclick="approveOrder(${r.id})">${escapeHtml(orderT("Approve"))}</button>` : ""}
+          ${r.status === "AwaitingCustomerConfirmation" ? `<button class="btn btn-sm btn-warning" onclick="confirmOrder(${r.id})">${escapeHtml(orderT("Confirm"))}</button>` : ""}
+          ${canAssignToDraft ? `<button class="btn btn-sm btn-outline-primary" onclick="openAssignDraftModal(${r.id}, '${escapeHtml(r.customer_name)}')" title="${escapeHtml(orderT("Assign to Shipment Draft"))}">→ ${escapeHtml(orderT("Draft"))}</button>` : ""}
+          ${isDeclinedAfterAutoConfirm ? `<button class="btn btn-sm btn-outline-danger" onclick="resetOrderAfterDecline(${r.id})" title="${escapeHtml(orderT("Undo the receipt result and move the order back to Submitted"))}">${escapeHtml(orderT("Reset"))}</button>` : ""}
           <button class="btn btn-sm btn-outline-secondary" onclick="showOrderFinance(${r.id})" title="P&amp;L / Finance">$</button>
         </td>
       </tr>
     `;
                 })
                 .join("") ||
-            '<tr><td colspan="7" class="text-muted">No orders yet.</td></tr>';
+            `<tr><td colspan="7" class="text-muted">${escapeHtml(orderT("No orders yet."))}</td></tr>`;
         tbody.querySelectorAll(".order-bulk-cb").forEach((cb) => {
             cb.addEventListener("change", updateSelectAllState);
         });
@@ -719,7 +729,8 @@ function openOrderForm() {
     showOrderDestinationSelect(false);
     const destInp = document.getElementById("orderDestinationCountry");
     if (destInp) destInp.value = "";
-    document.getElementById("orderModalTitle").textContent = "New Order";
+    document.getElementById("orderModalTitle").textContent =
+        orderT("New Order");
     resetOrderItems();
     addOrderItem();
     renderRecentChips();
@@ -733,7 +744,7 @@ async function loadOrderTemplatesDropdown() {
         const res = await api("GET", "/order-templates");
         const list = res.data || [];
         sel.innerHTML =
-            '<option value="">Load template...</option>' +
+            `<option value="">${escapeHtml(orderT("Load template..."))}</option>` +
             list
                 .map(
                     (t) =>
@@ -741,7 +752,7 @@ async function loadOrderTemplatesDropdown() {
                 )
                 .join("");
     } catch (_) {
-        sel.innerHTML = '<option value="">Load template...</option>';
+        sel.innerHTML = `<option value="">${escapeHtml(orderT("Load template..."))}</option>`;
     }
 }
 

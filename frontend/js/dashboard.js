@@ -3,6 +3,20 @@
  */
 document.addEventListener("DOMContentLoaded", loadDashboardStats);
 
+function buildStaleFeedbackMessage(count, days) {
+    if (typeof uiLocale === "function" && uiLocale() === "zh-CN") {
+        return `${count} 个订单等待客户反馈已超过 ${days} 天`;
+    }
+    return `${count} order${count > 1 ? "s" : ""} still waiting for customer feedback for more than ${days} day${days > 1 ? "s" : ""}`;
+}
+
+function buildStaleOverdueMessage(count) {
+    if (typeof uiLocale === "function" && uiLocale() === "zh-CN") {
+        return `${count} 个订单已超过预计完成日期`;
+    }
+    return `${count} order${count > 1 ? "s" : ""} past expected ready date`;
+}
+
 async function loadDashboardStats() {
     try {
         const res = await api("GET", "/dashboard/stats");
@@ -26,13 +40,9 @@ async function loadDashboardStats() {
         const msgs = [];
         const days = s.stale_threshold_days ?? 3;
         if ((s.stale_customer_feedback ?? 0) > 0)
-            msgs.push(
-                `${s.stale_customer_feedback} order${s.stale_customer_feedback > 1 ? "s" : ""} still waiting for customer feedback for more than ${days} day${days > 1 ? "s" : ""}`,
-            );
+            msgs.push(buildStaleFeedbackMessage(s.stale_customer_feedback, days));
         if ((s.stale_overdue ?? 0) > 0)
-            msgs.push(
-                `${s.stale_overdue} order${s.stale_overdue > 1 ? "s" : ""} past expected ready date`,
-            );
+            msgs.push(buildStaleOverdueMessage(s.stale_overdue));
         if (staleAlert && staleText && msgs.length > 0) {
             staleText.textContent = msgs.join(" · ");
             staleAlert.classList.remove("d-none");

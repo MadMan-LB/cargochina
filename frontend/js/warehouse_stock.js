@@ -6,6 +6,24 @@
     let stockCustomerAc = null;
     let stockSupplierAc = null;
 
+    function stockT(text, replacements = null) {
+        return typeof t === "function" ? t(text, replacements) : text;
+    }
+
+    function formatStockCbm(value, maxDecimals = 2) {
+        if (typeof formatDisplayCbm === "function") {
+            return formatDisplayCbm(value, maxDecimals) || "0";
+        }
+        return String(parseFloat(value || 0) || 0);
+    }
+
+    function buildStockOrderTitle(orderId) {
+        if ((typeof uiLocale === "function" ? uiLocale() : "en") === "zh-CN") {
+            return `订单 #${orderId}`;
+        }
+        return `Order #${orderId}`;
+    }
+
     function getSelectedStockStatuses() {
         return Array.from(
             document.querySelectorAll(".stock-status-filter:checked"),
@@ -22,11 +40,14 @@
         const selected = getSelectedStockStatuses();
         const mode = document.getElementById("filterStatusMode")?.value || "include";
         if (!selected.length) {
-            summaryEl.textContent = "All statuses";
+            summaryEl.textContent = stockT("All statuses");
             return;
         }
         summaryEl.textContent =
-            (mode === "exclude" ? "Excluding: " : "Including: ") +
+            (mode === "exclude"
+                ? stockT("Excluding:")
+                : stockT("Including:")) +
+            " " +
             selected.map(stockStatusDisplay).join(", ");
     };
 
@@ -48,7 +69,8 @@
     async function api(path) {
         const r = await fetch(API + path, { credentials: "same-origin" });
         const d = await r.json();
-        if (!r.ok || d.error) throw new Error(d.message || "Request failed");
+        if (!r.ok || d.error)
+            throw new Error(d.message || stockT("Request failed"));
         return d;
     }
 
@@ -69,7 +91,7 @@
             const d = await api("/warehouse-stock?" + params.toString());
             renderStock(d.data);
         } catch (e) {
-            alert(e.message || "Failed to load stock");
+            alert(e.message || stockT("Failed to load stock"));
         }
     };
 
@@ -77,7 +99,9 @@
         const tbody = document.getElementById("stockTableBody");
         if (!rows || rows.length === 0) {
             tbody.innerHTML =
-                '<tr><td colspan="9" class="text-center text-muted py-4">No stock found.</td></tr>';
+                `<tr><td colspan="9" class="text-center text-muted py-4">${escapeHtml(
+                    stockT("No stock found."),
+                )}</td></tr>`;
             return;
         }
         tbody.innerHTML = rows
@@ -90,9 +114,9 @@
                 <td><span class="badge bg-secondary">${escapeHtml(stockStatusDisplay(r.status || ""))}</span></td>
                 <td>${escapeHtml(r.description_en || r.description_cn || r.product_desc_en || r.product_desc_cn || "—")}</td>
                 <td>${r.quantity || "—"}</td>
-                <td>${r.declared_cbm != null ? parseFloat(r.declared_cbm).toFixed(2) : "—"}</td>
-                <td>${r.order_actual_cbm != null ? parseFloat(r.order_actual_cbm).toFixed(2) : "—"}</td>
-                <td><button type="button" class="btn btn-sm btn-outline-info" onclick="openStockOrderInfo(${Number(r.order_id)})" title="View full order details">Info</button></td>
+                <td>${r.declared_cbm != null ? formatStockCbm(r.declared_cbm, 2) : "—"}</td>
+                <td>${r.order_actual_cbm != null ? formatStockCbm(r.order_actual_cbm, 2) : "—"}</td>
+                <td><button type="button" class="btn btn-sm btn-outline-info" onclick="openStockOrderInfo(${Number(r.order_id)})" title="${escapeHtml(stockT("View full order details"))}">${escapeHtml(stockT("Info"))}</button></td>
             </tr>
         `,
             )
@@ -115,14 +139,14 @@
         const attachments = (order.attachments || [])
             .map((attachment) => {
                 const filePath = attachment.file_path || "";
-                const fileName = filePath.split("/").pop() || "Attachment";
+                const fileName = filePath.split("/").pop() || stockT("Attachment");
                 return `<a class="btn btn-sm btn-outline-secondary me-2 mb-2" target="_blank" rel="noopener" href="/cargochina/backend/${escapeHtml(filePath)}">${escapeHtml(fileName)}</a>`;
             })
             .join("");
         const photos = (order.receipt?.photos || [])
             .map((photo) => {
                 const filePath = photo.file_path || "";
-                return `<img src="/cargochina/backend/${escapeHtml(filePath)}" alt="Receipt evidence" class="img-thumbnail me-2 mb-2" style="max-width:120px;">`;
+                return `<img src="/cargochina/backend/${escapeHtml(filePath)}" alt="${escapeHtml(stockT("Receipt evidence"))}" class="img-thumbnail me-2 mb-2" style="max-width:120px;">`;
             })
             .join("");
         const itemsHtml = (order.items || [])
@@ -134,7 +158,7 @@
                         <td>${escapeHtml(item.item_no || "—")}</td>
                         <td>${escapeHtml(item.supplier_name || order.supplier_name || "—")}</td>
                         <td>${item.quantity != null ? escapeHtml(String(item.quantity)) : "—"}</td>
-                        <td>${item.declared_cbm != null ? parseFloat(item.declared_cbm || 0).toFixed(3) : "—"}</td>
+                        <td>${item.declared_cbm != null ? formatStockCbm(item.declared_cbm || 0, 3) : "—"}</td>
                     </tr>
                 `,
             )
@@ -144,32 +168,32 @@
             <div class="row g-3">
                 <div class="col-lg-4">
                     <div class="border rounded p-3 h-100">
-                        <div><strong>Customer:</strong> ${escapeHtml(order.customer_name || "—")}</div>
-                        <div><strong>Supplier:</strong> ${escapeHtml(order.supplier_name || "—")}</div>
-                        <div><strong>Status:</strong> ${renderStatusBadge(order.status || "")}</div>
-                        <div><strong>Expected Ready:</strong> ${escapeHtml(order.expected_ready_date || "—")}</div>
-                        <div><strong>Destination:</strong> ${escapeHtml(order.destination_country_name || "—")}</div>
-                        <div><strong>Shipping Code:</strong> ${escapeHtml(order.default_shipping_code || order.shipping_code || "—")}</div>
-                        <div><strong>High Alert:</strong> ${escapeHtml(order.high_alert_notes || "—")}</div>
+                        <div><strong>${escapeHtml(stockT("Customer:"))}</strong> ${escapeHtml(order.customer_name || "—")}</div>
+                        <div><strong>${escapeHtml(stockT("Supplier:"))}</strong> ${escapeHtml(order.supplier_name || "—")}</div>
+                        <div><strong>${escapeHtml(stockT("Status:"))}</strong> ${renderStatusBadge(order.status || "")}</div>
+                        <div><strong>${escapeHtml(stockT("Expected Ready:"))}</strong> ${escapeHtml(order.expected_ready_date || "—")}</div>
+                        <div><strong>${escapeHtml(stockT("Destination:"))}</strong> ${escapeHtml(order.destination_country_name || "—")}</div>
+                        <div><strong>${escapeHtml(stockT("Shipping Code:"))}</strong> ${escapeHtml(order.default_shipping_code || order.shipping_code || "—")}</div>
+                        <div><strong>${escapeHtml(stockT("High Alert:"))}</strong> ${escapeHtml(order.high_alert_notes || "—")}</div>
                     </div>
                 </div>
                 <div class="col-lg-8">
                     <div class="border rounded p-3 h-100">
-                        <div class="fw-semibold mb-2">Items</div>
+                        <div class="fw-semibold mb-2">${escapeHtml(stockT("Items"))}</div>
                         <div class="table-responsive">
                             <table class="table table-sm align-middle mb-0">
                                 <thead>
                                     <tr>
-                                        <th>Item</th>
-                                        <th>Shipping</th>
-                                        <th>Item No</th>
-                                        <th>Supplier</th>
-                                        <th>Qty</th>
-                                        <th>CBM</th>
+                                        <th>${escapeHtml(stockT("Item"))}</th>
+                                        <th>${escapeHtml(stockT("Shipping"))}</th>
+                                        <th>${escapeHtml(stockT("Item No"))}</th>
+                                        <th>${escapeHtml(stockT("Supplier"))}</th>
+                                        <th>${escapeHtml(stockT("Qty"))}</th>
+                                        <th>${escapeHtml(stockT("CBM"))}</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${itemsHtml || '<tr><td colspan="6" class="text-center text-muted py-3">No items found.</td></tr>'}
+                                    ${itemsHtml || `<tr><td colspan="6" class="text-center text-muted py-3">${escapeHtml(stockT("No items found."))}</td></tr>`}
                                 </tbody>
                             </table>
                         </div>
@@ -177,14 +201,14 @@
                 </div>
                 <div class="col-12">
                     <div class="border rounded p-3">
-                        <div class="fw-semibold mb-2">Attachments</div>
-                        ${attachments || '<div class="text-muted small">No order attachments.</div>'}
+                        <div class="fw-semibold mb-2">${escapeHtml(stockT("Attachments"))}</div>
+                        ${attachments || `<div class="text-muted small">${escapeHtml(stockT("No order attachments."))}</div>`}
                     </div>
                 </div>
                 <div class="col-12">
                     <div class="border rounded p-3">
-                        <div class="fw-semibold mb-2">Receipt Photos</div>
-                        ${photos || '<div class="text-muted small">No receipt photos.</div>'}
+                        <div class="fw-semibold mb-2">${escapeHtml(stockT("Receipt Photos"))}</div>
+                        ${photos || `<div class="text-muted small">${escapeHtml(stockT("No receipt photos."))}</div>`}
                     </div>
                 </div>
             </div>
@@ -197,9 +221,11 @@
         const modalEl = document.getElementById("stockOrderInfoModal");
         if (!titleEl || !bodyEl || !modalEl) return;
 
-        titleEl.textContent = `Order #${orderId}`;
+        titleEl.textContent = buildStockOrderTitle(orderId);
         bodyEl.innerHTML =
-            '<div class="text-center py-4 text-muted">Loading order details…</div>';
+            `<div class="text-center py-4 text-muted">${escapeHtml(
+                stockT("Loading order details…"),
+            )}</div>`;
         bootstrap.Modal.getOrCreateInstance(modalEl).show();
 
         try {
@@ -207,7 +233,7 @@
             bodyEl.innerHTML = renderStockOrderInfo(response.data || {});
         } catch (error) {
             bodyEl.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml(
-                error.message || "Failed to load order details",
+                error.message || stockT("Failed to load order details"),
             )}</div>`;
         }
     };
@@ -238,7 +264,7 @@
                 {
                     resource: "customers",
                     searchPath: "/search",
-                    placeholder: "Type to search customer...",
+                    placeholder: stockT("Type to search customer..."),
                     onSelect: (item) => {
                         document.getElementById("filterCustomerId").value =
                             item.id || "";
@@ -250,7 +276,7 @@
                 {
                     resource: "suppliers",
                     searchPath: "/search",
-                    placeholder: "Type to search supplier...",
+                    placeholder: stockT("Type to search supplier..."),
                     onSelect: (item) => {
                         document.getElementById("filterSupplierId").value =
                             item.id || "";

@@ -1122,3 +1122,5 @@ otification_preferences.php and removing the sidebar link unless the user is an 
 - Updated draft product autofill to prefer factory price from uy_price and customer price from sell_price when available.
 - Extended shared item numbering so manual item number jumps in both Orders and Draft Orders advance the next auto-generated number instead of restarting from the old sequence.
 
+
+- 2026-04-01: Added shared EN / Simplified Chinese UI i18n infrastructure for CLMS via includes/i18n.php, includes/ui_translations.php, layout/footer locale wiring, and client-side 	(...) support in rontend/js/app.js. The topbar EN / 中文 toggle now persists locale in session + cookie, page titles/local shared navigation switch correctly, and major live modules including Orders, Draft Orders, Receiving, Warehouse Stock, Notifications, Pipeline, Financials, Containers, Consolidation, Downloads, and User Management now translate user-facing UI text at display level without changing stored business data or backend status values.

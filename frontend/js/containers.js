@@ -33,7 +33,8 @@ const fmtContainerPercent = (value, maxDecimals = 1) =>
         : String(parseFloat(value || 0) || 0);
 
 function containerStatusDisplay(status) {
-    return CONTAINER_STATUS[status]?.label || status || "—";
+    const label = CONTAINER_STATUS[status]?.label || status || "—";
+    return typeof t === "function" ? t(label) : label;
 }
 
 function getContainerDestinationCountryId(container) {
@@ -46,7 +47,7 @@ function getContainerDestinationDisplay(container) {
         container?.destination_country_name ||
         container?.destination_country ||
         container?.destination ||
-        "No destination"
+        (typeof t === "function" ? t("No destination") : "No destination")
     );
 }
 
@@ -61,7 +62,7 @@ function getOrderDestinationDisplay(order) {
             ? `${order.destination_country_name} (${order.destination_country_code})`
             : order.destination_country_name;
     }
-    return "No destination";
+    return typeof t === "function" ? t("No destination") : "No destination";
 }
 
 function filterAssignableOrdersForContainer(orders, container) {
@@ -120,12 +121,21 @@ function updateContainerStatusFilterSummary() {
     const mode =
         document.getElementById("containerStatusMode")?.value || "include";
     if (!selected.length) {
-        summaryEl.textContent = "All statuses";
+        summaryEl.textContent =
+            typeof t === "function" ? t("All statuses") : "All statuses";
         return;
     }
-    summaryEl.textContent =
-        (mode === "exclude" ? "Excluding: " : "Including: ") +
-        selected.map(containerStatusDisplay).join(", ");
+    const prefix =
+        mode === "exclude"
+            ? typeof t === "function"
+                ? t("Excluding")
+                : "Excluding"
+            : typeof t === "function"
+              ? t("Including")
+              : "Including";
+    summaryEl.textContent = `${prefix}: ${selected
+        .map(containerStatusDisplay)
+        .join(", ")}`;
 }
 
 function setContainerStatusFilter(statuses = [], mode = "include") {
@@ -160,7 +170,7 @@ async function loadContainers() {
     const label = document.getElementById("containerCountLabel");
     if (!tbody) return;
     tbody.innerHTML =
-        '<tr><td colspan="10" class="text-center text-muted py-4">Loading…</td></tr>';
+        `<tr><td colspan="10" class="text-center text-muted py-4">${typeof t === "function" ? t("Loading…") : "Loading…"}</td></tr>`;
 
     const q = document.getElementById("containerSearch")?.value?.trim() || "";
     const statuses = getSelectedContainerStatuses();
@@ -179,8 +189,8 @@ async function loadContainers() {
         if (!res.ok)
             throw new Error(
                 res.status === 401
-                    ? "Please log in"
-                    : "Failed to load containers",
+                    ? (typeof t === "function" ? t("Please log in") : "Please log in")
+                    : (typeof t === "function" ? t("Failed to load containers") : "Failed to load containers"),
             );
         const data = await res.json();
         _allContainers = data.data || [];
@@ -213,7 +223,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 c
                     ? `${c.code || ""} — ${containerStatusDisplay(c.status)} (${c.max_cbm || 0} CBM)`
                     : "",
-            placeholder: "Code, customer, phone, shipping code, item description…",
+            placeholder:
+                typeof t === "function"
+                    ? t("Code, customer, phone, shipping code, item description…")
+                    : "Code, customer, phone, shipping code, item description…",
             onSelect: () => loadContainers(),
         });
     }
@@ -252,7 +265,7 @@ function applyClientFilters() {
 
     if (rows.length === 0) {
         tbody.innerHTML =
-            '<tr><td colspan="10" class="text-center text-muted py-4">No containers match the current filters.</td></tr>';
+            `<tr><td colspan="10" class="text-center text-muted py-4">${typeof t === "function" ? t("No containers match the current filters.") : "No containers match the current filters."}</td></tr>`;
         return;
     }
 

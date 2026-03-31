@@ -283,9 +283,10 @@ const activityLimit = 50;
 function showUserActivity(userId) {
     activityUserId = userId;
     const u = allUsers.find((x) => x.id == userId);
-    const name = u ? u.full_name || u.email || "User" : "User";
+    const fallbackUser = typeof t === "function" ? t("User") : "User";
+    const name = u ? u.full_name || u.email || fallbackUser : fallbackUser;
     document.getElementById("activityPanelTitle").textContent =
-        `Activity: ${name} (#${userId})`;
+        `${typeof t === "function" ? t("Activity") : "Activity"}: ${name} (#${userId})`;
     const panel = document.getElementById("activityPanel");
     panel.style.display = "block";
     panel.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -680,7 +681,11 @@ function updateSidebarRoleSummary(roleCode) {
     );
     if (!summaryEl) return;
     if (roleCode === "SuperAdmin") {
-        summaryEl.textContent = `${Object.keys(sidebarAccessRegistry).length} pages always visible`;
+        if (typeof uiLocale === "function" && uiLocale() === "zh-CN") {
+            summaryEl.textContent = `${Object.keys(sidebarAccessRegistry).length} 个页面始终可见`;
+        } else {
+            summaryEl.textContent = `${Object.keys(sidebarAccessRegistry).length} pages always visible`;
+        }
         return;
     }
 
@@ -691,7 +696,11 @@ function updateSidebarRoleSummary(roleCode) {
         if (tile) tile.classList.toggle("is-selected", checkbox.checked);
         if (checkbox.checked) checkedCount += 1;
     });
-    summaryEl.textContent = `${checkedCount} of ${checkboxes.length} pages visible (${assignableCount} selectable)`;
+    if (typeof uiLocale === "function" && uiLocale() === "zh-CN") {
+        summaryEl.textContent = `${checkedCount} / ${checkboxes.length} 个页面可见（${assignableCount} 个可选）`;
+    } else {
+        summaryEl.textContent = `${checkedCount} of ${checkboxes.length} pages visible (${assignableCount} selectable)`;
+    }
     summaryEl.classList.toggle("text-bg-warning", checkedCount === 0);
     summaryEl.classList.toggle("text-bg-light", checkedCount !== 0);
 }
