@@ -1163,7 +1163,38 @@
         });
     }
 
+    function syncDraftItemCbmFromDimensions(card) {
+        if (!card) return;
+        const cbmInput = card.querySelector(".draft-item-cbm");
+        if (!cbmInput) return;
+        const l =
+            parseFloat(card.querySelector(".draft-item-length")?.value || 0) ||
+            0;
+        const w =
+            parseFloat(card.querySelector(".draft-item-width")?.value || 0) || 0;
+        const h =
+            parseFloat(card.querySelector(".draft-item-height")?.value || 0) ||
+            0;
+        const hasAllDimensions = l > 0 && w > 0 && h > 0;
+        const isAutoDerived = card.dataset.cbmAutoDerived === "1";
+
+        if (hasAllDimensions) {
+            const computedCbm = (l * w * h) / 1000000;
+            if (!cbmInput.value.trim() || isAutoDerived) {
+                cbmInput.value = fmtFieldNumber(computedCbm, 6);
+                card.dataset.cbmAutoDerived = "1";
+            }
+            return;
+        }
+
+        if (isAutoDerived) {
+            cbmInput.value = "";
+            delete card.dataset.cbmAutoDerived;
+        }
+    }
+
     function updateDraftItemTotals(card) {
+        syncDraftItemCbmFromDimensions(card);
         const cartons =
             parseFloat(card.querySelector(".draft-item-cartons")?.value || 0) ||
             0;
@@ -1544,15 +1575,25 @@
             ".draft-item-pieces-per-carton",
             ".draft-item-unit-price",
             ".draft-item-customer-price",
-            ".draft-item-cbm",
             ".draft-item-weight",
-            ".draft-item-length",
-            ".draft-item-width",
-            ".draft-item-height",
         ].forEach((selector) => {
             card.querySelector(selector)?.addEventListener("input", () =>
                 updateDraftItemTotals(card),
             );
+        });
+        card.querySelector(".draft-item-cbm")?.addEventListener("input", () => {
+            delete card.dataset.cbmAutoDerived;
+            updateDraftItemTotals(card);
+        });
+        [
+            ".draft-item-length",
+            ".draft-item-width",
+            ".draft-item-height",
+        ].forEach((selector) => {
+            card.querySelector(selector)?.addEventListener("input", () => {
+                syncDraftItemCbmFromDimensions(card);
+                updateDraftItemTotals(card);
+            });
         });
         card.querySelector(".draft-item-item-no")?.addEventListener(
             "input",
@@ -1565,6 +1606,7 @@
                 renumberDraftItems();
             },
         );
+        syncDraftItemCbmFromDimensions(card);
         updateDraftItemTotals(card);
         renumberDraftItems();
     }
