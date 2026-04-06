@@ -22,6 +22,7 @@ class OrderExcelService
     private const PHOTO_COLUMN = 'B';
     private const PHOTO_COLUMN_WIDTH = 21;
     private const PHOTO_ROW_HEIGHT_PT = 90;
+    private const PHOTO_IMAGE_SCALE = 0.82;
     private const HEADER_BLUE = '1F4E79';
     private const BORDER_COLOR = 'BFBFBF';
     private const LIGHT_BLUE = 'EAF3FF';
@@ -44,7 +45,7 @@ class OrderExcelService
         $row = $this->writeCompanyHeader($sheet, 1, self::STANDARD_LAST_COL);
         $this->writeStandardColumnHeaders($sheet, $row);
         $row++;
-        $this->writeStandardItems($sheet, $items, $row);
+        $this->writeStandardItems($sheet, $items, $row, $order);
 
         $outName = $filename ?? ('order_' . (int) ($order['id'] ?? 0) . '_goods_details.xlsx');
         $this->outputXlsx($spreadsheet, $outName);
@@ -350,47 +351,63 @@ class OrderExcelService
         $sheet->getRowDimension($row)->setRowHeight(54.75);
     }
 
-    private function writeStandardItems($sheet, array $items, int $startRow): int
+    private function writeStandardItems($sheet, array $items, int $startRow, array $order = []): int
     {
         $row = $startRow;
 
-        foreach ($items as $item) {
-            $cartons = (float) ($item['cartons'] ?? 0);
-            $qtyPerCarton = (float) ($item['qty_per_carton'] ?? 0);
-            $quantity = $this->resolveQuantity($item);
-            $unitPrice = $this->resolveUnitPrice($item);
-            $scope = strtolower(trim((string) ($item['product_dimensions_scope'] ?? $item['dimensions_scope'] ?? 'piece')));
-            $multiplier = $scope === 'carton' && $cartons > 0 ? $cartons : $quantity;
-            $cbmPer = $multiplier > 0 ? round((float) ($item['declared_cbm'] ?? 0) / $multiplier, 6) : '';
-            $weightPer = $multiplier > 0 ? round((float) ($item['declared_weight'] ?? 0) / $multiplier, 4) : '';
+        foreach ($this->groupItemsBySupplier($items, $order) as $group) {
+            if ($group['supplier_name'] !== '' || $group['supplier_phone'] !== '' || $group['supplier_info'] !== '') {
+                $row = $this->writeSupplierGroupHeader(
+                    $sheet,
+                    $row,
+                    $group['supplier_name'],
+                    $group['supplier_phone'],
+                    $group['supplier_info'],
+                    self::STANDARD_LAST_COL
+                );
+            }
 
-            $sheet->setCellValue('C' . $row, (string) ($item['item_no'] ?? $item['shipping_code'] ?? ''));
-            $sheet->setCellValue('D' . $row, (string) ($item['supplier_name'] ?? ''));
-            $sheet->setCellValue('E' . $row, (string) ($item['description_en'] ?? $item['description_cn'] ?? ''));
-            $sheet->setCellValue('F' . $row, $cartons ?: '');
-            $sheet->setCellValue('G' . $row, $qtyPerCarton ?: '');
-            $sheet->setCellValue('H' . $row, $quantity ?: '');
-            $sheet->setCellValue('I' . $row, $unitPrice !== null ? $unitPrice : '');
-            $sheet->setCellValue('J' . $row, ($unitPrice !== null && $quantity > 0) ? round($unitPrice * $quantity, 4) : '');
-            $sheet->setCellValue('K' . $row, $cbmPer);
-            $sheet->setCellValue('L' . $row, round((float) ($item['declared_cbm'] ?? 0), 6));
-            $sheet->setCellValue('M' . $row, $weightPer);
-            $sheet->setCellValue('N' . $row, round((float) ($item['declared_weight'] ?? 0), 4));
+            foreach ($group['items'] as $item) {
+                $cartons = (float) ($item['cartons'] ?? 0);
+                $qtyPerCarton = (float) ($item['qty_per_carton'] ?? 0);
+                $quantity = $this->resolveQuantity($item);
+                $unitPrice = $this->resolveUnitPrice($item);
+                $scope = strtolower(trim((string) ($item['product_dimensions_scope'] ?? $item['dimensions_scope'] ?? 'piece')));
+                $multiplier = $scope === 'carton' && $cartons > 0 ? $cartons : $quantity;
+                $cbmPer = $multiplier > 0 ? round((float) ($item['declared_cbm'] ?? 0) / $multiplier, 6) : '';
+                $weightPer = $multiplier > 0 ? round((float) ($item['declared_weight'] ?? 0) / $multiplier, 4) : '';
 
-            $this->styleRange($sheet, 'B' . $row . ':N' . $row, [
-                'font' => ['name' => 'Arial', 'size' => 11],
-                'alignment' => [
-                    'horizontal' => Alignment::HORIZONTAL_CENTER,
-                    'vertical' => Alignment::VERTICAL_CENTER,
-                    'wrapText' => true,
-                ],
-                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FFFFFF']],
-                'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
-            ]);
+                $sheet->setCellValue('C' . $row, (string) ($item['item_no'] ?? $item['shipping_code'] ?? ''));
+                $sheet->setCellValue('D' . $row, (string) ($item['supplier_name'] ?? $group['supplier_name'] ?? ''));
+                $sheet->setCellValue('E' . $row, (string) ($item['description_en'] ?? $item['description_cn'] ?? ''));
+                $sheet->setCellValue('F' . $row, $cartons ?: '');
+                $sheet->setCellValue('G' . $row, $qtyPerCarton ?: '');
+                $sheet->setCellValue('H' . $row, $quantity ?: '');
+                $sheet->setCellValue('I' . $row, $unitPrice !== null ? $unitPrice : '');
+                $sheet->setCellValue('J' . $row, ($unitPrice !== null && $quantity > 0) ? round($unitPrice * $quantity, 4) : '');
+                $sheet->setCellValue('K' . $row, $cbmPer);
+                $sheet->setCellValue('L' . $row, round((float) ($item['declared_cbm'] ?? 0), 6));
+                $sheet->setCellValue('M' . $row, $weightPer);
+                $sheet->setCellValue('N' . $row, round((float) ($item['declared_weight'] ?? 0), 4));
 
-            $sheet->getRowDimension($row)->setRowHeight(self::PHOTO_ROW_HEIGHT_PT);
-            $this->writePhotoCell($sheet, 'B' . $row, $item['image_paths'] ?? []);
-            $row++;
+                $this->styleRange($sheet, 'B' . $row . ':N' . $row, [
+                    'font' => ['name' => 'Arial', 'size' => 11],
+                    'alignment' => [
+                        'horizontal' => Alignment::HORIZONTAL_CENTER,
+                        'vertical' => Alignment::VERTICAL_CENTER,
+                        'wrapText' => true,
+                    ],
+                    'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FFFFFF']],
+                    'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
+                ]);
+                $sheet->getStyle('I' . $row . ':J' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
+                $sheet->getStyle('K' . $row . ':L' . $row)->getNumberFormat()->setFormatCode('#,##0.######');
+                $sheet->getStyle('M' . $row . ':N' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
+
+                $sheet->getRowDimension($row)->setRowHeight(self::PHOTO_ROW_HEIGHT_PT);
+                $this->writePhotoCell($sheet, 'B' . $row, $item['image_paths'] ?? []);
+                $row++;
+            }
         }
 
         return $row;
@@ -507,79 +524,123 @@ class OrderExcelService
 
     private function writeContainerItems($sheet, array $items, array $order, int $row, array &$sectionTotals, array &$overallTotals): int
     {
-        foreach ($items as $item) {
-            $cartons = (float) ($item['cartons'] ?? 0);
-            $qtyPerCarton = (float) ($item['qty_per_carton'] ?? 0);
-            $quantity = $this->resolveQuantity($item);
-            $unitPrice = $this->resolveUnitPrice($item);
-            $factoryPrice = $this->resolveFactoryPriceDisplay($item);
-            $factoryPriceForTotals = $this->resolveFactoryPriceForTotals($item, $unitPrice);
-            $sellTotal = ($unitPrice !== null && $quantity > 0) ? round($unitPrice * $quantity, 4) : 0.0;
-            $factoryTotal = ($factoryPriceForTotals !== null && $quantity > 0) ? round($factoryPriceForTotals * $quantity, 4) : 0.0;
-            $currency = $this->resolveCurrency($order, $item);
-            $scope = strtolower(trim((string) ($item['product_dimensions_scope'] ?? $item['dimensions_scope'] ?? 'piece')));
-            $multiplier = $scope === 'carton' && $cartons > 0 ? $cartons : $quantity;
-            $totalCbm = round((float) ($item['declared_cbm'] ?? 0), 6);
-            $totalWeight = round((float) ($item['declared_weight'] ?? 0), 4);
-            $cbmPer = $multiplier > 0 ? round($totalCbm / $multiplier, 6) : '';
-            $weightPer = $multiplier > 0 ? round($totalWeight / $multiplier, 4) : '';
-            $accountNumber = $this->extractSupplierAccountReference($item, $order);
-            $supplierPhone = trim((string) ($item['supplier_phone'] ?? $order['supplier_phone'] ?? ''));
+        foreach ($this->groupItemsBySupplier($items, $order) as $group) {
+            if ($group['supplier_name'] !== '' || $group['supplier_phone'] !== '' || $group['supplier_info'] !== '') {
+                $row = $this->writeSupplierGroupHeader(
+                    $sheet,
+                    $row,
+                    $group['supplier_name'],
+                    $group['supplier_phone'],
+                    $group['supplier_info'],
+                    self::CONTAINER_LAST_COL
+                );
+            }
 
-            $sheet->setCellValue('C' . $row, (string) ($item['item_no'] ?? $item['shipping_code'] ?? ''));
-            $sheet->setCellValue('D' . $row, (string) ($item['supplier_name'] ?? $order['supplier_name'] ?? ''));
-            $sheet->setCellValue('E' . $row, $supplierPhone);
-            $sheet->setCellValue('F' . $row, $accountNumber);
-            $sheet->setCellValue('G' . $row, (string) ($item['description_en'] ?? $item['description_cn'] ?? ''));
-            $sheet->setCellValue('H' . $row, $cartons ?: '');
-            $sheet->setCellValue('I' . $row, $qtyPerCarton ?: '');
-            $sheet->setCellValue('J' . $row, $quantity ?: '');
-            $sheet->setCellValue('K' . $row, $unitPrice !== null ? $unitPrice : '');
-            $sheet->setCellValue('L' . $row, $factoryPrice !== null ? $factoryPrice : '');
-            $sheet->setCellValue('M' . $row, $sellTotal ?: '');
-            $sheet->setCellValue('N' . $row, $cbmPer);
-            $sheet->setCellValue('O' . $row, $totalCbm ?: '');
-            $sheet->setCellValue('P' . $row, $weightPer);
-            $sheet->setCellValue('Q' . $row, $totalWeight ?: '');
+            foreach ($group['items'] as $item) {
+                $cartons = (float) ($item['cartons'] ?? 0);
+                $qtyPerCarton = (float) ($item['qty_per_carton'] ?? 0);
+                $quantity = $this->resolveQuantity($item);
+                $unitPrice = $this->resolveUnitPrice($item);
+                $factoryPrice = $this->resolveFactoryPriceDisplay($item);
+                $factoryPriceForTotals = $this->resolveFactoryPriceForTotals($item, $unitPrice);
+                $sellTotal = ($unitPrice !== null && $quantity > 0) ? round($unitPrice * $quantity, 4) : 0.0;
+                $factoryTotal = ($factoryPriceForTotals !== null && $quantity > 0) ? round($factoryPriceForTotals * $quantity, 4) : 0.0;
+                $currency = $this->resolveCurrency($order, $item);
+                $scope = strtolower(trim((string) ($item['product_dimensions_scope'] ?? $item['dimensions_scope'] ?? 'piece')));
+                $multiplier = $scope === 'carton' && $cartons > 0 ? $cartons : $quantity;
+                $totalCbm = round((float) ($item['declared_cbm'] ?? 0), 6);
+                $totalWeight = round((float) ($item['declared_weight'] ?? 0), 4);
+                $cbmPer = $multiplier > 0 ? round($totalCbm / $multiplier, 6) : '';
+                $weightPer = $multiplier > 0 ? round($totalWeight / $multiplier, 4) : '';
+                $accountNumber = $this->extractSupplierAccountReference($item, $order);
+                $supplierPhone = trim((string) ($item['supplier_phone'] ?? $group['supplier_phone'] ?? $order['supplier_phone'] ?? ''));
 
-            $this->styleRange($sheet, 'B' . $row . ':Q' . $row, [
-                'font' => ['name' => 'Arial', 'size' => 11],
-                'alignment' => [
-                    'horizontal' => Alignment::HORIZONTAL_CENTER,
-                    'vertical' => Alignment::VERTICAL_CENTER,
-                    'wrapText' => true,
-                ],
-                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FFFFFF']],
-                'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
-            ]);
-            $this->styleRange($sheet, 'D' . $row . ':F' . $row, [
-                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_YELLOW]],
-            ]);
-            $this->styleRange($sheet, 'L' . $row, [
-                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_YELLOW]],
-            ]);
-            $sheet->getStyle('G' . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_LEFT);
-            $sheet->getRowDimension($row)->setRowHeight(self::PHOTO_ROW_HEIGHT_PT);
-            $this->writePhotoCell($sheet, 'B' . $row, $item['image_paths'] ?? []);
+                $sheet->setCellValue('C' . $row, (string) ($item['item_no'] ?? $item['shipping_code'] ?? ''));
+                $sheet->setCellValue('D' . $row, (string) ($item['supplier_name'] ?? $group['supplier_name'] ?? $order['supplier_name'] ?? ''));
+                $sheet->setCellValue('E' . $row, $supplierPhone);
+                $sheet->setCellValue('F' . $row, $accountNumber !== '' ? $accountNumber : $group['supplier_info']);
+                $sheet->setCellValue('G' . $row, (string) ($item['description_en'] ?? $item['description_cn'] ?? ''));
+                $sheet->setCellValue('H' . $row, $cartons ?: '');
+                $sheet->setCellValue('I' . $row, $qtyPerCarton ?: '');
+                $sheet->setCellValue('J' . $row, $quantity ?: '');
+                $sheet->setCellValue('K' . $row, $unitPrice !== null ? $unitPrice : '');
+                $sheet->setCellValue('L' . $row, $factoryPrice !== null ? $factoryPrice : '');
+                $sheet->setCellValue('M' . $row, $sellTotal ?: '');
+                $sheet->setCellValue('N' . $row, $cbmPer);
+                $sheet->setCellValue('O' . $row, $totalCbm ?: '');
+                $sheet->setCellValue('P' . $row, $weightPer);
+                $sheet->setCellValue('Q' . $row, $totalWeight ?: '');
 
-            $sectionTotals['cartons'] += $cartons;
-            $sectionTotals['quantity'] += $quantity;
-            $sectionTotals['cbm'] += $totalCbm;
-            $sectionTotals['weight'] += $totalWeight;
-            $this->addCurrencyTotal($sectionTotals['sell'], $currency, $sellTotal);
-            $this->addCurrencyTotal($sectionTotals['factory'], $currency, $factoryTotal);
+                $this->styleRange($sheet, 'B' . $row . ':Q' . $row, [
+                    'font' => ['name' => 'Arial', 'size' => 11],
+                    'alignment' => [
+                        'horizontal' => Alignment::HORIZONTAL_CENTER,
+                        'vertical' => Alignment::VERTICAL_CENTER,
+                        'wrapText' => true,
+                    ],
+                    'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FFFFFF']],
+                    'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
+                ]);
+                $this->styleRange($sheet, 'D' . $row . ':F' . $row, [
+                    'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_YELLOW]],
+                ]);
+                $this->styleRange($sheet, 'L' . $row, [
+                    'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_YELLOW]],
+                ]);
+                $sheet->getStyle('G' . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_LEFT);
+                $sheet->getStyle('K' . $row . ':M' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
+                $sheet->getStyle('N' . $row . ':O' . $row)->getNumberFormat()->setFormatCode('#,##0.######');
+                $sheet->getStyle('P' . $row . ':Q' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
+                $sheet->getRowDimension($row)->setRowHeight(self::PHOTO_ROW_HEIGHT_PT);
+                $this->writePhotoCell($sheet, 'B' . $row, $item['image_paths'] ?? []);
 
-            $overallTotals['cartons'] += $cartons;
-            $overallTotals['quantity'] += $quantity;
-            $overallTotals['cbm'] += $totalCbm;
-            $overallTotals['weight'] += $totalWeight;
-            $this->addCurrencyTotal($overallTotals['sell'], $currency, $sellTotal);
-            $this->addCurrencyTotal($overallTotals['factory'], $currency, $factoryTotal);
+                $sectionTotals['cartons'] += $cartons;
+                $sectionTotals['quantity'] += $quantity;
+                $sectionTotals['cbm'] += $totalCbm;
+                $sectionTotals['weight'] += $totalWeight;
+                $this->addCurrencyTotal($sectionTotals['sell'], $currency, $sellTotal);
+                $this->addCurrencyTotal($sectionTotals['factory'], $currency, $factoryTotal);
 
-            $row++;
+                $overallTotals['cartons'] += $cartons;
+                $overallTotals['quantity'] += $quantity;
+                $overallTotals['cbm'] += $totalCbm;
+                $overallTotals['weight'] += $totalWeight;
+                $this->addCurrencyTotal($overallTotals['sell'], $currency, $sellTotal);
+                $this->addCurrencyTotal($overallTotals['factory'], $currency, $factoryTotal);
+
+                $row++;
+            }
         }
 
         return $row;
+    }
+
+    private function writeSupplierGroupHeader($sheet, int $row, string $supplierName, string $supplierPhone, string $supplierInfo, string $lastCol): int
+    {
+        $sheet->setCellValue('A' . $row, '@@');
+        $sheet->setCellValue('B' . $row, 'supplier name and info');
+        $sheet->setCellValue('C' . $row, $supplierName !== '' ? $supplierName : '-');
+        $sheet->setCellValue('D' . $row, $supplierPhone !== '' ? $supplierPhone : '-');
+        $sheet->setCellValue('E' . $row, $supplierInfo !== '' ? $supplierInfo : '-');
+
+        if ($lastCol > 'E') {
+            $sheet->mergeCells('E' . $row . ':' . $lastCol . $row);
+        }
+
+        $this->styleRange($sheet, 'A' . $row . ':' . $lastCol . $row, [
+            'font' => ['name' => 'Arial', 'size' => 10, 'bold' => true],
+            'alignment' => [
+                'horizontal' => Alignment::HORIZONTAL_LEFT,
+                'vertical' => Alignment::VERTICAL_CENTER,
+                'wrapText' => true,
+            ],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_YELLOW]],
+            'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
+        ]);
+        $sheet->getStyle('A' . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getRowDimension($row)->setRowHeight(20);
+
+        return $row + 1;
     }
 
     private function collectSectionExpenses(array $expenses, array $section, array &$usedExpenseIds): array
@@ -812,13 +873,19 @@ class OrderExcelService
                 $defaultFont
             );
             $heightPx = SharedDrawing::pointsToPixels(self::PHOTO_ROW_HEIGHT_PT);
+            $imageWidthPx = max(32, (int) floor($columnWidthPx * self::PHOTO_IMAGE_SCALE));
+            $imageHeightPx = max(32, (int) floor($heightPx * self::PHOTO_IMAGE_SCALE));
+            $offsetX = max(0, (int) floor(($columnWidthPx - $imageWidthPx) / 2));
+            $offsetY = max(0, (int) floor(($heightPx - $imageHeightPx) / 2));
 
             $drawing = new Drawing();
             $drawing->setPath($path);
             $drawing->setCoordinates($cell);
             $drawing->setResizeProportional(false);
-            $drawing->setWidth($columnWidthPx);
-            $drawing->setHeight($heightPx);
+            $drawing->setWidth($imageWidthPx);
+            $drawing->setHeight($imageHeightPx);
+            $drawing->setOffsetX($offsetX);
+            $drawing->setOffsetY($offsetY);
             $drawing->setWorksheet($sheet);
         } catch (Throwable $e) {
             $sheet->setCellValue($cell, count($paths) . ' photo(s)');
@@ -934,10 +1001,41 @@ class OrderExcelService
             if (abs($amount) < 0.0001) {
                 continue;
             }
-            $parts[] = $currency . ' ' . number_format($amount, 2);
+            $parts[] = $currency . ' ' . format_display_amount($amount);
         }
 
         return $parts ? implode(' | ', $parts) : '-';
+    }
+
+    private function groupItemsBySupplier(array $items, array $order = []): array
+    {
+        $groups = [];
+
+        foreach ($items as $item) {
+            $supplierName = trim((string) ($item['supplier_name'] ?? $order['supplier_name'] ?? ''));
+            $supplierId = trim((string) ($item['supplier_id'] ?? $order['supplier_id'] ?? ''));
+            $key = $supplierId !== '' ? 'id:' . $supplierId : 'name:' . md5(strtolower($supplierName));
+
+            if (!isset($groups[$key])) {
+                $groups[$key] = [
+                    'supplier_name' => $supplierName,
+                    'supplier_phone' => trim((string) ($item['supplier_phone'] ?? $order['supplier_phone'] ?? '')),
+                    'supplier_info' => $this->extractSupplierAccountReference($item, $order),
+                    'items' => [],
+                ];
+            } else {
+                if ($groups[$key]['supplier_phone'] === '') {
+                    $groups[$key]['supplier_phone'] = trim((string) ($item['supplier_phone'] ?? $order['supplier_phone'] ?? ''));
+                }
+                if ($groups[$key]['supplier_info'] === '') {
+                    $groups[$key]['supplier_info'] = $this->extractSupplierAccountReference($item, $order);
+                }
+            }
+
+            $groups[$key]['items'][] = $item;
+        }
+
+        return array_values($groups);
     }
 
     private function extractSupplierAccountReference(array $item, array $order): string

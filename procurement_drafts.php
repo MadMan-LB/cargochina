@@ -228,14 +228,14 @@ require 'includes/layout.php';
               <input type="number" min="0" step="1" class="form-control" id="draftQuickSupplierFacility" placeholder="30">
             </div>
             <div class="col-12">
-              <label class="form-label">Payment Links</label>
+              <label class="form-label">Payment Accounts</label>
               <div id="draftQuickSupplierPaymentLinks" class="d-flex flex-column gap-2"></div>
-              <button type="button" class="btn btn-outline-secondary btn-sm mt-2" onclick="addDraftQuickSupplierPaymentLink()">+ Add Payment Link</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm mt-2" onclick="addDraftQuickSupplierPaymentLink()">+ Add Account</button>
             </div>
             <div class="col-12">
-              <label class="form-label">Supplier Card / Photo</label>
+              <label class="form-label">Supplier Files / QR Images</label>
               <input type="file" class="form-control" id="draftQuickSupplierFiles" accept="image/*,.pdf" multiple>
-              <small class="text-muted d-block mt-1">Optional. Files upload right after the supplier record is created.</small>
+              <small class="text-muted d-block mt-1">Optional. QR or account images upload right after the supplier record is created.</small>
             </div>
           </div>
         </form>

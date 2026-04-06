@@ -409,7 +409,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if (!$stmt->fetch()) jsonError('Customer not found', 404);
                 $amount = (float) ($input['amount'] ?? 0);
                 if ($amount <= 0) jsonError('Amount must be positive', 400);
-                $currency = trim($input['currency'] ?? 'USD');
+                $currency = trim($input['currency'] ?? 'RMB');
                 if (!in_array($currency, ['USD', 'RMB'], true)) jsonError('Currency must be USD or RMB', 400);
                 $paymentMethod = $input['payment_method'] ?? null;
                 $referenceNo = $input['reference_no'] ?? null;

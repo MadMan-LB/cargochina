@@ -337,12 +337,126 @@ function getOrderSupplierDisplay(order) {
     const orderSupp = order.supplier_name || "";
     const names = new Set();
     items.forEach((it) => {
-        const n = (it.supplier_name || orderSupp || "").trim();
-        if (n) names.add(n);
+        getOrderItemSupplierNames(it, orderSupp).forEach((name) => names.add(name));
     });
     if (names.size === 0) return orderSupp || "";
     if (names.size === 1) return [...names][0];
     return "Multiple (" + [...names].join(", ") + ")";
+}
+
+function getOrderItemSupplierNames(item, fallback = "") {
+    const names = new Set();
+    const primary = String(item?.supplier_name || fallback || "").trim();
+    if (primary) {
+        names.add(primary);
+    }
+    const sharedContents = Array.isArray(item?.shared_carton_contents)
+        ? item.shared_carton_contents
+        : [];
+    sharedContents.forEach((content) => {
+        const name = String(content?.supplier_name || "").trim();
+        if (name) {
+            names.add(name);
+        }
+    });
+    return [...names];
+}
+
+function getOrderItemDescription(item) {
+    if (typeof descText === "function") {
+        return descText(item);
+    }
+    return (
+        item?.description_en ||
+        item?.description_cn ||
+        item?.description ||
+        "—"
+    );
+}
+
+function getOrderDisplayRows(order) {
+    const orderSupplier = String(order?.supplier_name || "").trim();
+    return (order?.items || []).flatMap((item) => {
+        const sharedContents = Array.isArray(item?.shared_carton_contents)
+            ? item.shared_carton_contents
+            : [];
+        if (!item?.shared_carton_enabled || sharedContents.length === 0) {
+            return [
+                {
+                    type: "item",
+                    source: item,
+                    description: getOrderItemDescription(item),
+                    itemNo: item?.item_no || item?.shipping_code || "—",
+                    cartons: item?.cartons,
+                    qtyPerCarton: item?.qty_per_carton,
+                    quantity: item?.quantity,
+                    unitPrice: item?.unit_price,
+                    totalAmount: item?.total_amount,
+                    declaredCbm: item?.declared_cbm,
+                    declaredWeight: item?.declared_weight,
+                    supplierName: getOrderItemSupplierNames(item, orderSupplier).join(", ") || "—",
+                    imagePaths: Array.isArray(item?.image_paths) ? item.image_paths : [],
+                    productAlert: productAlertTextFromItem(item),
+                    isCartonSummary: false,
+                },
+            ];
+        }
+
+        const childRows = sharedContents.map((content) => ({
+            type: "shared-content",
+            source: item,
+            content,
+            description:
+                content?.description_en ||
+                content?.description_cn ||
+                getOrderItemDescription(item),
+            itemNo: content?.item_no || item?.item_no || item?.shipping_code || "—",
+            cartons: item?.cartons,
+            qtyPerCarton: content?.quantity_per_carton,
+            quantity: content?.quantity,
+            unitPrice:
+                content?.sell_price != null ? content.sell_price : content?.unit_price,
+            totalAmount: content?.total_amount,
+            declaredCbm: null,
+            declaredWeight: null,
+            supplierName: String(
+                content?.supplier_name ||
+                    getOrderItemSupplierNames(item, orderSupplier).join(", ") ||
+                    "—",
+            ).trim(),
+            imagePaths: [],
+            productAlert: "",
+            isCartonSummary: false,
+        }));
+
+        const supplierNames = getOrderItemSupplierNames(item, orderSupplier);
+        return [
+            {
+                type: "shared-carton",
+                source: item,
+                description:
+                    orderT("Shared carton") +
+                    (item?.shared_carton_code
+                        ? ` ${item.shared_carton_code}`
+                        : item?.item_no
+                          ? ` ${item.item_no}`
+                          : ""),
+                itemNo: item?.shared_carton_code || item?.item_no || "—",
+                cartons: item?.cartons,
+                qtyPerCarton: "",
+                quantity: item?.quantity,
+                unitPrice: null,
+                totalAmount: null,
+                declaredCbm: item?.declared_cbm,
+                declaredWeight: item?.declared_weight,
+                supplierName: supplierNames.join(", ") || "—",
+                imagePaths: Array.isArray(item?.image_paths) ? item.image_paths : [],
+                productAlert: "",
+                isCartonSummary: true,
+            },
+            ...childRows,
+        ];
+    });
 }
 
 function getSelectedOrderStatuses() {
@@ -362,6 +476,8 @@ function truncateOrderSearchText(text, maxLen = 32) {
 }
 
 function getOrderSearchSupplierText(order) {
+    const supplierDisplay = String(order?.supplier_name_display || "").trim();
+    if (supplierDisplay) return supplierDisplay;
     const itemSuppliers = String(order?.item_supplier_names || "").trim();
     if (itemSuppliers) return itemSuppliers;
     return String(order?.supplier_name || "").trim();
@@ -490,6 +606,7 @@ window.clearOrderSearch = function () {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+    registerUnsavedChangesGuard?.("#orderModal .modal-body");
     orderCustomerAc = Autocomplete.init(
         document.getElementById("orderCustomer"),
         {
@@ -735,6 +852,7 @@ function openOrderForm() {
     addOrderItem();
     renderRecentChips();
     loadOrderTemplatesDropdown();
+    refreshUnsavedBaseline?.(document.querySelector("#orderModal .modal-body"));
 }
 
 async function loadOrderTemplatesDropdown() {
@@ -1254,6 +1372,8 @@ function addOrderItem() {
       </div>
     </div>`;
     container.appendChild(card);
+    const photoPanel = card.querySelector(".order-item-photo-panel");
+    const photoContainer = card.querySelector(`.item-photos[data-idx="${idx}"]`);
     card.querySelector(".order-item-add-packaging")?.addEventListener("click", () => {
         addItemPackagingRow(card);
     });
@@ -1383,6 +1503,21 @@ function addOrderItem() {
     card.querySelector(".item-photo-input").addEventListener("change", (e) =>
         handleItemPhoto(e, idx),
     );
+    bindClipboardImagePaste?.(
+        photoPanel,
+        async (files) => {
+            try {
+                await appendOrderItemPhotos(photoContainer, files);
+            } catch (e) {
+                showToast(e.message || orderT("Upload failed"), "danger");
+            }
+        },
+        {
+            requireTargetMatch: true,
+            targetMatcher: (target) =>
+                !!target.closest(".order-item-photo-panel"),
+        },
+    );
     [
         "item-cartons",
         "item-qty-per-ctn",
@@ -1438,21 +1573,26 @@ async function handleItemPhoto(e, idx) {
     const files = e.target.files;
     if (!files || !files.length) return;
     const container = document.querySelector(`.item-photos[data-idx="${idx}"]`);
-    for (let i = 0; i < files.length; i++) {
-        try {
-            const path = await uploadFile(files[i]);
-            if (path) {
-                const div = document.createElement("div");
-                div.className = "d-inline-block me-1 mb-1";
-                div.dataset.path = path;
-                div.innerHTML = `<img src="/cargochina/backend/${path}" class="img-thumbnail img-thumbnail-sm" style="max-width:50px" alt=""><button type="button" class="btn-close btn-close-sm" onclick="this.closest('.d-inline-block').remove()"></button>`;
-                container.appendChild(div);
-            }
-        } catch (err) {
-            showToast(err.message, "danger");
-        }
+    try {
+        await appendOrderItemPhotos(container, files);
+    } catch (err) {
+        showToast(err.message, "danger");
     }
     e.target.value = "";
+}
+
+async function appendOrderItemPhotos(container, files) {
+    if (!container) return;
+    for (let i = 0; i < (files?.length || 0); i++) {
+        const path = await uploadFile(files[i]);
+        if (path) {
+            const div = document.createElement("div");
+            div.className = "d-inline-block me-1 mb-1";
+            div.dataset.path = path;
+            div.innerHTML = `<img src="/cargochina/backend/${path}" class="img-thumbnail img-thumbnail-sm" style="max-width:50px" alt=""><button type="button" class="btn-close btn-close-sm" onclick="this.closest('.d-inline-block').remove()"></button>`;
+            container.appendChild(div);
+        }
+    }
 }
 
 function buildPackagingRowHtml(idx, isSubrow) {
@@ -1848,6 +1988,7 @@ async function copyOrder(id) {
         });
         if (!o.items || o.items.length === 0) addOrderItem();
         updateOrderTotals();
+        refreshUnsavedBaseline?.(document.querySelector("#orderModal .modal-body"));
         new bootstrap.Modal(document.getElementById("orderModal")).show();
     } catch (e) {
         showToast(e.message, "danger");
@@ -1992,6 +2133,7 @@ async function editOrder(id) {
         });
         if (o.items && o.items.length === 0) addOrderItem();
         updateOrderTotals();
+        refreshUnsavedBaseline?.(document.querySelector("#orderModal .modal-body"));
         new bootstrap.Modal(document.getElementById("orderModal")).show();
     } catch (e) {
         showToast(e.message, "danger");
@@ -2121,6 +2263,7 @@ async function saveOrder() {
             showToast("Order created");
         }
         if (res?.warning) showToast(res.warning, "warning");
+        refreshUnsavedBaseline?.(document.querySelector("#orderModal .modal-body"));
         bootstrap.Modal.getInstance(
             document.getElementById("orderModal"),
         ).hide();
@@ -2225,6 +2368,7 @@ async function showOrderFinance(id) {
         const res = await api("GET", "/orders/" + id);
         const o = res.data || {};
         const items = o.items || [];
+        const displayRows = getOrderDisplayRows(o);
 
         const totalCost = items.reduce(
             (s, it) => s + (parseFloat(it.total_amount) || 0),
@@ -2243,17 +2387,19 @@ async function showOrderFinance(id) {
             0,
         );
         const currency = o.currency || "USD";
+        const supplierDisplay =
+            o.supplier_name_display || getOrderSupplierDisplay(o) || "—";
 
-        const itemRows = items
+        const itemRows = displayRows
             .map(
-                (it) => `
-          <tr>
-            <td class="small">${escapeHtml(typeof descText === "function" ? descText(it) : it.description_en || it.description_cn || "—")}</td>
-            <td class="small text-muted">${escapeHtml(it.item_no || "—")}</td>
-            <td class="text-end small">${it.cartons || "—"}</td>
-            <td class="text-end small">${it.quantity || "—"}</td>
-            <td class="text-end small">${it.unit_price != null ? fmtOrderAmount(it.unit_price) : "—"}</td>
-            <td class="text-end small fw-semibold">${it.total_amount != null ? fmtOrderAmount(it.total_amount) : "—"}</td>
+                (row) => `
+          <tr class="${row.isCartonSummary ? "table-light" : ""}">
+            <td class="small ${row.isCartonSummary ? "fw-semibold" : row.type === "shared-content" ? "ps-4" : ""}">${escapeHtml(row.description || "—")}</td>
+            <td class="small text-muted">${escapeHtml(row.itemNo || "—")}</td>
+            <td class="text-end small">${row.cartons ?? "—"}</td>
+            <td class="text-end small">${row.quantity ?? "—"}</td>
+            <td class="text-end small">${row.unitPrice != null ? fmtOrderAmount(row.unitPrice) : "—"}</td>
+            <td class="text-end small fw-semibold">${row.totalAmount != null ? fmtOrderAmount(row.totalAmount) : "—"}</td>
           </tr>`,
             )
             .join("");
@@ -2278,7 +2424,7 @@ async function showOrderFinance(id) {
           </div>
           <div class="d-flex gap-2 mb-2 flex-wrap">
             <span class="badge bg-secondary">${escapeHtml(o.customer_name || "—")}</span>
-            <span class="badge bg-secondary">${escapeHtml(o.supplier_name || "—")}</span>
+            <span class="badge bg-secondary">${escapeHtml(supplierDisplay)}</span>
             <span class="badge bg-light text-dark border">${escapeHtml(typeof statusLabel === "function" ? statusLabel(o.status) : o.status || "—")}</span>
             <span class="badge bg-light text-dark border">${escapeHtml(o.expected_ready_date || "—")}</span>
           </div>
@@ -2353,7 +2499,13 @@ async function showOrderInfo(id) {
         const res = await api("GET", "/orders/" + id);
         const o = res.data || {};
         const items = o.items || [];
+        const displayRows = getOrderDisplayRows(o);
         const currency = o.currency || "USD";
+        const supplierDisplay =
+            o.supplier_name_display || getOrderSupplierDisplay(o) || "—";
+        const displayItemCount = displayRows.filter(
+            (row) => !row.isCartonSummary,
+        ).length;
         const totalCost = items.reduce(
             (s, it) => s + (parseFloat(it.total_amount) || 0),
             0,
@@ -2389,54 +2541,55 @@ async function showOrderInfo(id) {
             ? window.API_BASE.replace("/api/v1", "")
             : "/cargochina";
 
-        const itemRows = items
-            .map((it) => {
-                const imgs = Array.isArray(it.image_paths)
-                    ? it.image_paths
+        const itemRows = displayRows
+            .map((row) => {
+                const source = row.source || {};
+                const imgs = Array.isArray(row.imagePaths)
+                    ? row.imagePaths
                     : [];
                 const thumb =
                     imgs.length > 0
                         ? `<img src="${imgBase}/backend/${escapeHtml(imgs[0])}" class="order-info-thumb" onerror="this.style.display='none'">`
-                        : `<div class="order-info-thumb-placeholder">📷</div>`;
-                const itemNo = escapeHtml(
-                    it.item_no || it.shipping_code || "—",
-                );
-                const desc = escapeHtml(
-                    it.description_en || it.description_cn || "—",
-                );
-                const supplier = escapeHtml(it.supplier_name || "—");
-                const productAlert = productAlertTextFromItem(it)
-                    ? `<div class="product-alert-badge mt-1" title="${escapeHtml(productAlertTextFromItem(it))}">Alert</div>`
+                        : row.isCartonSummary
+                          ? `<div class="order-info-thumb-placeholder">📦</div>`
+                          : `<div class="order-info-thumb-placeholder">📷</div>`;
+                const itemNo = escapeHtml(row.itemNo || "—");
+                const desc = escapeHtml(row.description || "—");
+                const supplier = escapeHtml(row.supplierName || "—");
+                const productAlert = row.productAlert
+                    ? `<div class="product-alert-badge mt-1" title="${escapeHtml(row.productAlert)}">Alert</div>`
                     : "";
                 const scope = (
-                    it.product_dimensions_scope ||
-                    it.dimensions_scope ||
+                    source.product_dimensions_scope ||
+                    source.dimensions_scope ||
                     "piece"
                 )
                     .toString()
                     .toLowerCase();
                 const denom =
-                    scope === "carton" && (it.cartons || 0) > 0
-                        ? parseFloat(it.cartons) || 1
-                        : getItemQuantityFromData(it) || 1;
+                    row.isCartonSummary
+                        ? parseFloat(row.quantity || 0) || 1
+                        : scope === "carton" && (source.cartons || 0) > 0
+                          ? parseFloat(source.cartons) || 1
+                          : parseFloat(row.quantity || source.quantity || 0) || 1;
                 const cbmPer =
-                    it.declared_cbm && denom > 0
-                        ? fmtOrderCbm(parseFloat(it.declared_cbm) / denom, 4)
+                    row.declaredCbm && denom > 0
+                        ? fmtOrderCbm(parseFloat(row.declaredCbm) / denom, 4)
                         : "—";
                 const gwPer =
-                    it.declared_weight && denom > 0
-                        ? fmtOrderWeight(parseFloat(it.declared_weight) / denom, 4)
+                    row.declaredWeight && denom > 0
+                        ? fmtOrderWeight(parseFloat(row.declaredWeight) / denom, 4)
                         : "—";
-                return `<tr>
+                return `<tr class="${row.isCartonSummary ? "table-light" : ""}">
               <td>${thumb}</td>
-              <td class="small fw-semibold">${itemNo}</td>
-              <td class="small">${desc}${productAlert}</td>
+              <td class="small ${row.isCartonSummary ? "fw-semibold" : row.type === "shared-content" ? "ps-3" : "fw-semibold"}">${itemNo}</td>
+              <td class="small ${row.type === "shared-content" ? "ps-3" : ""}">${desc}${productAlert}</td>
               <td class="small text-muted">${supplier}</td>
-              <td class="text-end small">${it.cartons || "—"} × ${it.qty_per_carton || "—"} = ${it.quantity || "—"}</td>
-              <td class="text-end small">${it.unit_price != null ? fmtOrderAmount(it.unit_price) : "—"}</td>
-              <td class="text-end small fw-semibold">${it.total_amount != null ? fmtOrderAmount(it.total_amount) : "—"}</td>
-              <td class="text-end small">${cbmPer} / ${escapeHtml(String(it.declared_cbm ?? "—"))}</td>
-              <td class="text-end small">${gwPer} / ${escapeHtml(String(it.declared_weight ?? "—"))}</td>
+              <td class="text-end small">${row.cartons || "—"}${row.qtyPerCarton !== "" && row.qtyPerCarton != null ? ` × ${escapeHtml(String(row.qtyPerCarton))}` : ""} = ${row.quantity || "—"}</td>
+              <td class="text-end small">${row.unitPrice != null ? fmtOrderAmount(row.unitPrice) : "—"}</td>
+              <td class="text-end small fw-semibold">${row.totalAmount != null ? fmtOrderAmount(row.totalAmount) : "—"}</td>
+              <td class="text-end small">${cbmPer} / ${escapeHtml(String(row.declaredCbm ?? "—"))}</td>
+              <td class="text-end small">${gwPer} / ${escapeHtml(String(row.declaredWeight ?? "—"))}</td>
             </tr>`;
             })
             .join("");
@@ -2484,7 +2637,7 @@ async function showOrderInfo(id) {
             <div class="col-auto"><span class="badge ${statusCls}">${escapeHtml(statusLbl)}</span></div>
             ${o.order_type === "draft_procurement" ? `<div class="col-auto"><span class="badge bg-dark-subtle text-dark border">Draft Order</span></div>` : ""}
             <div class="col-auto"><span class="badge bg-light text-dark border">${escapeHtml(o.customer_name || "—")}</span></div>
-            <div class="col-auto"><span class="badge bg-light text-dark border">${escapeHtml(o.supplier_name || "—")}</span></div>
+            <div class="col-auto"><span class="badge bg-light text-dark border">${escapeHtml(supplierDisplay)}</span></div>
             <div class="col-auto"><span class="badge bg-light text-dark border">📅 ${escapeHtml(o.expected_ready_date || "—")}</span></div>
             <div class="col-auto"><span class="badge bg-light text-dark border">${escapeHtml(currency)}</span></div>
           </div>
@@ -2494,7 +2647,7 @@ async function showOrderInfo(id) {
             <div class="col-6 col-md-2"><div class="order-info-stat-card"><div class="label">Total Weight</div><div class="value">${fmtOrderWeight(totalWeight, 2)} kg</div></div></div>
             <div class="col-6 col-md-2"><div class="order-info-stat-card"><div class="label">Total Cartons</div><div class="value">${totalCtns}</div></div></div>
             <div class="col-6 col-md-2"><div class="order-info-stat-card"><div class="label">Total Qty</div><div class="value">${totalQty}</div></div></div>
-            <div class="col-6 col-md-2"><div class="order-info-stat-card"><div class="label">Items</div><div class="value">${items.length}</div></div></div>
+            <div class="col-6 col-md-2"><div class="order-info-stat-card"><div class="label">Items</div><div class="value">${displayItemCount}</div></div></div>
           </div>
           <div class="table-responsive">
             <table class="table table-sm table-hover order-info-items">

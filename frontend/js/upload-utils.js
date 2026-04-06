@@ -14,7 +14,7 @@ async function getUploadConfig() {
         throw new Error(d.error?.message || "Failed to load upload config");
     uploadConfigCache = d.data || {
         max_upload_mb: 8,
-        allowed_types: ["jpg", "jpeg", "png", "webp", "gif", "pdf"],
+        allowed_types: ["jpg", "jpeg", "png", "webp", "jfif", "gif", "pdf"],
     };
     return uploadConfigCache;
 }
@@ -27,6 +27,57 @@ function getExt(file) {
     const n = file.name || "";
     const i = n.lastIndexOf(".");
     return i >= 0 ? n.slice(i + 1).toLowerCase() : "";
+}
+
+function formatUploadDisplayNumber(value, maxDecimals = 1) {
+    if (typeof window.formatDisplayNumber === "function") {
+        return window.formatDisplayNumber(value, { maxDecimals }) || "0";
+    }
+    const numeric = parseFloat(value);
+    return Number.isFinite(numeric) ? String(numeric) : "0";
+}
+
+function extractClipboardImageFiles(event) {
+    const clipboardData = event?.clipboardData;
+    if (!clipboardData?.items?.length) return [];
+    const files = [];
+    Array.from(clipboardData.items).forEach((item) => {
+        if (item.kind !== "file") return;
+        const file = item.getAsFile?.();
+        if (!file) return;
+        if (isImageFile(file)) {
+            files.push(file);
+        }
+    });
+    return files;
+}
+
+function bindClipboardImagePaste(target, onFiles, opts = {}) {
+    const el =
+        typeof target === "string" ? document.querySelector(target) : target;
+    if (!el || typeof onFiles !== "function") return () => {};
+    const enabledWhen =
+        typeof opts.enabledWhen === "function" ? opts.enabledWhen : () => true;
+    const listener = async (event) => {
+        if (!enabledWhen()) return;
+        const files = extractClipboardImageFiles(event);
+        if (!files.length) return;
+        event.preventDefault();
+        try {
+            await onFiles(files, event);
+        } catch (error) {
+            if (typeof opts.onError === "function") {
+                opts.onError(error);
+            } else if (typeof window.showToast === "function") {
+                window.showToast(
+                    error?.message || "Failed to paste image",
+                    "danger",
+                );
+            }
+        }
+    };
+    el.addEventListener("paste", listener);
+    return () => el.removeEventListener("paste", listener);
 }
 
 async function compressImage(file, maxMb, maxPx = 1600, quality = 0.8) {
@@ -95,6 +146,7 @@ async function uploadFileWithProgress(file, opts = {}) {
         "jpeg",
         "png",
         "webp",
+        "jfif",
         "gif",
         "pdf",
     ];
@@ -112,7 +164,7 @@ async function uploadFileWithProgress(file, opts = {}) {
         try {
             toUpload = await compressImage(file, maxMb);
             if (toUpload.size > maxMb * 1048576) {
-                const msg = `File too large (${fileMb.toFixed(1)} MB). Max ${maxMb} MB. Compression did not reduce enough.`;
+                const msg = `File too large (${formatUploadDisplayNumber(fileMb, 1)} MB). Max ${formatUploadDisplayNumber(maxMb, 1)} MB. Compression did not reduce enough.`;
                 showToast(msg, "danger");
                 throw new Error(msg);
             }
@@ -121,7 +173,7 @@ async function uploadFileWithProgress(file, opts = {}) {
             showToast("Compression failed, trying original", "warning");
         }
     } else if (fileMb > maxMb) {
-        const msg = `File too large (${fileMb.toFixed(1)} MB). Max allowed ${maxMb} MB.`;
+        const msg = `File too large (${formatUploadDisplayNumber(fileMb, 1)} MB). Max allowed ${formatUploadDisplayNumber(maxMb, 1)} MB.`;
         showToast(msg, "danger");
         throw new Error(msg);
     }
@@ -162,3 +214,6 @@ async function uploadFileWithProgress(file, opts = {}) {
         xhr.send(fd);
     });
 }
+
+window.extractClipboardImageFiles = extractClipboardImageFiles;
+window.bindClipboardImagePaste = bindClipboardImagePaste;

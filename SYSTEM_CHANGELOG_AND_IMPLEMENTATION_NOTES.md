@@ -1124,3 +1124,28 @@ otification_preferences.php and removing the sidebar link unless the user is an 
 
 
 - 2026-04-01: Added shared EN / Simplified Chinese UI i18n infrastructure for CLMS via includes/i18n.php, includes/ui_translations.php, layout/footer locale wiring, and client-side 	(...) support in rontend/js/app.js. The topbar EN / 中文 toggle now persists locale in session + cookie, page titles/local shared navigation switch correctly, and major live modules including Orders, Draft Orders, Receiving, Warehouse Stock, Notifications, Pipeline, Financials, Containers, Consolidation, Downloads, and User Management now translate user-facing UI text at display level without changing stored business data or backend status values.
+
+## 2026-04-06 Production Stabilization Pass
+
+- Extended the shared frontend UX layer in `frontend/js/app.js` with centralized trimmed-number display helpers, unsaved-changes guards, standardized supplier payment method normalization, and system-level Enter-key-next-field navigation safeguards that are now reused by Orders, Draft Orders, Suppliers, Customers, Financials, and Receiving.
+- Standardized supplier payment accounts around `WeChat`, `Alipay`, and `Bank Transfer`, with RMB as the default currency in touched payment/deposit workflows. Suppliers, Financials, and Draft Quick Supplier flows now support saved account detail selection plus optional QR images instead of relying on freeform payment labels as the primary operator path.
+- Hardened upload/media handling by broadening common operational image support (`jpg`, `jpeg`, `png`, `webp`, `jfif`, `gif` where supported), improving upload failure messages, and reusing clipboard-image paste through the shared upload utilities across draft item photos, order item photos, receiving evidence, and supplier QR/account image zones.
+- Added migration `057_supplier_payment_account_snapshot.sql` to extend `supplier_payments` with `payment_account_label`, `payment_account_value`, and `payment_account_qr_path`, keeping payment account selections auditable at the transaction level instead of only in supplier master data.
+- Improved Draft Orders and Orders alignment: both now use shared unsaved-change protection, manual item-number jump continuity, image paste support, RMB defaults in the touched draft flows, and clearer operator-facing error messaging for network/validation failures.
+- Updated `backend/services/OrderExcelService.php` so supplier-grouped exports insert dedicated supplier header rows (`A="@@", B="supplier name and info", C supplier name, D supplier phone, E supplier info`) and render images smaller/centered so the sheet grid stays readable. Optional-decimal Excel number formats were preserved so exports do not reintroduce padded zeros.
+- Expanded Simplified Chinese dictionary coverage in `includes/ui_translations.php` for the newly touched payment, upload, and operator-error strings introduced in this stabilization pass.
+- Current follow-up items intentionally left open rather than half-implemented: structured multi-item carton contents, explicit prepaid/factory-paid item semantics, and a complete final sweep of every remaining secondary admin/data page for full Chinese UI coverage.
+
+## 2026-04-06 Shared-Carton Downstream Review
+
+- Completed the downstream shared-carton review for Draft Orders mixed-supplier cartons instead of stopping at save/load only.
+- `backend/api/handlers/orders.php` now decodes shared-carton child rows when reading orders, carries child-supplier identity into `supplier_name_display` / `item_supplier_names`, and makes supplier search/filter logic shared-carton-aware so mixed-supplier cartons are not hidden or mis-labeled in order search/export/list flows.
+- `backend/api/handlers/financials.php` now builds supplier membership and supplier display labels from shared-carton child rows, so financial supplier filtering and row labels stay truthful for mixed-supplier cartons.
+- `frontend/js/orders.js` now renders shared-carton parent rows plus nested child rows in both `showOrderInfo()` and `showOrderFinance()`, and uses the mixed-supplier display badge instead of the old flat supplier label.
+- `frontend/js/financials.js` now uses the shared mixed-supplier display for profit rows and the financial order-info modal, and renders shared-carton parent/child rows instead of flattening everything into one misleading supplier line.
+- `procurement_draft_print.php` now labels mixed-supplier sections as `Section suppliers:` / `Section subtotal`, prints the shared-carton parent row plus nested contained rows, and keeps section/grand totals aligned with the saved carton structure.
+- Verified with Playwright MCP against `order_id=54` using a mixed-supplier shared carton (`Qingdao Pet Utility` + `Xiamen Outdoor Supply`):
+  - draft print page shows `Section suppliers:` and `Section subtotal`
+  - Financials profit filter includes order `#54` under both supplier filters and labels it as `Multiple (...)`
+  - Orders `showOrderInfo()` and `showOrderFinance()` display the shared-carton parent row plus its contained child items correctly
+- Remaining deliberate limit: the current downstream pass keeps financial meaning at the item-child level and physical packing meaning at the carton-parent level, but it does not yet introduce a separate shipment-ledger or carton-accounting subsystem beyond the saved nested carton contents.

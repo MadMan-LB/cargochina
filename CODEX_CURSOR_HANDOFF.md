@@ -164,6 +164,90 @@ CargoWise is the most complete logistics workflow platform in the market: 17,000
 
 Alibaba is the dominant China sourcing marketplace. Its supplier-trust model (Trade Assurance, Gold Supplier, Verified Supplier badges), RFQ/quote workflow, and logistics coordination layer are the reference for how sourcing confidence and supplier communication can be structured at scale.
 
+## 14. 2026-04-06 Implementation Snapshot — Production Stabilization Pass
+
+### What was completed
+- **Shared UX behavior**
+  - `frontend/js/app.js` now acts as the central UX helper layer for:
+    - Enter-key-next-field navigation with scoped safeguards and opt-outs
+    - unsaved-changes dirty tracking / close warnings
+    - trimmed display-number helpers used by touched modules
+    - standardized payment-method normalization (`WeChat`, `Alipay`, `Bank Transfer`)
+- **Supplier payment account model**
+  - Supplier account rows in `suppliers.php` / `frontend/js/suppliers.js` were upgraded from loose label/value rows to structured payment-account entries with:
+    - method
+    - currency
+    - account detail
+    - optional QR image
+  - Financial payment recording (`financials.php` / `frontend/js/financials.js`) now reads those saved supplier payment accounts and lets operators choose them directly.
+  - Draft quick supplier creation in `procurement_drafts.php` / `frontend/js/procurement_drafts.js` now uses the same standardized payment-account structure.
+- **Payment transaction auditability**
+  - New migration: `backend/migrations/057_supplier_payment_account_snapshot.sql`
+  - Adds `payment_account_label`, `payment_account_value`, and `payment_account_qr_path` to `supplier_payments` so actual payment records can capture the selected account snapshot.
+- **Default RMB behavior**
+  - Supplier payment, customer deposit, financial payment, financial deposit, and draft-order currency resets in the touched flows now default to `RMB` while preserving USD support.
+- **Upload/media hardening**
+  - `backend/api/handlers/upload.php` now accepts `jfif` alongside the common image types already used operationally.
+  - Shared upload utility now supports clipboard image paste, and this was wired into:
+    - Draft item photos
+    - Order item photos
+    - Receiving evidence / item-level receive photos
+    - Supplier QR/account image zones
+    - Supplier attachment section
+  - Upload failures now return safer operator-facing messages rather than raw server text.
+- **Draft / Orders alignment**
+  - Draft Orders and Orders now share:
+    - manual item-number continuity behavior through the shared numbering service
+    - unsaved-change protection
+    - clearer fetch/network validation messages in the touched draft flow
+    - clipboard image paste for item photos
+  - Draft builder also auto-fills visible CBM from `L * W * H / 1000000` when dimensions are provided.
+- **Excel exports**
+  - `backend/services/OrderExcelService.php` now inserts supplier-group header rows in supplier-grouped exports:
+    - `A = @@`
+    - `B = supplier name and info`
+    - `C = supplier name`
+    - `D = supplier phone`
+    - `E = supplier info`
+  - Export images are slightly smaller and centered so borders/grid stay more readable.
+  - Number formats remain numeric in XLSX while using optional decimals instead of padded trailing zeros.
+- **Chinese UI coverage**
+  - Shared Chinese dictionary coverage was extended for the newly introduced payment-account, QR, upload, and error-message strings used in Suppliers, Financials, Draft Orders, and related touched flows.
+
+### What was verified
+- JS syntax checks passed for the touched shared modules:
+  - `frontend/js/orders.js`
+  - `frontend/js/receiving.js`
+  - `frontend/js/suppliers.js`
+  - `frontend/js/financials.js`
+  - `frontend/js/customers.js`
+  - `frontend/js/procurement_drafts.js`
+- PHP syntax checks passed for the touched backend/pages:
+  - `backend/services/OrderExcelService.php`
+  - `backend/api/handlers/suppliers.php`
+  - `backend/api/handlers/upload.php`
+  - `backend/api/handlers/customers.php`
+  - `backend/api/handlers/financials.php`
+  - `suppliers.php`
+  - `financials.php`
+  - `customers.php`
+  - `procurement_drafts.php`
+  - `includes/footer.php`
+  - `includes/ui_translations.php`
+- One browser sanity check confirmed the translated login shell loads under Playwright; broader authenticated browser QA is still recommended.
+
+### Important remaining open items
+- The following requested items were **not** completed in this pass and should not be treated as done:
+  - structured nested carton-content modeling for one carton containing multiple different items/prices
+  - explicit prepaid / factory-paid / no-payable business semantics on item/order financial logic
+  - full Chinese translation coverage for every remaining secondary page and dynamic string
+  - a complete end-to-end authenticated browser QA sweep across all touched flows
+
+### Implementation guidance for the next pass
+- Prefer continuing from the shared helpers already added in `frontend/js/app.js` and `frontend/js/upload-utils.js`.
+- Reuse the supplier payment-account structure already normalized in `backend/api/handlers/suppliers.php` instead of inventing a second payment-account model.
+- If multi-item carton contents are added next, treat them as a nested incremental structure attached to packaging rows rather than a brand-new warehouse inventory subsystem.
+
 **Neither should be copied wholesale.** CargoWise is enterprise freight-forwarder infrastructure — designed for large MNCs managing global multi-modal operations with carrier integrations, customs automation across 193 countries, and payroll. Salameh Cargo is an upstream China operations team feeding a specific tracking system. Importing CargoWise's full complexity would destroy the internal simplicity that makes CLMS valuable.
 
 Alibaba is a public marketplace. It cannot be cloned internally. But its trust patterns — visibility into supplier verification status, order protection milestones, structured communication history — contain lightweight ideas CLMS can adapt.
@@ -599,3 +683,33 @@ This ledger should be maintained over time so both Codex and Cursor can see exec
 
 ### For Codex (pending)
 - [x] **Excel export test data:** Create 3 containers, 10–20 orders per container, fill containers via shipment drafts, import images for order items. Implemented via `scripts/seed_consolidation_export_dataset.py` and verified with Playwright/API exports.
+
+## 2026-04-06 Shared-Carton Verification Snapshot
+
+### What is now verified
+- Draft Orders shared-carton save/load/reopen remains working with migration `058_shared_carton_contents.sql` applied.
+- Mixed-supplier shared cartons now propagate downstream into:
+  - `procurement_draft_print.php`
+  - Orders read-only info modal
+  - Orders finance modal
+  - Financials profit supplier filter and supplier labels
+- Verified real browser flow with Playwright MCP using draft/order `#54`:
+  - shared carton parent row persisted
+  - child rows persisted with two suppliers
+  - print page shows `Section suppliers: Qingdao Pet Utility, Xiamen Outdoor Supply`
+  - Financials supplier filter finds order `#54` under both suppliers and labels it as `Multiple (...)`
+  - Orders info/finance modals render a shared-carton parent row plus nested child rows
+
+### Files touched in this downstream pass
+- `backend/api/handlers/orders.php`
+- `backend/api/handlers/financials.php`
+- `frontend/js/orders.js`
+- `frontend/js/financials.js`
+- `procurement_draft_print.php`
+- `includes/ui_translations.php`
+- `SYSTEM_CHANGELOG_AND_IMPLEMENTATION_NOTES.md`
+
+### Remaining limits / next likely steps
+- Shared-carton support is now persisted and truthfully displayed, but there is still no separate carton-level accounting subsystem beyond nested carton contents on order items.
+- If the next pass extends carton contents into real shipment/container packing analytics, start from the saved `shared_carton_contents` structure instead of inventing a parallel model.
+- Keep an eye on secondary exports and secondary admin pages if they later begin reading order items directly without the shared-carton-aware helpers.

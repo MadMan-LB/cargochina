@@ -12,10 +12,90 @@ require_once dirname(__DIR__, 2) . '/services/OrderItemNumberingService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderReceiptWorkflowService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
 
-function normalizeOrderItems(array $items): array
+function orderSupportsSharedCartons(PDO $pdo): bool
+{
+    return orderTableHasColumn($pdo, 'order_items', 'shared_carton_enabled')
+        && orderTableHasColumn($pdo, 'order_items', 'shared_carton_contents');
+}
+
+function orderBuildDescriptionEntries(?string $cn, ?string $en): array
+{
+    $entries = [];
+    $cnParts = array_values(array_filter(array_map('trim', preg_split('/\s*\|\s*/', (string) ($cn ?? '')) ?: [])));
+    $enParts = array_values(array_filter(array_map('trim', preg_split('/\s*\|\s*/', (string) ($en ?? '')) ?: [])));
+    $entryCount = max(count($cnParts), count($enParts));
+    for ($i = 0; $i < $entryCount; $i++) {
+        $entries[] = [
+            'description_text' => $cnParts[$i] ?? $enParts[$i] ?? '',
+            'description_translated' => $enParts[$i] ?? $cnParts[$i] ?? '',
+        ];
+    }
+
+    return $entries;
+}
+
+function orderLookupSupplierNames(PDO $pdo, array $supplierIds): array
+{
+    $supplierIds = array_values(array_unique(array_filter(array_map('intval', $supplierIds))));
+    if (!$supplierIds) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($supplierIds), '?'));
+    $stmt = $pdo->prepare("SELECT id, name FROM suppliers WHERE id IN ($placeholders)");
+    $stmt->execute($supplierIds);
+    return $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+}
+
+function orderDecodeSharedCartonContents(PDO $pdo, array $row): array
+{
+    $raw = $row['shared_carton_contents'] ?? null;
+    if (!$raw) {
+        return [];
+    }
+
+    $decoded = is_array($raw) ? $raw : (json_decode((string) $raw, true) ?: []);
+    if (!$decoded) {
+        return [];
+    }
+
+    $supplierNames = orderLookupSupplierNames($pdo, array_map(
+        static fn(array $content): int => (int) ($content['supplier_id'] ?? 0),
+        $decoded
+    ));
+    $cartons = (float) ($row['cartons'] ?? 0);
+
+    foreach ($decoded as &$content) {
+        $content['supplier_id'] = !empty($content['supplier_id']) ? (int) $content['supplier_id'] : null;
+        $content['supplier_name'] = $content['supplier_id'] ? ($supplierNames[$content['supplier_id']] ?? null) : null;
+        $content['quantity_per_carton'] = round((float) ($content['quantity_per_carton'] ?? $content['quantity'] ?? 0), 4);
+        $content['quantity'] = round($content['quantity_per_carton'] * $cartons, 4);
+        $content['unit_price'] = isset($content['unit_price']) && $content['unit_price'] !== '' ? (float) $content['unit_price'] : null;
+        $content['sell_price'] = isset($content['sell_price']) && $content['sell_price'] !== '' ? (float) $content['sell_price'] : null;
+        $content['description_entries'] = orderBuildDescriptionEntries(
+            $content['description_cn'] ?? '',
+            $content['description_en'] ?? ''
+        );
+        $linePrice = $content['sell_price'] ?? $content['unit_price'];
+        if (!isset($content['total_amount']) || $content['total_amount'] === null || $content['total_amount'] === '') {
+            $content['total_amount'] = $linePrice !== null ? round($content['quantity'] * $linePrice, 4) : null;
+        } else {
+            $content['total_amount'] = (float) $content['total_amount'];
+        }
+    }
+    unset($content);
+
+    return $decoded;
+}
+
+function normalizeOrderItems(PDO $pdo, array $items): array
 {
     foreach ($items as &$it) {
         $it['image_paths'] = $it['image_paths'] ? json_decode($it['image_paths'], true) : [];
+        $it['shared_carton_enabled'] = !empty($it['shared_carton_enabled']) ? 1 : 0;
+        $it['shared_carton_contents'] = !empty($it['shared_carton_enabled'])
+            ? orderDecodeSharedCartonContents($pdo, $it)
+            : [];
     }
     return $items;
 }
@@ -263,6 +343,15 @@ function fetchOrderItems(PDO $pdo, int $orderId): array
             $productAlertCol .= ", COALESCE(oi.hs_code, p.hs_code) as effective_hs_code";
         }
     }
+    if (orderTableHasColumn($pdo, 'order_items', 'shared_carton_enabled')) {
+        $productAlertCol .= ", oi.shared_carton_enabled";
+    }
+    if (orderTableHasColumn($pdo, 'order_items', 'shared_carton_code')) {
+        $productAlertCol .= ", oi.shared_carton_code";
+    }
+    if (orderTableHasColumn($pdo, 'order_items', 'shared_carton_contents')) {
+        $productAlertCol .= ", oi.shared_carton_contents";
+    }
     $supplierCols = '';
     if ($hasSupplier) {
         $supplierCols = ", s.name as supplier_name";
@@ -282,6 +371,73 @@ function fetchOrderItems(PDO $pdo, int $orderId): array
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$orderId]);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function orderCollectSupplierNamesFromItem(array $item, string $fallback = ''): array
+{
+    $names = [];
+    $primary = trim((string) ($item['supplier_name'] ?? $fallback));
+    if ($primary !== '') {
+        $names[$primary] = true;
+    }
+    if (!empty($item['shared_carton_enabled']) && !empty($item['shared_carton_contents'])) {
+        foreach ((array) $item['shared_carton_contents'] as $content) {
+            $name = trim((string) ($content['supplier_name'] ?? ''));
+            if ($name !== '') {
+                $names[$name] = true;
+            }
+        }
+    }
+
+    return array_keys($names);
+}
+
+function orderCollectSupplierNamesFromItems(array $items, string $fallback = ''): array
+{
+    $names = [];
+    foreach ($items as $item) {
+        foreach (orderCollectSupplierNamesFromItem($item, $fallback) as $name) {
+            $names[$name] = true;
+        }
+    }
+
+    return array_keys($names);
+}
+
+function orderBuildSupplierDisplayFromItems(array $items, string $fallback = ''): string
+{
+    $names = orderCollectSupplierNamesFromItems($items, $fallback);
+    if (!$names) {
+        return $fallback;
+    }
+    if (count($names) === 1) {
+        return $names[0];
+    }
+    return 'Multiple (' . implode(', ', $names) . ')';
+}
+
+function orderRowMatchesSupplierFilter(array $row, int $supplierId): bool
+{
+    if ($supplierId <= 0) {
+        return true;
+    }
+    if ((int) ($row['supplier_id'] ?? 0) === $supplierId) {
+        return true;
+    }
+    foreach (($row['items'] ?? []) as $item) {
+        if ((int) ($item['supplier_id'] ?? 0) === $supplierId) {
+            return true;
+        }
+        if (!empty($item['shared_carton_enabled']) && !empty($item['shared_carton_contents'])) {
+            foreach ((array) $item['shared_carton_contents'] as $content) {
+                if ((int) ($content['supplier_id'] ?? 0) === $supplierId) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
 }
 
 function fetchOrdersListRowsForRequest(PDO $pdo): array
@@ -376,9 +532,23 @@ function fetchOrdersListRowsForRequest(PDO $pdo): array
     }
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
     foreach ($rows as &$row) {
-        $row['items'] = normalizeOrderItems(fetchOrderItems($pdo, (int) $row['id']));
+        $row['items'] = normalizeOrderItems($pdo, fetchOrderItems($pdo, (int) $row['id']));
+        $supplierNames = orderCollectSupplierNamesFromItems($row['items'], (string) ($row['supplier_name'] ?? ''));
+        if ($supplierNames) {
+            $row['item_supplier_names'] = implode(', ', $supplierNames);
+            $row['supplier_name_display'] = count($supplierNames) === 1
+                ? $supplierNames[0]
+                : 'Multiple (' . implode(', ', $supplierNames) . ')';
+        } else {
+            $row['supplier_name_display'] = (string) ($row['supplier_name'] ?? '');
+        }
     }
     unset($row);
+
+    if ($supplierId && orderSupportsSharedCartons($pdo)) {
+        $filterSupplierId = (int) $supplierId;
+        $rows = array_values(array_filter($rows, static fn(array $row): bool => orderRowMatchesSupplierFilter($row, $filterSupplierId)));
+    }
 
     return $rows;
 }
@@ -398,13 +568,14 @@ function outputOrdersListCsv(array $rows, ?string $filename = null): void
         foreach (($row['items'] ?? []) as $item) {
             $cbm += (float) ($item['declared_cbm'] ?? 0);
             $weight += (float) ($item['declared_weight'] ?? 0);
-            $supplierName = trim((string) ($item['supplier_name'] ?? ''));
-            if ($supplierName !== '') {
-                $supplierNames[$supplierName] = true;
+            foreach (orderCollectSupplierNamesFromItem($item, (string) ($row['supplier_name'] ?? '')) as $supplierName) {
+                if ($supplierName !== '') {
+                    $supplierNames[$supplierName] = true;
+                }
             }
         }
-        $supplierDisplay = trim((string) ($row['supplier_name'] ?? ''));
-        if ($supplierNames) {
+        $supplierDisplay = trim((string) ($row['supplier_name_display'] ?? ($row['supplier_name'] ?? '')));
+        if ($supplierNames && $supplierDisplay === '') {
             $names = array_keys($supplierNames);
             $supplierDisplay = count($names) === 1 ? $names[0] : 'Multiple (' . implode(', ', $names) . ')';
         }
@@ -773,12 +944,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $where .= ' AND o.customer_id = ?';
                     $params[] = $customerId;
                 }
+                $hasSharedCartons = orderSupportsSharedCartons($pdo);
                 if ($supplierId) {
                     $chkItemSupp = @$pdo->query("SHOW COLUMNS FROM order_items LIKE 'supplier_id'");
                     if ($chkItemSupp && $chkItemSupp->rowCount() > 0) {
-                        $where .= ' AND (o.supplier_id = ? OR EXISTS (SELECT 1 FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = o.id AND COALESCE(oi.supplier_id, p.supplier_id) = ?))';
-                        $params[] = $supplierId;
-                        $params[] = $supplierId;
+                        if (!$hasSharedCartons) {
+                            $where .= ' AND (o.supplier_id = ? OR EXISTS (SELECT 1 FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = o.id AND COALESCE(oi.supplier_id, p.supplier_id) = ?))';
+                            $params[] = $supplierId;
+                            $params[] = $supplierId;
+                        }
                     } else {
                         $where .= ' AND o.supplier_id = ?';
                         $params[] = $supplierId;
@@ -797,6 +971,25 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute($params);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                if ($hasSharedCartons) {
+                    foreach ($rows as &$row) {
+                        $row['items'] = normalizeOrderItems($pdo, fetchOrderItems($pdo, (int) $row['id']));
+                        $supplierNames = orderCollectSupplierNamesFromItems($row['items'], (string) ($row['supplier_name'] ?? ''));
+                        if ($supplierNames) {
+                            $row['item_supplier_names'] = implode(', ', $supplierNames);
+                            $row['supplier_name_display'] = count($supplierNames) === 1
+                                ? $supplierNames[0]
+                                : 'Multiple (' . implode(', ', $supplierNames) . ')';
+                        } else {
+                            $row['supplier_name_display'] = (string) ($row['supplier_name'] ?? '');
+                        }
+                    }
+                    unset($row);
+                    if ($supplierId) {
+                        $filterSupplierId = (int) $supplierId;
+                        $rows = array_values(array_filter($rows, static fn(array $row): bool => orderRowMatchesSupplierFilter($row, $filterSupplierId)));
+                    }
+                }
                 jsonResponse(['data' => $rows]);
             }
             if ($id === 'export' && $action === 'list') {
@@ -821,7 +1014,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt->execute([$id]);
                 $order = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$order) jsonError('Order not found', 404);
-                $items = normalizeOrderItems(fetchOrderItems($pdo, (int) $id));
+                $items = normalizeOrderItems($pdo, fetchOrderItems($pdo, (int) $id));
                 $format = strtolower(trim((string) ($_GET['format'] ?? 'xlsx')));
                 if ($format === 'csv') {
                     outputOrderCsv($order, $items, 'order_' . (int) $id . '.csv');
@@ -845,7 +1038,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $stmt->execute([$id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$row) jsonError('Order not found', 404);
-            $row['items'] = normalizeOrderItems(fetchOrderItems($pdo, (int) $id));
+            $row['items'] = normalizeOrderItems($pdo, fetchOrderItems($pdo, (int) $id));
+            $row['supplier_name_display'] = orderBuildSupplierDisplayFromItems($row['items'], (string) ($row['supplier_name'] ?? ''));
+            $row['item_supplier_names'] = implode(', ', orderCollectSupplierNamesFromItems($row['items'], (string) ($row['supplier_name'] ?? '')));
             $att = $pdo->prepare("SELECT * FROM order_attachments WHERE order_id = ?");
             $att->execute([$id]);
             $row['attachments'] = $att->fetchAll(PDO::FETCH_ASSOC);
@@ -1015,7 +1210,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt = $pdo->prepare("SELECT $oc FROM orders o JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id WHERE o.id = ?");
                 $stmt->execute([$id]);
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
-                $row['items'] = normalizeOrderItems(fetchOrderItems($pdo, (int) $id));
+                $row['items'] = normalizeOrderItems($pdo, fetchOrderItems($pdo, (int) $id));
                 jsonResponse(array_filter(['data' => $row, 'warning' => $dupWarn]));
             } catch (Exception $e) {
                 $pdo->rollBack();
@@ -1177,7 +1372,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $stmt = $pdo->prepare("SELECT $oc FROM orders o JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id WHERE o.id = ?");
                     $stmt->execute([$orderId]);
                     $row = $stmt->fetch(PDO::FETCH_ASSOC);
-                    $row['items'] = normalizeOrderItems(fetchOrderItems($pdo, $orderId));
+                    $row['items'] = normalizeOrderItems($pdo, fetchOrderItems($pdo, $orderId));
                     jsonResponse(array_filter(['data' => $row, 'warning' => $dupWarn]), 201);
                 } catch (Exception $e) {
                     $pdo->rollBack();

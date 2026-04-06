@@ -8,6 +8,7 @@
     let quickSupplierModal = null;
     let sectionIndex = 0;
     let itemIndex = 0;
+    let sharedCartonContentIndex = 0;
     let quickSupplierPaymentLinkIndex = 0;
     let draftOrderCustomerCountryShipping = [];
 
@@ -16,15 +17,35 @@
     }
 
     async function api(method, path, body) {
+        if (typeof window.api === "function") {
+            return window.api(method, path, body);
+        }
+
         const opts = { method, credentials: "same-origin" };
         if (body && (method === "POST" || method === "PUT")) {
             opts.headers = { "Content-Type": "application/json" };
             opts.body = JSON.stringify(body);
         }
-        const res = await fetch(API + path, opts);
+
+        let res;
+        try {
+            res = await fetch(API + path, opts);
+        } catch (_) {
+            throw new Error(
+                draftT(
+                    "Could not reach the server. Check your connection and try again.",
+                ),
+            );
+        }
+
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) {
-            throw new Error(data.message || "Request failed");
+            throw new Error(
+                data.message ||
+                    draftT(
+                        "The request could not be completed. Check the highlighted fields and try again.",
+                    ),
+            );
         }
         return data;
     }
@@ -71,6 +92,94 @@
         const raw = String(value).trim();
         if (!raw) return "";
         return trimDisplayNumber(raw, maxDecimals);
+    }
+
+    function getDraftQuickSupplierPaymentMethods() {
+        return Array.isArray(window.STANDARD_PAYMENT_METHODS)
+            ? window.STANDARD_PAYMENT_METHODS
+            : ["WeChat", "Alipay", "Bank Transfer"];
+    }
+
+    function renderDraftQuickSupplierPaymentMethodOptions(selected = "") {
+        return getDraftQuickSupplierPaymentMethods()
+            .map(
+                (method) =>
+                    `<option value="${escapeHtml(method)}"${method === selected ? " selected" : ""}>${escapeHtml(method)}</option>`,
+            )
+            .join("");
+    }
+
+    function setDraftQuickSupplierQrPreview(row, qrPath = "", fileName = "") {
+        const hidden = row.querySelector(".draft-quick-supplier-payment-qr");
+        const preview = row.querySelector(
+            ".draft-quick-supplier-payment-qr-preview",
+        );
+        if (!hidden || !preview) return;
+        hidden.value = qrPath || "";
+        if (!qrPath) {
+            preview.classList.add("d-none");
+            preview.innerHTML = "";
+            return;
+        }
+        preview.classList.remove("d-none");
+        preview.innerHTML = `
+            <div class="d-flex align-items-center gap-2 mt-2">
+              <a href="/cargochina/backend/${escapeHtml(qrPath)}" target="_blank" rel="noopener" class="d-inline-flex align-items-center gap-2 text-decoration-none">
+                <img src="/cargochina/backend/${escapeHtml(qrPath)}" alt="${escapeHtml(draftT("QR"))}" style="width:48px;height:48px;object-fit:cover;border-radius:10px;border:1px solid #dbe4f0;">
+                <span class="small text-muted">${escapeHtml(fileName || draftT("QR saved"))}</span>
+              </a>
+              <button type="button" class="btn btn-sm btn-outline-danger draft-quick-supplier-payment-qr-clear">×</button>
+            </div>
+        `;
+        preview
+            .querySelector(".draft-quick-supplier-payment-qr-clear")
+            ?.addEventListener("click", () =>
+                setDraftQuickSupplierQrPreview(row, ""),
+            );
+    }
+
+    async function handleDraftQuickSupplierQrFiles(row, files) {
+        const list = Array.from(files || []).filter(Boolean);
+        if (!list.length) return;
+        const file = list[0];
+        const path = await uploadFile(file, { category: "supplier-payment-qr" });
+        if (!path) return;
+        setDraftQuickSupplierQrPreview(row, path, file.name || draftT("QR image"));
+        showToast(draftT("Payment QR uploaded"));
+    }
+
+    function bindDraftQuickSupplierPaymentRow(row) {
+        const fileInput = row.querySelector(
+            ".draft-quick-supplier-payment-qr-input",
+        );
+        const uploadBtn = row.querySelector(
+            ".draft-quick-supplier-payment-qr-btn",
+        );
+        uploadBtn?.addEventListener("click", () => fileInput?.click());
+        fileInput?.addEventListener("change", async function () {
+            try {
+                await handleDraftQuickSupplierQrFiles(row, this.files || []);
+            } catch (e) {
+                showToast(e.message, "danger");
+            } finally {
+                this.value = "";
+            }
+        });
+        bindClipboardImagePaste?.(
+            row,
+            async (files) => {
+                try {
+                    await handleDraftQuickSupplierQrFiles(row, files);
+                } catch (e) {
+                    showToast(e.message, "danger");
+                }
+            },
+            {
+                requireTargetMatch: true,
+                targetMatcher: (target) =>
+                    !!target.closest(".draft-quick-supplier-payment-link-row"),
+            },
+        );
     }
 
     function parseStructuredItemNo(value) {
@@ -314,30 +423,70 @@
     function renumberDraftItems() {
         const prefix = getCustomerShipCode();
         setShippingHint(prefix);
+        const targets = [];
         const supplierOrder = [];
         const supplierSequenceByKey = new Map();
         const manualSupplierSequenceByKey = new Map();
         const usedSupplierSequences = new Set();
         const supplierItemCounts = new Map();
+
         document.querySelectorAll(".draft-order-section").forEach((section) => {
-            const supplierId =
-                section.querySelector(".draft-section-supplier-id")?.value?.trim() ||
-                "";
-            const supplierKey = supplierId || `section-${section.dataset.sectionId || ""}`;
-            if (!supplierOrder.includes(supplierKey)) {
-                supplierOrder.push(supplierKey);
-            }
+            const sectionSupplierId =
+                section.querySelector(".draft-section-supplier-id")?.value?.trim() || "";
+            const sectionKey =
+                sectionSupplierId || `section-${section.dataset.sectionId || ""}`;
             section.querySelectorAll(".draft-order-item-card").forEach((card) => {
                 const shipInput = card.querySelector(".draft-item-shipping-code");
-                const itemNoInput = card.querySelector(".draft-item-item-no");
-                if (!shipInput || !itemNoInput) return;
+                if (!shipInput) return;
                 shipInput.value = prefix || "";
+
+                if (card.dataset.sharedCartonEnabled === "1") {
+                    getDraftSharedCartonRows(card).forEach((row) => {
+                        const supplierId =
+                            row.querySelector(".draft-shared-content-supplier-id")
+                                ?.value?.trim() || sectionSupplierId;
+                        const supplierKey =
+                            supplierId ||
+                            `${sectionKey}-shared-${row.dataset.contentId || ""}`;
+                        if (!supplierOrder.includes(supplierKey)) {
+                            supplierOrder.push(supplierKey);
+                        }
+                        const itemNoInput = row.querySelector(
+                            ".draft-shared-content-item-no",
+                        );
+                        const value = itemNoInput?.value?.trim() || "";
+                        const manual = !!row.dataset.manualItemNo;
+                        if (manual) {
+                            const parsed = parseStructuredItemNo(value);
+                            if (
+                                parsed &&
+                                !manualSupplierSequenceByKey.has(supplierKey)
+                            ) {
+                                manualSupplierSequenceByKey.set(
+                                    supplierKey,
+                                    parsed.supplierSequence,
+                                );
+                                usedSupplierSequences.add(parsed.supplierSequence);
+                            }
+                        }
+                        targets.push({
+                            supplierKey,
+                            input: itemNoInput,
+                            manual,
+                        });
+                    });
+                    return;
+                }
+
+                const itemNoInput = card.querySelector(".draft-item-item-no");
+                if (!itemNoInput) return;
+                const supplierKey = sectionKey;
+                if (!supplierOrder.includes(supplierKey)) {
+                    supplierOrder.push(supplierKey);
+                }
                 if (card.dataset.manualItemNo) {
                     const parsed = parseStructuredItemNo(itemNoInput.value);
-                    if (
-                        parsed &&
-                        !manualSupplierSequenceByKey.has(supplierKey)
-                    ) {
+                    if (parsed && !manualSupplierSequenceByKey.has(supplierKey)) {
                         manualSupplierSequenceByKey.set(
                             supplierKey,
                             parsed.supplierSequence,
@@ -345,6 +494,11 @@
                         usedSupplierSequences.add(parsed.supplierSequence);
                     }
                 }
+                targets.push({
+                    supplierKey,
+                    input: itemNoInput,
+                    manual: !!card.dataset.manualItemNo,
+                });
             });
         });
 
@@ -365,49 +519,32 @@
             nextSupplierSequence += 1;
         });
 
-        document.querySelectorAll(".draft-order-section").forEach((section) => {
-            const supplierId =
-                section.querySelector(".draft-section-supplier-id")?.value?.trim() ||
-                "";
-            const supplierKey = supplierId || `section-${section.dataset.sectionId || ""}`;
-            const supplierSequence = supplierSequenceByKey.get(supplierKey) || 1;
-            section.querySelectorAll(".draft-order-item-card").forEach((card) => {
-                const itemNoInput = card.querySelector(".draft-item-item-no");
-                const parsed = parseStructuredItemNo(itemNoInput?.value);
-                if (parsed && parsed.supplierSequence === supplierSequence) {
-                    supplierItemCounts.set(
-                        supplierKey,
-                        Math.max(
-                            supplierItemCounts.get(supplierKey) || 0,
-                            parsed.itemSequence,
-                        ),
-                    );
-                }
-            });
+        targets.forEach((target) => {
+            const supplierSequence =
+                supplierSequenceByKey.get(target.supplierKey) || 1;
+            const parsed = parseStructuredItemNo(target.input?.value);
+            if (parsed && parsed.supplierSequence === supplierSequence) {
+                supplierItemCounts.set(
+                    target.supplierKey,
+                    Math.max(
+                        supplierItemCounts.get(target.supplierKey) || 0,
+                        parsed.itemSequence,
+                    ),
+                );
+            }
         });
 
-        document.querySelectorAll(".draft-order-section").forEach((section) => {
-            const supplierId =
-                section.querySelector(".draft-section-supplier-id")?.value?.trim() ||
-                "";
-            const supplierKey = supplierId || `section-${section.dataset.sectionId || ""}`;
-            const supplierSequence = supplierSequenceByKey.get(supplierKey) || 1;
-            section.querySelectorAll(".draft-order-item-card").forEach((card) => {
-                const shipInput = card.querySelector(".draft-item-shipping-code");
-                const itemNoInput = card.querySelector(".draft-item-item-no");
-                if (!shipInput || !itemNoInput) return;
-                shipInput.value = prefix || "";
-                if (card.dataset.manualItemNo) {
-                    return;
-                }
-                const nextItemSequence =
-                    (supplierItemCounts.get(supplierKey) || 0) + 1;
-                supplierItemCounts.set(supplierKey, nextItemSequence);
-                const base = (shipInput.value || prefix || "").trim();
-                itemNoInput.value = base
-                    ? `${base}-${supplierSequence}-${nextItemSequence}`
-                    : "";
-            });
+        targets.forEach((target) => {
+            if (!target.input) return;
+            if (target.manual) return;
+            const supplierSequence =
+                supplierSequenceByKey.get(target.supplierKey) || 1;
+            const nextItemSequence =
+                (supplierItemCounts.get(target.supplierKey) || 0) + 1;
+            supplierItemCounts.set(target.supplierKey, nextItemSequence);
+            target.input.value = prefix
+                ? `${prefix}-${supplierSequence}-${nextItemSequence}`
+                : "";
         });
     }
 
@@ -527,7 +664,8 @@
             );
         document.getElementById("draftOrderSections").innerHTML = "";
         document.getElementById("draftOrderTotalAmount").textContent = "0";
-        document.getElementById("draftOrderTotalCurrency").textContent = "USD";
+        document.getElementById("draftOrderCurrency").value = "RMB";
+        document.getElementById("draftOrderTotalCurrency").textContent = "RMB";
         document.getElementById("draftOrderTotalQty").textContent = "0";
         document.getElementById("draftOrderTotalCbm").textContent = "0";
         document.getElementById("draftOrderTotalWeight").textContent = "0";
@@ -537,6 +675,9 @@
         setBuilderEditable(true);
         resetDraftDestinationCountry();
         setShippingHint("");
+        refreshUnsavedBaseline?.(
+            document.querySelector("#draftOrderModal .modal-body"),
+        );
     }
 
     function setBuilderEditable(editable) {
@@ -590,17 +731,20 @@
         document.getElementById("draftOrderExpectedDate").value =
             order.expected_ready_date || "";
         document.getElementById("draftOrderCurrency").value =
-            order.currency || "USD";
+            order.currency || "RMB";
         document.getElementById("draftOrderHighAlertNotes").value =
             order.high_alert_notes || "";
         (order.supplier_sections || []).forEach((section) =>
             addDraftOrderSection(section),
         );
         document.getElementById("draftOrderTotalCurrency").textContent =
-            order.currency || "USD";
+            order.currency || "RMB";
         updateDraftOrderTotals();
         setBuilderEditable(!!order.editable);
         renumberDraftItems();
+        refreshUnsavedBaseline?.(
+            document.querySelector("#draftOrderModal .modal-body"),
+        );
     }
 
     async function openDraftOrderBuilder(orderId = null) {
@@ -614,6 +758,9 @@
             await fillDraftOrderBuilder(orderId);
         } else {
             addDraftOrderSection();
+            refreshUnsavedBaseline?.(
+                document.querySelector("#draftOrderModal .modal-body"),
+            );
         }
         builderModal.show();
     }
@@ -915,6 +1062,454 @@
         });
     }
 
+    function getDraftSharedCartonRows(card) {
+        return Array.from(
+            card.querySelectorAll(".draft-shared-carton-row"),
+        );
+    }
+
+    function sharedCartonContentMarkup(contentId) {
+        return `
+            <div class="draft-shared-carton-row" data-content-id="${contentId}">
+              <div class="row g-2 align-items-start">
+                <div class="col-12 col-xl-2">
+                  <label class="form-label draft-item-label">Supplier</label>
+                  <input type="text" class="form-control form-control-sm draft-shared-content-supplier" placeholder="${escapeHtml(draftT("Type to search supplier..."))}" autocomplete="off">
+                  <input type="hidden" class="draft-shared-content-supplier-id">
+                </div>
+                <div class="col-12 col-sm-6 col-xl-2">
+                  <label class="form-label draft-item-label">Item No</label>
+                  <input type="text" class="form-control form-control-sm draft-shared-content-item-no" placeholder="${escapeHtml(draftT("Auto"))}">
+                </div>
+                <div class="col-12 col-sm-6 col-xl-2">
+                  <label class="form-label draft-item-label">Qty / Carton</label>
+                  <input type="number" step="0.0001" min="0" class="form-control form-control-sm draft-shared-content-qty-per-carton" placeholder="0">
+                </div>
+                <div class="col-12 col-xl-3">
+                  <label class="form-label draft-item-label">Description</label>
+                  <input type="text" class="form-control form-control-sm draft-shared-content-description-input" placeholder="${escapeHtml(draftT("Search for a product or add a new one."))}">
+                  <input type="hidden" class="draft-shared-content-product-id">
+                  <div class="form-text draft-shared-content-meta"></div>
+                </div>
+                <div class="col-12 col-sm-6 col-xl-1">
+                  <label class="form-label draft-item-label">Factory</label>
+                  <input type="number" step="0.0001" min="0" class="form-control form-control-sm draft-shared-content-unit-price" placeholder="0">
+                </div>
+                <div class="col-12 col-sm-6 col-xl-1">
+                  <label class="form-label draft-item-label">Customer</label>
+                  <input type="number" step="0.0001" min="0" class="form-control form-control-sm draft-shared-content-sell-price" placeholder="0">
+                </div>
+                <div class="col-12 col-sm-6 col-xl-1">
+                  <label class="form-label draft-item-label">Total Qty</label>
+                  <div class="draft-item-computed draft-shared-content-total-qty">0</div>
+                </div>
+                <div class="col-12 col-sm-6 col-xl-1">
+                  <label class="form-label draft-item-label">Total</label>
+                  <div class="draft-item-computed draft-shared-content-total-amount">0</div>
+                </div>
+                <div class="col-12 col-sm-6 col-xl-2">
+                  <label class="form-label draft-item-label">HS Code</label>
+                  <input type="text" class="form-control form-control-sm draft-shared-content-hs-code" placeholder="${escapeHtml(draftT("HS code"))}">
+                </div>
+                <div class="col-12 col-sm-6 col-xl-2">
+                  <label class="form-label draft-item-label">Notes</label>
+                  <input type="text" class="form-control form-control-sm draft-shared-content-notes" placeholder="${escapeHtml(draftT("Optional note"))}">
+                </div>
+                <div class="col-12 col-xl-1 d-flex align-items-end">
+                  <button type="button" class="btn btn-outline-danger btn-sm w-100 draft-item-action draft-shared-content-remove">${escapeHtml(draftT("Remove"))}</button>
+                </div>
+              </div>
+            </div>
+        `;
+    }
+
+    function setDraftSharedCartonDescription(row, entry = {}) {
+        const input = row.querySelector(".draft-shared-content-description-input");
+        if (!input) return;
+        const cn = (
+            entry.description_text ||
+            entry.text ||
+            entry.description_cn ||
+            ""
+        ).trim();
+        const en = (
+            entry.description_translated ||
+            entry.translated ||
+            entry.description_en ||
+            ""
+        ).trim();
+        input.value = draftDescriptionDisplayValue(cn, en);
+        input.dataset.descriptionCn = cn;
+        input.dataset.descriptionEn = en;
+    }
+
+    function collectDraftSharedCartonDescription(row) {
+        const input = row.querySelector(".draft-shared-content-description-input");
+        if (!input) return [];
+        const value = input.value.trim();
+        const storedCn = (input.dataset.descriptionCn || "").trim();
+        const storedEn = (input.dataset.descriptionEn || "").trim();
+        if (!value && !storedCn && !storedEn) return [];
+        if (storedCn || storedEn) {
+            const storedDisplay = draftDescriptionDisplayValue(storedCn, storedEn);
+            if (!value || value === storedDisplay) {
+                return [
+                    {
+                        description_text: storedCn || storedEn || value,
+                        description_translated: storedEn || storedCn || value,
+                    },
+                ];
+            }
+        }
+        return [
+            {
+                description_text: value,
+                description_translated: "",
+            },
+        ];
+    }
+
+    async function populateDraftSharedCartonContentFromProduct(card, row, productSummary) {
+        const section = card.closest(".draft-order-section");
+        const product = (await api("GET", "/products/" + productSummary.id)).data;
+        const supplierValue = {
+            id: product.supplier_id || "",
+            name: product.supplier_name || "",
+        };
+        if (supplierValue.id && row._supplierAc) {
+            row._supplierAc.setValue(supplierValue);
+            row.querySelector(".draft-shared-content-supplier-id").value =
+                supplierValue.id;
+        }
+
+        row.querySelector(".draft-shared-content-product-id").value =
+            product.id || "";
+        const entries =
+            product.description_entries && product.description_entries.length
+                ? product.description_entries
+                : [
+                      {
+                          description_text:
+                              product.description_cn ||
+                              product.description_en ||
+                              "",
+                          description_translated:
+                              product.description_en ||
+                              product.description_cn ||
+                              "",
+                      },
+                  ];
+        setDraftSharedCartonDescription(row, entries[0] || {});
+        if (
+            !row.querySelector(".draft-shared-content-qty-per-carton")?.value &&
+            product.pieces_per_carton != null
+        ) {
+            row.querySelector(".draft-shared-content-qty-per-carton").value =
+                fmtFieldNumber(product.pieces_per_carton, 4);
+        }
+        const factoryPrice =
+            product.buy_price != null && product.buy_price !== ""
+                ? product.buy_price
+                : product.unit_price;
+        if (factoryPrice != null && factoryPrice !== "") {
+            row.querySelector(".draft-shared-content-unit-price").value =
+                fmtFieldNumber(factoryPrice, 4);
+        }
+        if (product.sell_price != null && product.sell_price !== "") {
+            row.querySelector(".draft-shared-content-sell-price").value =
+                fmtFieldNumber(product.sell_price, 4);
+        }
+        row.querySelector(".draft-shared-content-hs-code").value =
+            product.hs_code || "";
+        row.querySelector(".draft-shared-content-meta").textContent = [
+            product.supplier_name || "",
+            product.hs_code ? `HS ${product.hs_code}` : "",
+        ]
+            .filter(Boolean)
+            .join(" · ");
+        updateDraftItemTotals(card);
+        renumberDraftItems();
+        refreshSectionProductFilters(section);
+    }
+
+    function syncDraftSharedCartonProductSearch(card, row, section) {
+        const input = row.querySelector(".draft-shared-content-description-input");
+        if (!input) return;
+        row._productAc = Autocomplete.init(input, {
+            resource: "products",
+            searchPath: "/search",
+            placeholder: draftT("Search for a product or add a new one."),
+            extraParams: () => ({
+                supplier_id:
+                    row.querySelector(".draft-shared-content-supplier-id")
+                        ?.value ||
+                    section?.querySelector(".draft-section-supplier-id")?.value ||
+                    "",
+            }),
+            renderItem: (product) =>
+                `${product.description_cn || product.description_en || ""}${product.supplier_name ? ` — ${product.supplier_name}` : ""}${product.hs_code ? ` — HS ${product.hs_code}` : ""}`
+                    .replace(/^ — | — $/g, "")
+                    .trim() || `#${product.id}`,
+            onSelect: (item) =>
+                populateDraftSharedCartonContentFromProduct(card, row, item),
+        });
+    }
+
+    function bindDraftSharedCartonSupplierAutocomplete(card, row, section) {
+        const supplierInput = row.querySelector(".draft-shared-content-supplier");
+        const supplierIdInput = row.querySelector(
+            ".draft-shared-content-supplier-id",
+        );
+        if (!supplierInput || !supplierIdInput) return;
+        row._supplierAc = Autocomplete.init(supplierInput, {
+            resource: "suppliers",
+            placeholder: draftT("Type to search supplier..."),
+            onSelect: (item) => {
+                supplierIdInput.value = item.id || "";
+                syncDraftSharedCartonProductSearch(card, row, section);
+                renumberDraftItems();
+                updateDraftItemTotals(card);
+            },
+        });
+        supplierInput.addEventListener("input", () => {
+            supplierIdInput.value = "";
+            row.querySelector(".draft-shared-content-product-id").value = "";
+            syncDraftSharedCartonProductSearch(card, row, section);
+            renumberDraftItems();
+            updateDraftItemTotals(card);
+        });
+    }
+
+    function addDraftSharedCartonContentRow(card, initial = {}) {
+        const section = card.closest(".draft-order-section");
+        const container = card.querySelector(".draft-shared-carton-rows");
+        if (!container) return null;
+        const wrapper = document.createElement("div");
+        wrapper.innerHTML = sharedCartonContentMarkup(++sharedCartonContentIndex);
+        const row = wrapper.firstElementChild;
+        container.appendChild(row);
+
+        bindDraftSharedCartonSupplierAutocomplete(card, row, section);
+        syncDraftSharedCartonProductSearch(card, row, section);
+
+        if (initial.supplier_id && initial.supplier_name && row._supplierAc) {
+            row._supplierAc.setValue({
+                id: initial.supplier_id,
+                name: initial.supplier_name,
+            });
+            row.querySelector(".draft-shared-content-supplier-id").value =
+                initial.supplier_id;
+        }
+        row.querySelector(".draft-shared-content-product-id").value =
+            initial.product_id || "";
+        row.querySelector(".draft-shared-content-item-no").value =
+            initial.item_no || "";
+        if (initial.item_no_manual || initial.item_no) {
+            row.dataset.manualItemNo = initial.item_no_manual || initial.item_no
+                ? "1"
+                : "";
+        }
+        row.querySelector(".draft-shared-content-qty-per-carton").value =
+            initial.quantity_per_carton ?? "";
+        row.querySelector(".draft-shared-content-unit-price").value =
+            initial.unit_price ?? "";
+        row.querySelector(".draft-shared-content-sell-price").value =
+            initial.sell_price ?? "";
+        row.querySelector(".draft-shared-content-hs-code").value =
+            initial.hs_code || "";
+        row.querySelector(".draft-shared-content-notes").value =
+            initial.notes || "";
+
+        if (initial.description_entries?.length) {
+            setDraftSharedCartonDescription(row, initial.description_entries[0]);
+        } else if (initial.description_cn || initial.description_en) {
+            setDraftSharedCartonDescription(row, {
+                description_text: initial.description_cn || "",
+                description_translated: initial.description_en || "",
+            });
+        }
+        row.querySelector(".draft-shared-content-meta").textContent = [
+            initial.supplier_name || "",
+            initial.hs_code ? `HS ${initial.hs_code}` : "",
+        ]
+            .filter(Boolean)
+            .join(" · ");
+
+        row.querySelector(".draft-shared-content-description-input")?.addEventListener(
+            "input",
+            (event) => {
+                event.currentTarget.dataset.descriptionCn = "";
+                event.currentTarget.dataset.descriptionEn = "";
+                row.querySelector(".draft-shared-content-product-id").value = "";
+            },
+        );
+        [
+            ".draft-shared-content-qty-per-carton",
+            ".draft-shared-content-unit-price",
+            ".draft-shared-content-sell-price",
+            ".draft-shared-content-hs-code",
+            ".draft-shared-content-notes",
+        ].forEach((selector) => {
+            row.querySelector(selector)?.addEventListener("input", () =>
+                updateDraftItemTotals(card),
+            );
+        });
+        row.querySelector(".draft-shared-content-item-no")?.addEventListener(
+            "input",
+            () => {
+                row.dataset.manualItemNo = row
+                    .querySelector(".draft-shared-content-item-no")
+                    ?.value?.trim()
+                    ? "1"
+                    : "";
+                renumberDraftItems();
+            },
+        );
+        row.querySelector(".draft-shared-content-remove")?.addEventListener(
+            "click",
+            () => {
+                row.remove();
+                if (!getDraftSharedCartonRows(card).length) {
+                    addDraftSharedCartonContentRow(card);
+                }
+                renumberDraftItems();
+                updateDraftItemTotals(card);
+            },
+        );
+
+        updateDraftItemTotals(card);
+        renumberDraftItems();
+        return row;
+    }
+
+    function calculateDraftSharedCartonSummary(card) {
+        const cartons =
+            parseFloat(card.querySelector(".draft-item-cartons")?.value || 0) ||
+            0;
+        let piecesPerCarton = 0;
+        let totalQty = 0;
+        let buyTotal = 0;
+        let sellTotal = 0;
+        let hasBuy = false;
+        let hasSell = false;
+        const suppliers = new Set();
+
+        getDraftSharedCartonRows(card).forEach((row) => {
+            const qtyPerCarton =
+                parseFloat(
+                    row.querySelector(".draft-shared-content-qty-per-carton")
+                        ?.value || 0,
+                ) || 0;
+            const totalQuantity = cartons > 0 ? cartons * qtyPerCarton : 0;
+            const unitPrice =
+                parseFloat(
+                    row.querySelector(".draft-shared-content-unit-price")
+                        ?.value || 0,
+                ) || 0;
+            const sellPrice =
+                parseFloat(
+                    row.querySelector(".draft-shared-content-sell-price")
+                        ?.value || 0,
+                ) || 0;
+            const priceForTotal = sellPrice > 0 ? sellPrice : unitPrice;
+            const supplierName =
+                row._supplierAc?.getSelected?.()?.name ||
+                row.querySelector(".draft-shared-content-supplier")?.value?.trim() ||
+                "";
+
+            if (supplierName) suppliers.add(supplierName);
+            piecesPerCarton += qtyPerCarton;
+            totalQty += totalQuantity;
+            row.querySelector(".draft-shared-content-total-qty").textContent =
+                fmtQty(totalQuantity);
+            row.querySelector(".draft-shared-content-total-amount").textContent =
+                fmtAmount(totalQuantity * priceForTotal);
+
+            if (unitPrice > 0) {
+                hasBuy = true;
+                buyTotal += totalQuantity * unitPrice;
+            }
+            if (sellPrice > 0) {
+                hasSell = true;
+                sellTotal += totalQuantity * sellPrice;
+            }
+        });
+
+        const priceForSummary = hasSell ? sellTotal : hasBuy ? buyTotal : 0;
+        return {
+            piecesPerCarton,
+            totalQty,
+            buyTotal,
+            sellTotal,
+            hasBuy,
+            hasSell,
+            unitPrice:
+                hasBuy && totalQty > 0 ? buyTotal / totalQty : 0,
+            customerPrice:
+                (hasSell || hasBuy) && totalQty > 0
+                    ? (hasSell ? sellTotal : buyTotal) / totalQty
+                    : 0,
+            totalAmount: priceForSummary,
+            supplierNames: Array.from(suppliers),
+        };
+    }
+
+    function syncDraftSharedCartonMode(card, forceEnabled = null) {
+        const toggle = card.querySelector(".draft-item-shared-carton-toggle");
+        if (!toggle) return;
+        const enabled =
+            forceEnabled !== null ? !!forceEnabled : !!toggle.checked;
+        toggle.checked = enabled;
+        card.dataset.sharedCartonEnabled = enabled ? "1" : "";
+        card.classList.toggle("draft-order-item-card--shared", enabled);
+
+        card.querySelector(".draft-shared-carton-panel")?.classList.toggle(
+            "d-none",
+            !enabled,
+        );
+        card.querySelector(".draft-item-descriptions-panel")?.classList.toggle(
+            "d-none",
+            enabled,
+        );
+        card.querySelector(".draft-item-identity-hs-wrap")?.classList.toggle(
+            "d-none",
+            enabled,
+        );
+
+        const identityLabel = card.querySelector(".draft-item-identity-label");
+        if (identityLabel) {
+            identityLabel.textContent = enabled
+                ? draftT("Carton Code")
+                : draftT("Item No");
+        }
+        const itemNoInput = card.querySelector(".draft-item-item-no");
+        if (itemNoInput) {
+            itemNoInput.placeholder = enabled
+                ? draftT("Optional carton code")
+                : draftT("Auto");
+        }
+
+        const piecesInput = card.querySelector(".draft-item-pieces-per-carton");
+        const unitPriceInput = card.querySelector(".draft-item-unit-price");
+        const customerPriceInput = card.querySelector(".draft-item-customer-price");
+        [piecesInput, unitPriceInput, customerPriceInput].forEach((input) => {
+            if (!input) return;
+            input.readOnly = enabled;
+            input.classList.toggle("bg-light", enabled);
+        });
+
+        if (enabled) {
+            delete card.dataset.manualItemNo;
+            card.querySelector(".draft-item-product-id").value = "";
+            if (!getDraftSharedCartonRows(card).length) {
+                addDraftSharedCartonContentRow(card);
+            }
+        }
+
+        updateDraftItemTotals(card);
+        renumberDraftItems();
+    }
+
     function draftDescriptionHasContent(card) {
         return Array.from(
             card.querySelectorAll(".draft-item-description-entry-input"),
@@ -995,11 +1590,17 @@
                   <div class="row g-2">
                     <div class="col-12 col-lg-3 col-xl-3">
                       <div class="draft-item-panel draft-item-identity-panel h-100">
-                        <label class="form-label form-label-sm">Item No</label>
+                        <div class="form-check form-switch mb-2">
+                          <input class="form-check-input draft-item-shared-carton-toggle" type="checkbox" id="draftItemSharedCarton${idx}">
+                          <label class="form-check-label small fw-semibold" for="draftItemSharedCarton${idx}">${escapeHtml(draftT("This carton contains multiple items"))}</label>
+                        </div>
+                        <label class="form-label form-label-sm draft-item-identity-label">Item No</label>
                         <input type="text" class="form-control form-control-sm draft-item-item-no" placeholder="Auto">
                         <input type="hidden" class="draft-item-shipping-code">
-                        <label class="form-label form-label-sm mt-2">Optional HS Code</label>
-                        <input type="text" class="form-control form-control-sm draft-item-hs-code" placeholder="HS code">
+                        <div class="draft-item-identity-hs-wrap">
+                          <label class="form-label form-label-sm mt-2">Optional HS Code</label>
+                          <input type="text" class="form-control form-control-sm draft-item-hs-code" placeholder="HS code">
+                        </div>
                       </div>
                     </div>
                     <div class="col-12 col-lg-9 col-xl-9">
@@ -1014,6 +1615,18 @@
                         <input type="hidden" class="draft-item-product-id">
                         <div class="draft-item-description-entries d-flex flex-column gap-2"></div>
                         <div class="form-text draft-item-product-meta"></div>
+                      </div>
+                    </div>
+                    <div class="col-12">
+                      <div class="draft-item-panel draft-shared-carton-panel d-none">
+                        <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap mb-2">
+                          <div>
+                            <div class="draft-item-subgrid-title mb-1">${escapeHtml(draftT("Contained items in this carton"))}</div>
+                            <small class="text-muted draft-shared-carton-summary">${escapeHtml(draftT("Add the packed items below. Suppliers can vary inside the same carton."))}</small>
+                          </div>
+                          <button type="button" class="btn btn-outline-primary btn-sm draft-item-action" data-builder-action="add-shared-content">${escapeHtml(draftT("+ Add Contained Item"))}</button>
+                        </div>
+                        <div class="draft-shared-carton-rows d-flex flex-column gap-2"></div>
                       </div>
                     </div>
                     <div class="col-12">
@@ -1160,6 +1773,9 @@
     function refreshSectionProductFilters(section) {
         section.querySelectorAll(".draft-order-item-card").forEach((card) => {
             syncDraftPrimaryDescriptionInput(card, section);
+            getDraftSharedCartonRows(card).forEach((row) =>
+                syncDraftSharedCartonProductSearch(card, row, section),
+            );
         });
     }
 
@@ -1198,20 +1814,21 @@
         const cartons =
             parseFloat(card.querySelector(".draft-item-cartons")?.value || 0) ||
             0;
-        const ppc =
+        const sharedMode = card.dataset.sharedCartonEnabled === "1";
+        let ppc =
             parseFloat(
                 card.querySelector(".draft-item-pieces-per-carton")?.value || 0,
             ) || 0;
-        const qty = cartons > 0 && ppc > 0 ? cartons * ppc : 0;
-        const unitPrice =
+        let qty = cartons > 0 && ppc > 0 ? cartons * ppc : 0;
+        let unitPrice =
             parseFloat(
                 card.querySelector(".draft-item-unit-price")?.value || 0,
             ) || 0;
-        const customerPrice =
+        let customerPrice =
             parseFloat(
                 card.querySelector(".draft-item-customer-price")?.value || 0,
             ) || 0;
-        const priceForTotal = customerPrice > 0 ? customerPrice : unitPrice;
+        let totalAmountValue = qty * (customerPrice > 0 ? customerPrice : unitPrice);
         let cbm =
             parseFloat(card.querySelector(".draft-item-cbm")?.value || 0) || 0;
         const l =
@@ -1232,19 +1849,50 @@
                 ? "piece"
                 : "carton";
         const multiplier = scope === "carton" ? cartons : qty;
+
+        if (sharedMode) {
+            const sharedSummary = calculateDraftSharedCartonSummary(card);
+            ppc = sharedSummary.piecesPerCarton;
+            qty = sharedSummary.totalQty;
+            unitPrice = sharedSummary.unitPrice;
+            customerPrice = sharedSummary.customerPrice;
+            totalAmountValue = sharedSummary.totalAmount;
+            const piecesInput = card.querySelector(".draft-item-pieces-per-carton");
+            const unitPriceInput = card.querySelector(".draft-item-unit-price");
+            const customerPriceInput = card.querySelector(
+                ".draft-item-customer-price",
+            );
+            if (piecesInput) {
+                piecesInput.value = fmtFieldNumber(ppc, 4);
+            }
+            if (unitPriceInput) {
+                unitPriceInput.value = fmtFieldNumber(unitPrice, 4);
+            }
+            if (customerPriceInput) {
+                customerPriceInput.value = fmtFieldNumber(customerPrice, 4);
+            }
+            const summaryEl = card.querySelector(".draft-shared-carton-summary");
+            if (summaryEl) {
+                const supplierSummary = sharedSummary.supplierNames.length
+                    ? sharedSummary.supplierNames.join(", ")
+                    : draftT("Add the packed items below. Suppliers can vary inside the same carton.");
+                summaryEl.textContent = supplierSummary;
+            }
+        }
+
         card.querySelector(".draft-item-total-qty").textContent = fmtQty(qty);
         const qtyInline = card.querySelector(".draft-item-total-qty-inline");
         if (qtyInline) {
             qtyInline.textContent = fmtQty(qty);
         }
         card.querySelector(".draft-item-total-amount").textContent = fmtAmount(
-            qty * priceForTotal,
+            totalAmountValue,
         );
         const amountInline = card.querySelector(
             ".draft-item-total-amount-inline",
         );
         if (amountInline) {
-            amountInline.textContent = fmtAmount(qty * priceForTotal);
+            amountInline.textContent = fmtAmount(totalAmountValue);
         }
         card.querySelector(".draft-item-total-cbm").textContent = fmtCbm(
             cbm * multiplier,
@@ -1255,9 +1903,11 @@
         const pricingHint = card.querySelector(".draft-item-pricing-hint");
         if (pricingHint) {
             pricingHint.textContent =
-                customerPrice > 0
-                    ? "Total amount follows customer price."
-                    : "Total amount follows factory price until customer price is set.";
+                sharedMode
+                    ? "Carton totals are derived from the contained items below."
+                    : customerPrice > 0
+                      ? "Total amount follows customer price."
+                      : "Total amount follows factory price until customer price is set.";
         }
         updateDraftOrderTotals();
     }
@@ -1479,8 +2129,11 @@
         card.querySelector(".draft-item-hs-code").value = initial.hs_code || "";
         card.querySelector(".draft-item-shipping-code").value =
             initial.shipping_code || "";
-        card.querySelector(".draft-item-item-no").value = initial.item_no || "";
-        if (initial.item_no) card.dataset.manualItemNo = "1";
+        const isSharedCarton = !!initial.shared_carton_enabled;
+        card.querySelector(".draft-item-item-no").value = isSharedCarton
+            ? initial.shared_carton_code || ""
+            : initial.item_no || "";
+        if (!isSharedCarton && initial.item_no) card.dataset.manualItemNo = "1";
         card.dataset.dimensionsScope = (
             initial.dimensions_scope || "carton"
         ).toLowerCase();
@@ -1524,6 +2177,14 @@
             "click",
             () => addDraftDescriptionEntry(card, {}, true),
         );
+        card.querySelector(".draft-item-shared-carton-toggle")?.addEventListener(
+            "change",
+            () => syncDraftSharedCartonMode(card),
+        );
+        card.querySelector('[data-builder-action="add-shared-content"]')?.addEventListener(
+            "click",
+            () => addDraftSharedCartonContentRow(card),
+        );
         card.querySelector('[data-builder-action="upload-design"]')?.addEventListener(
             "click",
             () => card.querySelector(".draft-item-design-upload").click(),
@@ -1552,6 +2213,24 @@
                 } finally {
                     event.target.value = "";
                 }
+            },
+        );
+        bindClipboardImagePaste?.(
+            card.querySelector(".draft-item-photo-panel") || card,
+            async (files) => {
+                try {
+                    await uploadPhotoFiles(card, files);
+                    updateDraftOrderTotals();
+                } catch (e) {
+                    showToast(e.message, "danger");
+                }
+            },
+            {
+                requireTargetMatch: true,
+                targetMatcher: (target) =>
+                    !!target.closest(
+                        ".draft-item-photo-panel, .draft-item-photos, .draft-item-photo-btn",
+                    ),
             },
         );
         card.querySelector(".draft-item-design-upload")?.addEventListener(
@@ -1598,6 +2277,9 @@
         card.querySelector(".draft-item-item-no")?.addEventListener(
             "input",
             () => {
+                if (card.dataset.sharedCartonEnabled === "1") {
+                    return;
+                }
                 card.dataset.manualItemNo = card
                     .querySelector(".draft-item-item-no")
                     ?.value?.trim()
@@ -1606,48 +2288,119 @@
                 renumberDraftItems();
             },
         );
+        syncDraftSharedCartonMode(card, isSharedCarton);
+        if (isSharedCarton) {
+            getDraftSharedCartonRows(card).forEach((row) => row.remove());
+            (initial.shared_carton_contents || []).forEach((content) =>
+                addDraftSharedCartonContentRow(card, content),
+            );
+            if (!getDraftSharedCartonRows(card).length) {
+                addDraftSharedCartonContentRow(card);
+            }
+        }
         syncDraftItemCbmFromDimensions(card);
         updateDraftItemTotals(card);
         renumberDraftItems();
     }
 
-    function addDraftQuickSupplierPaymentLink(label = "", value = "") {
+    function addDraftQuickSupplierPaymentLink(rowData = {}) {
         const container = document.getElementById("draftQuickSupplierPaymentLinks");
         if (!container) return;
+        const method =
+            rowData.method ||
+            (typeof normalizePaymentMethodName === "function"
+                ? normalizePaymentMethodName(
+                      rowData.label || rowData.type || "",
+                  )
+                : "") ||
+            "WeChat";
+        const currency =
+            rowData.currency === "USD" || rowData.currency === "RMB"
+                ? rowData.currency
+                : "RMB";
+        const detail = rowData.value || rowData.link || "";
+        const qrPath = rowData.qr_image_path || "";
         const row = document.createElement("div");
-        row.className = "row g-2 align-items-center";
+        row.className =
+            "border rounded-3 p-2 draft-quick-supplier-payment-link-row";
         row.dataset.idx = String(++quickSupplierPaymentLinkIndex);
         row.innerHTML = `
-            <div class="col-4"><input type="text" class="form-control form-control-sm draft-quick-supplier-payment-label" placeholder="WeChat / Bank / Alipay" value="${escapeHtml(label)}"></div>
-            <div class="col-7"><input type="text" class="form-control form-control-sm draft-quick-supplier-payment-value" placeholder="Account / number / URL" value="${escapeHtml(value)}"></div>
-            <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('.row').remove()">×</button></div>
+            <div class="row g-2 align-items-center">
+              <div class="col-12 col-md-3">
+                <select class="form-select form-select-sm draft-quick-supplier-payment-method">
+                  ${renderDraftQuickSupplierPaymentMethodOptions(method)}
+                </select>
+              </div>
+              <div class="col-12 col-md-2">
+                <select class="form-select form-select-sm draft-quick-supplier-payment-currency">
+                  <option value="RMB"${currency === "RMB" ? " selected" : ""}>RMB</option>
+                  <option value="USD"${currency === "USD" ? " selected" : ""}>USD</option>
+                </select>
+              </div>
+              <div class="col-12 col-md-5">
+                <input type="text" class="form-control form-control-sm draft-quick-supplier-payment-value" placeholder="${escapeHtml(draftT("Account / number / URL / account detail"))}" value="${escapeHtml(detail)}">
+                <input type="hidden" class="draft-quick-supplier-payment-qr" value="${escapeHtml(qrPath)}">
+                <input type="file" class="d-none draft-quick-supplier-payment-qr-input" accept="image/*,.jpg,.jpeg,.png,.webp,.jfif,.gif">
+              </div>
+              <div class="col-8 col-md-1">
+                <button type="button" class="btn btn-sm btn-outline-secondary w-100 draft-quick-supplier-payment-qr-btn">${escapeHtml(draftT("QR"))}</button>
+              </div>
+              <div class="col-4 col-md-1 text-end">
+                <button type="button" class="btn btn-sm btn-outline-danger w-100" onclick="this.closest('.draft-quick-supplier-payment-link-row').remove()">×</button>
+              </div>
+            </div>
+            <div class="draft-quick-supplier-payment-qr-preview ${qrPath ? "" : "d-none"}"></div>
         `;
         container.appendChild(row);
+        bindDraftQuickSupplierPaymentRow(row);
+        setDraftQuickSupplierQrPreview(
+            row,
+            qrPath,
+            rowData.file_name || "",
+        );
     }
 
     function collectDraftQuickSupplierPaymentLinks() {
         return Array.from(
             document.querySelectorAll(
-                "#draftQuickSupplierPaymentLinks .row",
+                "#draftQuickSupplierPaymentLinks .draft-quick-supplier-payment-link-row",
             ),
         )
             .map((row) => {
-                const label = row
-                    .querySelector(".draft-quick-supplier-payment-label")
+                const method = row
+                    .querySelector(".draft-quick-supplier-payment-method")
                     ?.value?.trim();
                 const value = row
                     .querySelector(".draft-quick-supplier-payment-value")
                     ?.value?.trim();
-                if (!label && !value) return null;
-                return { label: label || "Payment", value: value || "" };
+                const currency = row
+                    .querySelector(".draft-quick-supplier-payment-currency")
+                    ?.value?.trim();
+                const qrImagePath = row
+                    .querySelector(".draft-quick-supplier-payment-qr")
+                    ?.value?.trim();
+                if (!method && !value && !qrImagePath) return null;
+                return {
+                    method: method || "Bank Transfer",
+                    label: method || "Bank Transfer",
+                    account_label: method || "Bank Transfer",
+                    value: value || "",
+                    currency: currency === "USD" ? "USD" : "RMB",
+                    qr_image_path: qrImagePath || null,
+                };
             })
             .filter(Boolean);
     }
 
     function resetDraftQuickSupplierForm() {
         document.getElementById("draftSupplierQuickForm")?.reset();
+        const fileInput = document.getElementById("draftQuickSupplierFiles");
+        if (fileInput) fileInput.value = "";
         document.getElementById("draftQuickSupplierPaymentLinks").innerHTML = "";
         addDraftQuickSupplierPaymentLink();
+        refreshUnsavedBaseline?.(
+            document.querySelector("#draftSupplierQuickAddModal .modal-body"),
+        );
     }
 
     function openDraftQuickSupplier(section) {
@@ -1664,6 +2417,9 @@
             document.getElementById("draftQuickSupplierName").value =
                 selected.name;
         }
+        refreshUnsavedBaseline?.(
+            document.querySelector("#draftSupplierQuickAddModal .modal-body"),
+        );
         quickSupplierModal.show();
     }
 
@@ -1730,6 +2486,9 @@
             renumberDraftItems();
             syncDraftSectionCollapse(targetSection);
             showToast("Supplier added and selected in this section.");
+            refreshUnsavedBaseline?.(
+                document.querySelector("#draftSupplierQuickAddModal .modal-body"),
+            );
             quickSupplierModal.hide();
         } catch (error) {
             showToast(error.message || "Failed to save supplier.", "danger");
@@ -1770,79 +2529,155 @@
             .filter(Boolean);
     }
 
+    function collectDraftSharedCartonContents(card, sectionSupplierId = "") {
+        return getDraftSharedCartonRows(card).map((row) => ({
+            supplier_id:
+                row.querySelector(".draft-shared-content-supplier-id")?.value ||
+                sectionSupplierId ||
+                "",
+            product_id:
+                row.querySelector(".draft-shared-content-product-id")?.value ||
+                null,
+            item_no:
+                row.querySelector(".draft-shared-content-item-no")?.value?.trim() ||
+                null,
+            item_no_manual: row.dataset.manualItemNo ? 1 : 0,
+            shipping_code:
+                card
+                    .querySelector(".draft-item-shipping-code")
+                    ?.value?.trim() || null,
+            quantity_per_carton:
+                row.querySelector(".draft-shared-content-qty-per-carton")
+                    ?.value || null,
+            unit_price:
+                row.querySelector(".draft-shared-content-unit-price")?.value ||
+                null,
+            sell_price:
+                row.querySelector(".draft-shared-content-sell-price")?.value ||
+                null,
+            hs_code:
+                row.querySelector(".draft-shared-content-hs-code")?.value?.trim() ||
+                null,
+            description_entries: collectDraftSharedCartonDescription(row),
+            notes:
+                row.querySelector(".draft-shared-content-notes")?.value?.trim() ||
+                null,
+        }));
+    }
+
     function collectDraftOrderPayload() {
         const customerId = draftOrderCustomerAc?.getSelectedId() || "";
         const expectedReadyDate =
             document.getElementById("draftOrderExpectedDate")?.value || "";
         const supplierSections = Array.from(
             document.querySelectorAll(".draft-order-section"),
-        ).map((section) => ({
-            supplier_id:
-                section.querySelector(".draft-section-supplier-id")?.value || "",
-            items: Array.from(
-                section.querySelectorAll(".draft-order-item-card"),
-            ).map((card) => ({
-                product_id:
-                    card.querySelector(".draft-item-product-id")?.value || null,
-                item_no:
-                    card.querySelector(".draft-item-item-no")?.value?.trim() ||
-                    null,
-                item_no_manual: card.dataset.manualItemNo ? 1 : 0,
-                shipping_code:
-                    card
-                        .querySelector(".draft-item-shipping-code")
-                        ?.value?.trim() || null,
-                description_entries: collectDescriptionEntries(card),
-                pieces_per_carton:
-                    card.querySelector(".draft-item-pieces-per-carton")?.value ||
-                    null,
-                cartons:
-                    card.querySelector(".draft-item-cartons")?.value || null,
-                unit_price:
-                    card.querySelector(".draft-item-unit-price")?.value || null,
-                sell_price:
-                    card.querySelector(".draft-item-customer-price")?.value ||
-                    null,
-                cbm_mode:
-                    parseFloat(
-                        card.querySelector(".draft-item-cbm")?.value || 0,
-                    ) > 0
-                        ? "direct"
-                        : "dimensions",
-                cbm: card.querySelector(".draft-item-cbm")?.value || null,
-                item_length:
-                    card.querySelector(".draft-item-length")?.value || null,
-                item_width:
-                    card.querySelector(".draft-item-width")?.value || null,
-                item_height:
-                    card.querySelector(".draft-item-height")?.value || null,
-                weight:
-                    card.querySelector(".draft-item-weight")?.value || null,
-                hs_code:
-                    card.querySelector(".draft-item-hs-code")?.value?.trim() ||
-                    null,
-                photo_paths: (card._photoPaths || []).slice(),
-                custom_design_required: card.querySelector(
-                    ".draft-item-custom-design-required",
-                )?.checked
-                    ? 1
-                    : 0,
-                custom_design_note:
-                    card
-                        .querySelector(".draft-item-custom-design-note")
-                        ?.value?.trim() || null,
-                custom_design_paths: (card._designPaths || []).slice(),
-                dimensions_scope:
-                    (card.dataset.dimensionsScope || "carton").toLowerCase(),
-            })),
-        }));
+        ).map((section) => {
+            const sectionSupplierId =
+                section.querySelector(".draft-section-supplier-id")?.value || "";
+            return {
+                supplier_id: sectionSupplierId,
+                items: Array.from(
+                    section.querySelectorAll(".draft-order-item-card"),
+                ).map((card) => {
+                    const sharedCartonEnabled =
+                        card.dataset.sharedCartonEnabled === "1";
+                    return {
+                        product_id: sharedCartonEnabled
+                            ? null
+                            : card.querySelector(".draft-item-product-id")?.value ||
+                              null,
+                        item_no: sharedCartonEnabled
+                            ? null
+                            : card
+                                  .querySelector(".draft-item-item-no")
+                                  ?.value?.trim() || null,
+                        item_no_manual: sharedCartonEnabled
+                            ? 0
+                            : card.dataset.manualItemNo
+                              ? 1
+                              : 0,
+                        shared_carton_enabled: sharedCartonEnabled ? 1 : 0,
+                        shared_carton_code: sharedCartonEnabled
+                            ? card
+                                  .querySelector(".draft-item-item-no")
+                                  ?.value?.trim() || null
+                            : null,
+                        shared_carton_contents: sharedCartonEnabled
+                            ? collectDraftSharedCartonContents(
+                                  card,
+                                  sectionSupplierId,
+                              )
+                            : [],
+                        shipping_code:
+                            card
+                                .querySelector(".draft-item-shipping-code")
+                                ?.value?.trim() || null,
+                        description_entries: sharedCartonEnabled
+                            ? []
+                            : collectDescriptionEntries(card),
+                        pieces_per_carton:
+                            card.querySelector(".draft-item-pieces-per-carton")
+                                ?.value || null,
+                        cartons:
+                            card.querySelector(".draft-item-cartons")?.value ||
+                            null,
+                        unit_price:
+                            card.querySelector(".draft-item-unit-price")?.value ||
+                            null,
+                        sell_price:
+                            card.querySelector(".draft-item-customer-price")
+                                ?.value || null,
+                        cbm_mode:
+                            parseFloat(
+                                card.querySelector(".draft-item-cbm")?.value || 0,
+                            ) > 0
+                                ? "direct"
+                                : "dimensions",
+                        cbm:
+                            card.querySelector(".draft-item-cbm")?.value || null,
+                        item_length:
+                            card.querySelector(".draft-item-length")?.value ||
+                            null,
+                        item_width:
+                            card.querySelector(".draft-item-width")?.value ||
+                            null,
+                        item_height:
+                            card.querySelector(".draft-item-height")?.value ||
+                            null,
+                        weight:
+                            card.querySelector(".draft-item-weight")?.value ||
+                            null,
+                        hs_code: sharedCartonEnabled
+                            ? null
+                            : card
+                                  .querySelector(".draft-item-hs-code")
+                                  ?.value?.trim() || null,
+                        photo_paths: (card._photoPaths || []).slice(),
+                        custom_design_required: card.querySelector(
+                            ".draft-item-custom-design-required",
+                        )?.checked
+                            ? 1
+                            : 0,
+                        custom_design_note:
+                            card
+                                .querySelector(".draft-item-custom-design-note")
+                                ?.value?.trim() || null,
+                        custom_design_paths: (card._designPaths || []).slice(),
+                        dimensions_scope:
+                            (
+                                card.dataset.dimensionsScope || "carton"
+                            ).toLowerCase(),
+                    };
+                }),
+            };
+        });
 
         return {
             customer_id: customerId,
             destination_country_id: getDraftDestinationCountryId() || null,
             expected_ready_date: expectedReadyDate || null,
             currency:
-                document.getElementById("draftOrderCurrency")?.value || "USD",
+                document.getElementById("draftOrderCurrency")?.value || "RMB",
             high_alert_notes:
                 document
                     .getElementById("draftOrderHighAlertNotes")
@@ -1888,6 +2723,9 @@
                 : await api("POST", "/draft-orders", payload);
             if (res.warning) showToast(res.warning, "warning");
             showToast(id ? "Draft order updated" : "Draft order created");
+            refreshUnsavedBaseline?.(
+                document.querySelector("#draftOrderModal .modal-body"),
+            );
             builderModal?.hide();
             await Promise.all([loadDraftOrders(), loadLegacyDrafts()]);
         } catch (e) {
@@ -1915,8 +2753,11 @@
             );
         document.getElementById("legacyMigrationId").value = id;
         document.getElementById("legacyMigrationExpectedDate").value = "";
-        document.getElementById("legacyMigrationCurrency").value = "USD";
+        document.getElementById("legacyMigrationCurrency").value = "RMB";
         legacyMigrationCustomerAc?.setValue(null);
+        refreshUnsavedBaseline?.(
+            document.querySelector("#legacyMigrationModal .modal-body"),
+        );
         migrationModal.show();
     }
 
@@ -1927,7 +2768,7 @@
             expected_ready_date:
                 document.getElementById("legacyMigrationExpectedDate").value || null,
             currency:
-                document.getElementById("legacyMigrationCurrency").value || "USD",
+                document.getElementById("legacyMigrationCurrency").value || "RMB",
         };
         if (!payload.customer_id) {
             showToast("Customer is required.", "danger");
@@ -1948,6 +2789,9 @@
                 "POST",
                 `/draft-orders/legacy/${legacyId}/migrate`,
                 payload,
+            );
+            refreshUnsavedBaseline?.(
+                document.querySelector("#legacyMigrationModal .modal-body"),
             );
             migrationModal?.hide();
             showToast(
@@ -1972,6 +2816,11 @@
         );
         migrationModal = bootstrap.Modal.getOrCreateInstance(
             document.getElementById("legacyMigrationModal"),
+        );
+        registerUnsavedChangesGuard?.("#draftOrderModal .modal-body");
+        registerUnsavedChangesGuard?.("#legacyMigrationModal .modal-body");
+        registerUnsavedChangesGuard?.(
+            "#draftSupplierQuickAddModal .modal-body",
         );
 
         draftOrderCustomerAc = Autocomplete.init(

@@ -360,6 +360,18 @@ function setDescLang(lang) {
         localStorage.setItem("clms_desc_lang", lang);
 }
 
+const STANDARD_PAYMENT_METHODS = ["WeChat", "Alipay", "Bank Transfer"];
+
+function normalizePaymentMethodName(value) {
+    const raw = String(value || "").trim().toLowerCase();
+    if (!raw) return "";
+    if (raw.includes("wechat")) return "WeChat";
+    if (raw.includes("alipay")) return "Alipay";
+    if (raw.includes("bank")) return "Bank Transfer";
+    if (raw.includes("transfer")) return "Bank Transfer";
+    return "";
+}
+
 if (typeof window !== "undefined") {
     window.uiLocale = uiLocale;
     window.t = t;
@@ -369,6 +381,8 @@ if (typeof window !== "undefined") {
     window.descLang = descLang;
     window.descText = descText;
     window.setDescLang = setDescLang;
+    window.STANDARD_PAYMENT_METHODS = STANDARD_PAYMENT_METHODS;
+    window.normalizePaymentMethodName = normalizePaymentMethodName;
     window.orderHasPendingCustomerReview = orderHasPendingCustomerReview;
     window.orderIsOperationallyConfirmed = orderIsOperationallyConfirmed;
     window.orderIsShipmentEligible = orderIsShipmentEligible;
@@ -453,6 +467,10 @@ async function api(method, path, body = null) {
     return data;
 }
 
+if (typeof window !== "undefined") {
+    window.api = api;
+}
+
 function showToast(message, type = "success") {
     const container =
         document.querySelector(".toast-container") || createToastContainer();
@@ -530,6 +548,163 @@ async function uploadFile(file, opts = {}) {
         j.data?.path ||
         (j.data?.url ? j.data.url.replace("/cargochina/backend/", "") : null)
     );
+}
+
+const _unsavedGuards = new WeakMap();
+const _unsavedGuardScopes = new Set();
+let _beforeUnloadRegistered = false;
+
+function shouldTrackDirtyField(el) {
+    if (!(el instanceof HTMLElement)) return false;
+    if (el.matches("[data-dirty-ignore], .js-dirty-ignore")) return false;
+    if (
+        !el.matches(
+            "input, textarea, select, [contenteditable='true'], [contenteditable='plaintext-only']",
+        )
+    ) {
+        return false;
+    }
+    if (el.matches("[type='hidden'], [type='submit'], [type='button'], [type='reset']")) {
+        return false;
+    }
+    if (el.disabled || el.readOnly) return false;
+    if (el.closest("[hidden], .d-none")) return false;
+    return true;
+}
+
+function getDirtyFieldKey(el, index) {
+    const parts = [
+        el.getAttribute("data-dirty-key"),
+        el.name,
+        el.id,
+        el.getAttribute("data-field"),
+        `${el.tagName.toLowerCase()}-${index}`,
+    ].filter(Boolean);
+    return parts.join("|");
+}
+
+function captureDirtyState(scope) {
+    if (!(scope instanceof HTMLElement)) return "[]";
+    const rows = [];
+    const fields = Array.from(
+        scope.querySelectorAll(
+            "input, textarea, select, [contenteditable='true'], [contenteditable='plaintext-only']",
+        ),
+    ).filter(shouldTrackDirtyField);
+    fields.forEach((field, index) => {
+        let value = "";
+        if (field instanceof HTMLInputElement) {
+            if (field.type === "checkbox" || field.type === "radio") {
+                value = field.checked ? "1" : "0";
+            } else if (field.type === "file") {
+                value = String(field.files?.length || 0);
+            } else {
+                value = field.value ?? "";
+            }
+        } else if (
+            field instanceof HTMLTextAreaElement ||
+            field instanceof HTMLSelectElement
+        ) {
+            value = field.value ?? "";
+        } else {
+            value = field.textContent ?? "";
+        }
+        rows.push([getDirtyFieldKey(field, index), value]);
+    });
+    return JSON.stringify(rows);
+}
+
+function hasUnsavedChanges(scope) {
+    const entry = _unsavedGuards.get(scope);
+    if (!entry) return false;
+    return captureDirtyState(scope) !== entry.baseline;
+}
+
+function refreshUnsavedBaseline(scope) {
+    const entry = _unsavedGuards.get(scope);
+    if (!entry) return;
+    entry.baseline = captureDirtyState(scope);
+}
+
+function ensureBeforeUnloadGuard() {
+    if (_beforeUnloadRegistered || typeof window === "undefined") return;
+    window.addEventListener("beforeunload", (event) => {
+        const shouldWarn = Array.from(_unsavedGuardScopes).some((scope) => {
+            const entry = _unsavedGuards.get(scope);
+            return (
+                entry &&
+                document.contains(scope) &&
+                !entry.ignore &&
+                captureDirtyState(scope) !== entry.baseline
+            );
+        });
+        if (!shouldWarn) return;
+        event.preventDefault();
+        event.returnValue = "";
+    });
+    _beforeUnloadRegistered = true;
+}
+
+function registerUnsavedChangesGuard(target, opts = {}) {
+    const scope =
+        typeof target === "string" ? document.querySelector(target) : target;
+    if (!(scope instanceof HTMLElement)) return null;
+    const existing = _unsavedGuards.get(scope);
+    if (existing) {
+        refreshUnsavedBaseline(scope);
+        return existing.api;
+    }
+    const entry = {
+        baseline: captureDirtyState(scope),
+        ignore: false,
+        message:
+            opts.message ||
+            "You have unsaved changes. Press Save to keep them, or confirm if you want to leave without saving.",
+        api: null,
+    };
+    _unsavedGuards.set(scope, entry);
+    _unsavedGuardScopes.add(scope);
+    ensureBeforeUnloadGuard();
+
+    const modalEl = scope.closest(".modal");
+    if (modalEl) {
+        modalEl.addEventListener("hide.bs.modal", (event) => {
+            if (entry.ignore) {
+                entry.ignore = false;
+                return;
+            }
+            if (!hasUnsavedChanges(scope)) return;
+            if (window.confirm(entry.message)) {
+                entry.ignore = true;
+                return;
+            }
+            event.preventDefault();
+        });
+    }
+
+    const apiObj = {
+        markSaved() {
+            refreshUnsavedBaseline(scope);
+        },
+        hasChanges() {
+            return hasUnsavedChanges(scope);
+        },
+        dispose() {
+            _unsavedGuards.delete(scope);
+            _unsavedGuardScopes.delete(scope);
+        },
+        bypassNextClose() {
+            entry.ignore = true;
+        },
+    };
+    entry.api = apiObj;
+    return apiObj;
+}
+
+if (typeof window !== "undefined") {
+    window.registerUnsavedChangesGuard = registerUnsavedChangesGuard;
+    window.refreshUnsavedBaseline = refreshUnsavedBaseline;
+    window.hasUnsavedChanges = hasUnsavedChanges;
 }
 
 document.addEventListener("change", function (e) {

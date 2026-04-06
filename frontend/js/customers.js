@@ -439,6 +439,7 @@ function openDepositModal(customerId, name) {
     document.getElementById("depCustomerId").value = customerId;
     document.getElementById("depCustomerName").textContent = name;
     document.getElementById("depAmount").value = "";
+    document.getElementById("depCurrency").value = "RMB";
     document.getElementById("depMethod").value = "";
     document.getElementById("depReference").value = "";
     document.getElementById("depNotes").value = "";
@@ -454,6 +455,7 @@ function openDepositModal(customerId, name) {
             minChars: 0,
         });
     }
+    refreshUnsavedBaseline?.(document.querySelector("#depositModal .modal-body"));
     new bootstrap.Modal(document.getElementById("depositModal")).show();
 }
 
@@ -479,6 +481,7 @@ async function submitDeposit() {
         setLoading(btn, true);
         await api("POST", "/customers/" + customerId + "/deposits", payload);
         showToast("Deposit recorded");
+        refreshUnsavedBaseline?.(document.querySelector("#depositModal .modal-body"));
         bootstrap.Modal.getInstance(
             document.getElementById("depositModal"),
         ).hide();
@@ -704,6 +707,10 @@ async function loadPortalHistory(customerId) {
             '<span class="text-danger">Failed to load recent portal links.</span>';
     }
 }
+
+document.addEventListener("DOMContentLoaded", () => {
+    registerUnsavedChangesGuard?.("#depositModal .modal-body");
+});
 
 window.openMessagesModal = function (customerId, name) {
     window._messagesCustomerId = customerId;

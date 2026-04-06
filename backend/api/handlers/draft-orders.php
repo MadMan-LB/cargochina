@@ -291,6 +291,194 @@ function draftOrderPerUnitWeight(array $item): float
     return round((float) ($item['weight'] ?? 0), 4);
 }
 
+function draftOrderSupportsSharedCartons(PDO $pdo): bool
+{
+    return draftOrderTableHasColumn($pdo, 'order_items', 'shared_carton_enabled')
+        && draftOrderTableHasColumn($pdo, 'order_items', 'shared_carton_code')
+        && draftOrderTableHasColumn($pdo, 'order_items', 'shared_carton_contents');
+}
+
+function draftOrderBuildSharedCartonSummaryDescriptions(array $contents): array
+{
+    $cnParts = [];
+    $enParts = [];
+
+    foreach ($contents as $content) {
+        $cn = trim((string) ($content['description_cn'] ?? ''));
+        $en = trim((string) ($content['description_en'] ?? ''));
+        if ($cn !== '') {
+            $cnParts[] = $cn;
+        }
+        if ($en !== '') {
+            $enParts[] = $en;
+        }
+    }
+
+    return [
+        'description_cn' => $cnParts ? implode(' | ', $cnParts) : null,
+        'description_en' => $enParts ? implode(' | ', $enParts) : null,
+    ];
+}
+
+function draftOrderNormalizeSharedCartonContents(PDO $pdo, array $rawContents, int $sectionSupplierId, int $cartons): array
+{
+    $normalized = [];
+
+    foreach ($rawContents as $rawContent) {
+        $product = null;
+        if (!empty($rawContent['product_id'])) {
+            $product = draftOrderFetchProduct($pdo, (int) $rawContent['product_id']);
+            if (!$product) {
+                jsonError('Selected contained product not found.', 404);
+            }
+        }
+
+        $supplierId = (int) ($rawContent['supplier_id'] ?? ($product['supplier_id'] ?? $sectionSupplierId));
+        if ($supplierId <= 0) {
+            jsonError('Each contained shared-carton item needs a supplier.', 400);
+        }
+        if ($product && !empty($product['supplier_id']) && (int) $product['supplier_id'] !== $supplierId) {
+            jsonError('Selected contained product belongs to another supplier.', 400);
+        }
+
+        $description = draftOrderBuildDescriptionStrings($pdo, $rawContent['description_entries'] ?? []);
+        if (!$description['entries'] && $product) {
+            $description = draftOrderBuildDescriptionStrings($pdo, $product['description_entries'] ?? []);
+        }
+        if (!$description['entries']) {
+            $description = draftOrderBuildDescriptionStrings($pdo, [[
+                'description_text' => $rawContent['description_cn'] ?? $rawContent['description'] ?? '',
+                'description_translated' => $rawContent['description_en'] ?? $rawContent['description'] ?? '',
+            ]]);
+        }
+        if (!$description['entries']) {
+            continue;
+        }
+
+        $quantityPerCarton = round((float) ($rawContent['quantity_per_carton'] ?? $rawContent['quantity'] ?? 0), 4);
+        if ($quantityPerCarton <= 0) {
+            jsonError('Each contained shared-carton item needs quantity inside the carton.', 400);
+        }
+
+        $unitPrice = isset($rawContent['unit_price']) && $rawContent['unit_price'] !== ''
+            ? round((float) $rawContent['unit_price'], 4)
+            : null;
+        $sellPrice = isset($rawContent['sell_price']) && $rawContent['sell_price'] !== ''
+            ? round((float) $rawContent['sell_price'], 4)
+            : null;
+        $totalQuantity = round($quantityPerCarton * $cartons, 4);
+        $priceForTotal = $sellPrice ?? $unitPrice;
+
+        $normalized[] = [
+            'product_id' => !empty($rawContent['product_id']) ? (int) $rawContent['product_id'] : null,
+            'supplier_id' => $supplierId,
+            'item_no' => trim((string) ($rawContent['item_no'] ?? '')) ?: null,
+            'item_no_manual' => !empty($rawContent['item_no_manual']) ? 1 : 0,
+            'shipping_code' => trim((string) ($rawContent['shipping_code'] ?? '')) ?: null,
+            'quantity_per_carton' => $quantityPerCarton,
+            'quantity' => $totalQuantity,
+            'unit_price' => $unitPrice,
+            'sell_price' => $sellPrice,
+            'total_amount' => $priceForTotal !== null ? round($priceForTotal * $totalQuantity, 4) : null,
+            'hs_code' => draftOrderNormalizeHsCode($rawContent['hs_code'] ?? ($product['hs_code'] ?? null)),
+            'description_entries' => $description['entries'],
+            'description_cn' => $description['description_cn'],
+            'description_en' => $description['description_en'],
+            'notes' => trim((string) ($rawContent['notes'] ?? '')) ?: null,
+        ];
+    }
+
+    if (!$normalized) {
+        jsonError('Shared cartons need at least one contained item.', 400);
+    }
+
+    return $normalized;
+}
+
+function draftOrderSummarizeSharedCartonContents(array $contents, int $cartons): array
+{
+    $qtyPerCarton = 0.0;
+    $quantity = 0.0;
+    $buyTotal = 0.0;
+    $sellTotal = 0.0;
+    $hasBuy = false;
+    $hasSell = false;
+
+    foreach ($contents as $content) {
+        $lineQtyPerCarton = (float) ($content['quantity_per_carton'] ?? 0);
+        $lineQty = round($lineQtyPerCarton * $cartons, 4);
+        $qtyPerCarton += $lineQtyPerCarton;
+        $quantity += $lineQty;
+
+        if ($content['unit_price'] !== null && $content['unit_price'] !== '') {
+            $hasBuy = true;
+            $buyTotal += $lineQty * (float) $content['unit_price'];
+        }
+        $lineSell = $content['sell_price'] ?? $content['unit_price'];
+        if ($lineSell !== null && $lineSell !== '') {
+            $hasSell = true;
+            $sellTotal += $lineQty * (float) $lineSell;
+        }
+    }
+
+    $priceForTotal = $hasSell ? $sellTotal : ($hasBuy ? $buyTotal : null);
+
+    return [
+        'pieces_per_carton' => round($qtyPerCarton, 4),
+        'quantity' => round($quantity, 4),
+        'unit_price' => ($hasBuy && $quantity > 0) ? round($buyTotal / $quantity, 4) : null,
+        'sell_price' => (($hasSell || $hasBuy) && $quantity > 0)
+            ? round(($hasSell ? $sellTotal : $buyTotal) / $quantity, 4)
+            : null,
+        'total_amount' => $priceForTotal !== null ? round($priceForTotal, 4) : null,
+    ];
+}
+
+function draftOrderDecodeSharedCartonContents(PDO $pdo, array $item): array
+{
+    $raw = $item['shared_carton_contents'] ?? null;
+    if (!$raw) {
+        return [];
+    }
+
+    $decoded = is_array($raw) ? $raw : (json_decode((string) $raw, true) ?: []);
+    if (!$decoded) {
+        return [];
+    }
+
+    $supplierIds = array_values(array_unique(array_filter(array_map(
+        static fn(array $row): int => (int) ($row['supplier_id'] ?? 0),
+        $decoded
+    ))));
+    $supplierNames = [];
+    if ($supplierIds) {
+        $placeholders = implode(',', array_fill(0, count($supplierIds), '?'));
+        $stmt = $pdo->prepare("SELECT id, name FROM suppliers WHERE id IN ($placeholders)");
+        $stmt->execute($supplierIds);
+        $supplierNames = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+    }
+
+    $cartons = (int) ($item['cartons'] ?? 0);
+    foreach ($decoded as &$content) {
+        $content['supplier_id'] = !empty($content['supplier_id']) ? (int) $content['supplier_id'] : null;
+        $content['supplier_name'] = $content['supplier_id'] ? ($supplierNames[$content['supplier_id']] ?? null) : null;
+        $content['quantity_per_carton'] = round((float) ($content['quantity_per_carton'] ?? $content['quantity'] ?? 0), 4);
+        $content['quantity'] = round($content['quantity_per_carton'] * $cartons, 4);
+        $content['unit_price'] = isset($content['unit_price']) && $content['unit_price'] !== '' ? round((float) $content['unit_price'], 4) : null;
+        $content['sell_price'] = isset($content['sell_price']) && $content['sell_price'] !== '' ? round((float) $content['sell_price'], 4) : null;
+        $linePrice = $content['sell_price'] ?? $content['unit_price'];
+        $content['total_amount'] = $linePrice !== null ? round($content['quantity'] * $linePrice, 4) : null;
+        $content['hs_code'] = draftOrderNormalizeHsCode($content['hs_code'] ?? null);
+        $content['description_entries'] = draftOrderSplitDescriptionEntries(
+            $content['description_cn'] ?? null,
+            $content['description_en'] ?? null
+        );
+    }
+    unset($content);
+
+    return $decoded;
+}
+
 function draftOrderCheckDuplicateShippingCodes(PDO $pdo, int $customerId, int $excludeOrderId, array $items): ?string
 {
     $codes = [];
@@ -542,20 +730,6 @@ function draftOrderFetchProduct(PDO $pdo, int $productId): ?array
 
 function draftOrderNormalizeItem(PDO $pdo, array $rawItem, int $supplierId, ?array $product = null): array
 {
-    $description = draftOrderBuildDescriptionStrings($pdo, $rawItem['description_entries'] ?? []);
-    if (!$description['entries']) {
-        $description = draftOrderBuildDescriptionStrings($pdo, [[
-            'description_text' => $rawItem['description_cn'] ?? $rawItem['description'] ?? '',
-            'description_translated' => $rawItem['description_en'] ?? $rawItem['description'] ?? '',
-        ]]);
-    }
-    if (!$description['entries'] && $product) {
-        $description = draftOrderBuildDescriptionStrings($pdo, $product['description_entries'] ?? []);
-    }
-    if (!$description['entries']) {
-        jsonError('Each item needs a description.', 400);
-    }
-
     $productScope = $product['dimensions_scope'] ?? $product['product_dimensions_scope'] ?? null;
     $dimensionsScope = strtolower(trim((string) ($rawItem['dimensions_scope'] ?? $productScope ?? 'carton')));
     if (!in_array($dimensionsScope, ['piece', 'carton'], true)) {
@@ -598,11 +772,58 @@ function draftOrderNormalizeItem(PDO $pdo, array $rawItem, int $supplierId, ?arr
         jsonError('Selected product belongs to another supplier. Create a separate supplier section instead.', 400);
     }
 
+    $sharedCartonEnabled = !empty($rawItem['shared_carton_enabled']) ? 1 : 0;
+    $sharedCartonCode = trim((string) ($rawItem['shared_carton_code'] ?? '')) ?: null;
+    $sharedCartonContents = [];
+
+    if ($sharedCartonEnabled) {
+        if (!draftOrderSupportsSharedCartons($pdo)) {
+            jsonError('Shared-carton support is not ready in this database yet. Run the latest migrations first.', 409);
+        }
+        $sharedCartonContents = draftOrderNormalizeSharedCartonContents(
+            $pdo,
+            $rawItem['shared_carton_contents'] ?? [],
+            $supplierId,
+            $cartons
+        );
+        $summary = draftOrderSummarizeSharedCartonContents($sharedCartonContents, $cartons);
+        $summaryDescriptions = draftOrderBuildSharedCartonSummaryDescriptions($sharedCartonContents);
+        $description = draftOrderBuildDescriptionStrings($pdo, $rawItem['description_entries'] ?? []);
+        if (!$description['entries']) {
+            $description = [
+                'entries' => [],
+                'description_cn' => $summaryDescriptions['description_cn'],
+                'description_en' => $summaryDescriptions['description_en'],
+            ];
+        }
+        $quantity = $summary['quantity'];
+        $piecesPerCarton = $summary['pieces_per_carton'];
+        $unitPrice = $summary['unit_price'];
+        $sellPrice = $summary['sell_price'];
+        $totalAmount = $summary['total_amount'];
+        $declaredCbm = round($cbmPerUnit * ($dimensionsScope === 'carton' ? $cartons : $quantity), 6);
+        $declaredWeight = round($weightPerUnit * ($dimensionsScope === 'carton' ? $cartons : $quantity), 4);
+    } else {
+        $description = draftOrderBuildDescriptionStrings($pdo, $rawItem['description_entries'] ?? []);
+        if (!$description['entries']) {
+            $description = draftOrderBuildDescriptionStrings($pdo, [[
+                'description_text' => $rawItem['description_cn'] ?? $rawItem['description'] ?? '',
+                'description_translated' => $rawItem['description_en'] ?? $rawItem['description'] ?? '',
+            ]]);
+        }
+        if (!$description['entries'] && $product) {
+            $description = draftOrderBuildDescriptionStrings($pdo, $product['description_entries'] ?? []);
+        }
+        if (!$description['entries']) {
+            jsonError('Each item needs a description.', 400);
+        }
+    }
+
     return [
-        'product_id' => !empty($rawItem['product_id']) ? (int) $rawItem['product_id'] : null,
+        'product_id' => $sharedCartonEnabled ? null : (!empty($rawItem['product_id']) ? (int) $rawItem['product_id'] : null),
         'supplier_id' => $supplierId,
-        'item_no' => trim((string) ($rawItem['item_no'] ?? '')) ?: null,
-        'item_no_manual' => !empty($rawItem['item_no_manual']) ? 1 : 0,
+        'item_no' => $sharedCartonEnabled ? null : (trim((string) ($rawItem['item_no'] ?? '')) ?: null),
+        'item_no_manual' => $sharedCartonEnabled ? 0 : (!empty($rawItem['item_no_manual']) ? 1 : 0),
         'shipping_code' => trim((string) ($rawItem['shipping_code'] ?? '')) ?: null,
         'cartons' => $cartons,
         'pieces_per_carton' => round($piecesPerCarton, 4),
@@ -628,6 +849,9 @@ function draftOrderNormalizeItem(PDO $pdo, array $rawItem, int $supplierId, ?arr
         'custom_design_required' => $customDesignRequired,
         'custom_design_note' => $customDesignNote,
         'custom_design_paths' => $customDesignPaths,
+        'shared_carton_enabled' => $sharedCartonEnabled,
+        'shared_carton_code' => $sharedCartonCode,
+        'shared_carton_contents' => $sharedCartonContents,
     ];
 }
 
@@ -662,7 +886,52 @@ function draftOrderFlattenSections(PDO $pdo, array $sections): array
 function draftOrderAssignCanonicalItemNumbers(PDO $pdo, int $customerId, array $items, ?int $defaultSupplierId = null, ?int $destinationCountryId = null): array
 {
     $shippingCode = OrderCountryService::resolveShippingCode($pdo, $customerId, $destinationCountryId);
-    return OrderItemNumberingService::assignItemNumbers($items, $shippingCode, $defaultSupplierId);
+    $numberingTargets = [];
+    $numberingMap = [];
+
+    foreach ($items as $itemIndex => $item) {
+        $itemShippingCode = trim((string) ($item['shipping_code'] ?? '')) ?: $shippingCode;
+        $items[$itemIndex]['shipping_code'] = $itemShippingCode;
+
+        if (!empty($item['shared_carton_enabled']) && !empty($item['shared_carton_contents'])) {
+            foreach ($item['shared_carton_contents'] as $contentIndex => $content) {
+                $numberingTargets[] = [
+                    'supplier_id' => $content['supplier_id'] ?? $item['supplier_id'] ?? $defaultSupplierId,
+                    'item_no' => $content['item_no'] ?? null,
+                    'item_no_manual' => !empty($content['item_no_manual']) ? 1 : 0,
+                    'shipping_code' => trim((string) ($content['shipping_code'] ?? '')) ?: $itemShippingCode,
+                ];
+                $numberingMap[] = [$itemIndex, $contentIndex];
+            }
+            continue;
+        }
+
+        $numberingTargets[] = [
+            'supplier_id' => $item['supplier_id'] ?? $defaultSupplierId,
+            'item_no' => $item['item_no'] ?? null,
+            'item_no_manual' => !empty($item['item_no_manual']) ? 1 : 0,
+            'shipping_code' => $itemShippingCode,
+        ];
+        $numberingMap[] = [$itemIndex, null];
+    }
+
+    if (!$numberingTargets) {
+        return $items;
+    }
+
+    $assigned = OrderItemNumberingService::assignItemNumbers($numberingTargets, $shippingCode, $defaultSupplierId);
+    foreach ($assigned as $index => $numbered) {
+        [$itemIndex, $contentIndex] = $numberingMap[$index];
+        if ($contentIndex === null) {
+            $items[$itemIndex]['item_no'] = $numbered['item_no'] ?? null;
+            $items[$itemIndex]['shipping_code'] = $numbered['shipping_code'] ?? $items[$itemIndex]['shipping_code'];
+            continue;
+        }
+        $items[$itemIndex]['shared_carton_contents'][$contentIndex]['item_no'] = $numbered['item_no'] ?? null;
+        $items[$itemIndex]['shared_carton_contents'][$contentIndex]['shipping_code'] = $numbered['shipping_code'] ?? ($items[$itemIndex]['shipping_code'] ?? null);
+    }
+
+    return $items;
 }
 
 function draftOrderInsertDesignAttachments(PDO $pdo, int $itemId, array $paths, ?string $note, ?int $userId): void
@@ -693,6 +962,9 @@ function draftOrderInsertItems(PDO $pdo, int $orderId, ?int $defaultSupplierId, 
     $hasHsCode = draftOrderTableHasColumn($pdo, 'order_items', 'hs_code');
     $hasCustomDesignRequired = draftOrderTableHasColumn($pdo, 'order_items', 'custom_design_required');
     $hasCustomDesignNote = draftOrderTableHasColumn($pdo, 'order_items', 'custom_design_note');
+    $hasSharedCartonEnabled = draftOrderTableHasColumn($pdo, 'order_items', 'shared_carton_enabled');
+    $hasSharedCartonCode = draftOrderTableHasColumn($pdo, 'order_items', 'shared_carton_code');
+    $hasSharedCartonContents = draftOrderTableHasColumn($pdo, 'order_items', 'shared_carton_contents');
 
     $columns = "order_id, product_id, item_no, shipping_code, cartons, qty_per_carton, quantity, unit, declared_cbm, declared_weight, item_length, item_width, item_height, unit_price, total_amount, notes, image_paths, description_cn, description_en";
     $placeholders = "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?";
@@ -728,12 +1000,24 @@ function draftOrderInsertItems(PDO $pdo, int $orderId, ?int $defaultSupplierId, 
         $columns .= ", custom_design_note";
         $placeholders .= ",?";
     }
+    if ($hasSharedCartonEnabled) {
+        $columns .= ", shared_carton_enabled";
+        $placeholders .= ",?";
+    }
+    if ($hasSharedCartonCode) {
+        $columns .= ", shared_carton_code";
+        $placeholders .= ",?";
+    }
+    if ($hasSharedCartonContents) {
+        $columns .= ", shared_carton_contents";
+        $placeholders .= ",?";
+    }
 
     $insert = $pdo->prepare("INSERT INTO order_items ($columns) VALUES ($placeholders)");
     foreach ($items as &$item) {
-        if (empty($item['product_id'])) {
+        if (empty($item['shared_carton_enabled']) && empty($item['product_id'])) {
             $item['product_id'] = draftOrderCreateProduct($pdo, $item);
-        } else {
+        } elseif (empty($item['shared_carton_enabled'])) {
             draftOrderSafeSyncProduct($pdo, $item);
         }
 
@@ -783,6 +1067,17 @@ function draftOrderInsertItems(PDO $pdo, int $orderId, ?int $defaultSupplierId, 
         if ($hasCustomDesignNote) {
             $params[] = $item['custom_design_note'];
         }
+        if ($hasSharedCartonEnabled) {
+            $params[] = !empty($item['shared_carton_enabled']) ? 1 : 0;
+        }
+        if ($hasSharedCartonCode) {
+            $params[] = $item['shared_carton_code'] ?? null;
+        }
+        if ($hasSharedCartonContents) {
+            $params[] = !empty($item['shared_carton_contents'])
+                ? json_encode($item['shared_carton_contents'], JSON_UNESCAPED_UNICODE)
+                : null;
+        }
         $insert->execute($params);
         $item['id'] = (int) $pdo->lastInsertId();
         draftOrderInsertDesignAttachments($pdo, $item['id'], $item['custom_design_paths'], $item['custom_design_note'], $userId);
@@ -794,6 +1089,9 @@ function draftOrderInsertItems(PDO $pdo, int $orderId, ?int $defaultSupplierId, 
 
 function draftOrderFetchOrderItemRows(PDO $pdo, int $orderId): array
 {
+    $hasSharedCartonEnabled = draftOrderTableHasColumn($pdo, 'order_items', 'shared_carton_enabled');
+    $hasSharedCartonCode = draftOrderTableHasColumn($pdo, 'order_items', 'shared_carton_code');
+    $hasSharedCartonContents = draftOrderTableHasColumn($pdo, 'order_items', 'shared_carton_contents');
     $select = "oi.*, s.name as supplier_name, p.hs_code as product_hs_code, p.dimensions_scope as product_dimensions_scope";
     $stmt = $pdo->prepare(
         "SELECT $select
@@ -847,6 +1145,11 @@ function draftOrderFetchOrderItemRows(PDO $pdo, int $orderId): array
         $item['custom_design_required'] = !empty($item['custom_design_required']) || !empty($design['paths']) ? 1 : 0;
         $item['custom_design_note'] = $item['custom_design_note'] ?: $design['note'];
         $item['custom_design_paths'] = $design['paths'];
+        $item['shared_carton_enabled'] = $hasSharedCartonEnabled ? (!empty($item['shared_carton_enabled']) ? 1 : 0) : 0;
+        $item['shared_carton_code'] = $hasSharedCartonCode ? (trim((string) ($item['shared_carton_code'] ?? '')) ?: null) : null;
+        $item['shared_carton_contents'] = ($hasSharedCartonEnabled && $hasSharedCartonContents && !empty($item['shared_carton_enabled']))
+            ? draftOrderDecodeSharedCartonContents($pdo, $item)
+            : [];
     }
     unset($item);
 
@@ -869,8 +1172,8 @@ function draftOrderBuildSupplierSections(array $items): array
         }
         $sections[$key]['items'][] = [
             'id' => (int) $item['id'],
-            'product_id' => !empty($item['product_id']) ? (int) $item['product_id'] : null,
-            'item_no' => $item['item_no'] ?: null,
+            'product_id' => (!empty($item['shared_carton_enabled']) ? null : (!empty($item['product_id']) ? (int) $item['product_id'] : null)),
+            'item_no' => !empty($item['shared_carton_enabled']) ? null : ($item['item_no'] ?: null),
             'shipping_code' => $item['shipping_code'] ?: null,
             'cartons' => (int) ($item['cartons'] ?? 0),
             'pieces_per_carton' => isset($item['qty_per_carton']) ? (float) $item['qty_per_carton'] : null,
@@ -891,6 +1194,9 @@ function draftOrderBuildSupplierSections(array $items): array
             'custom_design_required' => !empty($item['custom_design_required']) ? 1 : 0,
             'custom_design_note' => $item['custom_design_note'] ?: null,
             'custom_design_paths' => $item['custom_design_paths'] ?? [],
+            'shared_carton_enabled' => !empty($item['shared_carton_enabled']) ? 1 : 0,
+            'shared_carton_code' => $item['shared_carton_code'] ?? null,
+            'shared_carton_contents' => $item['shared_carton_contents'] ?? [],
         ];
         $sections[$key]['totals']['amount'] += (float) ($item['total_amount'] ?? 0);
         $sections[$key]['totals']['cbm'] += (float) ($item['declared_cbm'] ?? 0);
@@ -960,6 +1266,140 @@ function draftOrderFetchOrderPayload(PDO $pdo, int $orderId): array
     ];
 }
 
+function draftOrderCountDisplayItems(array $items): int
+{
+    $count = 0;
+    foreach ($items as $item) {
+        if (!empty($item['shared_carton_enabled']) && !empty($item['shared_carton_contents'])) {
+            $count += count($item['shared_carton_contents']);
+            continue;
+        }
+        $count++;
+    }
+
+    return $count;
+}
+
+function draftOrderCollectSupplierNames(array $sections): array
+{
+    $names = [];
+    foreach ($sections as $section) {
+        $sectionName = trim((string) ($section['supplier_name'] ?? ''));
+        if ($sectionName !== '') {
+            $names[] = $sectionName;
+        }
+        foreach (($section['items'] ?? []) as $item) {
+            if (empty($item['shared_carton_enabled']) || empty($item['shared_carton_contents'])) {
+                continue;
+            }
+            foreach ($item['shared_carton_contents'] as $content) {
+                $contentSupplier = trim((string) ($content['supplier_name'] ?? ''));
+                if ($contentSupplier !== '') {
+                    $names[] = $contentSupplier;
+                }
+            }
+        }
+    }
+
+    return array_values(array_unique($names));
+}
+
+function draftOrderBuildExportRows(array $sections): array
+{
+    $rows = [];
+
+    foreach ($sections as $section) {
+        foreach (($section['items'] ?? []) as $item) {
+            if (!empty($item['shared_carton_enabled']) && !empty($item['shared_carton_contents'])) {
+                $rows[] = [
+                    'row_type' => 'shared_carton_summary',
+                    'supplier_name' => $section['supplier_name'] ?? '',
+                    'item_no' => $item['shared_carton_code'] ?: $item['shipping_code'] ?: '',
+                    'description' => 'Shared carton / multiple items',
+                    'hs_code' => '',
+                    'pieces_per_carton' => $item['pieces_per_carton'] ?? '',
+                    'cartons' => $item['cartons'] ?? '',
+                    'quantity' => $item['quantity'] ?? '',
+                    'unit_price' => null,
+                    'sell_price' => null,
+                    'total_amount' => null,
+                    'cbm' => $item['cbm'] ?? '',
+                    'total_cbm' => round((float) (($item['cbm'] ?? 0) * (($item['dimensions_scope'] ?? 'carton') === 'carton' ? (float) ($item['cartons'] ?? 0) : (float) ($item['quantity'] ?? 0))), 6),
+                    'weight' => $item['weight'] ?? '',
+                    'total_weight' => round((float) (($item['weight'] ?? 0) * (($item['dimensions_scope'] ?? 'carton') === 'carton' ? (float) ($item['cartons'] ?? 0) : (float) ($item['quantity'] ?? 0))), 4),
+                    'custom_design_required' => !empty($item['custom_design_required']) ? 'Yes' : 'No',
+                    'image_paths' => $item['photo_paths'] ?? [],
+                    'carton_note' => $item['shared_carton_code'] ? ('Shared carton ' . $item['shared_carton_code']) : 'Shared carton',
+                ];
+
+                foreach ($item['shared_carton_contents'] as $content) {
+                    $description = implode(' | ', array_map(
+                        static fn($entry) => trim((string) (($entry['description_translated'] ?? '') ?: ($entry['description_text'] ?? ''))),
+                        $content['description_entries'] ?? []
+                    ));
+                    $customerPrice = isset($content['sell_price']) && $content['sell_price'] !== null && $content['sell_price'] !== ''
+                        ? (float) $content['sell_price']
+                        : (isset($content['unit_price']) && $content['unit_price'] !== null ? (float) $content['unit_price'] : null);
+                    $rows[] = [
+                        'row_type' => 'shared_carton_content',
+                        'supplier_name' => $content['supplier_name'] ?? ($section['supplier_name'] ?? ''),
+                        'item_no' => $content['item_no'] ? ('↳ ' . $content['item_no']) : '↳',
+                        'description' => trim(($item['shared_carton_code'] ? ('[' . $item['shared_carton_code'] . '] ') : '') . $description),
+                        'hs_code' => $content['hs_code'] ?? '',
+                        'pieces_per_carton' => $content['quantity_per_carton'] ?? '',
+                        'cartons' => '',
+                        'quantity' => $content['quantity'] ?? '',
+                        'unit_price' => $content['unit_price'] ?? '',
+                        'sell_price' => $customerPrice,
+                        'total_amount' => $content['total_amount'] ?? '',
+                        'cbm' => '',
+                        'total_cbm' => '',
+                        'weight' => '',
+                        'total_weight' => '',
+                        'custom_design_required' => '',
+                        'image_paths' => [],
+                        'carton_note' => $item['shared_carton_code'] ? ('Shared carton ' . $item['shared_carton_code']) : 'Shared carton',
+                    ];
+                }
+                continue;
+            }
+
+            $desc = implode(' | ', array_map(
+                static fn($entry) => trim((string) (($entry['description_translated'] ?? '') ?: ($entry['description_text'] ?? ''))),
+                $item['description_entries'] ?? []
+            ));
+            $multiplier = ($item['dimensions_scope'] ?? 'carton') === 'carton'
+                ? (float) ($item['cartons'] ?? 0)
+                : (float) ($item['quantity'] ?? 0);
+            $customerPrice = isset($item['sell_price']) && $item['sell_price'] !== null && $item['sell_price'] !== ''
+                ? (float) $item['sell_price']
+                : (isset($item['unit_price']) && $item['unit_price'] !== null ? (float) $item['unit_price'] : null);
+            $rows[] = [
+                'row_type' => 'item',
+                'supplier_name' => $section['supplier_name'] ?? '',
+                'item_no' => $item['item_no'] ?: '',
+                'description' => $desc,
+                'hs_code' => $item['hs_code'] ?: '',
+                'pieces_per_carton' => $item['pieces_per_carton'] ?? '',
+                'cartons' => $item['cartons'] ?? '',
+                'quantity' => $item['quantity'] ?? '',
+                'unit_price' => $item['unit_price'] ?? '',
+                'sell_price' => $customerPrice,
+                'total_amount' => $item['total_amount'] ?? '',
+                'cbm' => $item['cbm'] ?? '',
+                'total_cbm' => round((float) (($item['cbm'] ?? 0) * $multiplier), 6),
+                'weight' => $item['weight'] ?? '',
+                'total_weight' => round((float) (($item['weight'] ?? 0) * $multiplier), 4),
+                'custom_design_required' => !empty($item['custom_design_required']) ? 'Yes' : 'No',
+                'image_paths' => $item['photo_paths'] ?? [],
+                'carton_note' => '',
+            ];
+        }
+    }
+
+    return $rows;
+}
+
 function draftOrderListRows(PDO $pdo): array
 {
     $stmt = $pdo->query(
@@ -972,11 +1412,12 @@ function draftOrderListRows(PDO $pdo): array
     $list = [];
     foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $orderId) {
         $payload = draftOrderFetchOrderPayload($pdo, (int) $orderId);
-        $payload['supplier_names'] = array_values(array_filter(array_unique(array_map(
-            static fn($section) => trim((string) ($section['supplier_name'] ?? '')),
-            $payload['supplier_sections']
-        ))));
-        $payload['item_count'] = array_reduce($payload['supplier_sections'], static fn($sum, $section) => $sum + count($section['items'] ?? []), 0);
+        $payload['supplier_names'] = draftOrderCollectSupplierNames($payload['supplier_sections']);
+        $payload['item_count'] = array_reduce(
+            $payload['supplier_sections'],
+            static fn($sum, $section) => $sum + draftOrderCountDisplayItems($section['items'] ?? []),
+            0
+        );
         $list[] = $payload;
     }
 
@@ -1009,31 +1450,21 @@ function draftOrderExportCsv(PDO $pdo, int $orderId): void
     foreach ($order['supplier_sections'] as $section) {
         fputcsv($out, ['Supplier', $section['supplier_name']]);
         fputcsv($out, ['Item No', 'Product / Names', 'HS Code', 'Pieces/Carton', 'Cartons', 'Quantity', 'Factory Price', 'Customer Price', 'Total Amount', 'CBM/Unit', 'Total CBM', 'Weight/Unit', 'Total Weight', 'Custom Design']);
-        foreach ($section['items'] as $item) {
-            $desc = implode(' | ', array_map(
-                static fn($entry) => trim((string) (($entry['description_translated'] ?? '') ?: ($entry['description_text'] ?? ''))),
-                $item['description_entries'] ?? []
-            ));
-            $multiplier = ($item['dimensions_scope'] ?? 'carton') === 'carton'
-                ? (float) ($item['cartons'] ?? 0)
-                : (float) ($item['quantity'] ?? 0);
-            $customerPrice = isset($item['sell_price']) && $item['sell_price'] !== null && $item['sell_price'] !== ''
-                ? (float) $item['sell_price']
-                : (isset($item['unit_price']) && $item['unit_price'] !== null ? (float) $item['unit_price'] : null);
+        foreach (draftOrderBuildExportRows([$section]) as $item) {
             fputcsv($out, [
                 $item['item_no'] ?: '',
-                $desc,
+                $item['description'] ?? '',
                 $item['hs_code'] ?: '',
                 $item['pieces_per_carton'] ?? '',
                 $item['cartons'] ?? '',
                 $item['quantity'] ?? '',
                 $item['unit_price'] ?? '',
-                $customerPrice ?? '',
+                $item['sell_price'] ?? '',
                 $item['total_amount'] ?? '',
                 $item['cbm'] ?? '',
-                round((float) (($item['cbm'] ?? 0) * $multiplier), 6),
+                $item['total_cbm'] ?? '',
                 $item['weight'] ?? '',
-                round((float) (($item['weight'] ?? 0) * $multiplier), 4),
+                $item['total_weight'] ?? '',
                 !empty($item['custom_design_required']) ? 'Yes' : 'No',
             ]);
         }
@@ -1051,47 +1482,25 @@ function draftOrderExportXlsx(PDO $pdo, int $orderId): void
     $order = draftOrderFetchOrderPayload($pdo, $orderId);
     $excelItems = [];
 
-    foreach ($order['supplier_sections'] as $section) {
-        foreach (($section['items'] ?? []) as $item) {
-            $englishParts = array_values(array_filter(array_map(
-                static fn($entry) => trim((string) ($entry['description_translated'] ?? '')),
-                $item['description_entries'] ?? []
-            )));
-            $cnParts = array_values(array_filter(array_map(
-                static fn($entry) => trim((string) ($entry['description_text'] ?? '')),
-                $item['description_entries'] ?? []
-            )));
-            $multiplier = ($item['dimensions_scope'] ?? 'carton') === 'carton'
-                ? (float) ($item['cartons'] ?? 0)
-                : (float) ($item['quantity'] ?? 0);
-            $cbmPerUnit = (float) ($item['cbm'] ?? 0);
-            $weightPerUnit = (float) ($item['weight'] ?? 0);
-            $totalQty = (float) ($item['quantity'] ?? 0);
-            $unitPrice = isset($item['unit_price']) && $item['unit_price'] !== null && $item['unit_price'] !== ''
-                ? (float) $item['unit_price']
-                : null;
-            $sellPrice = isset($item['sell_price']) && $item['sell_price'] !== null && $item['sell_price'] !== ''
-                ? (float) $item['sell_price']
-                : $unitPrice;
-
-            $excelItems[] = [
-                'item_no' => $item['item_no'] ?? '',
-                'shipping_code' => $item['shipping_code'] ?? '',
-                'description_en' => $englishParts ? implode(' | ', $englishParts) : implode(' | ', $cnParts),
-                'description_cn' => $cnParts ? implode(' | ', $cnParts) : implode(' | ', $englishParts),
-                'quantity' => $totalQty,
-                'cartons' => (float) ($item['cartons'] ?? 0),
-                'qty_per_carton' => (float) ($item['pieces_per_carton'] ?? 0),
-                'declared_cbm' => $multiplier > 0 ? round($cbmPerUnit * $multiplier, 6) : 0.0,
-                'declared_weight' => $multiplier > 0 ? round($weightPerUnit * $multiplier, 4) : 0.0,
-                'unit_price' => $unitPrice,
-                'sell_price' => $sellPrice,
-                'supplier_name' => $section['supplier_name'] ?? '',
-                'image_paths' => $item['photo_paths'] ?? [],
-                'dimensions_scope' => $item['dimensions_scope'] ?? 'piece',
-                'product_dimensions_scope' => $item['dimensions_scope'] ?? 'piece',
-            ];
-        }
+    foreach (draftOrderBuildExportRows($order['supplier_sections']) as $row) {
+        $isSummary = ($row['row_type'] ?? '') === 'shared_carton_summary';
+        $excelItems[] = [
+            'item_no' => $row['item_no'] ?? '',
+            'shipping_code' => '',
+            'description_en' => $row['description'] ?? '',
+            'description_cn' => $row['description'] ?? '',
+            'quantity' => $isSummary ? '' : (float) ($row['quantity'] ?? 0),
+            'cartons' => $isSummary ? (float) ($row['cartons'] ?? 0) : (is_numeric($row['cartons'] ?? null) ? (float) $row['cartons'] : ''),
+            'qty_per_carton' => is_numeric($row['pieces_per_carton'] ?? null) ? (float) $row['pieces_per_carton'] : '',
+            'declared_cbm' => is_numeric($row['total_cbm'] ?? null) ? (float) $row['total_cbm'] : 0.0,
+            'declared_weight' => is_numeric($row['total_weight'] ?? null) ? (float) $row['total_weight'] : 0.0,
+            'unit_price' => is_numeric($row['unit_price'] ?? null) ? (float) $row['unit_price'] : null,
+            'sell_price' => is_numeric($row['sell_price'] ?? null) ? (float) $row['sell_price'] : null,
+            'supplier_name' => $row['supplier_name'] ?? '',
+            'image_paths' => $row['image_paths'] ?? [],
+            'dimensions_scope' => $isSummary ? 'carton' : 'piece',
+            'product_dimensions_scope' => $isSummary ? 'carton' : 'piece',
+        ];
     }
 
     require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';

@@ -82,6 +82,41 @@ cargochina/
 
 ---
 
+## 3.1 Recent System-Wide Implementation Status (2026-04-06)
+
+The following production-minded stabilization work is now part of the live codebase and should be treated as current behavior during future audits:
+
+- **Shared UX layer**
+  - `frontend/js/app.js` now provides system-level:
+    - Enter-key-next-field behavior with scoped exclusions
+    - unsaved-changes guard registration and dirty-state tracking
+    - trimmed display-number helpers
+    - shared payment-method normalization
+- **Supplier payment accounts**
+  - Suppliers now store structured payment-account rows rather than relying on loose freeform labels as the main operator path.
+  - Standardized payment methods in the touched flows:
+    - `WeChat`
+    - `Alipay`
+    - `Bank Transfer`
+  - Financial payment recording and draft quick-supplier creation both reuse those stored supplier payment accounts.
+- **RMB defaults**
+  - Touched supplier/customer/financial/draft payment flows now default to `RMB`, with USD still supported.
+- **Upload/media behavior**
+  - Common operational image formats were broadened to include `jfif`.
+  - Clipboard image paste is now supported in the touched upload zones for order items, draft items, receiving evidence, and supplier QR/account images.
+- **Excel exports**
+  - Shared Excel export generation now supports supplier-group header rows and slightly smaller/centered images for readability.
+- **Translation**
+  - Simplified Chinese UI coverage was expanded for the touched payment, upload, and operator-error strings, but not every secondary page in the system has been fully verified yet.
+
+**Still open / not complete yet:**
+- nested carton-content modeling for cartons containing multiple different items/prices
+- explicit prepaid / factory-paid / no-payable semantics in the commercial and payable model
+- exhaustive authenticated browser QA across every touched workflow
+- final full-page Chinese translation sweep for every remaining live module
+
+---
+
 ## 4. Authentication and Authorization Model
 
 ### 4.1 Authentication
@@ -823,3 +858,36 @@ CLMS is a functional operations platform with a clear order lifecycle, RBAC, and
 3. Add integration tests for order lifecycle and confirmation flow.
 4. Document API contracts for tracking push.
 5. Consider extracting config keys into a schema/doc for maintainability.
+
+---
+
+## 17. Shared-Carton Downstream Coverage (2026-04-06)
+
+### Verified scope
+- Draft Orders shared-carton data is no longer treated as a draft-builder-only UI feature.
+- The saved nested carton structure now survives and remains truthful across:
+  - draft print
+  - order read surfaces
+  - financial supplier filtering
+  - financial order info display
+
+### Downstream modules reviewed
+- `backend/api/handlers/draft-orders.php`
+- `backend/api/handlers/orders.php`
+- `backend/api/handlers/financials.php`
+- `frontend/js/procurement_drafts.js`
+- `frontend/js/orders.js`
+- `frontend/js/financials.js`
+- `procurement_draft_print.php`
+
+### Runtime behavior verified
+- Mixed-supplier shared cartons can contain child rows from multiple suppliers while staying inside one customer draft flow.
+- Supplier identity is preserved on each shared-carton child row and surfaced downstream as:
+  - section supplier summaries in print
+  - mixed supplier display labels in Orders and Financials
+  - supplier-aware financial filtering
+- Orders read APIs now decode shared-carton contents when loading order items, so read-only UI no longer collapses mixed cartons back into a single flat supplier row.
+
+### Explicit current boundary
+- Shared-carton support is persisted as nested carton content on the order-item record, not as a separate warehouse or shipment-ledger subsystem.
+- That is intentional for this incremental pass: it keeps Draft Orders, Orders, Financials, and print/export behavior aligned without introducing a second competing packing model.

@@ -316,12 +316,17 @@ require 'includes/layout.php';
         <div class="row mb-3">
           <div class="col-6"><label class="form-label">Amount *</label><input type="number" step="0.01" class="form-control" id="finDepAmount" required></div>
           <div class="col-6"><label class="form-label">Currency *</label><select class="form-select" id="finDepCurrency">
-            <option value="USD">USD</option>
             <option value="RMB">RMB</option>
+            <option value="USD">USD</option>
           </select></div>
         </div>
         <div class="row mb-3">
-          <div class="col-6"><label class="form-label">Payment Method</label><input type="text" class="form-control" id="finDepMethod" placeholder="Bank, Cash, etc."></div>
+          <div class="col-6"><label class="form-label">Payment Method</label><select class="form-select" id="finDepMethod">
+            <option value="">Choose payment method...</option>
+            <option value="WeChat">WeChat</option>
+            <option value="Alipay">Alipay</option>
+            <option value="Bank Transfer">Bank Transfer</option>
+          </select></div>
           <div class="col-6"><label class="form-label">Reference No</label><input type="text" class="form-control" id="finDepReference" placeholder="Receipt/TT number"></div>
         </div>
         <div class="mb-3"><label class="form-label">Order</label><input type="text" class="form-control" id="finDepOrderId" placeholder="Type to search order (optional)…" autocomplete="off"></div>
@@ -352,17 +357,23 @@ require 'includes/layout.php';
         </div>
         <div class="row mb-3">
           <div class="col-6"><label class="form-label">Currency *</label><select class="form-select" id="finPayCurrency">
-            <option value="USD">USD</option>
             <option value="RMB">RMB</option>
+            <option value="USD">USD</option>
           </select></div>
           <div class="col-6"><label class="form-label">Payment Type</label><select class="form-select" id="finPayChannel">
             <option value="">Choose payment type...</option>
             <option value="WeChat">WeChat</option>
             <option value="Alipay">Alipay</option>
             <option value="Bank Transfer">Bank Transfer</option>
-            <option value="Cash">Cash</option>
           </select></div>
         </div>
+        <div class="row mb-3">
+          <div class="col-7"><label class="form-label">Supplier Account</label><select class="form-select" id="finPayAccountOption">
+            <option value="">Choose saved account...</option>
+          </select></div>
+          <div class="col-5"><label class="form-label">Account Detail</label><input type="text" class="form-control" id="finPayAccountDetail" placeholder="Selected account detail" readonly></div>
+        </div>
+        <div class="alert alert-light border py-2 d-none mb-3" id="finPayAccountQrWrap"></div>
         <div class="mb-3"><label class="form-label">Order</label><input type="text" class="form-control" id="finPayOrderId" placeholder="Type to search order (optional)…" autocomplete="off"></div>
         <div class="form-check mb-3">
           <input type="checkbox" class="form-check-input" id="finPayMarkedFull">

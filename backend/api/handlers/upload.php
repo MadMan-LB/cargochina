@@ -24,12 +24,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $config = require dirname(__DIR__, 2) . '/config/config.php';
         $maxSize = (int) ($config['upload_max_size'] ?? 8388608);
         $maxMb = (float) ($config['upload_max_mb'] ?? 8);
-        $allowed = $config['upload_allowed_extensions'] ?? ['jpg', 'jpeg', 'png', 'webp', 'gif', 'pdf'];
+        $allowed = $config['upload_allowed_extensions'] ?? ['jpg', 'jpeg', 'png', 'webp', 'jfif', 'gif', 'pdf'];
         $allowedMimeMap = [
             'jpg' => ['image/jpeg'],
             'jpeg' => ['image/jpeg'],
             'png' => ['image/png'],
             'webp' => ['image/webp'],
+            'jfif' => ['image/jpeg'],
             'gif' => ['image/gif'],
             'pdf' => ['application/pdf'],
         ];
@@ -80,7 +81,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $path = $uploadDir . $filename;
 
         if (!move_uploaded_file($file['tmp_name'], $path)) {
-            jsonResponse(['error' => ['message' => 'Failed to save file', 'code' => 'UPLOAD_FAILED']], 500);
+            jsonResponse(['error' => ['message' => 'Failed to save file. Please try again or choose a different file.', 'code' => 'UPLOAD_FAILED', 'request_id' => $requestId]], 500);
         }
 
         $relPath = 'uploads/' . $filename;
@@ -90,6 +91,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $logDir = dirname(__DIR__, 3) . '/logs';
         if (!is_dir($logDir)) mkdir($logDir, 0755, true);
         error_log(date('Y-m-d H:i:s') . ' Upload error: ' . $e->getMessage() . "\n" . $e->getTraceAsString() . "\n", 3, $logDir . '/php_errors.log');
-        jsonResponse(['error' => ['message' => 'Upload failed: ' . $e->getMessage(), 'code' => 'UPLOAD_FAILED']], 500);
+        jsonResponse(['error' => ['message' => 'Upload failed. Please try again or contact an administrator if it keeps happening.', 'code' => 'UPLOAD_FAILED', 'request_id' => $requestId]], 500);
     }
 };

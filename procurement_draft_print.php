@@ -4,60 +4,190 @@ require_once 'includes/page_guard.php';
 requireRoleForPage(['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin']);
 
 require_once __DIR__ . '/backend/config/database.php';
+require_once __DIR__ . '/backend/api/helpers.php';
 $pdo = getDb();
 $basePath = '/cargochina';
 
 $orderId = isset($_GET['order_id']) ? (int) $_GET['order_id'] : 0;
 $legacyId = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 
+function printDraftDecodeSharedCartonContents(PDO $pdo, array $row): array
+{
+    $raw = $row['shared_carton_contents'] ?? null;
+    if (!$raw) {
+        return [];
+    }
+
+    $decoded = is_array($raw) ? $raw : (json_decode((string) $raw, true) ?: []);
+    if (!$decoded) {
+        return [];
+    }
+
+    $supplierIds = array_values(array_unique(array_filter(array_map(
+        static fn(array $content): int => (int) ($content['supplier_id'] ?? 0),
+        $decoded
+    ))));
+    $supplierNames = [];
+    if ($supplierIds) {
+        $placeholders = implode(',', array_fill(0, count($supplierIds), '?'));
+        $stmt = $pdo->prepare("SELECT id, name FROM suppliers WHERE id IN ($placeholders)");
+        $stmt->execute($supplierIds);
+        $supplierNames = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+    }
+
+    $cartons = (float) ($row['cartons'] ?? 0);
+    foreach ($decoded as &$content) {
+        $content['supplier_id'] = !empty($content['supplier_id']) ? (int) $content['supplier_id'] : null;
+        $content['supplier_name'] = $content['supplier_id'] ? ($supplierNames[$content['supplier_id']] ?? null) : null;
+        $content['quantity_per_carton'] = round((float) ($content['quantity_per_carton'] ?? $content['quantity'] ?? 0), 4);
+        $content['quantity'] = round($content['quantity_per_carton'] * $cartons, 4);
+        $content['unit_price'] = isset($content['unit_price']) && $content['unit_price'] !== '' ? (float) $content['unit_price'] : null;
+        $content['sell_price'] = isset($content['sell_price']) && $content['sell_price'] !== '' ? (float) $content['sell_price'] : null;
+        $content['description_entries'] = [];
+        $cnParts = array_values(array_filter(array_map('trim', preg_split('/\s*\|\s*/', (string) ($content['description_cn'] ?? '')) ?: [])));
+        $enParts = array_values(array_filter(array_map('trim', preg_split('/\s*\|\s*/', (string) ($content['description_en'] ?? '')) ?: [])));
+        $entryCount = max(count($cnParts), count($enParts));
+        for ($i = 0; $i < $entryCount; $i++) {
+            $content['description_entries'][] = [
+                'description_text' => $cnParts[$i] ?? $enParts[$i] ?? '',
+                'description_translated' => $enParts[$i] ?? $cnParts[$i] ?? '',
+            ];
+        }
+        $linePrice = $content['sell_price'] ?? $content['unit_price'];
+        $content['total_amount'] = $linePrice !== null ? round($content['quantity'] * $linePrice, 4) : null;
+    }
+    unset($content);
+
+    return $decoded;
+}
+
 function printDraftEntryRows(array $sections): string
 {
     ob_start();
     foreach ($sections as $sectionIndex => $section) {
-        $supplierName = $section['supplier_name'] ?? 'Unassigned supplier';
+        $supplierNames = [];
+        $sectionSupplierName = trim((string) ($section['supplier_name'] ?? ''));
+        if ($sectionSupplierName !== '') {
+            $supplierNames[$sectionSupplierName] = true;
+        }
+        foreach (($section['items'] ?? []) as $item) {
+            $itemSupplierName = trim((string) ($item['supplier_name'] ?? ''));
+            if ($itemSupplierName !== '') {
+                $supplierNames[$itemSupplierName] = true;
+            }
+            if (!empty($item['shared_carton_enabled']) && !empty($item['shared_carton_contents'])) {
+                foreach (($item['shared_carton_contents'] ?? []) as $content) {
+                    $contentSupplierName = trim((string) ($content['supplier_name'] ?? ''));
+                    if ($contentSupplierName !== '') {
+                        $supplierNames[$contentSupplierName] = true;
+                    }
+                }
+            }
+        }
+        $sectionSupplierList = array_keys($supplierNames);
+        $sectionSupplierDisplay = $sectionSupplierList
+            ? implode(', ', $sectionSupplierList)
+            : 'Unassigned supplier';
+        $hasMultipleSectionSuppliers = count($sectionSupplierList) > 1;
         ?>
         <tr class="table-light">
-          <td colspan="11"><strong>Supplier:</strong> <?= htmlspecialchars($supplierName) ?></td>
+          <td colspan="12"><strong><?= $hasMultipleSectionSuppliers ? 'Section suppliers:' : 'Supplier:' ?></strong> <?= htmlspecialchars($sectionSupplierDisplay) ?></td>
         </tr>
         <?php foreach (($section['items'] ?? []) as $itemIndex => $item): ?>
             <?php
-            $desc = implode(' | ', array_map(
-                static fn($entry) => trim((string) ($entry['description_text'] ?? '')),
-                $item['description_entries'] ?? []
-            ));
-            $factoryPrice = isset($item['unit_price']) && $item['unit_price'] !== null
-                ? (float) $item['unit_price']
-                : null;
-            $customerPrice = isset($item['sell_price']) && $item['sell_price'] !== null
-                ? (float) $item['sell_price']
-                : $factoryPrice;
-            $multiplier = (($item['dimensions_scope'] ?? 'carton') === 'carton')
-                ? (float) ($item['cartons'] ?? 0)
-                : (float) ($item['quantity'] ?? 0);
-            $totalCbm = round((float) (($item['cbm'] ?? 0) * $multiplier), 6);
-            $totalWeight = round((float) (($item['weight'] ?? 0) * $multiplier), 4);
+            $isSharedCarton = !empty($item['shared_carton_enabled']) && !empty($item['shared_carton_contents']);
             ?>
-            <tr>
-              <td><?= $itemIndex + 1 ?></td>
-              <td><?= htmlspecialchars($item['item_no'] ?? '—') ?></td>
-              <td><?= htmlspecialchars($desc ?: '—') ?></td>
-              <td><?= htmlspecialchars($item['hs_code'] ?? '—') ?></td>
-              <td><?= htmlspecialchars((string) ($item['pieces_per_carton'] ?? '—')) ?></td>
-              <td><?= htmlspecialchars((string) ($item['cartons'] ?? '—')) ?></td>
-              <td><?= htmlspecialchars((string) ($item['quantity'] ?? '—')) ?></td>
-              <td><?= $factoryPrice !== null ? number_format($factoryPrice, 2) : '—' ?></td>
-              <td><?= $customerPrice !== null ? number_format($customerPrice, 2) : '—' ?></td>
-              <td><?= number_format((float) ($item['total_amount'] ?? 0), 2) ?></td>
-              <td><?= number_format($totalCbm, 6) ?></td>
-              <td><?= number_format($totalWeight, 4) ?></td>
-            </tr>
+            <?php if ($isSharedCarton): ?>
+                <?php
+                $multiplier = (($item['dimensions_scope'] ?? 'carton') === 'carton')
+                    ? (float) ($item['cartons'] ?? 0)
+                    : (float) ($item['quantity'] ?? 0);
+                $totalCbm = round((float) (($item['cbm'] ?? 0) * $multiplier), 6);
+                $totalWeight = round((float) (($item['weight'] ?? 0) * $multiplier), 4);
+                ?>
+                <tr class="table-warning">
+                  <td><?= $itemIndex + 1 ?></td>
+                  <td><?= htmlspecialchars($item['shared_carton_code'] ?? '—') ?></td>
+                  <td><strong>Shared carton / multiple items</strong></td>
+                  <td>—</td>
+                  <td><?= htmlspecialchars(format_display_number($item['pieces_per_carton'] ?? null, 4) ?: '—') ?></td>
+                  <td><?= htmlspecialchars(format_display_number($item['cartons'] ?? null, 4) ?: '—') ?></td>
+                  <td><?= htmlspecialchars(format_display_number($item['quantity'] ?? null, 4) ?: '—') ?></td>
+                  <td>—</td>
+                  <td>—</td>
+                  <td><strong><?= htmlspecialchars(format_display_number($item['total_amount'] ?? null, 4) ?: '—') ?></strong></td>
+                  <td><strong><?= htmlspecialchars(format_display_cbm($totalCbm)) ?></strong></td>
+                  <td><strong><?= htmlspecialchars(format_display_weight($totalWeight, 4)) ?></strong></td>
+                </tr>
+                <?php foreach (($item['shared_carton_contents'] ?? []) as $content): ?>
+                    <?php
+                    $desc = implode(' | ', array_map(
+                        static fn($entry) => trim((string) (($entry['description_text'] ?? '') ?: ($entry['description_translated'] ?? ''))),
+                        $content['description_entries'] ?? []
+                    ));
+                    $descLabel = trim(((string) ($content['supplier_name'] ?? '')) . ($desc ? (' | ' . $desc) : ''));
+                    $factoryPrice = isset($content['unit_price']) && $content['unit_price'] !== null
+                        ? (float) $content['unit_price']
+                        : null;
+                    $customerPrice = isset($content['sell_price']) && $content['sell_price'] !== null
+                        ? (float) $content['sell_price']
+                        : $factoryPrice;
+                    ?>
+                    <tr>
+                      <td></td>
+                      <td><?= htmlspecialchars($content['item_no'] ? ('↳ ' . $content['item_no']) : '↳') ?></td>
+                      <td><?= htmlspecialchars($descLabel ?: '—') ?></td>
+                      <td><?= htmlspecialchars($content['hs_code'] ?? '—') ?></td>
+                      <td><?= htmlspecialchars(format_display_number($content['quantity_per_carton'] ?? null, 4) ?: '—') ?></td>
+                      <td>—</td>
+                      <td><?= htmlspecialchars(format_display_number($content['quantity'] ?? null, 4) ?: '—') ?></td>
+                      <td><?= $factoryPrice !== null ? htmlspecialchars(format_display_number($factoryPrice, 4)) : '—' ?></td>
+                      <td><?= $customerPrice !== null ? htmlspecialchars(format_display_number($customerPrice, 4)) : '—' ?></td>
+                      <td><?= htmlspecialchars(format_display_number($content['total_amount'] ?? null, 4) ?: '—') ?></td>
+                      <td>—</td>
+                      <td>—</td>
+                    </tr>
+                <?php endforeach; ?>
+            <?php else: ?>
+                <?php
+                $desc = implode(' | ', array_map(
+                    static fn($entry) => trim((string) ($entry['description_text'] ?? '')),
+                    $item['description_entries'] ?? []
+                ));
+                $factoryPrice = isset($item['unit_price']) && $item['unit_price'] !== null
+                    ? (float) $item['unit_price']
+                    : null;
+                $customerPrice = isset($item['sell_price']) && $item['sell_price'] !== null
+                    ? (float) $item['sell_price']
+                    : $factoryPrice;
+                $multiplier = (($item['dimensions_scope'] ?? 'carton') === 'carton')
+                    ? (float) ($item['cartons'] ?? 0)
+                    : (float) ($item['quantity'] ?? 0);
+                $totalCbm = round((float) (($item['cbm'] ?? 0) * $multiplier), 6);
+                $totalWeight = round((float) (($item['weight'] ?? 0) * $multiplier), 4);
+                ?>
+                <tr>
+                  <td><?= $itemIndex + 1 ?></td>
+                  <td><?= htmlspecialchars($item['item_no'] ?? '—') ?></td>
+                  <td><?= htmlspecialchars($desc ?: '—') ?></td>
+                  <td><?= htmlspecialchars($item['hs_code'] ?? '—') ?></td>
+                  <td><?= htmlspecialchars(format_display_number($item['pieces_per_carton'] ?? null, 4) ?: '—') ?></td>
+                  <td><?= htmlspecialchars(format_display_number($item['cartons'] ?? null, 4) ?: '—') ?></td>
+                  <td><?= htmlspecialchars(format_display_number($item['quantity'] ?? null, 4) ?: '—') ?></td>
+                  <td><?= $factoryPrice !== null ? htmlspecialchars(format_display_number($factoryPrice, 4)) : '—' ?></td>
+                  <td><?= $customerPrice !== null ? htmlspecialchars(format_display_number($customerPrice, 4)) : '—' ?></td>
+                  <td><?= htmlspecialchars(format_display_number($item['total_amount'] ?? null, 4) ?: '—') ?></td>
+                  <td><?= htmlspecialchars(format_display_cbm($totalCbm)) ?></td>
+                  <td><?= htmlspecialchars(format_display_weight($totalWeight, 4)) ?></td>
+                </tr>
+            <?php endif; ?>
         <?php endforeach; ?>
         <tr class="table-secondary">
-          <td colspan="8"><strong>Supplier subtotal</strong></td>
+          <td colspan="8"><strong><?= $hasMultipleSectionSuppliers ? 'Section subtotal' : 'Supplier subtotal' ?></strong></td>
           <td>—</td>
-          <td><strong><?= number_format((float) ($section['totals']['amount'] ?? 0), 2) ?></strong></td>
-          <td><strong><?= number_format((float) ($section['totals']['cbm'] ?? 0), 6) ?></strong></td>
-          <td><strong><?= number_format((float) ($section['totals']['weight'] ?? 0), 4) ?></strong></td>
+          <td><strong><?= htmlspecialchars(format_display_number((float) ($section['totals']['amount'] ?? 0), 4)) ?></strong></td>
+          <td><strong><?= htmlspecialchars(format_display_cbm((float) ($section['totals']['cbm'] ?? 0))) ?></strong></td>
+          <td><strong><?= htmlspecialchars(format_display_weight((float) ($section['totals']['weight'] ?? 0), 4)) ?></strong></td>
         </tr>
         <?php
     }
@@ -80,8 +210,30 @@ if ($orderId > 0) {
         exit;
     }
 
+    $sharedCols = [];
+    $hasSharedCartonEnabled = false;
+    $hasSharedCartonCode = false;
+    $hasSharedCartonContents = false;
+    foreach (['shared_carton_enabled', 'shared_carton_code', 'shared_carton_contents'] as $column) {
+        $check = $pdo->prepare("SHOW COLUMNS FROM order_items LIKE ?");
+        $check->execute([$column]);
+        if ($check->fetch(PDO::FETCH_ASSOC)) {
+            $sharedCols[] = "oi.$column";
+            if ($column === 'shared_carton_enabled') {
+                $hasSharedCartonEnabled = true;
+            } elseif ($column === 'shared_carton_code') {
+                $hasSharedCartonCode = true;
+            } elseif ($column === 'shared_carton_contents') {
+                $hasSharedCartonContents = true;
+            }
+        }
+    }
+    $selectCols = array_merge(
+        ['oi.*', 's.name as supplier_name', 'p.hs_code as product_hs_code', 'p.dimensions_scope as product_dimensions_scope'],
+        $sharedCols
+    );
     $itemsStmt = $pdo->prepare(
-        "SELECT oi.*, s.name as supplier_name, p.hs_code as product_hs_code, p.dimensions_scope as product_dimensions_scope
+        "SELECT " . implode(', ', $selectCols) . "
          FROM order_items oi
          LEFT JOIN suppliers s ON oi.supplier_id = s.id
          LEFT JOIN products p ON p.id = oi.product_id
@@ -132,6 +284,11 @@ if ($orderId > 0) {
             'cbm' => $multiplier > 0 ? round(((float) ($row['declared_cbm'] ?? 0)) / $multiplier, 6) : 0,
             'weight' => $multiplier > 0 ? round(((float) ($row['declared_weight'] ?? 0)) / $multiplier, 4) : 0,
             'dimensions_scope' => $scope,
+            'shared_carton_enabled' => ($hasSharedCartonEnabled && !empty($row['shared_carton_enabled'])) ? 1 : 0,
+            'shared_carton_code' => $hasSharedCartonCode ? ($row['shared_carton_code'] ?: null) : null,
+            'shared_carton_contents' => ($hasSharedCartonEnabled && $hasSharedCartonContents && !empty($row['shared_carton_enabled']))
+                ? printDraftDecodeSharedCartonContents($pdo, $row)
+                : [],
         ];
         $sections[$key]['totals']['amount'] += (float) ($row['total_amount'] ?? 0);
         $sections[$key]['totals']['cbm'] += (float) ($row['declared_cbm'] ?? 0);
@@ -256,9 +413,9 @@ if ($orderId > 0) {
         <?= printDraftEntryRows($sections) ?>
         <tr class="table-dark">
           <td colspan="9"><strong>Grand total</strong></td>
-          <td><strong><?= number_format($grandAmount, 2) ?></strong></td>
-          <td><strong><?= number_format($grandCbm, 6) ?></strong></td>
-          <td><strong><?= number_format($grandWeight, 4) ?></strong></td>
+          <td><strong><?= htmlspecialchars(format_display_number($grandAmount, 4)) ?></strong></td>
+          <td><strong><?= htmlspecialchars(format_display_cbm($grandCbm)) ?></strong></td>
+          <td><strong><?= htmlspecialchars(format_display_weight($grandWeight, 4)) ?></strong></td>
         </tr>
       </tbody>
     </table>

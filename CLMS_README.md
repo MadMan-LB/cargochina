@@ -386,6 +386,16 @@ Any AI/engineer working on this system must follow these operating rules:
   - Rationale: Align with spec section 9
   - Impacted modules: api/index.php, rbac.php, all handlers
 
+- 2026-04-06 — Production stabilization pass (payments, uploads, UX, exports)
+  - Decision: Standardize supplier payment accounts around `WeChat`, `Alipay`, and `Bank Transfer`, with RMB as the default currency in the touched supplier/customer/financial/draft payment flows.
+  - Decision: Reuse shared frontend helpers for Enter-key-next-field navigation, unsaved-change protection, trimmed decimal display, and standardized payment method normalization instead of duplicating page-level logic.
+  - Decision: Extend supplier payment records to optionally snapshot the selected account detail and QR image at payment time through migration `057_supplier_payment_account_snapshot.sql`.
+  - Decision: Broaden common operational image upload support to include `jfif` and reuse one clipboard-image paste flow across draft items, order items, receiving evidence, and supplier QR/account uploads.
+  - Decision: Keep XLSX export cells numeric while switching to optional-decimal display and supplier-group header rows in the shared order/container export service.
+  - Rationale: Improve operator speed, payment auditability, and production reliability without inventing parallel subsystems.
+  - Impacted modules/states: suppliers, customers, financials, draft orders, orders, receiving, shared uploads, shared app.js UX helpers, Excel export generation
+  - Not completed in this pass: structured multi-item carton contents, explicit prepaid/factory-paid payable semantics, and a final exhaustive Chinese translation sweep across every secondary page
+
 - YYYY-MM-DD — (TBD)
   - Decision:
   - Rationale:

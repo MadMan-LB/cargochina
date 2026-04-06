@@ -105,11 +105,11 @@ require 'includes/layout.php';
           <div class="mb-2"><label class="form-label">Notes</label><textarea class="form-control" id="supplierNotes" rows="2"></textarea></div>
           <div class="mb-3">
             <div class="d-flex justify-content-between align-items-center">
-              <label class="form-label mb-1">Payment Links / Accounts</label>
-              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addSupplierPaymentLinkRow()">+ Add Link</button>
+              <label class="form-label mb-1">Payment Accounts</label>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addSupplierPaymentLinkRow()">+ Add Account</button>
             </div>
             <div id="supplierPaymentLinksContainer" class="d-flex flex-column gap-2"></div>
-            <small class="text-muted d-block mt-1">Use this for WeChat, Alipay, bank account, or any payment reference operators need later in procurement and balances.</small>
+            <small class="text-muted d-block mt-1">Select WeChat, Alipay, or Bank Transfer, then save the account details and optional QR image operators will use later in procurement and payments.</small>
           </div>
           <div class="mb-2">
             <label class="form-label">Additional IDs (e.g. Tax ID, VAT)</label>
@@ -169,17 +169,23 @@ require 'includes/layout.php';
         </div>
         <div class="row mb-3">
           <div class="col-6"><label class="form-label">Currency *</label><select class="form-select" id="payCurrency">
-              <option value="USD">USD</option>
               <option value="RMB">RMB</option>
+              <option value="USD">USD</option>
             </select></div>
           <div class="col-6"><label class="form-label">Payment Channel</label><select class="form-select" id="payChannel">
               <option value="">Choose channel...</option>
               <option value="WeChat">WeChat</option>
               <option value="Alipay">Alipay</option>
               <option value="Bank Transfer">Bank Transfer</option>
-              <option value="Cash">Cash</option>
             </select></div>
         </div>
+        <div class="row mb-3">
+          <div class="col-7"><label class="form-label">Supplier Account</label><select class="form-select" id="payAccountOption">
+              <option value="">Choose saved account...</option>
+            </select></div>
+          <div class="col-5"><label class="form-label">Account Detail</label><input type="text" class="form-control" id="payAccountDetail" placeholder="Selected account detail" readonly></div>
+        </div>
+        <div class="alert alert-light border py-2 small d-none" id="payAccountQrWrap"></div>
         <div class="mb-3"><label class="form-label">Linked Order</label><input type="number" class="form-control" id="payOrderId" placeholder="Order ID (optional)"></div>
         <div class="form-check mb-3">
           <input type="checkbox" class="form-check-input" id="payMarkedFull">

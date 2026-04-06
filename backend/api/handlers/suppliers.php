@@ -26,6 +26,29 @@ function supplierTableHasColumn(PDO $pdo, string $table, string $column): bool
     return $cache[$key];
 }
 
+function normalizeSupplierPaymentMethodName(?string $value): string
+{
+    $normalized = mb_strtolower(trim((string) $value), 'UTF-8');
+    if ($normalized === '') {
+        return '';
+    }
+    if (str_contains($normalized, 'wechat') || str_contains($normalized, 'weixin')) {
+        return 'WeChat';
+    }
+    if (str_contains($normalized, 'alipay') || str_contains($normalized, 'ali pay') || $normalized === 'ali') {
+        return 'Alipay';
+    }
+    if (
+        str_contains($normalized, 'bank') ||
+        str_contains($normalized, 'transfer') ||
+        str_contains($normalized, 'wire') ||
+        preg_match('/\btt\b/u', $normalized)
+    ) {
+        return 'Bank Transfer';
+    }
+    return '';
+}
+
 function normalizeSupplierPaymentLinks($value): ?string
 {
     if (!is_array($value)) {
@@ -37,14 +60,28 @@ function normalizeSupplierPaymentLinks($value): ?string
         if (!is_array($row)) {
             continue;
         }
-        $label = trim((string) ($row['label'] ?? $row['type'] ?? ''));
-        $content = trim((string) ($row['value'] ?? $row['link'] ?? ''));
-        if ($label === '' && $content === '') {
+        $rawMethod = trim((string) ($row['method'] ?? $row['type'] ?? $row['label'] ?? ''));
+        $method = normalizeSupplierPaymentMethodName($rawMethod) ?: 'Bank Transfer';
+        $accountLabel = trim((string) ($row['account_label'] ?? $row['label'] ?? ''));
+        $content = trim((string) ($row['value'] ?? $row['link'] ?? $row['account_value'] ?? ''));
+        $currency = strtoupper(trim((string) ($row['currency'] ?? 'RMB')));
+        $qrImagePath = trim((string) ($row['qr_image_path'] ?? $row['qr'] ?? ''));
+        if ($rawMethod === '' && $accountLabel === '' && $content === '' && $qrImagePath === '') {
             continue;
         }
+        if (!in_array($currency, ['RMB', 'USD'], true)) {
+            $currency = 'RMB';
+        }
+        if ($qrImagePath !== '' && str_contains($qrImagePath, '..')) {
+            jsonError('Invalid supplier payment QR path', 400);
+        }
         $rows[] = [
-            'label' => $label ?: 'Payment',
+            'method' => $method,
+            'account_label' => $accountLabel ?: $method,
+            'label' => $accountLabel ?: $method,
             'value' => $content ?: null,
+            'currency' => $currency,
+            'qr_image_path' => $qrImagePath !== '' ? $qrImagePath : null,
         ];
     }
 
@@ -58,7 +95,15 @@ function decodeSupplierPaymentLinks($value): array
     }
 
     $decoded = json_decode((string) $value, true);
-    return is_array($decoded) ? $decoded : [];
+    if (!is_array($decoded)) {
+        return [];
+    }
+    $normalized = normalizeSupplierPaymentLinks($decoded);
+    if (!$normalized) {
+        return [];
+    }
+    $rows = json_decode($normalized, true);
+    return is_array($rows) ? $rows : [];
 }
 
 function supplierSettlementDeltaExpr(PDO $pdo): string
@@ -436,12 +481,18 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt->execute([$id]);
                 if (!$stmt->fetch()) jsonError('Supplier not found', 404);
                 $amount = (float) ($input['amount'] ?? 0);
-                $currency = trim($input['currency'] ?? 'USD');
+                $currency = trim($input['currency'] ?? 'RMB');
                 if (!in_array($currency, ['USD', 'RMB'], true)) jsonError('Currency must be USD or RMB', 400);
                 $paymentType = in_array($input['payment_type'] ?? '', ['partial', 'full']) ? $input['payment_type'] : 'partial';
-                $paymentChannel = trim((string) ($input['payment_channel'] ?? ''));
-                if ($paymentChannel !== '' && !in_array($paymentChannel, ['WeChat', 'Alipay', 'Bank Transfer', 'Cash'], true)) {
+                $paymentChannel = normalizeSupplierPaymentMethodName((string) ($input['payment_channel'] ?? ''));
+                if ($paymentChannel !== '' && !in_array($paymentChannel, ['WeChat', 'Alipay', 'Bank Transfer'], true)) {
                     jsonError('Unsupported payment channel', 400);
+                }
+                $paymentAccountLabel = trim((string) ($input['payment_account_label'] ?? '')) ?: null;
+                $paymentAccountValue = trim((string) ($input['payment_account_value'] ?? '')) ?: null;
+                $paymentAccountQrPath = trim((string) ($input['payment_account_qr_path'] ?? '')) ?: null;
+                if ($paymentAccountQrPath !== null && str_contains($paymentAccountQrPath, '..')) {
+                    jsonError('Invalid payment account QR path', 400);
                 }
                 $notes = $input['notes'] ?? null;
                 $orderId = !empty($input['order_id']) ? (int) $input['order_id'] : null;
@@ -474,6 +525,21 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $columns[] = 'payment_channel';
                     $values[] = '?';
                     $params[] = $paymentChannel ?: null;
+                }
+                if (supplierTableHasColumn($pdo, 'supplier_payments', 'payment_account_label')) {
+                    $columns[] = 'payment_account_label';
+                    $values[] = '?';
+                    $params[] = $paymentAccountLabel;
+                }
+                if (supplierTableHasColumn($pdo, 'supplier_payments', 'payment_account_value')) {
+                    $columns[] = 'payment_account_value';
+                    $values[] = '?';
+                    $params[] = $paymentAccountValue;
+                }
+                if (supplierTableHasColumn($pdo, 'supplier_payments', 'payment_account_qr_path')) {
+                    $columns[] = 'payment_account_qr_path';
+                    $values[] = '?';
+                    $params[] = $paymentAccountQrPath;
                 }
                 if (supplierTableHasColumn($pdo, 'supplier_payments', 'settlement_delta')) {
                     $columns[] = 'settlement_delta';

@@ -32,6 +32,160 @@ function financialSupplierSettlementExpr(PDO $pdo): string
     return 'COALESCE(discount_amount,0)';
 }
 
+function financialsSupportsSharedCartons(PDO $pdo): bool
+{
+    return financialsTableHasColumn($pdo, 'order_items', 'shared_carton_enabled')
+        && financialsTableHasColumn($pdo, 'order_items', 'shared_carton_contents');
+}
+
+function financialsDecodeSharedCartonContents(array $row): array
+{
+    $raw = $row['shared_carton_contents'] ?? null;
+    if (!$raw) {
+        return [];
+    }
+
+    $decoded = is_array($raw) ? $raw : (json_decode((string) $raw, true) ?: []);
+    if (!$decoded) {
+        return [];
+    }
+
+    $cartons = (float) ($row['cartons'] ?? 0);
+    foreach ($decoded as &$content) {
+        $content['supplier_id'] = !empty($content['supplier_id']) ? (int) $content['supplier_id'] : null;
+        $content['quantity_per_carton'] = round((float) ($content['quantity_per_carton'] ?? $content['quantity'] ?? 0), 4);
+        $content['quantity'] = round($content['quantity_per_carton'] * $cartons, 4);
+        $content['unit_price'] = isset($content['unit_price']) && $content['unit_price'] !== '' ? (float) $content['unit_price'] : null;
+        $content['sell_price'] = isset($content['sell_price']) && $content['sell_price'] !== '' ? (float) $content['sell_price'] : null;
+    }
+    unset($content);
+
+    return $decoded;
+}
+
+function financialsLookupSupplierNames(PDO $pdo, array $supplierIds): array
+{
+    $supplierIds = array_values(array_unique(array_filter(array_map('intval', $supplierIds))));
+    if (!$supplierIds) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($supplierIds), '?'));
+    $stmt = $pdo->prepare("SELECT id, name FROM suppliers WHERE id IN ($placeholders)");
+    $stmt->execute($supplierIds);
+    return $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+}
+
+function financialsBuildSupplierDisplay(array $supplierNames, string $fallback = ''): string
+{
+    $names = array_values(array_unique(array_filter(array_map('trim', $supplierNames))));
+    if (!$names) {
+        return trim($fallback);
+    }
+    if (count($names) === 1) {
+        return $names[0];
+    }
+    return 'Multiple (' . implode(', ', $names) . ')';
+}
+
+function financialsBuildOrderItemAnalysis(PDO $pdo, array $orderIds): array
+{
+    if (!$orderIds) {
+        return ['lines' => [], 'order_suppliers' => [], 'order_supplier_names' => []];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
+    $hasSharedCartons = financialsSupportsSharedCartons($pdo);
+    $selectCols = [
+        'oi.order_id',
+        'oi.quantity',
+        'oi.buy_price',
+        'oi.sell_price',
+        'oi.unit_price',
+        'oi.cartons',
+        'COALESCE(oi.supplier_id, p.supplier_id) as eff_supplier_id',
+    ];
+    if ($hasSharedCartons) {
+        $selectCols[] = 'oi.shared_carton_enabled';
+        $selectCols[] = 'oi.shared_carton_contents';
+    }
+
+    $stmt = $pdo->prepare(
+        "SELECT " . implode(', ', $selectCols) . "
+         FROM order_items oi
+         LEFT JOIN products p ON oi.product_id = p.id
+         WHERE oi.order_id IN ($placeholders)"
+    );
+    $stmt->execute($orderIds);
+
+    $lines = [];
+    $orderSuppliers = [];
+    $supplierIdsSeen = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $orderId = (int) ($row['order_id'] ?? 0);
+        $defaultSupplierId = !empty($row['eff_supplier_id']) ? (int) $row['eff_supplier_id'] : null;
+        $sharedContents = ($hasSharedCartons && !empty($row['shared_carton_enabled']))
+            ? financialsDecodeSharedCartonContents($row)
+            : [];
+
+        if ($sharedContents) {
+            foreach ($sharedContents as $content) {
+                $supplierId = $content['supplier_id'] ?: $defaultSupplierId;
+                if ($supplierId) {
+                    $orderSuppliers[$orderId][$supplierId] = true;
+                    $supplierIdsSeen[$supplierId] = true;
+                }
+                $qty = (float) ($content['quantity'] ?? 0);
+                $buyPrice = $content['unit_price'];
+                $sellPrice = $content['sell_price'] ?? $buyPrice;
+                $lines[] = [
+                    'order_id' => $orderId,
+                    'supplier_id' => $supplierId,
+                    'buy_total' => $qty * (float) ($buyPrice ?? 0),
+                    'sell_total' => $qty * (float) ($sellPrice ?? 0),
+                ];
+            }
+            continue;
+        }
+
+        if ($defaultSupplierId) {
+            $orderSuppliers[$orderId][$defaultSupplierId] = true;
+            $supplierIdsSeen[$defaultSupplierId] = true;
+        }
+        $qty = (float) ($row['quantity'] ?? 0);
+        $buyPrice = isset($row['buy_price']) && $row['buy_price'] !== null ? (float) $row['buy_price'] : (float) ($row['unit_price'] ?? 0);
+        $sellPrice = isset($row['sell_price']) && $row['sell_price'] !== null ? (float) $row['sell_price'] : (float) ($row['unit_price'] ?? 0);
+        $lines[] = [
+            'order_id' => $orderId,
+            'supplier_id' => $defaultSupplierId,
+            'buy_total' => $qty * $buyPrice,
+            'sell_total' => $qty * $sellPrice,
+        ];
+    }
+
+    $supplierNamesById = financialsLookupSupplierNames($pdo, array_keys($supplierIdsSeen));
+    $orderSupplierNames = [];
+    foreach ($orderSuppliers as $orderId => $supplierMap) {
+        $names = [];
+        foreach (array_keys($supplierMap) as $supplierId) {
+            $name = trim((string) ($supplierNamesById[(int) $supplierId] ?? ''));
+            if ($name !== '') {
+                $names[] = $name;
+            }
+        }
+        $orderSupplierNames[$orderId] = array_values(array_unique($names));
+    }
+
+    return [
+        'lines' => $lines,
+        'order_suppliers' => array_map(
+            static fn(array $supplierMap): array => array_map('intval', array_keys($supplierMap)),
+            $orderSuppliers
+        ),
+        'order_supplier_names' => $orderSupplierNames,
+    ];
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
     if (!getAuthUserId()) jsonError('Unauthorized', 401);
@@ -213,6 +367,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $hasItemSupplier = $chkItemSupp && $chkItemSupp->rowCount() > 0;
         $chkComm = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'commission_rate'");
         $hasCommission = $chkComm && $chkComm->rowCount() > 0;
+        $hasSharedCartons = financialsSupportsSharedCartons($pdo);
 
         $sellExpr = $hasSell
             ? "(SELECT SUM(CASE WHEN oi.sell_price IS NOT NULL THEN oi.quantity * oi.sell_price ELSE COALESCE(oi.total_amount, oi.quantity * COALESCE(oi.unit_price, 0)) END) FROM order_items oi WHERE oi.order_id = o.id)"
@@ -263,11 +418,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $params[] = $customerId;
         }
         if ($supplierId) {
-            if ($hasItemSupplier) {
+            if ($hasItemSupplier && !$hasSharedCartons) {
                 $sql .= " AND (o.supplier_id = ? OR EXISTS (SELECT 1 FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = o.id AND COALESCE(oi.supplier_id, p.supplier_id) = ?))";
                 $params[] = $supplierId;
                 $params[] = $supplierId;
-            } else {
+            } elseif (!$hasItemSupplier) {
                 $sql .= " AND o.supplier_id = ?";
                 $params[] = $supplierId;
             }
@@ -277,29 +432,46 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if ($params) $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+        $itemAnalysis = null;
+        if (!empty($rows) && (($supplierId && $hasItemSupplier) || ($hasCommission && $hasItemSupplier))) {
+            $itemAnalysis = financialsBuildOrderItemAnalysis($pdo, array_map('intval', array_column($rows, 'id')));
+        }
+        if ($supplierId && $hasItemSupplier && $itemAnalysis !== null) {
+            $filterSupplierId = (int) $supplierId;
+            $rows = array_values(array_filter($rows, static function (array $row) use ($itemAnalysis, $filterSupplierId): bool {
+                $orderId = (int) ($row['id'] ?? 0);
+                $orderSuppliers = $itemAnalysis['order_suppliers'][$orderId] ?? [];
+                if (in_array($filterSupplierId, $orderSuppliers, true)) {
+                    return true;
+                }
+                return (int) ($row['supplier_id'] ?? 0) === $filterSupplierId;
+            }));
+        }
+
         $orderCommissions = [];
         if ($hasCommission && $hasItemSupplier && !empty($rows)) {
-            $orderIds = array_column($rows, 'id');
-            $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
-            $itemSql = "SELECT oi.order_id, oi.quantity, oi.buy_price, oi.sell_price, oi.unit_price,
-                COALESCE(oi.supplier_id, p.supplier_id) as eff_supplier_id,
-                s.commission_rate, s.commission_type, s.commission_applied_on
-                FROM order_items oi
-                LEFT JOIN products p ON oi.product_id = p.id
-                LEFT JOIN suppliers s ON s.id = COALESCE(oi.supplier_id, p.supplier_id)
-                WHERE oi.order_id IN ($placeholders)";
-            $itemStmt = $pdo->prepare($itemSql);
-            $itemStmt->execute($orderIds);
-            $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
-            foreach ($items as $it) {
-                $oid = (int) $it['order_id'];
-                $sid = $it['eff_supplier_id'] ? (int) $it['eff_supplier_id'] : null;
-                $rate = (float) ($it['commission_rate'] ?? 0);
-                $type = $it['commission_type'] ?? 'percentage';
-                $appliedOn = $it['commission_applied_on'] ?? 'buy_value';
+            if ($itemAnalysis === null) {
+                $itemAnalysis = financialsBuildOrderItemAnalysis($pdo, array_map('intval', array_column($rows, 'id')));
+            }
+            $remainingOrderIds = array_fill_keys(array_map('intval', array_column($rows, 'id')), true);
+            $supplierMeta = [];
+            $supplierStmt = $pdo->query("SELECT id, commission_rate, commission_type, commission_applied_on FROM suppliers");
+            foreach ($supplierStmt->fetchAll(PDO::FETCH_ASSOC) as $supplierRow) {
+                $supplierMeta[(int) $supplierRow['id']] = $supplierRow;
+            }
+            foreach (($itemAnalysis['lines'] ?? []) as $it) {
+                $oid = (int) ($it['order_id'] ?? 0);
+                if (!isset($remainingOrderIds[$oid])) {
+                    continue;
+                }
+                $sid = !empty($it['supplier_id']) ? (int) $it['supplier_id'] : null;
+                $meta = $sid ? ($supplierMeta[$sid] ?? null) : null;
+                $rate = (float) ($meta['commission_rate'] ?? 0);
+                $type = $meta['commission_type'] ?? 'percentage';
+                $appliedOn = $meta['commission_applied_on'] ?? 'buy_value';
                 if (!$rate || !$sid) continue;
-                $buyVal = (float) ($it['quantity'] ?? 0) * (float) ($it['buy_price'] ?? $it['unit_price'] ?? 0);
-                $sellVal = (float) ($it['quantity'] ?? 0) * (float) ($it['sell_price'] ?? $it['unit_price'] ?? 0);
+                $buyVal = (float) ($it['buy_total'] ?? 0);
+                $sellVal = (float) ($it['sell_total'] ?? 0);
                 $base = $appliedOn === 'sell_value' ? $sellVal : $buyVal;
                 if ($type === 'fixed') {
                     if (!isset($orderCommissions[$oid])) $orderCommissions[$oid] = ['pct' => 0, 'fixed' => []];
@@ -329,6 +501,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $totalBuy = 0;
         $totalCommission = 0;
         foreach ($rows as &$r) {
+            $supplierNames = [];
+            if ($itemAnalysis !== null) {
+                $supplierNames = $itemAnalysis['order_supplier_names'][(int) ($r['id'] ?? 0)] ?? [];
+            }
+            $r['supplier_name_display'] = financialsBuildSupplierDisplay($supplierNames, (string) ($r['supplier_name'] ?? ''));
+            if ($r['supplier_name_display'] !== '') {
+                $r['supplier_name'] = $r['supplier_name_display'];
+            }
             $r['order_total'] = (float) ($r['order_total'] ?? 0);
             $r['buy_total'] = (float) ($r['buy_total'] ?? $r['order_total']);
             $commission = 0.0;

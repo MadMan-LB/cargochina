@@ -20,12 +20,24 @@
     ];
 
     async function api(path, opts = {}) {
-        const fetchOpts = { credentials: "same-origin", ...opts };
-        if (opts.method === "POST" && opts.body) {
+        const method = String(opts.method || "GET").toUpperCase();
+        let body = opts.body ?? null;
+        if (typeof body === "string" && body.trim() !== "") {
+            try {
+                body = JSON.parse(body);
+            } catch (_) {
+            }
+        }
+        if (typeof window.api === "function") {
+            return window.api(method, path, body);
+        }
+        const fetchOpts = { credentials: "same-origin", method };
+        if (body && (method === "POST" || method === "PUT")) {
             fetchOpts.headers = { "Content-Type": "application/json" };
+            fetchOpts.body = JSON.stringify(body);
         }
         const r = await fetch(API + path, fetchOpts);
-        const d = await r.json();
+        const d = await r.json().catch(() => ({}));
         if (!r.ok || d.error) throw new Error(d.message || "Request failed");
         return d;
     }
@@ -92,6 +104,81 @@
 
     function getFilterSummary(parts, fallback) {
         return parts.length ? parts.join(" | ") : fallback;
+    }
+
+    function getFinancialSupplierDisplay(order) {
+        return String(
+            order?.supplier_name_display ||
+                order?.item_supplier_names ||
+                order?.supplier_name ||
+                "—",
+        ).trim();
+    }
+
+    function getFinancialOrderDisplayRows(order) {
+        return (order?.items || []).flatMap((item) => {
+            const sharedContents = Array.isArray(item?.shared_carton_contents)
+                ? item.shared_carton_contents
+                : [];
+            if (!item?.shared_carton_enabled || sharedContents.length === 0) {
+                return [
+                    {
+                        description:
+                            item?.description_en ||
+                            item?.description_cn ||
+                            "—",
+                        itemNo: item?.item_no || item?.shipping_code || "—",
+                        quantity: item?.quantity || item?.cartons || "0",
+                        sellPrice:
+                            item?.sell_price != null
+                                ? item.sell_price
+                                : item?.unit_price,
+                        totalAmount:
+                            item?.total_amount != null
+                                ? item.total_amount
+                                : (parseFloat(item?.quantity || 0) || 0) *
+                                  (parseFloat(
+                                      item?.sell_price ?? item?.unit_price ?? 0,
+                                  ) || 0),
+                        supplierName: getFinancialSupplierDisplay(item),
+                        isSummary: false,
+                    },
+                ];
+            }
+
+            return [
+                {
+                    description:
+                        financialsT("Shared carton") +
+                        (item?.shared_carton_code
+                            ? ` ${item.shared_carton_code}`
+                            : item?.item_no
+                              ? ` ${item.item_no}`
+                              : ""),
+                    itemNo: item?.shared_carton_code || item?.item_no || "—",
+                    quantity: item?.quantity || item?.cartons || "0",
+                    sellPrice: null,
+                    totalAmount: null,
+                    supplierName: getFinancialSupplierDisplay(item),
+                    isSummary: true,
+                },
+                ...sharedContents.map((content) => ({
+                    description:
+                        content?.description_en ||
+                        content?.description_cn ||
+                        "—",
+                    itemNo: content?.item_no || item?.item_no || "—",
+                    quantity: content?.quantity || "0",
+                    sellPrice:
+                        content?.sell_price != null
+                            ? content.sell_price
+                            : content?.unit_price,
+                    totalAmount: content?.total_amount,
+                    supplierName: String(content?.supplier_name || "—").trim(),
+                    isSummary: false,
+                })),
+            ];
+        });
     }
 
     function getSelectedProfitStatuses() {
@@ -345,7 +432,7 @@
             <tr>
                 <td><a href="/cargochina/orders.php?id=${r.id}">#${r.id}</a></td>
                 <td>${escapeHtml(r.customer_name || "")}</td>
-                <td>${escapeHtml(r.supplier_name || "—")}</td>
+                <td>${escapeHtml(getFinancialSupplierDisplay(r))}</td>
                 <td>${getStatusBadge(r.status || "")}</td>
                 <td>${formatNum(r.order_total)}</td>
                 <td>${formatNum(r.buy_total)}</td>
@@ -603,10 +690,10 @@
 
     function formatNum(n) {
         if (n == null || n === "") return "—";
-        return parseFloat(n).toLocaleString(undefined, {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-        });
+        if (typeof window.formatDisplayAmount === "function") {
+            return window.formatDisplayAmount(n) || "0";
+        }
+        return String(parseFloat(n || 0) || 0);
     }
     function escapeHtml(s) {
         if (!s) return "";
@@ -634,10 +721,95 @@
         return ac;
     }
 
+    function formatPaymentAccountText(row) {
+        if (!row) return financialsT("No saved supplier account selected.");
+        const method =
+            row.method ||
+            (typeof normalizePaymentMethodName === "function"
+                ? normalizePaymentMethodName(row.label || row.type || "")
+                : "") ||
+            financialsT("Payment");
+        const label =
+            row.account_label && row.account_label !== method
+                ? `${method} - ${row.account_label}`
+                : method;
+        const detail = row.value || "—";
+        const currency = row.currency || "RMB";
+        return `${label} | ${currency} | ${detail}`;
+    }
+
+    function renderPaymentLinksSummary(links) {
+        const rows = Array.isArray(links) ? links : [];
+        if (!rows.length) {
+            return financialsT("No saved payment accounts.");
+        }
+        return rows.map(formatPaymentAccountText).join(" | ");
+    }
+
+    function populateFinSupplierAccountOptions(links) {
+        const select = document.getElementById("finPayAccountOption");
+        if (!select) return;
+        const rows = Array.isArray(links) ? links : [];
+        select.innerHTML = `<option value="">${escapeHtml(financialsT("Choose saved account..."))}</option>`;
+        rows.forEach((row, index) => {
+            const option = document.createElement("option");
+            option.value = String(index);
+            option.textContent = formatPaymentAccountText(row);
+            option.dataset.method = row.method || "";
+            option.dataset.detail = row.value || "";
+            option.dataset.currency = row.currency || "RMB";
+            option.dataset.qr = row.qr_image_path || "";
+            option.dataset.label = row.account_label || row.label || row.method || "";
+            select.appendChild(option);
+        });
+        if (rows.length === 1) {
+            select.value = "0";
+        }
+        syncFinSupplierAccountSelection();
+    }
+
+    function syncFinSupplierAccountSelection() {
+        const select = document.getElementById("finPayAccountOption");
+        const detailInput = document.getElementById("finPayAccountDetail");
+        const qrWrap = document.getElementById("finPayAccountQrWrap");
+        if (!select || !detailInput || !qrWrap) return;
+        const option = select.selectedOptions?.[0] || null;
+        if (!option || !option.value) {
+            detailInput.value = "";
+            qrWrap.classList.add("d-none");
+            qrWrap.innerHTML = "";
+            return;
+        }
+        const method = option.dataset.method || "";
+        const currency = option.dataset.currency || "RMB";
+        const detail = option.dataset.detail || "";
+        detailInput.value = detail;
+        const channelEl = document.getElementById("finPayChannel");
+        const currencyEl = document.getElementById("finPayCurrency");
+        if (channelEl && !channelEl.value && method) {
+            channelEl.value = method;
+        }
+        if (currencyEl && option.dataset.currency) {
+            currencyEl.value = currency;
+        }
+        const qrPath = option.dataset.qr || "";
+        if (!qrPath) {
+            qrWrap.classList.add("d-none");
+            qrWrap.innerHTML = "";
+            return;
+        }
+        qrWrap.classList.remove("d-none");
+        qrWrap.innerHTML = `
+            <div class="fw-semibold mb-1">${escapeHtml(financialsT("Saved QR image"))}</div>
+            <img src="/cargochina/backend/${escapeHtml(qrPath)}" alt="${escapeHtml(financialsT("Payment QR"))}" class="img-thumbnail" style="max-width: 180px;">
+        `;
+    }
+
     window.openFinDepositModal = function (customerId, name) {
         document.getElementById("finDepCustomerId").value = customerId;
         document.getElementById("finDepCustomerName").textContent = name;
         document.getElementById("finDepAmount").value = "";
+        document.getElementById("finDepCurrency").value = "RMB";
         document.getElementById("finDepMethod").value = "";
         document.getElementById("finDepReference").value = "";
         document.getElementById("finDepNotes").value = "";
@@ -653,6 +825,9 @@
                 minChars: 0,
             });
         }
+        refreshUnsavedBaseline?.(
+            document.querySelector("#finDepositModal .modal-body"),
+        );
         new bootstrap.Modal(document.getElementById("finDepositModal")).show();
     };
 
@@ -661,7 +836,13 @@
         document.getElementById("finPaySupplierName").textContent = name;
         document.getElementById("finPayInvoiceAmount").value = "";
         document.getElementById("finPayAmount").value = "";
+        document.getElementById("finPayCurrency").value = "RMB";
         document.getElementById("finPayChannel").value = "";
+        document.getElementById("finPayAccountOption").innerHTML =
+            `<option value="">${escapeHtml(financialsT("Choose saved account..."))}</option>`;
+        document.getElementById("finPayAccountDetail").value = "";
+        document.getElementById("finPayAccountQrWrap").classList.add("d-none");
+        document.getElementById("finPayAccountQrWrap").innerHTML = "";
         document.getElementById("finPayMarkedFull").checked = false;
         document.getElementById("finPayNotes").value = "";
         document.getElementById("finPaySettlementNote").value = "";
@@ -700,18 +881,23 @@
                           days: supplier.payment_facility_days,
                       })
                     : financialsT("No payment facility saved");
-                const links = (supplier.payment_links || [])
-                    .map((row) => `${row.label || "Payment"}: ${row.value || "—"}`)
-                    .join(" | ");
+                const links = renderPaymentLinksSummary(supplier.payment_links);
                 document.getElementById("finPaySupplierContext").textContent =
                     `${facility}${links ? " | " + links : ""}`;
+                populateFinSupplierAccountOptions(supplier.payment_links || []);
                 renderFinSupplierOrders(ordersRes.data || []);
+                refreshUnsavedBaseline?.(
+                    document.querySelector("#finPaymentModal .modal-body"),
+                );
             })
             .catch(() => {
                 document.getElementById("finPaySupplierContext").textContent =
                     financialsT("Could not load supplier payment options.");
                 document.getElementById("finPayOrdersBody").innerHTML =
                     `<tr><td colspan="6" class="text-center text-muted py-3">${escapeHtml(financialsT("Could not load supplier orders."))}</td></tr>`;
+                refreshUnsavedBaseline?.(
+                    document.querySelector("#finPaymentModal .modal-body"),
+                );
             });
         new bootstrap.Modal(document.getElementById("finPaymentModal")).show();
     };
@@ -785,6 +971,8 @@
         try {
             const res = await api("/orders/" + orderId);
             const order = res.data || {};
+            const displayRows = getFinancialOrderDisplayRows(order);
+            const supplierDisplay = getFinancialSupplierDisplay(order);
             const attachments = (order.attachments || [])
                 .map(
                     (attachment) =>
@@ -802,7 +990,7 @@
                     <div class="col-lg-4">
                         <div class="border rounded p-3 h-100">
                             <div><strong>Customer:</strong> ${escapeHtml(order.customer_name || "—")}</div>
-                            <div><strong>Supplier:</strong> ${escapeHtml(order.supplier_name || "—")}</div>
+                            <div><strong>Supplier:</strong> ${escapeHtml(supplierDisplay)}</div>
                             <div><strong>Status:</strong> ${getStatusBadge(order.status || "")}</div>
                             <div><strong>Expected Ready:</strong> ${escapeHtml(order.expected_ready_date || "—")}</div>
                             <div><strong>Destination:</strong> ${escapeHtml(order.destination_country_name || "—")}</div>
@@ -816,14 +1004,14 @@
                                 <table class="table table-sm">
                                     <thead><tr><th>Item</th><th>Shipping</th><th>Qty</th><th>Sell</th></tr></thead>
                                     <tbody>
-                                        ${(order.items || [])
+                                        ${displayRows
                                             .map(
-                                                (item) => `
-                                            <tr>
-                                                <td>${escapeHtml(item.description_en || item.description_cn || "—")}</td>
-                                                <td class="small text-muted">${escapeHtml(item.item_no || item.shipping_code || "—")}</td>
-                                                <td>${escapeHtml(String(item.quantity || item.cartons || "0"))}</td>
-                                                <td>${escapeHtml(order.currency || "USD")} ${formatNum(item.total_amount || (parseFloat(item.quantity || 0) * parseFloat(item.sell_price || item.unit_price || 0)))}</td>
+                                                (row) => `
+                                            <tr class="${row.isSummary ? "table-light" : ""}">
+                                                <td class="${row.isSummary ? "fw-semibold" : row.supplierName ? "ps-3" : ""}">${escapeHtml(row.description || "—")}</td>
+                                                <td class="small text-muted">${escapeHtml(row.itemNo || "—")}</td>
+                                                <td>${escapeHtml(String(row.quantity || "0"))}</td>
+                                                <td>${row.totalAmount != null ? `${escapeHtml(order.currency || "USD")} ${formatNum(row.totalAmount)}` : "—"}</td>
                                             </tr>`,
                                             )
                                             .join("") || `<tr><td colspan="4" class="text-muted">${escapeHtml(financialsT("No items."))}</td></tr>`}
@@ -852,7 +1040,7 @@
         const customerId = document.getElementById("finDepCustomerId").value;
         const amount = parseFloat(document.getElementById("finDepAmount").value || 0);
         if (amount <= 0) {
-            alert(financialsT("Amount must be positive"));
+            showToast(financialsT("Amount must be positive"), "danger");
             return;
         }
         const orderVal = (finDepOrderAc?.getSelectedId?.() || document.getElementById("finDepOrderId").value?.trim() || "").replace(/^#/, "");
@@ -869,12 +1057,14 @@
         try {
             btn.disabled = true;
             await api("/customers/" + customerId + "/deposits", { method: "POST", body: JSON.stringify(payload) });
-            if (typeof showToast === "function") showToast(financialsT("Deposit recorded"));
-            else alert(financialsT("Deposit recorded"));
+            showToast(financialsT("Deposit recorded"));
+            refreshUnsavedBaseline?.(
+                document.querySelector("#finDepositModal .modal-body"),
+            );
             bootstrap.Modal.getInstance(document.getElementById("finDepositModal")).hide();
             loadBalances();
         } catch (e) {
-            alert(e.message || financialsT("Failed to record deposit"));
+            showToast(e.message || financialsT("Failed to record deposit"), "danger");
         } finally {
             btn.disabled = false;
         }
@@ -884,7 +1074,7 @@
         const supplierId = document.getElementById("finPaySupplierId").value;
         const amount = parseFloat(document.getElementById("finPayAmount").value || 0);
         if (amount <= 0) {
-            alert(financialsT("Amount must be positive"));
+            showToast(financialsT("Amount must be positive"), "danger");
             return;
         }
         const orderVal = (finPayOrderAc?.getSelectedId?.() || document.getElementById("finPayOrderId").value?.trim() || "").replace(/^#/, "");
@@ -895,6 +1085,15 @@
             currency: document.getElementById("finPayCurrency").value,
             payment_channel:
                 document.getElementById("finPayChannel").value || null,
+            payment_account_label:
+                document.getElementById("finPayAccountOption")?.selectedOptions?.[0]
+                    ?.dataset?.label || null,
+            payment_account_value:
+                document.getElementById("finPayAccountOption")?.selectedOptions?.[0]
+                    ?.dataset?.detail || null,
+            payment_account_qr_path:
+                document.getElementById("finPayAccountOption")?.selectedOptions?.[0]
+                    ?.dataset?.qr || null,
             order_id: orderId,
             notes: document.getElementById("finPayNotes").value || null,
             marked_full_payment: document.getElementById("finPayMarkedFull").checked ? 1 : 0,
@@ -913,12 +1112,14 @@
         try {
             btn.disabled = true;
             await api("/suppliers/" + supplierId + "/payments", { method: "POST", body: JSON.stringify(payload) });
-            if (typeof showToast === "function") showToast(financialsT("Payment recorded"));
-            else alert(financialsT("Payment recorded"));
+            showToast(financialsT("Payment recorded"));
+            refreshUnsavedBaseline?.(
+                document.querySelector("#finPaymentModal .modal-body"),
+            );
             bootstrap.Modal.getInstance(document.getElementById("finPaymentModal")).hide();
             loadBalances();
         } catch (e) {
-            alert(e.message || financialsT("Failed to record payment"));
+            showToast(e.message || financialsT("Failed to record payment"), "danger");
         } finally {
             btn.disabled = false;
         }
@@ -954,7 +1155,13 @@
             if (!balancesLoadedOnce) loadBalances();
         });
 
+    document
+        .getElementById("finPayAccountOption")
+        ?.addEventListener("change", syncFinSupplierAccountSelection);
+
     document.addEventListener("DOMContentLoaded", function () {
+        registerUnsavedChangesGuard?.("#finDepositModal .modal-body");
+        registerUnsavedChangesGuard?.("#finPaymentModal .modal-body");
         profitCustomerAc = bindEntityAutocomplete(
             "profitCustomerSearch",
             "profitCustomerId",

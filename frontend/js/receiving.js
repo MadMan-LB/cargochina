@@ -11,6 +11,14 @@ function receivingT(text, replacements = null) {
     return typeof t === "function" ? t(text, replacements) : text;
 }
 
+function fmtReceivingNumber(value, maxDecimals = 6) {
+    if (typeof window.formatDisplayNumber === "function") {
+        return window.formatDisplayNumber(value, { maxDecimals }) || "0";
+    }
+    const numeric = parseFloat(value);
+    return Number.isFinite(numeric) ? String(numeric) : "0";
+}
+
 function setReceivingMetric(id, value) {
     const el = document.getElementById(id);
     if (el) el.textContent = value;
@@ -201,6 +209,7 @@ function updateReceivingOverview() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+    registerUnsavedChangesGuard?.("#receiveForm");
     setupFilterAutocomplete();
     setupReceivingFilterControls();
     setReceivingStatusFilter(RECEIVING_DEFAULT_STATUSES);
@@ -219,6 +228,28 @@ document.addEventListener("DOMContentLoaded", () => {
         ?.addEventListener("click", handleReceiveClick);
     const input = document.getElementById("receivePhotos");
     if (input) input.onchange = () => handleReceivePhotos(input.files);
+    bindClipboardImagePaste?.(
+        document.getElementById("photoPreview") ||
+            document.getElementById("receiveForm"),
+        async (files) => {
+            await handleReceivePhotos(files);
+        },
+    );
+    bindClipboardImagePaste?.(
+        document.getElementById("itemLevelBody"),
+        async (files, event) => {
+            const row = event?.target?.closest?.("tr[data-order-item-id]");
+            if (!row) return;
+            const orderItemId = row.dataset.orderItemId;
+            await appendReceiveItemPhotos(orderItemId, files);
+            renderItemPhotoPreview(orderItemId);
+        },
+        {
+            requireTargetMatch: true,
+            targetMatcher: (target) =>
+                !!target.closest("tr[data-order-item-id]"),
+        },
+    );
     document
         .getElementById("actualCbm")
         ?.addEventListener("input", updateVariancePhotoAlert);
@@ -333,7 +364,7 @@ function setupReceiveDimensionInputs() {
         const h = parseFloat(hEl.value) || 0;
         if (l > 0 && w > 0 && h > 0) {
             const cbm = Math.round(((l * w * h) / 1000000) * 1e6) / 1e6;
-            cbmEl.value = cbm.toFixed(6);
+            cbmEl.value = fmtReceivingNumber(cbm, 6);
             updateVariancePhotoAlert();
         }
     };
@@ -488,6 +519,20 @@ function getFilterParams() {
     if (dt) params.set("date_to", dt);
     if (sc) params.set("shipping_code", sc);
     return params.toString();
+}
+
+async function appendReceiveItemPhotos(orderItemId, files) {
+    const list = Array.from(files || []).filter((f) =>
+        (f.type || "").startsWith("image/"),
+    );
+    if (!list.length) return;
+    for (const file of list) {
+        const path = await uploadFile(file);
+        if (path) {
+            receiveItemPhotos[orderItemId] = receiveItemPhotos[orderItemId] || [];
+            receiveItemPhotos[orderItemId].push(path);
+        }
+    }
 }
 
 function applyLocalReceivingFilters() {
@@ -675,6 +720,7 @@ function receiveOrderById(orderId) {
 
 function showReceiveForm() {
     document.getElementById("receiveForm")?.classList.remove("d-none");
+    refreshUnsavedBaseline?.(document.getElementById("receiveForm"));
 }
 
 function renderCalendar() {
@@ -874,7 +920,7 @@ function updateDeclaredSummary(order) {
                 `${i.shipping_code || "-"} ${i.cartons || 0}ctn ${i.qty_per_carton || ""}/ctn`,
         )
         .join("; ");
-    el.textContent = `${cartons} cartons, ${cbm.toFixed(6)} CBM, ${weight.toFixed(2)} kg. Items: ${itemsStr || "—"}`;
+    el.textContent = `${fmtReceivingNumber(cartons, 4)} cartons, ${fmtReceivingNumber(cbm, 6)} CBM, ${fmtReceivingNumber(weight, 4)} kg. Items: ${itemsStr || "—"}`;
 
     // Set declared values as placeholders on Actual inputs so user can verify before entering
     const ac = document.getElementById("actualCartons");
@@ -882,8 +928,8 @@ function updateDeclaredSummary(order) {
     const aw = document.getElementById("actualWeight");
     if (ac) ac.placeholder = String(cartons || "");
     if (acbm)
-        acbm.placeholder = cbm > 0 ? cbm.toFixed(6) : "Direct or from L×W×H";
-    if (aw) aw.placeholder = weight > 0 ? weight.toFixed(2) : "";
+        acbm.placeholder = cbm > 0 ? fmtReceivingNumber(cbm, 6) : "Direct or from L×W×H";
+    if (aw) aw.placeholder = weight > 0 ? fmtReceivingNumber(weight, 4) : "";
 }
 
 async function loadOrderForReceive(orderId) {
@@ -900,7 +946,7 @@ async function loadOrderForReceive(orderId) {
                 (it, i) => `
           <tr data-order-item-id="${it.id}">
             <td>${escapeHtml((typeof descText === "function" ? descText(it) : it.description_en || it.description_cn || "Item " + (i + 1)).substring(0, 40))}${it.product_high_alert_note || it.product_required_design ? `<div class="product-alert-badge mt-1" title="${escapeHtml((it.product_required_design ? "Required design. " : "") + (it.product_high_alert_note || ""))}">Alert</div>` : ""}</td>
-            <td>${it.declared_cbm || 0} CBM / ${it.declared_weight || 0} kg</td>
+            <td>${fmtReceivingNumber(it.declared_cbm || 0, 6)} CBM / ${fmtReceivingNumber(it.declared_weight || 0, 4)} kg</td>
             <td><input type="number" class="form-control form-control-sm item-actual-cartons" min="0" placeholder="0"></td>
             <td><input type="number" step="0.000001" class="form-control form-control-sm item-actual-cbm" min="0" placeholder="0"></td>
             <td><input type="number" step="0.0001" class="form-control form-control-sm item-actual-weight" min="0" placeholder="0"></td>
@@ -914,20 +960,10 @@ async function loadOrderForReceive(orderId) {
             const oiId = row.dataset.orderItemId;
             const input = row.querySelector(".item-photo-input");
             input.onchange = async (e) => {
-                const files = Array.from(e.target.files || []).filter((f) =>
-                    f.type.startsWith("image/"),
-                );
-                for (const f of files) {
-                    try {
-                        const path = await uploadFile(f);
-                        if (path) {
-                            receiveItemPhotos[oiId] =
-                                receiveItemPhotos[oiId] || [];
-                            receiveItemPhotos[oiId].push(path);
-                        }
-                    } catch (err) {
-                        showToast(err.message, "danger");
-                    }
+                try {
+                    await appendReceiveItemPhotos(oiId, e.target.files || []);
+                } catch (err) {
+                    showToast(err.message, "danger");
                 }
                 renderItemPhotoPreview(oiId);
                 e.target.value = "";
@@ -1077,6 +1113,7 @@ async function submitReceive() {
         receivePhotoPaths = [];
         receiveItemPhotos = {};
         renderReceivePhotoPreview();
+        refreshUnsavedBaseline?.(document.getElementById("receiveForm"));
     } catch (e) {
         showToast(e.message || receivingT("Request failed"), "danger");
     } finally {

@@ -136,12 +136,17 @@ require 'includes/layout.php';
         <div class="row mb-3">
           <div class="col-6"><label class="form-label">Amount *</label><input type="number" step="0.01" class="form-control" id="depAmount" required></div>
           <div class="col-6"><label class="form-label">Currency *</label><select class="form-select" id="depCurrency">
-              <option value="USD">USD</option>
               <option value="RMB">RMB</option>
+              <option value="USD">USD</option>
             </select></div>
         </div>
         <div class="row mb-3">
-          <div class="col-6"><label class="form-label">Payment Method</label><input type="text" class="form-control" id="depMethod" placeholder="Bank, Cash, etc."></div>
+          <div class="col-6"><label class="form-label">Payment Method</label><select class="form-select" id="depMethod">
+              <option value="">Choose payment method...</option>
+              <option value="WeChat">WeChat</option>
+              <option value="Alipay">Alipay</option>
+              <option value="Bank Transfer">Bank Transfer</option>
+            </select></div>
           <div class="col-6"><label class="form-label">Reference No</label><input type="text" class="form-control" id="depReference" placeholder="Receipt/TT number"></div>
         </div>
         <div class="mb-3"><label class="form-label">Order</label><input type="text" class="form-control" id="depOrderId" placeholder="Type to search order (optional)…" autocomplete="off"></div>

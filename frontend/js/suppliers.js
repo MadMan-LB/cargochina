@@ -1,10 +1,15 @@
 document.addEventListener("DOMContentLoaded", () => {
     loadSuppliers();
+    registerUnsavedChangesGuard?.("#supplierForm");
+    registerUnsavedChangesGuard?.("#paymentModal .modal-body");
     document
         .getElementById("supplierSearch")
         ?.addEventListener("keydown", (e) => {
             if (e.key === "Enter") applySupplierFilters();
         });
+    document
+        .getElementById("payAccountOption")
+        ?.addEventListener("change", syncSupplierPaymentAccountSelection);
     ["supplierPaymentFilter", "supplierSort", "supplierOrder"].forEach((id) => {
         document
             .getElementById(id)
@@ -191,34 +196,163 @@ function collectAdditionalIds() {
     return Object.keys(obj).length ? obj : null;
 }
 
-function addSupplierPaymentLinkRow(label = "", value = "") {
+function getSupplierPaymentMethods() {
+    return Array.isArray(window.STANDARD_PAYMENT_METHODS)
+        ? window.STANDARD_PAYMENT_METHODS
+        : ["WeChat", "Alipay", "Bank Transfer"];
+}
+
+function renderSupplierPaymentMethodOptions(selected = "") {
+    return getSupplierPaymentMethods()
+        .map(
+            (method) =>
+                `<option value="${escapeHtml(method)}"${method === selected ? " selected" : ""}>${escapeHtml(method)}</option>`,
+        )
+        .join("");
+}
+
+function setSupplierPaymentQrPreview(row, qrPath = "", fileName = "") {
+    const hidden = row.querySelector(".supplier-payment-link-qr");
+    const preview = row.querySelector(".supplier-payment-qr-preview");
+    if (!hidden || !preview) return;
+    hidden.value = qrPath || "";
+    if (!qrPath) {
+        preview.classList.add("d-none");
+        preview.innerHTML = "";
+        return;
+    }
+    preview.classList.remove("d-none");
+    preview.innerHTML = `
+      <div class="d-flex align-items-center gap-2 mt-2">
+        <a href="/cargochina/backend/${escapeHtml(qrPath)}" target="_blank" rel="noopener" class="d-inline-flex align-items-center gap-2 text-decoration-none">
+          <img src="/cargochina/backend/${escapeHtml(qrPath)}" alt="QR" style="width:48px;height:48px;object-fit:cover;border-radius:10px;border:1px solid #dbe4f0;">
+          <span class="small text-muted">${escapeHtml(fileName || "QR saved")}</span>
+        </a>
+        <button type="button" class="btn btn-sm btn-outline-danger supplier-payment-qr-clear">${escapeHtml("×")}</button>
+      </div>
+    `;
+    preview
+        .querySelector(".supplier-payment-qr-clear")
+        ?.addEventListener("click", () => setSupplierPaymentQrPreview(row, ""));
+}
+
+async function handleSupplierPaymentQrFiles(row, files) {
+    const list = Array.from(files || []).filter(Boolean);
+    if (!list.length) return;
+    const file = list[0];
+    const path = await uploadFile(file, { category: "supplier-payment-qr" });
+    if (!path) return;
+    setSupplierPaymentQrPreview(row, path, file.name || "QR image");
+    showToast("Payment QR uploaded");
+}
+
+function bindSupplierPaymentRow(row) {
+    const fileInput = row.querySelector(".supplier-payment-qr-input");
+    const uploadBtn = row.querySelector(".supplier-payment-qr-btn");
+    uploadBtn?.addEventListener("click", () => fileInput?.click());
+    fileInput?.addEventListener("change", async function () {
+        try {
+            await handleSupplierPaymentQrFiles(row, this.files || []);
+        } catch (e) {
+            showToast(e.message, "danger");
+        } finally {
+            this.value = "";
+        }
+    });
+    bindClipboardImagePaste?.(
+        row,
+        async (files) => {
+            try {
+                await handleSupplierPaymentQrFiles(row, files);
+            } catch (e) {
+                showToast(e.message, "danger");
+            }
+        },
+        {
+            requireTargetMatch: true,
+            targetMatcher: (target) =>
+                !!target.closest(".supplier-payment-link-row"),
+        },
+    );
+}
+
+function addSupplierPaymentLinkRow(rowData = {}) {
     const container = document.getElementById("supplierPaymentLinksContainer");
     if (!container) return;
     const idx = supplierPaymentLinkIndex++;
+    const method =
+        rowData.method ||
+        (typeof normalizePaymentMethodName === "function"
+            ? normalizePaymentMethodName(rowData.label || rowData.type || "")
+            : "") ||
+        "WeChat";
+    const currency =
+        rowData.currency === "USD" || rowData.currency === "RMB"
+            ? rowData.currency
+            : "RMB";
+    const detail = rowData.value || rowData.link || "";
+    const qrPath = rowData.qr_image_path || "";
     const row = document.createElement("div");
-    row.className = "row g-2 align-items-center";
+    row.className = "border rounded-3 p-2 supplier-payment-link-row";
     row.dataset.idx = idx;
     row.innerHTML = `
-      <div class="col-4"><input type="text" class="form-control form-control-sm supplier-payment-link-label" placeholder="WeChat / Bank / Alipay" value="${escapeHtml(label)}"></div>
-      <div class="col-7"><input type="text" class="form-control form-control-sm supplier-payment-link-value" placeholder="Account / number / URL / QR note" value="${escapeHtml(value)}"></div>
-      <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('.row').remove()">×</button></div>
+      <div class="row g-2 align-items-center">
+        <div class="col-12 col-md-3">
+          <select class="form-select form-select-sm supplier-payment-link-method">
+            ${renderSupplierPaymentMethodOptions(method)}
+          </select>
+        </div>
+        <div class="col-12 col-md-2">
+          <select class="form-select form-select-sm supplier-payment-link-currency">
+            <option value="RMB"${currency === "RMB" ? " selected" : ""}>RMB</option>
+            <option value="USD"${currency === "USD" ? " selected" : ""}>USD</option>
+          </select>
+        </div>
+        <div class="col-12 col-md-5">
+          <input type="text" class="form-control form-control-sm supplier-payment-link-value" placeholder="Account / number / URL / account detail" value="${escapeHtml(detail)}">
+          <input type="hidden" class="supplier-payment-link-qr" value="${escapeHtml(qrPath)}">
+          <input type="file" class="d-none supplier-payment-qr-input" accept="image/*,.jpg,.jpeg,.png,.webp,.jfif,.gif">
+        </div>
+        <div class="col-8 col-md-1">
+          <button type="button" class="btn btn-sm btn-outline-secondary w-100 supplier-payment-qr-btn">QR</button>
+        </div>
+        <div class="col-4 col-md-1 text-end">
+          <button type="button" class="btn btn-sm btn-outline-danger w-100" onclick="this.closest('.supplier-payment-link-row').remove()">×</button>
+        </div>
+      </div>
+      <div class="supplier-payment-qr-preview ${qrPath ? "" : "d-none"}"></div>
     `;
     container.appendChild(row);
+    bindSupplierPaymentRow(row);
+    setSupplierPaymentQrPreview(row, qrPath, rowData.file_name || "");
 }
 
 function collectSupplierPaymentLinks() {
     const rows = [];
     document
-        .querySelectorAll("#supplierPaymentLinksContainer .row")
+        .querySelectorAll("#supplierPaymentLinksContainer .supplier-payment-link-row")
         .forEach((row) => {
-            const label = row
-                .querySelector(".supplier-payment-link-label")
+            const method = row
+                .querySelector(".supplier-payment-link-method")
                 ?.value?.trim();
             const value = row
                 .querySelector(".supplier-payment-link-value")
                 ?.value?.trim();
-            if (!label && !value) return;
-            rows.push({ label: label || "Payment", value: value || "" });
+            const currency = row
+                .querySelector(".supplier-payment-link-currency")
+                ?.value?.trim();
+            const qrImagePath = row
+                .querySelector(".supplier-payment-link-qr")
+                ?.value?.trim();
+            if (!method && !value && !qrImagePath) return;
+            rows.push({
+                method: method || "Bank Transfer",
+                label: method || "Bank Transfer",
+                account_label: method || "Bank Transfer",
+                value: value || "",
+                currency: currency === "USD" ? "USD" : "RMB",
+                qr_image_path: qrImagePath || null,
+            });
         });
     return rows;
 }
@@ -228,11 +362,78 @@ function formatSupplierPaymentLinks(links) {
     if (!rows.length) return "No stored payment links yet.";
     return rows
         .map((row) => {
-            const label = row?.label || row?.type || "Payment";
+            const method =
+                row?.method ||
+                (typeof normalizePaymentMethodName === "function"
+                    ? normalizePaymentMethodName(row?.label || row?.type || "")
+                    : "") ||
+                "Bank Transfer";
             const value = row?.value || row?.link || "—";
-            return `${label}: ${value}`;
+            const currency = row?.currency || "RMB";
+            return `${method} (${currency}): ${value}`;
         })
         .join(" | ");
+}
+
+function populateSupplierPaymentAccountOptions(links) {
+    const select = document.getElementById("payAccountOption");
+    if (!select) return;
+    const rows = Array.isArray(links) ? links : [];
+    select.innerHTML = '<option value="">Choose saved account...</option>';
+    rows.forEach((row, index) => {
+        const option = document.createElement("option");
+        const method =
+            row?.method ||
+            (typeof normalizePaymentMethodName === "function"
+                ? normalizePaymentMethodName(row?.label || row?.type || "")
+                : "") ||
+            "Bank Transfer";
+        option.value = String(index);
+        option.dataset.method = method;
+        option.dataset.detail = row?.value || row?.link || "";
+        option.dataset.currency = row?.currency || "RMB";
+        option.dataset.qr = row?.qr_image_path || "";
+        option.dataset.label = row?.account_label || row?.label || method;
+        option.textContent = `${method} (${option.dataset.currency}) - ${option.dataset.detail || "—"}`;
+        select.appendChild(option);
+    });
+    if (rows.length === 1) {
+        select.value = "0";
+    }
+    syncSupplierPaymentAccountSelection();
+}
+
+function syncSupplierPaymentAccountSelection() {
+    const select = document.getElementById("payAccountOption");
+    const detailInput = document.getElementById("payAccountDetail");
+    const qrWrap = document.getElementById("payAccountQrWrap");
+    if (!select || !detailInput || !qrWrap) return;
+    const option = select.selectedOptions?.[0] || null;
+    if (!option || !option.value) {
+        detailInput.value = "";
+        qrWrap.classList.add("d-none");
+        qrWrap.innerHTML = "";
+        return;
+    }
+    detailInput.value = option.dataset.detail || "";
+    const channelEl = document.getElementById("payChannel");
+    const currencyEl = document.getElementById("payCurrency");
+    if (channelEl && option.dataset.method) {
+        channelEl.value = option.dataset.method;
+    }
+    if (currencyEl && option.dataset.currency) {
+        currencyEl.value = option.dataset.currency;
+    }
+    if (!option.dataset.qr) {
+        qrWrap.classList.add("d-none");
+        qrWrap.innerHTML = "";
+        return;
+    }
+    qrWrap.classList.remove("d-none");
+    qrWrap.innerHTML = `
+      <div class="fw-semibold mb-1">Saved QR image</div>
+      <img src="/cargochina/backend/${escapeHtml(option.dataset.qr)}" alt="Payment QR" class="img-thumbnail" style="max-width: 180px;">
+    `;
 }
 
 function openSupplierForm() {
@@ -253,6 +454,7 @@ function openSupplierForm() {
     renderSupplierAttachments();
     addAdditionalIdRow();
     addSupplierPaymentLinkRow();
+    refreshUnsavedBaseline?.(document.getElementById("supplierForm"));
 }
 
 async function editSupplier(id) {
@@ -290,13 +492,12 @@ async function editSupplier(id) {
             addAdditionalIdRow();
         }
         if ((d.payment_links || []).length) {
-            d.payment_links.forEach((row) =>
-                addSupplierPaymentLinkRow(row.label || "", row.value || ""),
-            );
+            d.payment_links.forEach((row) => addSupplierPaymentLinkRow(row));
         } else {
             addSupplierPaymentLinkRow();
         }
         await loadSupplierAttachments(id);
+        refreshUnsavedBaseline?.(document.getElementById("supplierForm"));
         new bootstrap.Modal(document.getElementById("supplierModal")).show();
     } catch (e) {
         showToast(e.message, "danger");
@@ -356,9 +557,12 @@ async function saveSupplier() {
             showToast("Supplier created. You can now add documents and photos.");
         }
         if (id) {
+            refreshUnsavedBaseline?.(document.getElementById("supplierForm"));
             bootstrap.Modal.getInstance(
                 document.getElementById("supplierModal"),
             ).hide();
+        } else {
+            refreshUnsavedBaseline?.(document.getElementById("supplierForm"));
         }
         loadSuppliers();
     } catch (e) {
@@ -444,6 +648,7 @@ window.deleteSupplierAttachment = async function deleteSupplierAttachment(
 
 document.addEventListener("DOMContentLoaded", () => {
     const input = document.getElementById("supplierAttachmentInput");
+    const section = document.getElementById("supplierAttachmentSection");
     if (!input) return;
     input.addEventListener("change", async function () {
         const supplierId = document.getElementById("supplierId")?.value;
@@ -479,6 +684,43 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         this.value = "";
     });
+    bindClipboardImagePaste?.(
+        section || input,
+        async (files) => {
+            const supplierId = document.getElementById("supplierId")?.value;
+            if (!supplierId) {
+                showToast(
+                    "Save supplier first to add documents and photos",
+                    "warning",
+                );
+                return;
+            }
+            for (const file of Array.from(files || [])) {
+                try {
+                    const path = await uploadFile(file);
+                    if (!path) continue;
+                    await api("POST", "/design-attachments", {
+                        entity_type: "supplier",
+                        entity_id: parseInt(supplierId, 10),
+                        file_path: path,
+                        file_type:
+                            (file.name || "").split(".").pop()?.toLowerCase() ||
+                            null,
+                        internal_note: file.name || "Supplier attachment",
+                    });
+                } catch (e) {
+                    showToast(e.message, "danger");
+                }
+            }
+            await loadSupplierAttachments(supplierId);
+            showToast("Supplier attachments updated");
+        },
+        {
+            requireTargetMatch: true,
+            targetMatcher: (target) =>
+                !!target.closest("#supplierAttachmentSection"),
+        },
+    );
 });
 
 function openPaymentModal(supplierId, name) {
@@ -486,7 +728,13 @@ function openPaymentModal(supplierId, name) {
     document.getElementById("paymentSupplierName").textContent = name;
     document.getElementById("payInvoiceAmount").value = "";
     document.getElementById("payAmount").value = "";
+    document.getElementById("payCurrency").value = "RMB";
     document.getElementById("payChannel").value = "";
+    document.getElementById("payAccountOption").innerHTML =
+        '<option value="">Choose saved account...</option>';
+    document.getElementById("payAccountDetail").value = "";
+    document.getElementById("payAccountQrWrap").classList.add("d-none");
+    document.getElementById("payAccountQrWrap").innerHTML = "";
     document.getElementById("payOrderId").value = "";
     document.getElementById("payNotes").value = "";
     document.getElementById("paySettlementNote").value = "";
@@ -504,10 +752,17 @@ function openPaymentModal(supplierId, name) {
             const links = formatSupplierPaymentLinks(supplier.payment_links);
             document.getElementById("paymentSupplierContext").textContent =
                 `${facility} | ${links}`;
+            populateSupplierPaymentAccountOptions(supplier.payment_links || []);
+            refreshUnsavedBaseline?.(
+                document.querySelector("#paymentModal .modal-body"),
+            );
         })
         .catch(() => {
             document.getElementById("paymentSupplierContext").textContent =
                 "Could not load supplier payment options.";
+            refreshUnsavedBaseline?.(
+                document.querySelector("#paymentModal .modal-body"),
+            );
         });
     new bootstrap.Modal(document.getElementById("paymentModal")).show();
 }
@@ -559,6 +814,15 @@ async function submitPayment() {
         currency: document.getElementById("payCurrency").value,
         payment_channel:
             document.getElementById("payChannel").value || null,
+        payment_account_label:
+            document.getElementById("payAccountOption")?.selectedOptions?.[0]
+                ?.dataset?.label || null,
+        payment_account_value:
+            document.getElementById("payAccountOption")?.selectedOptions?.[0]
+                ?.dataset?.detail || null,
+        payment_account_qr_path:
+            document.getElementById("payAccountOption")?.selectedOptions?.[0]
+                ?.dataset?.qr || null,
         order_id: document.getElementById("payOrderId").value || null,
         marked_full_payment: document.getElementById("payMarkedFull").checked,
         payment_type: document.getElementById("payMarkedFull").checked
@@ -576,6 +840,9 @@ async function submitPayment() {
         setLoading(btn, true);
         await api("POST", "/suppliers/" + supplierId + "/payments", payload);
         showToast("Payment recorded");
+        refreshUnsavedBaseline?.(
+            document.querySelector("#paymentModal .modal-body"),
+        );
         bootstrap.Modal.getInstance(
             document.getElementById("paymentModal"),
         ).hide();
