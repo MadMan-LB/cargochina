@@ -4,38 +4,44 @@
  * CLMS Configuration - single source of truth for thresholds and policies
  */
 
-function clmsNormalizeAppUrl(?string $value): string
-{
-    $value = trim((string) $value);
-    if ($value === '') {
-        return '';
+if (!function_exists('clmsNormalizeAppUrl')) {
+    function clmsNormalizeAppUrl(?string $value): string
+    {
+        $value = trim((string) $value);
+        if ($value === '') {
+            return '';
+        }
+        return rtrim($value, '/');
     }
-    return rtrim($value, '/');
 }
 
-function clmsInferAppUrl(): string
-{
-    if (!empty($_SERVER['HTTP_HOST'])) {
-        $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-        $host = $_SERVER['HTTP_HOST'];
-        $requestUri = $_SERVER['REQUEST_URI'] ?? '';
-        $basePath = (strpos($requestUri, '/cargochina') === 0) ? '/cargochina' : '';
-        return $proto . '://' . $host . $basePath;
+if (!function_exists('clmsInferAppUrl')) {
+    function clmsInferAppUrl(): string
+    {
+        if (!empty($_SERVER['HTTP_HOST'])) {
+            $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+            $host = $_SERVER['HTTP_HOST'];
+            $requestUri = $_SERVER['REQUEST_URI'] ?? '';
+            $basePath = (strpos($requestUri, '/cargochina') === 0) ? '/cargochina' : '';
+            return $proto . '://' . $host . $basePath;
+        }
+        return 'http://localhost/cargochina';
     }
-    return 'http://localhost/cargochina';
 }
 
-function clmsResolveAppUrl(?string $value, ?string $fallback = null): string
-{
-    $normalized = clmsNormalizeAppUrl($value);
-    if ($normalized !== '') {
-        return $normalized;
+if (!function_exists('clmsResolveAppUrl')) {
+    function clmsResolveAppUrl(?string $value, ?string $fallback = null): string
+    {
+        $normalized = clmsNormalizeAppUrl($value);
+        if ($normalized !== '') {
+            return $normalized;
+        }
+        $normalizedFallback = clmsNormalizeAppUrl($fallback);
+        if ($normalizedFallback !== '') {
+            return $normalizedFallback;
+        }
+        return clmsInferAppUrl();
     }
-    $normalizedFallback = clmsNormalizeAppUrl($fallback);
-    if ($normalizedFallback !== '') {
-        return $normalizedFallback;
-    }
-    return clmsInferAppUrl();
 }
 
 $rootDir = dirname(__DIR__, 2);
@@ -63,8 +69,8 @@ $base = [
     'notification_channels' => array_map('trim', explode(',', $_ENV['NOTIFICATION_CHANNELS'] ?? 'dashboard')),
     'upload_max_mb' => (float) ($_ENV['UPLOAD_MAX_MB'] ?? 8),
     'upload_max_size' => (int) ($_ENV['UPLOAD_MAX_SIZE'] ?? (int)(($_ENV['UPLOAD_MAX_MB'] ?? 8) * 1048576)),
-    'upload_allowed_types' => array_map('trim', explode(',', $_ENV['UPLOAD_ALLOWED_TYPES'] ?? 'jpg,jpeg,png,webp,gif,pdf')),
-    'upload_allowed_extensions' => array_map('trim', explode(',', $_ENV['UPLOAD_ALLOWED_TYPES'] ?? 'jpg,jpeg,png,webp,gif,pdf')),
+    'upload_allowed_types' => array_map('trim', explode(',', $_ENV['UPLOAD_ALLOWED_TYPES'] ?? 'jpg,jpeg,png,webp,jfif,gif,pdf')),
+    'upload_allowed_extensions' => array_map('trim', explode(',', $_ENV['UPLOAD_ALLOWED_TYPES'] ?? 'jpg,jpeg,png,webp,jfif,gif,pdf')),
     'tracking_api_base_url' => trim($_ENV['TRACKING_API_BASE_URL'] ?? ''),
     'tracking_api_token' => trim($_ENV['TRACKING_API_TOKEN'] ?? ''),
     'tracking_api_timeout_sec' => (int) ($_ENV['TRACKING_API_TIMEOUT_SEC'] ?? 15),

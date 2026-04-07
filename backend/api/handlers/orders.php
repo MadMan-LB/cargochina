@@ -208,6 +208,33 @@ function normalizeOrderItemsForPersistence(PDO $pdo, int $customerId, ?int $dest
     return OrderItemNumberingService::prepareItemsForPersistence($items, $currentStatus, $shippingCode, $defaultSupplierId);
 }
 
+function orderHandleLifecycleTransition(string $action, string $currentStatus, string $targetStatus): void
+{
+    if ($currentStatus === $targetStatus) {
+        jsonResponse([
+            'data' => [
+                'status' => $targetStatus,
+                'already_applied' => true,
+            ],
+            'message' => $action === 'submit'
+                ? 'Order already submitted'
+                : 'Order already approved',
+        ]);
+    }
+
+    try {
+        OrderStateService::validateTransition($currentStatus, $targetStatus);
+    } catch (RuntimeException $e) {
+        jsonError(
+            $action === 'submit'
+                ? 'Only draft orders can be submitted.'
+                : 'Only submitted orders can be approved.',
+            400,
+            ['status' => "Current order status is $currentStatus."]
+        );
+    }
+}
+
 function buildOrderSearchSql(PDO $pdo, string $query, array &$params, string $orderAlias = 'o', string $customerAlias = 'c', string $supplierAlias = 's'): string
 {
     $terms = preg_split('/\s+/', trim($query)) ?: [];
@@ -314,21 +341,22 @@ function buildOrderSearchSql(PDO $pdo, string $query, array &$params, string $or
     return implode(' AND ', $clauses);
 }
 
-function fetchOrderItems(PDO $pdo, int $orderId): array
+function fetchOrderItemsForOrders(PDO $pdo, array $orderIds): array
 {
-    $chk = @$pdo->query("SHOW COLUMNS FROM order_items LIKE 'supplier_id'");
-    $hasSupplier = $chk && $chk->rowCount() > 0;
+    $ids = array_values(array_unique(array_filter(array_map('intval', $orderIds), static fn(int $id): bool => $id > 0)));
+    if (empty($ids)) {
+        return [];
+    }
+
+    $hasSupplier = orderTableHasColumn($pdo, 'order_items', 'supplier_id');
     $hasProductSupplier = orderTableHasColumn($pdo, 'products', 'supplier_id');
-    $chkProductAlert = @$pdo->query("SHOW COLUMNS FROM products LIKE 'high_alert_note'");
-    $chkRequiredDesign = @$pdo->query("SHOW COLUMNS FROM products LIKE 'required_design'");
-    $chkDimensionsScope = @$pdo->query("SHOW COLUMNS FROM products LIKE 'dimensions_scope'");
-    $productAlertCol = ($chkProductAlert && $chkProductAlert->rowCount() > 0)
+    $productAlertCol = orderTableHasColumn($pdo, 'products', 'high_alert_note')
         ? ", p.high_alert_note as product_high_alert_note"
-        : "";
-    if ($chkRequiredDesign && $chkRequiredDesign->rowCount() > 0) {
+        : '';
+    if (orderTableHasColumn($pdo, 'products', 'required_design')) {
         $productAlertCol .= ", p.required_design as product_required_design";
     }
-    if ($chkDimensionsScope && $chkDimensionsScope->rowCount() > 0) {
+    if (orderTableHasColumn($pdo, 'products', 'dimensions_scope')) {
         $productAlertCol .= ", p.dimensions_scope as product_dimensions_scope";
     }
     if (orderTableHasColumn($pdo, 'products', 'buy_price')) {
@@ -365,12 +393,25 @@ function fetchOrderItems(PDO $pdo, int $orderId): array
     $supplierJoinTarget = $hasProductSupplier
         ? 'COALESCE(oi.supplier_id, p.supplier_id)'
         : 'oi.supplier_id';
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
     $sql = $hasSupplier
-        ? "SELECT oi.*$supplierCols$productAlertCol FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id LEFT JOIN suppliers s ON $supplierJoinTarget = s.id WHERE oi.order_id = ?"
-        : "SELECT oi.*$productAlertCol FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?";
+        ? "SELECT oi.*$supplierCols$productAlertCol FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id LEFT JOIN suppliers s ON $supplierJoinTarget = s.id WHERE oi.order_id IN ($placeholders) ORDER BY oi.order_id ASC, oi.id ASC"
+        : "SELECT oi.*$productAlertCol FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id IN ($placeholders) ORDER BY oi.order_id ASC, oi.id ASC";
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([$orderId]);
-    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $stmt->execute($ids);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $grouped = [];
+    foreach ($rows as $row) {
+        $grouped[(int) ($row['order_id'] ?? 0)][] = $row;
+    }
+
+    return $grouped;
+}
+
+function fetchOrderItems(PDO $pdo, int $orderId): array
+{
+    $grouped = fetchOrderItemsForOrders($pdo, [$orderId]);
+    return $grouped[$orderId] ?? [];
 }
 
 function orderCollectSupplierNamesFromItem(array $item, string $fallback = ''): array
@@ -531,8 +572,9 @@ function fetchOrdersListRowsForRequest(PDO $pdo): array
         $stmt->execute($params);
     }
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $itemsByOrderId = fetchOrderItemsForOrders($pdo, array_column($rows, 'id'));
     foreach ($rows as &$row) {
-        $row['items'] = normalizeOrderItems($pdo, fetchOrderItems($pdo, (int) $row['id']));
+        $row['items'] = normalizeOrderItems($pdo, $itemsByOrderId[(int) ($row['id'] ?? 0)] ?? []);
         $supplierNames = orderCollectSupplierNamesFromItems($row['items'], (string) ($row['supplier_name'] ?? ''));
         if ($supplierNames) {
             $row['item_supplier_names'] = implode(', ', $supplierNames);
@@ -1536,7 +1578,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $order = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$order) jsonError('Order not found', 404);
                 if ($action === 'submit') {
-                    OrderStateService::validateTransition($order['status'], 'Submitted');
+                    orderHandleLifecycleTransition('submit', (string) ($order['status'] ?? ''), 'Submitted');
                     $si = $pdo->prepare("SELECT COUNT(*) FROM order_items WHERE order_id = ?");
                     $si->execute([$id]);
                     if ((int) $si->fetchColumn() === 0) {
@@ -1544,23 +1586,37 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     }
                     $config = require dirname(__DIR__, 2) . '/config/config.php';
                     $minPhotos = (int) ($config['min_photos_per_item'] ?? 0);
+                    $submitWarning = null;
+                    $skipPhotoMinimum = in_array((string) ($order['order_type'] ?? ''), ['draft_procurement'], true);
                     if ($minPhotos > 0) {
                         $itemsWithPhotos = $pdo->prepare("SELECT id, image_paths FROM order_items WHERE order_id = ?");
                         $itemsWithPhotos->execute([$id]);
+                        $missingPhotoItems = [];
                         while ($row = $itemsWithPhotos->fetch(PDO::FETCH_ASSOC)) {
                             $paths = $row['image_paths'] ? (json_decode($row['image_paths'], true) ?? []) : [];
                             if (!is_array($paths) || count($paths) < $minPhotos) {
+                                if ($skipPhotoMinimum) {
+                                    $missingPhotoItems[] = (int) $row['id'];
+                                    continue;
+                                }
                                 jsonError("Each item must have at least $minPhotos photo(s). Item #{$row['id']} has insufficient photos.", 400);
                             }
+                        }
+                        if ($skipPhotoMinimum && !empty($missingPhotoItems)) {
+                            $submitWarning = 'Photos are optional for Draft Orders at this stage. Some items are missing photos.';
                         }
                     }
                     $pdo->prepare("UPDATE orders SET status='Submitted' WHERE id=?")->execute([$id]);
                     $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, user_id) VALUES ('order',?,'submit',?)")->execute([$id, $userId]);
                     (new NotificationService($pdo))->notifyOrderSubmitted((int) $id);
-                    jsonResponse(['data' => ['status' => 'Submitted']]);
+                    $response = ['data' => ['status' => 'Submitted']];
+                    if ($submitWarning) {
+                        $response['warning'] = $submitWarning;
+                    }
+                    jsonResponse($response);
                 }
                 if ($action === 'approve') {
-                    OrderStateService::validateTransition($order['status'], 'Approved');
+                    orderHandleLifecycleTransition('approve', (string) ($order['status'] ?? ''), 'Approved');
                     $pdo->prepare("UPDATE orders SET status='Approved' WHERE id=?")->execute([$id]);
                     $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, user_id) VALUES ('order',?,'approve',?)")->execute([$id, $userId]);
                     (new NotificationService($pdo))->notifyOrderApproved((int) $id);

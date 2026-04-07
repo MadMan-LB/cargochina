@@ -489,7 +489,7 @@ function renderProductImagesPreview() {
         .map(
             (path, i) => `
       <div class="position-relative d-inline-block">
-        <img src="/cargochina/backend/${path}" class="img-thumbnail img-thumbnail-sm" alt="${i}">
+        <img src="${uploadedThumbUrl(path, 80, 80, "cover")}" class="img-thumbnail img-thumbnail-sm" alt="${i}" loading="lazy">
         <button type="button" class="btn btn-sm btn-danger position-absolute top-0 end-0" style="padding:0.1rem 0.3rem" onclick="removeProductImage(${i})">×</button>
       </div>`,
         )
@@ -635,7 +635,7 @@ async function loadProducts() {
                 .map(
                     (r) => `
       <tr>
-        <td>${r.thumbnail_url ? `<img src="${r.thumbnail_url}" class="img-thumbnail img-thumbnail-sm" alt="">` : "—"}</td>
+        <td>${r.thumbnail_url ? `<img src="${r.thumbnail_url}" class="img-thumbnail img-thumbnail-sm" alt="" loading="lazy">` : "—"}</td>
         <td>${r.id}</td>
         <td style="min-width:220px">
           <div class="fw-semibold text-truncate" style="max-width:260px" title="${escapeHtml(mergedDescription(r))}">${escapeHtml(mergedDescription(r))}</div>

@@ -187,7 +187,7 @@ function renderItemPhotos(oiId) {
     row.querySelector(".item-photo-preview").innerHTML = paths
         .map(
             (p, i) =>
-                `<span class="d-inline-block me-1"><img src="/cargochina/backend/${p}" class="img-thumbnail" style="max-width:40px"><button type="button" class="btn-close btn-close-sm" onclick="removeItemPhoto('${oiId}',${i})"></button></span>`,
+                `<span class="d-inline-block me-1"><a href="${typeof uploadedFileUrl === "function" ? uploadedFileUrl(p) : `/cargochina/backend/${p}`}" target="_blank" rel="noopener"><img src="${typeof uploadedThumbUrl === "function" ? uploadedThumbUrl(p, 40, 40, "cover") : `/cargochina/backend/${p}`}" class="img-thumbnail" style="max-width:40px" loading="lazy"></a><button type="button" class="btn-close btn-close-sm" onclick="removeItemPhoto('${oiId}',${i})"></button></span>`,
         )
         .join("");
 }
@@ -298,7 +298,7 @@ function renderPhotoPreview() {
     c.innerHTML = receivePhotoPaths
         .map(
             (p, i) =>
-                `<div class="position-relative d-inline-block"><img src="/cargochina/backend/${p}" class="img-thumbnail" style="max-width:80px"><button type="button" class="btn btn-sm btn-danger position-absolute top-0 end-0" onclick="receivePhotoPaths.splice(${i},1);renderPhotoPreview();updateVarianceAlert()">×</button></div>`,
+                `<div class="position-relative d-inline-block"><a href="${typeof uploadedFileUrl === "function" ? uploadedFileUrl(p) : `/cargochina/backend/${p}`}" target="_blank" rel="noopener"><img src="${typeof uploadedThumbUrl === "function" ? uploadedThumbUrl(p, 80, 80, "cover") : `/cargochina/backend/${p}`}" class="img-thumbnail" style="max-width:80px" loading="lazy"></a><button type="button" class="btn btn-sm btn-danger position-absolute top-0 end-0" onclick="receivePhotoPaths.splice(${i},1);renderPhotoPreview();updateVarianceAlert()">×</button></div>`,
         )
         .join("");
 }

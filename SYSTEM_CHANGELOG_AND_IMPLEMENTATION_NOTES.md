@@ -1149,3 +1149,70 @@ otification_preferences.php and removing the sidebar link unless the user is an 
   - Financials profit filter includes order `#54` under both supplier filters and labels it as `Multiple (...)`
   - Orders `showOrderInfo()` and `showOrderFinance()` display the shared-carton parent row plus its contained child items correctly
 - Remaining deliberate limit: the current downstream pass keeps financial meaning at the item-child level and physical packing meaning at the carton-parent level, but it does not yet introduce a separate shipment-ledger or carton-accounting subsystem beyond the saved nested carton contents.
+
+## 2026-04-07 Draft Orders Submit Lifecycle Hardening
+
+- Hardened `POST /api/v1/orders/{id}/submit` and `POST /api/v1/orders/{id}/approve` in `backend/api/handlers/orders.php` so stale duplicate clicks no longer throw uncaught lifecycle exceptions as HTTP 500s.
+- Repeated `submit` on an already submitted order now returns HTTP 200 with `already_applied=true` and the user-safe message `Order already submitted`; repeated `approve` on an already approved order behaves the same with `Order already approved`.
+- Invalid lifecycle actions are now converted into clear HTTP 400 validation responses (`Only draft orders can be submitted.` / `Only submitted orders can be approved.`) instead of surfacing raw transition exceptions.
+- Updated both `frontend/js/procurement_drafts.js` and `frontend/js/orders.js` to respect backend lifecycle messages in success toasts, so stale tabs self-correct by refreshing their lists instead of showing a scary failure state.
+- Added Simplified Chinese translations for the new lifecycle messages in `includes/ui_translations.php`.
+- Verified with Playwright MCP:
+  - Draft Orders page now renders order `#53` as `Submitted` with no lingering `Submit` button after reload
+  - manual POST to `/api/v1/orders/53/submit` returns `200` with `Order already submitted`
+  - manual POST to `/api/v1/orders/52/approve` returns `200` with `Order already approved`
+  - invalid approve on draft order `#54` now returns clean `400` validation JSON instead of `500`
+
+## 2026-04-07 China Performance Audit + Optimization Pass
+
+- Replaced critical overseas shell dependencies with self-hosted assets. `includes/layout.php`, `includes/footer.php`, `login.php`, `403.php`, `confirm.php`, `customer_portal.php`, and `procurement_draft_print.php` now load local Bootstrap from `frontend/vendor/bootstrap/`, and the old Google Fonts dependency was removed in favor of a system font stack in `frontend/css/style.css`.
+- Reduced always-on request cost in the shared shell: `includes/footer.php` now requests `/api/v1/notifications/unread-count` for the badge instead of fetching the full notifications payload on every page.
+- Added `GET /api/v1/notifications/unread-count` and removed the old N+1 variance-confirmation phone lookup from `backend/api/handlers/notifications.php`. The full notifications feed and unread count now both use short cache headers.
+- Optimized `backend/api/handlers/dashboard.php` by replacing many per-status count queries with grouped status aggregation plus short response caching.
+- Deferred non-visible financial data in `frontend/js/financials.js` so the balances tab is loaded on demand instead of during the initial page render.
+- Added shared uploaded-media thumbnail infrastructure:
+  - new `backend/thumb.php`
+  - new safe path helper in `backend/api/helpers.php`
+  - product APIs now emit thumbnail URLs
+  - image-heavy JS modules now use thumbnails for previews while still linking to the original file
+- Touched image-heavy modules for thumbnail/original-link behavior:
+  - `frontend/js/photo_uploader.js`
+  - `frontend/js/products.js`
+  - `frontend/js/orders.js`
+  - `frontend/js/procurement_drafts.js`
+  - `frontend/js/financials.js`
+  - `frontend/js/receiving_receive.js`
+  - `frontend/js/receiving_receipt.js`
+  - `frontend/js/suppliers.js`
+  - `frontend/js/warehouse_stock.js`
+- Hardened upload UX for poor-network environments in `frontend/js/upload-utils.js` with proactive image optimization, a 120-second upload timeout, and clearer interruption/timeout messages. Also expanded common operational image type support to include `jfif` in both `backend/config/config.php` and `backend/api/handlers/config.php`.
+- Added static cache/compression rules in `.htaccess` for CSS, JS, fonts, SVG, and common image types.
+- Added targeted performance indexes through `backend/migrations/059_performance_indexes.sql`:
+  - `notifications (user_id, created_at)`
+  - `shipment_drafts (status)`
+  - `orders (status, expected_ready_date)`
+- Local verification results:
+  - `financials.php` initial request count improved from **14** to **11**
+  - `financials.php` initial API fetches improved from **3** to **2**
+  - `procurement_drafts.php` loads with **0 external hosts** in the measured waterfall
+  - the notifications badge request payload dropped from **3315 bytes** (`/notifications`) to **28 bytes** (`/notifications/unread-count`)
+  - a sample original uploaded image measured **119620 bytes**, while its generated thumbnail measured **2421 bytes**
+- Remaining honest limit: these code fixes remove avoidable round trips and oversized media, but they do not eliminate Hostinger cross-border latency. A China-friendlier delivery strategy is still recommended for the biggest next gain.
+## 2026-04-07 - Draft Procurement Submit Photo Requirement Fix
+
+- Relaxed order submit photo enforcement for `draft_procurement` orders in [backend/api/handlers/orders.php](backend/api/handlers/orders.php).
+- Standard orders still honor `MIN_PHOTOS_PER_ITEM` on submit.
+- Draft Orders can now be submitted even when item photos are missing, matching the draft workflow's incomplete-data allowance.
+- Draft submit now returns a non-blocking warning when photos are missing instead of rejecting the workflow.
+- Added shared API timing instrumentation in [backend/api/index.php](backend/api/index.php) and [backend/api/helpers.php](backend/api/helpers.php):
+  - slow requests are logged to `logs/performance.log`
+  - SuperAdmin can opt into response timing with `X-CLMS-Debug-Timing: 1`
+- Optimized the Orders list endpoint by batching `order_items` loading instead of fetching items one order at a time.
+- Deferred legacy draft list hydration in [frontend/js/procurement_drafts.js](frontend/js/procurement_drafts.js) so the primary Draft Orders list renders first.
+- Improved upload/settings error messaging and admin-side timing visibility in [frontend/js/app.js](frontend/js/app.js) and [frontend/js/upload-utils.js](frontend/js/upload-utils.js).
+
+## 2026-04-07 - Draft Orders False Error Cleanup
+
+- Fixed a late submit-time fatal in [backend/config/config.php](backend/config/config.php) by guarding the shared app-url helper function declarations with `function_exists(...)`. This prevents repeated `require` paths during order lifecycle notifications from crashing after the order status was already updated.
+- Confirmed the Draft Orders submit route now returns a clean success JSON response instead of a fake `500 Internal Server Error` after the status change. Local validation used order `#56`, which now submits successfully with the expected non-blocking missing-photo warning.
+- Hardened [backend/thumb.php](backend/thumb.php) so valid uploaded images that GD cannot decode for thumbnail generation no longer return `415 Unsupported Media Type`. In that edge case, CLMS now serves the original image directly as a safe fallback, eliminating noisy console errors for seed/product previews.

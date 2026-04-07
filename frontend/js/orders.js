@@ -1476,7 +1476,7 @@ function addOrderItem() {
                         wrap.style.background = "#e8f5e9";
                         wrap.dataset.path = firstPath;
                         wrap.dataset.fromProduct = "1";
-                        wrap.innerHTML = `<small class="text-success fw-semibold d-block mb-1">From product</small><img src="/cargochina/backend/${firstPath}" class="img-thumbnail img-thumbnail-sm" style="max-width:50px" alt=""><button type="button" class="btn-close btn-close-sm" onclick="this.closest('[data-from-product]').remove()"></button>`;
+                        wrap.innerHTML = `<small class="text-success fw-semibold d-block mb-1">From product</small><img src="${uploadedThumbUrl(firstPath, 64, 64, "cover")}" class="img-thumbnail img-thumbnail-sm" style="max-width:50px" alt="" loading="lazy"><button type="button" class="btn-close btn-close-sm" onclick="this.closest('[data-from-product]').remove()"></button>`;
                         photosContainer.insertBefore(
                             wrap,
                             photosContainer.firstChild,
@@ -1589,7 +1589,7 @@ async function appendOrderItemPhotos(container, files) {
             const div = document.createElement("div");
             div.className = "d-inline-block me-1 mb-1";
             div.dataset.path = path;
-            div.innerHTML = `<img src="/cargochina/backend/${path}" class="img-thumbnail img-thumbnail-sm" style="max-width:50px" alt=""><button type="button" class="btn-close btn-close-sm" onclick="this.closest('.d-inline-block').remove()"></button>`;
+            div.innerHTML = `<img src="${uploadedThumbUrl(path, 64, 64, "cover")}" class="img-thumbnail img-thumbnail-sm" style="max-width:50px" alt="" loading="lazy"><button type="button" class="btn-close btn-close-sm" onclick="this.closest('.d-inline-block').remove()"></button>`;
             container.appendChild(div);
         }
     }
@@ -1980,7 +1980,7 @@ async function copyOrder(id) {
                     const div = document.createElement("div");
                     div.className = "d-inline-block me-1 mb-1";
                     div.dataset.path = path;
-                    div.innerHTML = `<img src="/cargochina/backend/${path}" class="img-thumbnail img-thumbnail-sm" style="max-width:50px" alt=""><button type="button" class="btn-close btn-close-sm" onclick="this.closest('.d-inline-block').remove()"></button>`;
+                    div.innerHTML = `<img src="${uploadedThumbUrl(path, 64, 64, "cover")}" class="img-thumbnail img-thumbnail-sm" style="max-width:50px" alt="" loading="lazy"><button type="button" class="btn-close btn-close-sm" onclick="this.closest('.d-inline-block').remove()"></button>`;
                     copyLastCard.querySelector(".item-photos").appendChild(div);
                 });
             }
@@ -2120,7 +2120,7 @@ async function editOrder(id) {
                     const div = document.createElement("div");
                     div.className = "d-inline-block me-1 mb-1";
                     div.dataset.path = path;
-                    div.innerHTML = `<img src="/cargochina/backend/${path}" class="img-thumbnail img-thumbnail-sm" style="max-width:50px" alt=""><button type="button" class="btn-close btn-close-sm" onclick="this.closest('.d-inline-block').remove()"></button>`;
+                    div.innerHTML = `<img src="${uploadedThumbUrl(path, 64, 64, "cover")}" class="img-thumbnail img-thumbnail-sm" style="max-width:50px" alt="" loading="lazy"><button type="button" class="btn-close btn-close-sm" onclick="this.closest('.d-inline-block').remove()"></button>`;
                     lastCard.querySelector(".item-photos").appendChild(div);
                 });
                 if (it.id) {
@@ -2277,8 +2277,11 @@ async function saveOrder() {
 
 async function submitOrder(id) {
     try {
-        await api("POST", "/orders/" + id + "/submit", {});
-        showToast("Order submitted");
+        const res = await api("POST", "/orders/" + id + "/submit", {});
+        if (res?.warning) {
+            showToast(res.warning, "warning");
+        }
+        showToast(res?.message || "Order submitted");
         loadOrders();
     } catch (e) {
         showToast(e.message, "danger");
@@ -2287,8 +2290,8 @@ async function submitOrder(id) {
 
 async function approveOrder(id) {
     try {
-        await api("POST", "/orders/" + id + "/approve", {});
-        showToast("Order approved");
+        const res = await api("POST", "/orders/" + id + "/approve", {});
+        showToast(res?.message || "Order approved");
         loadOrders();
     } catch (e) {
         showToast(e.message, "danger");
@@ -2549,7 +2552,7 @@ async function showOrderInfo(id) {
                     : [];
                 const thumb =
                     imgs.length > 0
-                        ? `<img src="${imgBase}/backend/${escapeHtml(imgs[0])}" class="order-info-thumb" onerror="this.style.display='none'">`
+                        ? `<img src="${escapeHtml(uploadedThumbUrl(imgs[0], 72, 72, "cover"))}" class="order-info-thumb" loading="lazy" onerror="this.style.display='none'">`
                         : row.isCartonSummary
                           ? `<div class="order-info-thumb-placeholder">📦</div>`
                           : `<div class="order-info-thumb-placeholder">📷</div>`;
@@ -2604,7 +2607,7 @@ async function showOrderInfo(id) {
               <div class="col-6 col-md-3"><div class="order-info-stat-card"><div class="label">Actual Cartons</div><div class="value">${receipt.actual_cartons ?? "—"}</div></div></div>
               <div class="col-6 col-md-3"><div class="order-info-stat-card"><div class="label">Condition</div><div class="value">${escapeHtml(receipt.receipt_condition || "—")}</div></div></div>
             </div>
-            ${receipt.photos?.length ? `<div class="d-flex gap-2 flex-wrap mt-2">${receipt.photos.map((p) => `<img src="${imgBase}/backend/${escapeHtml(p)}" class="order-info-thumb" style="width:72px;height:72px">`).join("")}</div>` : ""}
+            ${receipt.photos?.length ? `<div class="d-flex gap-2 flex-wrap mt-2">${receipt.photos.map((p) => `<a href="${escapeHtml(uploadedFileUrl(p))}" target="_blank" rel="noopener"><img src="${escapeHtml(uploadedThumbUrl(p, 72, 72, "cover"))}" class="order-info-thumb" style="width:72px;height:72px" loading="lazy"></a>`).join("")}</div>` : ""}
           </div>`
             : "";
 

@@ -73,7 +73,7 @@ const PHOTO_UPLOADER = {
             .map(
                 (path, i) => `
       <div class="position-relative d-inline-block me-1 mb-1" data-path-index="${i}">
-        <img src="/cargochina/backend/${path}" class="img-thumbnail" style="max-width:80px;max-height:80px" alt="">
+        <img src="${uploadedThumbUrl(path, 80, 80, "cover")}" class="img-thumbnail" style="max-width:80px;max-height:80px" alt="" loading="lazy">
         <button type="button" class="btn btn-sm btn-danger position-absolute top-0 end-0" style="padding:0.1rem 0.3rem" data-remove-index="${i}">×</button>
       </div>`,
             )

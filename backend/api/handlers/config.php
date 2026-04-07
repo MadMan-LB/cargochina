@@ -25,7 +25,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 jsonResponse(['data' => [
                     'max_upload_mb' => (float) ($fileConfig['upload_max_mb'] ?? 8),
-                    'allowed_types' => $fileConfig['upload_allowed_types'] ?? ['jpg', 'jpeg', 'png', 'webp', 'gif', 'pdf'],
+                    'allowed_types' => $fileConfig['upload_allowed_types'] ?? ['jpg', 'jpeg', 'png', 'webp', 'jfif', 'gif', 'pdf'],
                 ]]);
                 return;
             }
@@ -184,8 +184,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             if (isset($updates['UPLOAD_ALLOWED_TYPES'])) {
                 $t = is_array($updates['UPLOAD_ALLOWED_TYPES']) ? $updates['UPLOAD_ALLOWED_TYPES'] : array_map('trim', explode(',', (string) $updates['UPLOAD_ALLOWED_TYPES']));
-                $allowed = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'pdf'];
-                if (!empty(array_diff(array_map('strtolower', $t), $allowed))) $errors['UPLOAD_ALLOWED_TYPES'] = 'Only jpg,jpeg,png,webp,gif,pdf allowed';
+                $allowed = ['jpg', 'jpeg', 'png', 'webp', 'jfif', 'gif', 'pdf'];
+                if (!empty(array_diff(array_map('strtolower', $t), $allowed))) $errors['UPLOAD_ALLOWED_TYPES'] = 'Only jpg,jpeg,png,webp,jfif,gif,pdf allowed';
             }
             if (!empty($errors)) {
                 jsonError('Validation failed', 400, $errors);

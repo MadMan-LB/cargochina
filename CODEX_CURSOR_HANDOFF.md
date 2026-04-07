@@ -713,3 +713,31 @@ This ledger should be maintained over time so both Codex and Cursor can see exec
 - Shared-carton support is now persisted and truthfully displayed, but there is still no separate carton-level accounting subsystem beyond nested carton contents on order items.
 - If the next pass extends carton contents into real shipment/container packing analytics, start from the saved `shared_carton_contents` structure instead of inventing a parallel model.
 - Keep an eye on secondary exports and secondary admin pages if they later begin reading order items directly without the shared-carton-aware helpers.
+
+## 2026-04-07 Draft Submit / Approve Stale-Action Fix
+
+### Root cause verified
+- Draft Orders row `#53` was already `Submitted` in the DB, but a stale UI state could still call `/api/v1/orders/53/submit`.
+- `backend/api/handlers/orders.php` previously called `OrderStateService::validateTransition()` directly for `submit` / `approve`, so stale duplicate actions raised an uncaught runtime exception and surfaced as HTTP 500.
+
+### What changed
+- Added lifecycle hardening in `backend/api/handlers/orders.php`:
+  - duplicate `submit` on `Submitted` returns `200` + `already_applied=true` + `Order already submitted`
+  - duplicate `approve` on `Approved` returns `200` + `already_applied=true` + `Order already approved`
+  - invalid transitions now return clean `400` validation JSON (`Only draft orders can be submitted.` / `Only submitted orders can be approved.`)
+- Updated `frontend/js/procurement_drafts.js` and `frontend/js/orders.js` to show backend lifecycle messages in success toasts, then refresh the relevant list so stale tabs self-heal.
+- Added Chinese translations for the new lifecycle strings in `includes/ui_translations.php`.
+
+### What was verified
+- Playwright MCP: Draft Orders list now shows order `#53` as `Submitted` with no visible `Submit` button after reload.
+- Manual authenticated POST from the browser:
+  - `/api/v1/orders/53/submit` → `200`, `Order already submitted`
+  - `/api/v1/orders/52/approve` → `200`, `Order already approved`
+  - `/api/v1/orders/54/approve` → `400`, `Only submitted orders can be approved.`
+
+### Downstream impact reviewed
+- Draft Orders page submit action
+- Orders page submit/approve actions
+- Stale-tab / repeated-click behavior
+- Lifecycle toasts and translation coverage
+- RBAC unchanged; this fix only hardens lifecycle responses and operator feedback

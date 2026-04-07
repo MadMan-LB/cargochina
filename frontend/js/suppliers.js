@@ -224,8 +224,8 @@ function setSupplierPaymentQrPreview(row, qrPath = "", fileName = "") {
     preview.classList.remove("d-none");
     preview.innerHTML = `
       <div class="d-flex align-items-center gap-2 mt-2">
-        <a href="/cargochina/backend/${escapeHtml(qrPath)}" target="_blank" rel="noopener" class="d-inline-flex align-items-center gap-2 text-decoration-none">
-          <img src="/cargochina/backend/${escapeHtml(qrPath)}" alt="QR" style="width:48px;height:48px;object-fit:cover;border-radius:10px;border:1px solid #dbe4f0;">
+        <a href="${typeof uploadedFileUrl === "function" ? uploadedFileUrl(qrPath) : `/cargochina/backend/${escapeHtml(qrPath)}`}" target="_blank" rel="noopener" class="d-inline-flex align-items-center gap-2 text-decoration-none">
+          <img src="${typeof uploadedThumbUrl === "function" ? uploadedThumbUrl(qrPath, 48, 48, "cover") : `/cargochina/backend/${escapeHtml(qrPath)}`}" alt="QR" style="width:48px;height:48px;object-fit:cover;border-radius:10px;border:1px solid #dbe4f0;" loading="lazy">
           <span class="small text-muted">${escapeHtml(fileName || "QR saved")}</span>
         </a>
         <button type="button" class="btn btn-sm btn-outline-danger supplier-payment-qr-clear">${escapeHtml("×")}</button>
@@ -432,7 +432,7 @@ function syncSupplierPaymentAccountSelection() {
     qrWrap.classList.remove("d-none");
     qrWrap.innerHTML = `
       <div class="fw-semibold mb-1">Saved QR image</div>
-      <img src="/cargochina/backend/${escapeHtml(option.dataset.qr)}" alt="Payment QR" class="img-thumbnail" style="max-width: 180px;">
+      <a href="${typeof uploadedFileUrl === "function" ? uploadedFileUrl(option.dataset.qr) : `/cargochina/backend/${escapeHtml(option.dataset.qr)}`}" target="_blank" rel="noopener"><img src="${typeof uploadedThumbUrl === "function" ? uploadedThumbUrl(option.dataset.qr, 180, 180, "contain") : `/cargochina/backend/${escapeHtml(option.dataset.qr)}`}" alt="Payment QR" class="img-thumbnail" style="max-width: 180px;" loading="lazy"></a>
     `;
 }
 

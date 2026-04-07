@@ -5,6 +5,9 @@ const API = "/cargochina/api/v1";
 const AREA_BASE = "/cargochina/warehouse";
 
 async function api(path) {
+    if (typeof window.api === "function") {
+        return window.api("GET", path);
+    }
     const res = await fetch(API + path, { credentials: "same-origin" });
     const d = await res.json().catch(() => ({}));
     if (!res.ok)

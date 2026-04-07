@@ -3,7 +3,7 @@
     <script>
       window.CLMS_UI = <?= json_encode($clientTranslations ?? clmsGetClientTranslationPayload(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/cargochina/frontend/js/bootstrap.bundle.min.js"></script>
     <script src="/cargochina/frontend/js/upload-utils.js?v=<?= @filemtime(__DIR__ . '/../frontend/js/upload-utils.js') ?: time() ?>"></script>
     <script src="/cargochina/frontend/js/app.js?v=<?= @filemtime(__DIR__ . '/../frontend/js/app.js') ?: time() ?>"></script>
     <script src="/cargochina/frontend/js/sidebar.js?v=<?= @filemtime(__DIR__ . '/../frontend/js/sidebar.js') ?: time() ?>"></script>
@@ -11,19 +11,16 @@
       (function() {
         var b = document.getElementById('notifBadge');
         if (b) {
-          fetch('/cargochina/api/v1/notifications', {
+          fetch('/cargochina/api/v1/notifications/unread-count', {
               credentials: 'same-origin'
             })
             .then(function(r) {
               return r.json();
             })
             .then(function(d) {
-              var rows = d.data || [];
-              var unread = rows.filter(function(n) {
-                return !n.read_at;
-              });
-              if (unread.length > 0) {
-                b.textContent = unread.length;
+              var unread = Number(d.data && d.data.unread_count || 0);
+              if (unread > 0) {
+                b.textContent = unread;
                 b.classList.remove('d-none');
               }
             }).catch(function() {});

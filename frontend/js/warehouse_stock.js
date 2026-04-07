@@ -146,7 +146,7 @@
         const photos = (order.receipt?.photos || [])
             .map((photo) => {
                 const filePath = photo.file_path || "";
-                return `<img src="/cargochina/backend/${escapeHtml(filePath)}" alt="${escapeHtml(stockT("Receipt evidence"))}" class="img-thumbnail me-2 mb-2" style="max-width:120px;">`;
+                return `<a target="_blank" rel="noopener" href="${typeof uploadedFileUrl === "function" ? uploadedFileUrl(filePath) : `/cargochina/backend/${escapeHtml(filePath)}`}"><img src="${typeof uploadedThumbUrl === "function" ? uploadedThumbUrl(filePath, 120, 120, "cover") : `/cargochina/backend/${escapeHtml(filePath)}`}" alt="${escapeHtml(stockT("Receipt evidence"))}" class="img-thumbnail me-2 mb-2" style="max-width:120px;" loading="lazy"></a>`;
             })
             .join("");
         const itemsHtml = (order.items || [])

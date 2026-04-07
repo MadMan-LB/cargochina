@@ -252,6 +252,21 @@ function formatDisplayQuantity(value, maxDecimals = 4, options = {}) {
         ...options,
     });
 }
+function uploadedFileUrl(path) {
+    const normalized = String(path || "").replace(/^\/+/, "").trim();
+    return normalized ? `/cargochina/backend/${normalized}` : "";
+}
+function uploadedThumbUrl(path, width = 160, height = 160, fit = "contain") {
+    const normalized = String(path || "").replace(/^\/+/, "").trim();
+    if (!normalized) return "";
+    const params = new URLSearchParams({
+        path: normalized,
+        w: String(width),
+        h: String(height),
+        fit,
+    });
+    return `/cargochina/backend/thumb.php?${params.toString()}`;
+}
 function isSearchLikeInput(el) {
     if (!el) return false;
     const type = (el.getAttribute("type") || "").toLowerCase();
@@ -392,6 +407,8 @@ if (typeof window !== "undefined") {
     window.formatDisplayWeight = formatDisplayWeight;
     window.formatDisplayPercent = formatDisplayPercent;
     window.formatDisplayQuantity = formatDisplayQuantity;
+    window.uploadedFileUrl = uploadedFileUrl;
+    window.uploadedThumbUrl = uploadedThumbUrl;
     window.closeActiveModalOrPanel = closeActiveModalOrPanel;
     window.translateTree = translateTree;
 }
@@ -445,17 +462,49 @@ async function api(method, path, body = null) {
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
     };
+    const debugTiming =
+        typeof window !== "undefined" &&
+        typeof localStorage !== "undefined" &&
+        localStorage.getItem("clms_debug_timing") === "1";
+    if (debugTiming) {
+        opts.headers["X-CLMS-Debug-Timing"] = "1";
+    }
     if (body && (method === "POST" || method === "PUT")) {
         opts.body = JSON.stringify(body);
     }
-    const res = await fetch(API_BASE + path, opts);
+    let res;
+    try {
+        res = await fetch(API_BASE + path, opts);
+    } catch (error) {
+        throw new Error(
+            t("Network error. Please check your connection and try again."),
+        );
+    }
+    if (debugTiming) {
+        const serverMs = res.headers.get("X-CLMS-Response-Time-Ms");
+        if (serverMs) {
+            console.debug(`[CLMS API] ${method} ${path} ${serverMs}ms`);
+        }
+    }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
         const err = data.error === true ? data : data.error || {};
         const msg =
             err.message || data.message || res.statusText || "Request failed";
+        const fieldErrors =
+            err.errors && typeof err.errors === "object" ? err.errors : null;
+        const details = fieldErrors
+            ? Object.entries(fieldErrors)
+                  .slice(0, 3)
+                  .map(([field, issue]) => `${field}: ${issue}`)
+                  .join("; ")
+            : "";
         const reqId = err.request_id || data.request_id;
-        throw new Error(msg + (reqId ? ` (ref: ${reqId})` : ""));
+        throw new Error(
+            msg +
+                (details ? ` ${details}` : "") +
+                (reqId ? ` (ref: ${reqId})` : ""),
+        );
     }
     if (
         method === "GET" &&
@@ -522,11 +571,18 @@ async function uploadFile(file, opts = {}) {
     }
     const fd = new FormData();
     fd.append("file", file);
-    const res = await fetch("/cargochina/api/v1/upload", {
-        method: "POST",
-        body: fd,
-        credentials: "same-origin",
-    });
+    let res;
+    try {
+        res = await fetch("/cargochina/api/v1/upload", {
+            method: "POST",
+            body: fd,
+            credentials: "same-origin",
+        });
+    } catch (error) {
+        throw new Error(
+            t("Upload failed because the network connection was interrupted."),
+        );
+    }
     const text = await res.text();
     let j = {};
     try {

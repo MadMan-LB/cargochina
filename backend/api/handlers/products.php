@@ -190,7 +190,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 foreach ($rows as &$r) {
                     $r['image_paths'] = $r['image_paths'] ? json_decode($r['image_paths'], true) : [];
-                    $r['thumbnail_url'] = !empty($r['image_paths'][0]) ? '/cargochina/backend/' . $r['image_paths'][0] : null;
+                    $r['thumbnail_url'] = !empty($r['image_paths'][0])
+                        ? '/cargochina/backend/thumb.php?path=' . rawurlencode($r['image_paths'][0]) . '&w=96&h=96&fit=cover'
+                        : null;
                 }
                 jsonResponse(['data' => $rows]);
             }
@@ -201,7 +203,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 jsonError('Product not found', 404);
             }
             $row['image_paths'] = $row['image_paths'] ? json_decode($row['image_paths'], true) : [];
-            $row['thumbnail_url'] = !empty($row['image_paths'][0]) ? '/cargochina/backend/' . $row['image_paths'][0] : null;
+            $row['thumbnail_url'] = !empty($row['image_paths'][0])
+                ? '/cargochina/backend/thumb.php?path=' . rawurlencode($row['image_paths'][0]) . '&w=96&h=96&fit=cover'
+                : null;
             if (hasProductDescEntries($pdo)) {
                 $stmt2 = $pdo->prepare("SELECT description_text, description_translated, sort_order FROM product_description_entries WHERE product_id = ? ORDER BY sort_order, id");
                 $stmt2->execute([$id]);

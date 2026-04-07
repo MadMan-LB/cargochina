@@ -48,7 +48,7 @@ async function loadReceipt() {
                       const itemPhotos = (it.photos || [])
                           .map(
                               (p) =>
-                                  `<img src="/cargochina/backend/${p.file_path}" class="img-thumbnail me-1" style="max-width:48px">`,
+                                  `<a href="${typeof uploadedFileUrl === "function" ? uploadedFileUrl(p.file_path) : `/cargochina/backend/${p.file_path}`}" target="_blank" rel="noopener"><img src="${typeof uploadedThumbUrl === "function" ? uploadedThumbUrl(p.file_path, 48, 48, "cover") : `/cargochina/backend/${p.file_path}`}" class="img-thumbnail me-1" style="max-width:48px" loading="lazy"></a>`,
                           )
                           .join("");
                       return `
@@ -74,7 +74,7 @@ async function loadReceipt() {
             r.photos
                 .map(
                     (p) =>
-                        `<img src="/cargochina/backend/${p.file_path}" class="img-thumbnail" style="max-width:120px">`,
+                        `<a href="${typeof uploadedFileUrl === "function" ? uploadedFileUrl(p.file_path) : `/cargochina/backend/${p.file_path}`}" target="_blank" rel="noopener"><img src="${typeof uploadedThumbUrl === "function" ? uploadedThumbUrl(p.file_path, 120, 120, "cover") : `/cargochina/backend/${p.file_path}`}" class="img-thumbnail" style="max-width:120px" loading="lazy"></a>`,
                 )
                 .join("") +
             "</div>";

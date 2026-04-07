@@ -124,8 +124,8 @@
         preview.classList.remove("d-none");
         preview.innerHTML = `
             <div class="d-flex align-items-center gap-2 mt-2">
-              <a href="/cargochina/backend/${escapeHtml(qrPath)}" target="_blank" rel="noopener" class="d-inline-flex align-items-center gap-2 text-decoration-none">
-                <img src="/cargochina/backend/${escapeHtml(qrPath)}" alt="${escapeHtml(draftT("QR"))}" style="width:48px;height:48px;object-fit:cover;border-radius:10px;border:1px solid #dbe4f0;">
+              <a href="${escapeHtml(uploadedFileUrl(qrPath))}" target="_blank" rel="noopener" class="d-inline-flex align-items-center gap-2 text-decoration-none">
+                <img src="${escapeHtml(uploadedThumbUrl(qrPath, 48, 48, "cover"))}" alt="${escapeHtml(draftT("QR"))}" style="width:48px;height:48px;object-fit:cover;border-radius:10px;border:1px solid #dbe4f0;" loading="lazy">
                 <span class="small text-muted">${escapeHtml(fileName || draftT("QR saved"))}</span>
               </a>
               <button type="button" class="btn btn-sm btn-outline-danger draft-quick-supplier-payment-qr-clear">×</button>
@@ -580,6 +580,32 @@
     async function loadDraftOrders() {
         const res = await api("GET", "/draft-orders");
         renderDraftOrders(res.data || []);
+    }
+
+    let legacyDraftLoadTimer = null;
+
+    function scheduleLegacyDraftLoad(delay = 150) {
+        if (legacyDraftLoadTimer) {
+            clearTimeout(legacyDraftLoadTimer);
+        }
+        legacyDraftLoadTimer = window.setTimeout(async () => {
+            legacyDraftLoadTimer = null;
+            try {
+                await loadLegacyDrafts();
+            } catch (error) {
+                console.warn("Deferred legacy draft load failed", error);
+            }
+        }, delay);
+    }
+
+    async function refreshDraftLists(opts = {}) {
+        const { deferLegacy = false } = opts;
+        await loadDraftOrders();
+        if (deferLegacy) {
+            scheduleLegacyDraftLoad();
+            return;
+        }
+        await loadLegacyDrafts();
     }
 
     function renderDraftOrders(rows) {
@@ -1521,8 +1547,8 @@
             .map(
                 (path, index) => `
                     <div class="draft-item-photo-thumb" data-path="${escapeHtml(path).replace(/"/g, "&quot;")}">
-                      <a href="/cargochina/backend/${escapeHtml(path)}" target="_blank" rel="noopener">
-                        <img src="/cargochina/backend/${escapeHtml(path)}" alt="Item photo">
+                      <a href="${escapeHtml(uploadedFileUrl(path))}" target="_blank" rel="noopener">
+                        <img src="${escapeHtml(uploadedThumbUrl(path, 128, 128, "cover"))}" alt="Item photo" loading="lazy">
                       </a>
                       ${
                           removable
@@ -2727,7 +2753,7 @@
                 document.querySelector("#draftOrderModal .modal-body"),
             );
             builderModal?.hide();
-            await Promise.all([loadDraftOrders(), loadLegacyDrafts()]);
+            await refreshDraftLists({ deferLegacy: true });
         } catch (e) {
             showToast(e.message, "danger");
         } finally {
@@ -2737,8 +2763,11 @@
 
     async function submitDraftOrder(orderId) {
         try {
-            await api("POST", `/orders/${orderId}/submit`, {});
-            showToast("Draft order submitted");
+            const res = await api("POST", `/orders/${orderId}/submit`, {});
+            if (res?.warning) {
+                showToast(res.warning, "warning");
+            }
+            showToast(res?.message || "Draft order submitted");
             await loadDraftOrders();
         } catch (e) {
             showToast(e.message, "danger");
@@ -2799,7 +2828,7 @@
                     ? "Legacy draft was already migrated"
                     : "Legacy draft migrated",
             );
-            await Promise.all([loadDraftOrders(), loadLegacyDrafts()]);
+            await refreshDraftLists({ deferLegacy: true });
             if (res.data?.order?.id) {
                 await openDraftOrderBuilder(res.data.order.id);
             }
@@ -2909,7 +2938,7 @@
             .getElementById("draftOrderCurrency")
             ?.addEventListener("change", updateDraftOrderTotals);
 
-        await Promise.all([loadDraftOrders(), loadLegacyDrafts()]);
+        await refreshDraftLists({ deferLegacy: true });
 
         const params = new URLSearchParams(window.location.search);
         const orderId = params.get("order_id");

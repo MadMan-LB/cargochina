@@ -6,12 +6,30 @@ let uploadConfigCache = null;
 
 async function getUploadConfig() {
     if (uploadConfigCache) return uploadConfigCache;
-    const res = await fetch(UPLOAD_API + "/config/upload", {
-        credentials: "same-origin",
-    });
+    let res;
+    try {
+        res = await fetch(UPLOAD_API + "/config/upload", {
+            credentials: "same-origin",
+        });
+    } catch (error) {
+        throw new Error(
+            typeof t === "function"
+                ? t(
+                      "Unable to load upload settings. Please refresh and try again.",
+                  )
+                : "Unable to load upload settings. Please refresh and try again.",
+        );
+    }
     const d = await res.json().catch(() => ({}));
     if (!res.ok)
-        throw new Error(d.error?.message || "Failed to load upload config");
+        throw new Error(
+            d.error?.message ||
+                (typeof t === "function"
+                    ? t(
+                          "Unable to load upload settings. Please refresh and try again.",
+                      )
+                    : "Unable to load upload settings. Please refresh and try again."),
+        );
     uploadConfigCache = d.data || {
         max_upload_mb: 8,
         allowed_types: ["jpg", "jpeg", "png", "webp", "jfif", "gif", "pdf"],
@@ -35,6 +53,14 @@ function formatUploadDisplayNumber(value, maxDecimals = 1) {
     }
     const numeric = parseFloat(value);
     return Number.isFinite(numeric) ? String(numeric) : "0";
+}
+
+function shouldDebugUploadTiming() {
+    return (
+        typeof window !== "undefined" &&
+        typeof localStorage !== "undefined" &&
+        localStorage.getItem("clms_debug_timing") === "1"
+    );
 }
 
 function extractClipboardImageFiles(event) {
@@ -160,9 +186,10 @@ async function uploadFileWithProgress(file, opts = {}) {
 
     let toUpload = file;
     const fileMb = file.size / 1048576;
-    if (fileMb > maxMb && isImageFile(file)) {
+    if (isImageFile(file)) {
         try {
-            toUpload = await compressImage(file, maxMb);
+            const quality = fileMb > 6 ? 0.72 : fileMb > 3 ? 0.76 : 0.82;
+            toUpload = await compressImage(file, maxMb, 1600, quality);
             if (toUpload.size > maxMb * 1048576) {
                 const msg = `File too large (${formatUploadDisplayNumber(fileMb, 1)} MB). Max ${formatUploadDisplayNumber(maxMb, 1)} MB. Compression did not reduce enough.`;
                 showToast(msg, "danger");
@@ -170,7 +197,13 @@ async function uploadFileWithProgress(file, opts = {}) {
             }
         } catch (e) {
             if (e.message && e.message.includes("File too large")) throw e;
-            showToast("Compression failed, trying original", "warning");
+            showToast(
+                typeof t === "function"
+                    ? t("Image optimization failed, trying the original file")
+                    : "Image optimization failed, trying the original file",
+                "warning",
+            );
+            toUpload = file;
         }
     } else if (fileMb > maxMb) {
         const msg = `File too large (${formatUploadDisplayNumber(fileMb, 1)} MB). Max allowed ${formatUploadDisplayNumber(maxMb, 1)} MB.`;
@@ -184,6 +217,10 @@ async function uploadFileWithProgress(file, opts = {}) {
         const xhr = new XMLHttpRequest();
         xhr.open("POST", UPLOAD_API + "/upload");
         xhr.withCredentials = true;
+        xhr.timeout = 120000;
+        if (shouldDebugUploadTiming()) {
+            xhr.setRequestHeader("X-CLMS-Debug-Timing", "1");
+        }
 
         xhr.upload.onprogress = (e) => {
             if (e.lengthComputable && typeof onProgress === "function") {
@@ -196,6 +233,12 @@ async function uploadFileWithProgress(file, opts = {}) {
             try {
                 j = xhr.responseText ? JSON.parse(xhr.responseText) : {};
             } catch (_) {}
+            if (shouldDebugUploadTiming()) {
+                const serverMs = xhr.getResponseHeader("X-CLMS-Response-Time-Ms");
+                if (serverMs) {
+                    console.debug(`[CLMS Upload] ${toUpload.name} ${serverMs}ms`);
+                }
+            }
             if (xhr.status >= 200 && xhr.status < 300) {
                 const path =
                     j.data?.path ||
@@ -210,7 +253,26 @@ async function uploadFileWithProgress(file, opts = {}) {
                 reject(new Error(msg + reqId));
             }
         };
-        xhr.onerror = () => reject(new Error("Network error"));
+        xhr.onerror = () =>
+            reject(
+                new Error(
+                    typeof t === "function"
+                        ? t(
+                              "Upload failed because the network connection was interrupted.",
+                          )
+                        : "Upload failed because the network connection was interrupted.",
+                ),
+            );
+        xhr.ontimeout = () =>
+            reject(
+                new Error(
+                    typeof t === "function"
+                        ? t(
+                              "Upload timed out. Please try a smaller image or retry on a stronger connection.",
+                          )
+                        : "Upload timed out. Please try a smaller image or retry on a stronger connection.",
+                ),
+            );
         xhr.send(fd);
     });
 }

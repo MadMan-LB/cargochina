@@ -11,11 +11,17 @@ $logDir = dirname(__DIR__, 2) . '/logs';
 if (is_dir($logDir) || @mkdir($logDir, 0755, true)) {
     @ini_set('error_log', $logDir . '/php_errors.log');
 }
+$GLOBALS['__clms_api_start'] = microtime(true);
+$GLOBALS['__clms_api_method'] = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+$GLOBALS['__clms_api_path'] = '/' . trim((string) ($_GET['path'] ?? ''), '/');
+$GLOBALS['__clms_api_slow_threshold_ms'] = 800.0;
+$GLOBALS['__clms_api_request_id'] = null;
+$GLOBALS['__clms_api_timing_finalized'] = false;
 
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
+header('Access-Control-Allow-Headers: Content-Type, X-CLMS-Debug-Timing');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
@@ -57,6 +63,9 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Unauthorized']);
         exit;
     }
+    $timingRequested = (string) ($_SERVER['HTTP_X_CLMS_DEBUG_TIMING'] ?? '') === '1'
+        || (string) ($_GET['debug_timing'] ?? '') === '1';
+    $GLOBALS['__clms_api_timing_debug'] = $timingRequested && hasAnyRole(['SuperAdmin']);
     if ($resource === 'orders' && $action === 'approve' && !hasAnyRole($rbac['orders']['approve'] ?? [])) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
@@ -207,6 +216,7 @@ try {
     $handler($method, $id, $action, $input);
 } catch (Throwable $e) {
     $requestId = bin2hex(random_bytes(8));
+    $GLOBALS['__clms_api_request_id'] = $requestId;
     $logDir = dirname(__DIR__, 2) . '/logs';
     if (is_dir($logDir)) {
         @error_log(date('Y-m-d H:i:s') . " [{$requestId}] " . $e->getMessage() . "\n" . $e->getTraceAsString() . "\n", 3, $logDir . '/php_errors.log');
@@ -214,6 +224,7 @@ try {
     $isDev = (($_SERVER['SERVER_NAME'] ?? '') === 'localhost' || ($_ENV['APP_ENV'] ?? '') === 'development');
     $message = $isDev ? $e->getMessage() . ' (ref: ' . $requestId . ')' : 'An error occurred. Please try again or contact support. (ref: ' . $requestId . ')';
     http_response_code(500);
+    clmsFinalizeApiTiming(500);
     echo json_encode([
         'error' => true,
         'message' => $message,

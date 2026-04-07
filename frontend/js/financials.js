@@ -801,7 +801,9 @@
         qrWrap.classList.remove("d-none");
         qrWrap.innerHTML = `
             <div class="fw-semibold mb-1">${escapeHtml(financialsT("Saved QR image"))}</div>
-            <img src="/cargochina/backend/${escapeHtml(qrPath)}" alt="${escapeHtml(financialsT("Payment QR"))}" class="img-thumbnail" style="max-width: 180px;">
+            <a href="${escapeHtml(uploadedFileUrl(qrPath))}" target="_blank" rel="noopener">
+                <img src="${escapeHtml(uploadedThumbUrl(qrPath, 180, 180, "contain"))}" alt="${escapeHtml(financialsT("Payment QR"))}" class="img-thumbnail" style="max-width: 180px;" loading="lazy">
+            </a>
         `;
     }
 
@@ -982,7 +984,7 @@
             const photos = (order.receipt?.photos || [])
                 .map(
                     (photo) =>
-                        `<img src="/cargochina/backend/${escapeHtml(photo.file_path || "")}" alt="Receipt evidence" class="img-thumbnail me-2 mb-2" style="max-width:120px;">`,
+                        `<a target="_blank" rel="noopener" href="${escapeHtml(uploadedFileUrl(photo.file_path || ""))}"><img src="${escapeHtml(uploadedThumbUrl(photo.file_path || "", 120, 120, "cover"))}" alt="Receipt evidence" class="img-thumbnail me-2 mb-2" style="max-width:120px;" loading="lazy"></a>`,
                 )
                 .join("");
             document.getElementById("finOrderInfoBody").innerHTML = `
@@ -1216,7 +1218,6 @@
             ?.addEventListener("change", updateFinSettlementPreview);
         activateTabFromHash();
         loadProfit();
-        loadBalances();
     });
 
     function updateFinSettlementPreview() {

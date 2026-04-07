@@ -32,33 +32,35 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     }
 
     $pdo = getDb();
+    setCacheHeaders(15);
     $userRoles = getUserRoles();
     $canSeePage = static fn(string $pageId) => clmsCanRolesAccessPage($userRoles, $pageId, $pdo);
 
-    $stats = [];
-    foreach (
-        [
-            'Draft' => 'draft',
-            'Submitted' => 'submitted',
-            'Approved' => 'approved',
-            'InTransitToWarehouse' => 'in_transit',
-            'ReceivedAtWarehouse' => 'received',
-            'AwaitingCustomerConfirmation' => 'awaiting_confirmation',
-            'Confirmed' => 'confirmed',
-            'CustomerDeclinedAfterAutoConfirm' => 'declined_after_auto_confirm',
-            'ReadyForConsolidation' => 'ready_for_consolidation',
-            'ConsolidatedIntoShipmentDraft' => 'in_shipment_draft',
-            'AssignedToContainer' => 'assigned_to_container',
-            'FinalizedAndPushedToTracking' => 'finalized',
-        ] as $status => $key
-    ) {
-        $stmt = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE status = ?");
-        $stmt->execute([$status]);
-        $stats[$key] = (int) $stmt->fetchColumn();
+    $statusKeyMap = [
+        'Draft' => 'draft',
+        'Submitted' => 'submitted',
+        'Approved' => 'approved',
+        'InTransitToWarehouse' => 'in_transit',
+        'ReceivedAtWarehouse' => 'received',
+        'AwaitingCustomerConfirmation' => 'awaiting_confirmation',
+        'Confirmed' => 'confirmed',
+        'CustomerDeclinedAfterAutoConfirm' => 'declined_after_auto_confirm',
+        'ReadyForConsolidation' => 'ready_for_consolidation',
+        'ConsolidatedIntoShipmentDraft' => 'in_shipment_draft',
+        'AssignedToContainer' => 'assigned_to_container',
+        'FinalizedAndPushedToTracking' => 'finalized',
+    ];
+    $stats = array_fill_keys(array_values($statusKeyMap), 0);
+
+    $statusStmt = $pdo->query("SELECT status, COUNT(*) AS total FROM orders GROUP BY status");
+    foreach ($statusStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $status = $row['status'] ?? '';
+        if (isset($statusKeyMap[$status])) {
+            $stats[$statusKeyMap[$status]] = (int) ($row['total'] ?? 0);
+        }
     }
 
-    $stmt = $pdo->query("SELECT COUNT(*) FROM orders WHERE status IN ('Approved','InTransitToWarehouse')");
-    $stats['pending_receiving'] = (int) $stmt->fetchColumn();
+    $stats['pending_receiving'] = ($stats['approved'] ?? 0) + ($stats['in_transit'] ?? 0);
 
     $stmt = $pdo->query("SELECT COUNT(*) FROM shipment_drafts WHERE status = 'draft'");
     $stats['draft_shipments'] = (int) $stmt->fetchColumn();
@@ -78,39 +80,33 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     // My tasks — role-scoped actionable counts
     $stats['my_tasks'] = [];
     if ((in_array('ChinaAdmin', $userRoles) || in_array('ChinaEmployee', $userRoles) || in_array('SuperAdmin', $userRoles)) && $canSeePage('orders')) {
-        $stmt = $pdo->query("SELECT COUNT(*) FROM orders WHERE status = 'Submitted'");
-        $submitted = (int) $stmt->fetchColumn();
+        $submitted = (int) ($stats['submitted'] ?? 0);
         if ($submitted > 0) {
             $stats['my_tasks'][] = ['label' => 'Orders to approve', 'count' => $submitted, 'url' => '/cargochina/orders.php?status=Submitted'];
         }
-        $stmt = $pdo->query("SELECT COUNT(*) FROM orders WHERE COALESCE(confirmation_token, '') <> ''");
-        $feedbackPending = (int) $stmt->fetchColumn();
+        $feedbackPending = (int) ($stats['customer_feedback_pending'] ?? 0);
         if ($feedbackPending > 0) {
             $stats['my_tasks'][] = ['label' => 'Customer feedback pending', 'count' => $feedbackPending, 'url' => '/cargochina/orders.php?customer_feedback=pending'];
         }
     }
     if ((in_array('WarehouseStaff', $userRoles) || in_array('SuperAdmin', $userRoles)) && $canSeePage('receiving')) {
-        $stmt = $pdo->query("SELECT COUNT(*) FROM orders WHERE status IN ('Approved','InTransitToWarehouse')");
-        $toReceive = (int) $stmt->fetchColumn();
+        $toReceive = (int) ($stats['pending_receiving'] ?? 0);
         if ($toReceive > 0) {
             $stats['my_tasks'][] = ['label' => 'To receive', 'count' => $toReceive, 'url' => '/cargochina/receiving.php'];
         }
     }
     if ((in_array('ChinaAdmin', $userRoles) || in_array('LebanonAdmin', $userRoles) || in_array('SuperAdmin', $userRoles)) && $canSeePage('consolidation')) {
-        $stmt = $pdo->query("SELECT COUNT(*) FROM orders WHERE status = 'ReadyForConsolidation'");
-        $ready = (int) $stmt->fetchColumn();
+        $ready = (int) ($stats['ready_for_consolidation'] ?? 0);
         if ($ready > 0) {
             $stats['my_tasks'][] = ['label' => 'Ready to consolidate', 'count' => $ready, 'url' => '/cargochina/consolidation.php'];
         }
-        $stmt = $pdo->query("SELECT COUNT(*) FROM shipment_drafts WHERE status = 'draft'");
-        $drafts = (int) $stmt->fetchColumn();
+        $drafts = (int) ($stats['draft_shipments'] ?? 0);
         if ($drafts > 0) {
             $stats['my_tasks'][] = ['label' => 'Shipment drafts', 'count' => $drafts, 'url' => '/cargochina/consolidation.php'];
         }
     }
     if ((in_array('ChinaAdmin', $userRoles) || in_array('ChinaEmployee', $userRoles) || in_array('LebanonAdmin', $userRoles) || in_array('SuperAdmin', $userRoles)) && $canSeePage('orders')) {
-        $stmt = $pdo->query("SELECT COUNT(*) FROM orders WHERE status = 'CustomerDeclinedAfterAutoConfirm'");
-        $declinedAfter = (int) $stmt->fetchColumn();
+        $declinedAfter = (int) ($stats['declined_after_auto_confirm'] ?? 0);
         if ($declinedAfter > 0) {
             $stats['my_tasks'][] = ['label' => 'Declined after auto-confirm', 'count' => $declinedAfter, 'url' => '/cargochina/orders.php?customer_feedback=declined_after_auto_confirm'];
         }

@@ -4,9 +4,62 @@
  * API response helpers
  */
 
+function clmsFinalizeApiTiming(int $status): void
+{
+    if (!empty($GLOBALS['__clms_api_timing_finalized'])) {
+        return;
+    }
+    $GLOBALS['__clms_api_timing_finalized'] = true;
+
+    $start = $GLOBALS['__clms_api_start'] ?? null;
+    if (!$start) {
+        return;
+    }
+
+    $elapsedMs = max(0, (microtime(true) - (float) $start) * 1000);
+    $formattedMs = number_format($elapsedMs, 1, '.', '');
+    $requestId = $GLOBALS['__clms_api_request_id'] ?? null;
+
+    if (!headers_sent()) {
+        if ($requestId) {
+            header('X-Request-Id: ' . $requestId);
+        }
+        if (!empty($GLOBALS['__clms_api_timing_debug'])) {
+            header('X-CLMS-Response-Time-Ms: ' . $formattedMs);
+            header('Server-Timing: app;dur=' . $formattedMs);
+        }
+    }
+
+    $slowThresholdMs = (float) ($GLOBALS['__clms_api_slow_threshold_ms'] ?? 800);
+    if ($elapsedMs < $slowThresholdMs) {
+        return;
+    }
+
+    $logDir = dirname(__DIR__, 2) . '/logs';
+    if (!is_dir($logDir) && !@mkdir($logDir, 0755, true)) {
+        return;
+    }
+
+    $method = (string) ($GLOBALS['__clms_api_method'] ?? ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+    $path = (string) ($GLOBALS['__clms_api_path'] ?? ($_GET['path'] ?? ''));
+    $userId = getAuthUserId();
+    $line = sprintf(
+        "%s %s %s %s %.1fms user=%s request=%s\n",
+        date('Y-m-d H:i:s'),
+        $method,
+        $path ?: '/',
+        $status,
+        $elapsedMs,
+        $userId !== null ? (string) $userId : '-',
+        $requestId ?: '-'
+    );
+    @error_log($line, 3, $logDir . '/performance.log');
+}
+
 function jsonResponse(array $data, int $status = 200): void
 {
     http_response_code($status);
+    clmsFinalizeApiTiming($status);
     echo json_encode($data, JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -20,6 +73,7 @@ function setCacheHeaders(int $maxAgeSeconds = 60): void
 function jsonError(string $message, int $status = 400, array $errors = [], ?string $requestId = null): void
 {
     $requestId = $requestId ?? bin2hex(random_bytes(8));
+    $GLOBALS['__clms_api_request_id'] = $requestId;
     $body = ['error' => true, 'message' => $message, 'request_id' => $requestId];
     if (!empty($errors)) {
         $body['errors'] = $errors;
@@ -144,20 +198,20 @@ function getBusinessSetting(PDO $pdo, string $key, ?string $default = null): ?st
     }
 }
 
-function normalizeStoredUploadPath(string $filePath, bool $mustExist = true): string
+function clmsResolveStoredUploadPathMeta(string $filePath, bool $mustExist = true): array
 {
     $normalized = str_replace('\\', '/', trim($filePath));
     $normalized = preg_replace('#^\./+#', '', $normalized ?? '');
     $normalized = ltrim((string) $normalized, '/');
 
     if ($normalized === '') {
-        jsonError('file_path required', 400);
+        throw new InvalidArgumentException('file_path required');
     }
     if (preg_match('#^[A-Za-z]:/#', $normalized) || str_contains($normalized, '..')) {
-        jsonError('Invalid file_path', 400);
+        throw new InvalidArgumentException('Invalid file_path');
     }
     if (!str_starts_with($normalized, 'uploads/')) {
-        jsonError('Invalid file_path; only uploaded files are allowed', 400);
+        throw new InvalidArgumentException('Invalid file_path; only uploaded files are allowed');
     }
 
     // Must match upload handler: backend/uploads (dirname(__DIR__,1) = backend from backend/api)
@@ -165,37 +219,61 @@ function normalizeStoredUploadPath(string $filePath, bool $mustExist = true): st
     $uploadDir = $backendDir . '/uploads';
     if (!is_dir($uploadDir)) {
         if (!@mkdir($uploadDir, 0755, true)) {
-            jsonError('Upload directory is not available', 500);
+            throw new RuntimeException('Upload directory is not available');
         }
     }
     $uploadRoot = realpath($uploadDir);
     if ($uploadRoot === false) {
-        jsonError('Upload directory is not available', 500);
+        throw new RuntimeException('Upload directory is not available');
     }
 
     $fullPath = $backendDir . '/' . $normalized;
     if ($mustExist && !is_file($fullPath)) {
-        jsonError('Uploaded file not found', 400);
+        throw new InvalidArgumentException('Uploaded file not found');
     }
 
     $resolved = realpath($fullPath);
     if ($resolved === false && !$mustExist) {
         $resolvedDir = realpath(dirname($fullPath));
         if ($resolvedDir === false) {
-            jsonError('Invalid file_path', 400);
+            throw new InvalidArgumentException('Invalid file_path');
         }
         $resolvedDir = str_replace('\\', '/', $resolvedDir);
         if ($resolvedDir !== str_replace('\\', '/', $uploadRoot) && !str_starts_with($resolvedDir, str_replace('\\', '/', $uploadRoot) . '/')) {
-            jsonError('Invalid file_path', 400);
+            throw new InvalidArgumentException('Invalid file_path');
         }
-        return $normalized;
+        return [
+            'normalized' => $normalized,
+            'backend_dir' => $backendDir,
+            'upload_root' => $uploadRoot,
+            'full_path' => $fullPath,
+            'resolved_path' => null,
+        ];
     }
 
     if ($resolved === false || !str_starts_with(str_replace('\\', '/', $resolved), str_replace('\\', '/', $uploadRoot) . '/')) {
-        jsonError('Invalid file_path', 400);
+        throw new InvalidArgumentException('Invalid file_path');
     }
 
-    return $normalized;
+    return [
+        'normalized' => $normalized,
+        'backend_dir' => $backendDir,
+        'upload_root' => $uploadRoot,
+        'full_path' => $fullPath,
+        'resolved_path' => $resolved,
+    ];
+}
+
+function normalizeStoredUploadPath(string $filePath, bool $mustExist = true): string
+{
+    try {
+        $meta = clmsResolveStoredUploadPathMeta($filePath, $mustExist);
+        return $meta['normalized'];
+    } catch (InvalidArgumentException $e) {
+        jsonError($e->getMessage(), 400);
+    } catch (RuntimeException $e) {
+        jsonError($e->getMessage(), 500);
+    }
 }
 
 function normalizeStoredUploadPathList(array $paths): array
