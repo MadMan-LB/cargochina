@@ -25,7 +25,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 jsonResponse(['data' => [
                     'max_upload_mb' => (float) ($fileConfig['upload_max_mb'] ?? 8),
-                    'allowed_types' => $fileConfig['upload_allowed_types'] ?? ['jpg', 'jpeg', 'png', 'webp', 'jfif', 'gif', 'pdf'],
+                    'allowed_types' => $fileConfig['upload_allowed_types'] ?? clmsUploadAllowedExtensions(),
+                    'supported_image_types' => clmsUploadAllowedImageExtensions(),
+                    'unsupported_image_types' => array_keys(clmsUploadUnsupportedCommonImageTypes()),
+                    'unsupported_image_messages' => clmsUploadUnsupportedCommonImageTypes(),
+                    'processing_mode' => 'deferred-thumbnail',
+                    'preserve_originals' => true,
                 ]]);
                 return;
             }
@@ -184,8 +189,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             if (isset($updates['UPLOAD_ALLOWED_TYPES'])) {
                 $t = is_array($updates['UPLOAD_ALLOWED_TYPES']) ? $updates['UPLOAD_ALLOWED_TYPES'] : array_map('trim', explode(',', (string) $updates['UPLOAD_ALLOWED_TYPES']));
-                $allowed = ['jpg', 'jpeg', 'png', 'webp', 'jfif', 'gif', 'pdf'];
-                if (!empty(array_diff(array_map('strtolower', $t), $allowed))) $errors['UPLOAD_ALLOWED_TYPES'] = 'Only jpg,jpeg,png,webp,jfif,gif,pdf allowed';
+                $allowed = clmsUploadAllowedExtensions();
+                if (!empty(array_diff(array_map('strtolower', $t), $allowed))) $errors['UPLOAD_ALLOWED_TYPES'] = 'Only ' . implode(',', $allowed) . ' allowed';
             }
             if (!empty($errors)) {
                 jsonError('Validation failed', 400, $errors);

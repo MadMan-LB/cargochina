@@ -58,8 +58,7 @@ const PHOTO_UPLOADER = {
         const paths = [];
         for (let i = 0; i < files.length; i++) {
             if (!files[i].type.startsWith("image/")) continue;
-            const file = await this.compressImage.call(this, files[i]);
-            const path = await uploadFile(file);
+            const path = await uploadFile(files[i]);
             if (path) paths.push(path);
             if (onProgress) onProgress(i + 1, files.length);
         }

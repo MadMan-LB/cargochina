@@ -131,6 +131,98 @@ function format_display_percent($value, int $maxDecimals = 1, int $minDecimals =
     return format_display_number($value, $maxDecimals, $minDecimals);
 }
 
+function clmsUploadTypeDefinitions(): array
+{
+    static $definitions = null;
+    if ($definitions !== null) {
+        return $definitions;
+    }
+
+    $definitions = [
+        'jpg' => ['kind' => 'image', 'mimes' => ['image/jpeg']],
+        'jpeg' => ['kind' => 'image', 'mimes' => ['image/jpeg']],
+        'png' => ['kind' => 'image', 'mimes' => ['image/png']],
+        'webp' => ['kind' => 'image', 'mimes' => ['image/webp']],
+        'jfif' => ['kind' => 'image', 'mimes' => ['image/jpeg']],
+        'gif' => ['kind' => 'image', 'mimes' => ['image/gif']],
+        'bmp' => ['kind' => 'image', 'mimes' => ['image/bmp', 'image/x-ms-bmp', 'image/x-bmp']],
+        'avif' => ['kind' => 'image', 'mimes' => ['image/avif']],
+        'pdf' => ['kind' => 'document', 'mimes' => ['application/pdf']],
+    ];
+
+    return $definitions;
+}
+
+function clmsUploadAllowedExtensions(): array
+{
+    return array_keys(clmsUploadTypeDefinitions());
+}
+
+function clmsUploadAllowedImageExtensions(): array
+{
+    return array_keys(array_filter(
+        clmsUploadTypeDefinitions(),
+        static fn(array $def): bool => ($def['kind'] ?? '') === 'image'
+    ));
+}
+
+function clmsUploadAllowedMimeMap(): array
+{
+    $map = [];
+    foreach (clmsUploadTypeDefinitions() as $ext => $definition) {
+        $map[$ext] = $definition['mimes'] ?? [];
+    }
+    return $map;
+}
+
+function clmsUploadUnsupportedCommonImageTypes(): array
+{
+    return [
+        'heic' => 'HEIC / HEIF images are not supported on this server yet. Please convert them to JPG, PNG, WebP, BMP, or AVIF before uploading.',
+        'heif' => 'HEIC / HEIF images are not supported on this server yet. Please convert them to JPG, PNG, WebP, BMP, or AVIF before uploading.',
+    ];
+}
+
+function clmsIsUploadImageExtension(string $extension): bool
+{
+    $definition = clmsUploadTypeDefinitions()[strtolower($extension)] ?? null;
+    return ($definition['kind'] ?? null) === 'image';
+}
+
+function clmsCreateImageResourceFromPath(string $sourcePath, ?array $imageInfo = null)
+{
+    if (!is_file($sourcePath)) {
+        return false;
+    }
+
+    $imageType = $imageInfo[2] ?? @exif_imagetype($sourcePath);
+
+    if ($imageType === IMAGETYPE_JPEG && function_exists('imagecreatefromjpeg')) {
+        return @imagecreatefromjpeg($sourcePath);
+    }
+    if ($imageType === IMAGETYPE_PNG && function_exists('imagecreatefrompng')) {
+        return @imagecreatefrompng($sourcePath);
+    }
+    if ($imageType === IMAGETYPE_GIF && function_exists('imagecreatefromgif')) {
+        return @imagecreatefromgif($sourcePath);
+    }
+    if (defined('IMAGETYPE_WEBP') && $imageType === IMAGETYPE_WEBP && function_exists('imagecreatefromwebp')) {
+        return @imagecreatefromwebp($sourcePath);
+    }
+    if (defined('IMAGETYPE_BMP') && $imageType === IMAGETYPE_BMP && function_exists('imagecreatefrombmp')) {
+        return @imagecreatefrombmp($sourcePath);
+    }
+    if (defined('IMAGETYPE_AVIF') && $imageType === IMAGETYPE_AVIF && function_exists('imagecreatefromavif')) {
+        return @imagecreatefromavif($sourcePath);
+    }
+
+    $binary = @file_get_contents($sourcePath);
+    if ($binary === false || !function_exists('imagecreatefromstring')) {
+        return false;
+    }
+    return @imagecreatefromstring($binary);
+}
+
 function ensureSession(): void
 {
     if (session_status() === PHP_SESSION_NONE) {

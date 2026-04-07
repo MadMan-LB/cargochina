@@ -32,7 +32,24 @@ async function getUploadConfig() {
         );
     uploadConfigCache = d.data || {
         max_upload_mb: 8,
-        allowed_types: ["jpg", "jpeg", "png", "webp", "jfif", "gif", "pdf"],
+        allowed_types: [
+            "jpg",
+            "jpeg",
+            "png",
+            "webp",
+            "jfif",
+            "gif",
+            "bmp",
+            "avif",
+            "pdf",
+        ],
+        unsupported_image_types: ["heic", "heif"],
+        unsupported_image_messages: {
+            heic: "HEIC / HEIF images are not supported on this server yet. Please convert them to JPG, PNG, WebP, BMP, or AVIF before uploading.",
+            heif: "HEIC / HEIF images are not supported on this server yet. Please convert them to JPG, PNG, WebP, BMP, or AVIF before uploading.",
+        },
+        processing_mode: "deferred-thumbnail",
+        preserve_originals: true,
     };
     return uploadConfigCache;
 }
@@ -53,6 +70,24 @@ function formatUploadDisplayNumber(value, maxDecimals = 1) {
     }
     const numeric = parseFloat(value);
     return Number.isFinite(numeric) ? String(numeric) : "0";
+}
+
+function getUnsupportedUploadMessage(ext, config) {
+    const normalized = String(ext || "").toLowerCase();
+    const messages = config?.unsupported_image_messages || {};
+    return messages[normalized] || null;
+}
+
+function translateUploadMessage(message, replacements = null) {
+    if (typeof t === "function") {
+        return t(message, replacements);
+    }
+    if (!replacements || typeof replacements !== "object") return message;
+    return String(message).replace(/\{(\w+)\}/g, (_, key) =>
+        Object.prototype.hasOwnProperty.call(replacements, key)
+            ? String(replacements[key])
+            : `{${key}}`,
+    );
 }
 
 function shouldDebugUploadTiming() {
@@ -112,9 +147,16 @@ async function compressImage(file, maxMb, maxPx = 1600, quality = 0.8) {
         const url = URL.createObjectURL(file);
         img.onload = () => {
             URL.revokeObjectURL(url);
+            const ext = getExt(file);
             let w = img.width,
                 h = img.height;
-            if (w <= maxPx && h <= maxPx && file.size <= maxMb * 1048576) {
+            const shouldNormalizeSmallImage = ext === "bmp";
+            if (
+                !shouldNormalizeSmallImage &&
+                w <= maxPx &&
+                h <= maxPx &&
+                file.size <= maxMb * 1048576
+            ) {
                 resolve(file);
                 return;
             }
@@ -174,12 +216,24 @@ async function uploadFileWithProgress(file, opts = {}) {
         "webp",
         "jfif",
         "gif",
+        "bmp",
+        "avif",
         "pdf",
     ];
     const ext = getExt(file);
 
+    const unsupportedMsg = getUnsupportedUploadMessage(ext, config);
+    if (unsupportedMsg) {
+        const msg = translateUploadMessage(unsupportedMsg);
+        showToast(msg, "danger");
+        throw new Error(msg);
+    }
+
     if (!allowed.includes(ext)) {
-        const msg = "File type not allowed. Allowed: " + allowed.join(", ");
+        const msg = translateUploadMessage(
+            "File type not allowed. Allowed: {types}",
+            { types: allowed.join(", ") },
+        );
         showToast(msg, "danger");
         throw new Error(msg);
     }
@@ -248,7 +302,14 @@ async function uploadFileWithProgress(file, opts = {}) {
                 resolve(path);
             } else {
                 const err = j.error || {};
-                const msg = err.message || "Upload failed";
+                const msg = err.allowed_types
+                    ? translateUploadMessage(
+                          "File type not allowed. Allowed: {types}",
+                          { types: err.allowed_types.join(", ") },
+                      )
+                    : translateUploadMessage(
+                          err.message || "Upload failed",
+                      );
                 const reqId = err.request_id ? ` (ref: ${err.request_id})` : "";
                 reject(new Error(msg + reqId));
             }

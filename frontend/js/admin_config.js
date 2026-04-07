@@ -70,7 +70,8 @@ async function loadConfig() {
             c.upload_allowed_types,
         )
             ? c.upload_allowed_types.join(",")
-            : c.upload_allowed_types || "jpg,jpeg,png,webp,gif,pdf";
+            : c.upload_allowed_types ||
+              "jpg,jpeg,png,webp,jfif,gif,bmp,avif,pdf";
         toggleWhatsAppSections();
         document.getElementById("whatsappProvider").onchange =
             toggleWhatsAppSections;
@@ -177,10 +178,23 @@ function validateConfig(cfg) {
     if (
         allowedTypes.length &&
         allowedTypes.some(
-            (t) => !["jpg", "jpeg", "png", "webp", "gif", "pdf"].includes(t),
+            (t) =>
+                ![
+                    "jpg",
+                    "jpeg",
+                    "png",
+                    "webp",
+                    "jfif",
+                    "gif",
+                    "bmp",
+                    "avif",
+                    "pdf",
+                ].includes(t),
         )
     ) {
-        errs.push("Upload allowed types must be jpg,jpeg,png,webp,gif,pdf");
+        errs.push(
+            "Upload allowed types must be jpg,jpeg,png,webp,jfif,gif,bmp,avif,pdf",
+        );
     }
     return errs;
 }
@@ -243,7 +257,8 @@ async function saveConfig() {
                 UPLOAD_ALLOWED_TYPES:
                     document
                         .getElementById("uploadAllowedTypes")
-                        .value?.trim() || "jpg,jpeg,png,webp,gif,pdf",
+                        .value?.trim() ||
+                    "jpg,jpeg,png,webp,jfif,gif,bmp,avif,pdf",
                 TRACKING_API_BASE_URL:
                     document
                         .getElementById("trackingApiBaseUrl")

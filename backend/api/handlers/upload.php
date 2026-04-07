@@ -24,16 +24,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $config = require dirname(__DIR__, 2) . '/config/config.php';
         $maxSize = (int) ($config['upload_max_size'] ?? 8388608);
         $maxMb = (float) ($config['upload_max_mb'] ?? 8);
-        $allowed = $config['upload_allowed_extensions'] ?? ['jpg', 'jpeg', 'png', 'webp', 'jfif', 'gif', 'pdf'];
-        $allowedMimeMap = [
-            'jpg' => ['image/jpeg'],
-            'jpeg' => ['image/jpeg'],
-            'png' => ['image/png'],
-            'webp' => ['image/webp'],
-            'jfif' => ['image/jpeg'],
-            'gif' => ['image/gif'],
-            'pdf' => ['application/pdf'],
-        ];
+        $allowed = array_values(array_unique(array_map(
+            'strtolower',
+            $config['upload_allowed_extensions'] ?? clmsUploadAllowedExtensions()
+        )));
+        $allowedMimeMap = clmsUploadAllowedMimeMap();
+        $unsupportedCommonImages = clmsUploadUnsupportedCommonImageTypes();
 
         if ($file['error'] !== UPLOAD_ERR_OK) {
             $errMsg = [
@@ -59,6 +55,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         }
 
         $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+        if (isset($unsupportedCommonImages[$ext])) {
+            jsonResponse(['error' => [
+                'message' => $unsupportedCommonImages[$ext],
+                'code' => 'UNSUPPORTED_IMAGE_FORMAT',
+                'request_id' => $requestId,
+            ]], 415);
+        }
         if (!in_array($ext, $allowed)) {
             jsonResponse(['error' => ['message' => 'File type not allowed. Allowed: ' . implode(', ', $allowed), 'code' => 'UPLOAD_FAILED', 'allowed_types' => $allowed, 'request_id' => $requestId]], 400);
         }
@@ -86,7 +89,19 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
         $relPath = 'uploads/' . $filename;
         $url = '/cargochina/backend/' . $relPath;
-        jsonResponse(['data' => ['path' => $relPath, 'url' => $url]], 201);
+        $payload = [
+            'path' => $relPath,
+            'url' => $url,
+            'stored_extension' => $ext,
+        ];
+        if (clmsIsUploadImageExtension($ext)) {
+            $payload['thumbnail_url'] = '/cargochina/backend/thumb.php?path=' . rawurlencode($relPath) . '&w=128&h=128&fit=cover';
+            $payload['media_status'] = 'stored';
+            $payload['processing_mode'] = 'deferred-thumbnail';
+            $payload['thumbnail_status'] = 'pending';
+            $payload['original_preserved'] = true;
+        }
+        jsonResponse(['data' => $payload], 201);
     } catch (Throwable $e) {
         $logDir = dirname(__DIR__, 3) . '/logs';
         if (!is_dir($logDir)) mkdir($logDir, 0755, true);

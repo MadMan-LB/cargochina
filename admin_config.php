@@ -97,8 +97,8 @@ require 'includes/layout.php';
                                 <div class="col-md-4"><label class="form-label">Max Upload Size (MB)</label><input type="number" min="0.5"
                                                 max="50" step="0.5" class="form-control" id="uploadMaxMb"></div>
                                 <div class="col-md-8"><label class="form-label">Allowed File Types</label><input type="text"
-                                                class="form-control" id="uploadAllowedTypes" placeholder="jpg,jpeg,png,webp,gif,pdf"><small
-                                                class="text-muted">Used for photos, design attachments, and shipment documents.</small></div>
+                                                class="form-control" id="uploadAllowedTypes" placeholder="jpg,jpeg,png,webp,jfif,gif,bmp,avif,pdf"><small
+                                                class="text-muted">Used for photos, design attachments, and shipment documents. HEIC / HEIF still require conversion before upload on this server.</small></div>
                         </div>
                         <hr>
                         <h5 class="mb-3">Tracking Integration (Phase 3)</h5>

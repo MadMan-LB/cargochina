@@ -985,7 +985,7 @@ function renderItemPhotoPreview(orderItemId) {
     container.innerHTML = paths
         .map(
             (p, i) =>
-                `<span class="d-inline-block me-1"><img src="/cargochina/backend/${p}" class="img-thumbnail" style="max-width:40px"><button type="button" class="btn-close btn-close-sm" onclick="removeItemPhoto('${orderItemId}',${i})"></button></span>`,
+                `<span class="d-inline-block me-1"><a href="${typeof uploadedFileUrl === "function" ? uploadedFileUrl(p) : `/cargochina/backend/${p}`}" target="_blank" rel="noopener"><img src="${typeof uploadedThumbUrl === "function" ? uploadedThumbUrl(p, 40, 40, "cover") : `/cargochina/backend/${p}`}" class="img-thumbnail" style="max-width:40px" loading="lazy"></a><button type="button" class="btn-close btn-close-sm" onclick="removeItemPhoto('${orderItemId}',${i})"></button></span>`,
         )
         .join("");
 }

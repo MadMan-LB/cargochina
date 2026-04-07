@@ -37,8 +37,7 @@ try {
     $cachePath = $cacheDir . '/' . $cacheKey . '.jpg';
 
     if (!is_file($cachePath)) {
-        $binary = @file_get_contents($sourcePath);
-        $src = $binary !== false ? @imagecreatefromstring($binary) : false;
+        $src = clmsCreateImageResourceFromPath($sourcePath, $imageInfo);
         if (!$src) {
             header('Content-Type: ' . $sourceMime);
             header('Cache-Control: public, max-age=2592000, immutable');

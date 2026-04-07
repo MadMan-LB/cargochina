@@ -311,7 +311,7 @@ function addSupplierPaymentLinkRow(rowData = {}) {
         <div class="col-12 col-md-5">
           <input type="text" class="form-control form-control-sm supplier-payment-link-value" placeholder="Account / number / URL / account detail" value="${escapeHtml(detail)}">
           <input type="hidden" class="supplier-payment-link-qr" value="${escapeHtml(qrPath)}">
-          <input type="file" class="d-none supplier-payment-qr-input" accept="image/*,.jpg,.jpeg,.png,.webp,.jfif,.gif">
+          <input type="file" class="d-none supplier-payment-qr-input" accept="image/*,.jpg,.jpeg,.png,.webp,.jfif,.gif,.bmp,.avif">
         </div>
         <div class="col-8 col-md-1">
           <button type="button" class="btn btn-sm btn-outline-secondary w-100 supplier-payment-qr-btn">QR</button>
