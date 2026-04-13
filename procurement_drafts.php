@@ -15,7 +15,10 @@ require 'includes/layout.php';
       <div class="fw-semibold">Draft Orders</div>
       <small class="text-muted">These are real orders saved with the draft-order workflow.</small>
     </div>
-    <button class="btn btn-primary btn-sm" type="button" onclick="openDraftOrderBuilder()">+ Draft an Order</button>
+    <div class="d-flex gap-2 flex-wrap">
+      <button class="btn btn-outline-primary btn-sm" type="button" id="draftOrderImportBtn">Import</button>
+      <button class="btn btn-primary btn-sm" type="button" onclick="openDraftOrderBuilder()">+ Draft an Order</button>
+    </div>
   </div>
   <div class="card-body">
     <div id="draftOrdersTable" class="table-responsive">
@@ -64,6 +67,73 @@ require 'includes/layout.php';
   </div>
 </div>
 
+<div class="modal fade" id="draftOrderImportGuideModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h5 class="modal-title mb-1">Import Draft Order</h5>
+          <small class="text-muted">Use exported Draft an Order or Orders columns.</small>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted mb-3">Keep the column names below. Missing columns can stay blank; empty data will stay empty in the draft form.</p>
+
+        <div class="mb-3">
+          <div class="fw-semibold mb-2">Supplier section marker row</div>
+          <div class="border rounded p-2 bg-light small text-break">
+            Supplier:, Supplier Name
+          </div>
+          <div class="form-text">All following item rows stay in that supplier section until the next Supplier: row.</div>
+        </div>
+
+        <div class="mb-3">
+          <div class="fw-semibold mb-2">Draft CSV header row</div>
+          <div class="border rounded p-2 bg-light small text-break">
+            Item No, Product / Names, HS Code, Pieces/Carton, Cartons, Quantity, Factory Price, Customer Price, Total Amount, CBM/Unit, Total CBM, Weight/Unit, Total Weight, Custom Design
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <div class="fw-semibold mb-2">Orders XLSX header row</div>
+          <div class="border rounded p-2 bg-light small text-break">
+            PHOTO, ITEM NO, SUPPLIER, DESCRIPTION, TOTAL CTNS, QTY/CTN, TOTAL QTY, UNIT PRICE, TOTAL AMOUNT, CBM, TOTAL CBM, GWKG, TOTAL GW
+          </div>
+        </div>
+
+        <div class="table-responsive mb-3">
+          <table class="table table-sm table-bordered align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Form field</th>
+                <th>Accepted column names</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Supplier section</td><td>Supplier: in the first cell, supplier name in the next cell</td></tr>
+              <tr><td>Item number</td><td>Item No, Item Number, ITEM NO</td></tr>
+              <tr><td>Description</td><td>Product / Names, Description, DESCRIPTION</td></tr>
+              <tr><td>Packaging</td><td>Pieces/Carton, Qty/Ctn, Cartons, Total CTNS, Quantity, Total Qty</td></tr>
+              <tr><td>Pricing</td><td>Factory Price, Customer Price, Unit Price, Total Amount</td></tr>
+              <tr><td>Volume and weight</td><td>CBM/Unit, CBM, Total CBM, Weight/Unit, GWKG, Total Weight, Total GW</td></tr>
+              <tr><td>Optional</td><td>HS Code, Custom Design</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="alert alert-info mb-0">
+          Optional metadata rows before the item headers: Customer, Destination Country, Expected Ready, Currency. Supplier sections start with Supplier: and the supplier name in the next cell.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-primary" id="draftOrderImportChooseFileBtn">Choose Excel/CSV file</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal fade" id="draftOrderModal" tabindex="-1">
   <div class="modal-dialog modal-fullscreen">
     <div class="modal-content">
@@ -78,6 +148,7 @@ require 'includes/layout.php';
         <form id="draftOrderForm">
           <input type="hidden" id="draftOrderId">
           <input type="hidden" id="draftOrderEditable" value="1">
+          <input type="file" class="d-none" id="draftOrderImportFile" accept=".xlsx,.xls,.csv,.cv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel">
           <div class="card mb-4 draft-order-meta-card">
             <div class="card-body">
               <div class="row g-3">
@@ -125,7 +196,10 @@ require 'includes/layout.php';
               <div class="fw-semibold text-dark">Supplier Sections</div>
               <small class="text-muted">Photo-first item cards, auto item numbers, compact fields, and supplier-level totals stay live while you build.</small>
             </div>
-            <button type="button" class="btn btn-outline-primary btn-sm" id="draftOrderAddSectionBtn" onclick="addDraftOrderSection()">+ Add Supplier Section</button>
+            <div class="d-flex gap-2 flex-wrap">
+              <button type="button" class="btn btn-outline-primary btn-sm" id="draftOrderModalImportBtn">Import</button>
+              <button type="button" class="btn btn-outline-primary btn-sm" id="draftOrderAddSectionBtn" onclick="addDraftOrderSection()">+ Add Supplier Section</button>
+            </div>
           </div>
 
           <div id="draftOrderSections" class="d-flex flex-column gap-4"></div>

@@ -11,9 +11,20 @@
     let sharedCartonContentIndex = 0;
     let quickSupplierPaymentLinkIndex = 0;
     let draftOrderCustomerCountryShipping = [];
+    let draftOrderImportTrigger = null;
+    let draftOrderImportGuideModal = null;
+    let draftOrderImportNeedsReplaceConfirm = false;
+    let draftOrderImportReturnToBuilder = false;
+    let draftOrderUnsavedGuard = null;
 
     function draftT(text, replacements = null) {
-        return typeof t === "function" ? t(text, replacements) : text;
+        let value = typeof t === "function" ? t(text, replacements) : text;
+        if (replacements && typeof value === "string") {
+            Object.entries(replacements).forEach(([key, replacement]) => {
+                value = value.replaceAll(`{${key}}`, String(replacement));
+            });
+        }
+        return value;
     }
 
     async function api(method, path, body) {
@@ -791,6 +802,234 @@
         builderModal.show();
     }
 
+    function draftOrderBuilderHasImportableInput() {
+        const modalEl = document.getElementById("draftOrderModal");
+        if (!modalEl?.classList.contains("show")) return false;
+        if (document.getElementById("draftOrderId")?.value) return true;
+        const fields = Array.from(
+            modalEl.querySelectorAll(
+                "#draftOrderCustomer, #draftOrderExpectedDate, #draftOrderHighAlertNotes, #draftOrderSections input:not([type='hidden']):not([type='file']), #draftOrderSections textarea",
+            ),
+        );
+        return fields.some((field) => String(field.value || "").trim() !== "");
+    }
+
+    async function uploadDraftOrderImportFile(file) {
+        const fd = new FormData();
+        fd.append("file", file);
+
+        let res;
+        try {
+            res = await fetch(API + "/draft-orders/import", {
+                method: "POST",
+                credentials: "same-origin",
+                body: fd,
+            });
+        } catch (_) {
+            throw new Error(
+                draftT(
+                    "Could not reach the server. Check your connection and try again.",
+                ),
+            );
+        }
+
+        const text = await res.text();
+        let data = {};
+        try {
+            data = text ? JSON.parse(text) : {};
+        } catch (_) {
+            throw new Error("Import failed because the server response was not JSON.");
+        }
+        if (!res.ok || data.error) {
+            const err = data.error === true ? data : data.error || {};
+            const message =
+                err.message ||
+                data.message ||
+                draftT("Import failed. Check the file and try again.");
+            const ref = err.request_id || data.request_id;
+            throw new Error(message + (ref ? ` (ref: ${ref})` : ""));
+        }
+        return data;
+    }
+
+    async function applyImportedDraftOrder(imported) {
+        builderModal =
+            builderModal ||
+            bootstrap.Modal.getOrCreateInstance(
+                document.getElementById("draftOrderModal"),
+            );
+        resetDraftOrderBuilder();
+
+        const customer = imported.customer || {};
+        if (customer.id) {
+            draftOrderCustomerAc?.setValue({
+                id: customer.id,
+                name: customer.name || "",
+                default_shipping_code: customer.default_shipping_code || "",
+            });
+            await loadDraftCustomerCountryContext(
+                customer.id,
+                customer.default_shipping_code || "",
+                imported.destination_country || null,
+            );
+        } else if (customer.name) {
+            draftOrderCustomerAc?.setValue(null);
+            const customerInput = document.getElementById("draftOrderCustomer");
+            if (customerInput) customerInput.value = customer.name || "";
+        }
+
+        const country = imported.destination_country || {};
+        if (!customer.id && (country.id || country.name)) {
+            setDraftDestinationCountry(
+                country.id || "",
+                country.name || "",
+                country.code || "",
+            );
+        }
+
+        document.getElementById("draftOrderExpectedDate").value =
+            imported.expected_ready_date || "";
+        document.getElementById("draftOrderCurrency").value =
+            imported.currency || "RMB";
+        document.getElementById("draftOrderHighAlertNotes").value =
+            imported.high_alert_notes || "";
+        document.getElementById("draftOrderSections").innerHTML = "";
+        const sections = imported.supplier_sections || [];
+        if (sections.length) {
+            sections.forEach((section) => addDraftOrderSection(section));
+        } else {
+            addDraftOrderSection();
+        }
+        document.getElementById("draftOrderTotalCurrency").textContent =
+            imported.currency || "RMB";
+        setBuilderEditable(true);
+        updateDraftOrderTotals();
+        renumberDraftItems();
+        refreshUnsavedBaseline?.(
+            document.querySelector("#draftOrderModal .modal-body"),
+        );
+        builderModal.show();
+    }
+
+    function triggerDraftOrderImport(button = null) {
+        draftOrderImportTrigger = button;
+        const guideEl = document.getElementById("draftOrderImportGuideModal");
+        if (guideEl && typeof bootstrap !== "undefined") {
+            draftOrderImportGuideModal =
+                draftOrderImportGuideModal ||
+                bootstrap.Modal.getOrCreateInstance(guideEl);
+            draftOrderImportNeedsReplaceConfirm =
+                draftOrderBuilderHasImportableInput();
+            const builderEl = document.getElementById("draftOrderModal");
+            const showGuide = () => draftOrderImportGuideModal.show();
+            if (
+                button?.id === "draftOrderModalImportBtn" &&
+                builderEl?.classList.contains("show")
+            ) {
+                draftOrderImportReturnToBuilder = true;
+                builderEl.addEventListener("hidden.bs.modal", showGuide, {
+                    once: true,
+                });
+                draftOrderUnsavedGuard?.bypassNextClose?.();
+                builderModal =
+                    builderModal || bootstrap.Modal.getOrCreateInstance(builderEl);
+                builderModal.hide();
+                return;
+            }
+            draftOrderImportReturnToBuilder = false;
+            draftOrderImportGuideModal.show();
+            return;
+        }
+        chooseDraftOrderImportFile();
+    }
+
+    function chooseDraftOrderImportFile() {
+        if (
+            (draftOrderImportNeedsReplaceConfirm ||
+                draftOrderBuilderHasImportableInput()) &&
+            !window.confirm(
+                draftT(
+                    "Importing will replace the current unsaved draft form. Continue?",
+                ),
+            )
+        ) {
+            return;
+        }
+        draftOrderImportNeedsReplaceConfirm = false;
+        draftOrderImportGuideModal?.hide();
+        const input = document.getElementById("draftOrderImportFile");
+        if (input) {
+            input.value = "";
+            input.click();
+        }
+    }
+
+    async function handleDraftOrderImportFile(event) {
+        const input = event.currentTarget;
+        const file = input?.files?.[0];
+        if (!file) return;
+
+        const btn = draftOrderImportTrigger;
+        try {
+            setLoading(btn, true);
+            const res = await uploadDraftOrderImportFile(file);
+            await applyImportedDraftOrder(res.data || {});
+            const meta = res.data?.meta || {};
+            const warnings = meta.warnings || [];
+            showToast(
+                draftT("Imported {count} row(s) into the draft form.", {
+                    count: meta.rows_imported || 0,
+                }),
+            );
+            warnings.slice(0, 3).forEach((warning) =>
+                showToast(warning, "warning"),
+            );
+            if (warnings.length > 3) {
+                showToast(
+                    draftT("{count} import warning(s). Review the empty fields before saving.", {
+                        count: warnings.length,
+                    }),
+                    "warning",
+                );
+            }
+        } catch (e) {
+            showToast(e.message || "Import failed.", "danger");
+        } finally {
+            setLoading(btn, false);
+            draftOrderImportTrigger = null;
+            if (input) input.value = "";
+        }
+    }
+
+    function bindDraftOrderImportControls() {
+        const input = document.getElementById("draftOrderImportFile");
+        input?.addEventListener("change", handleDraftOrderImportFile);
+        [
+            document.getElementById("draftOrderImportBtn"),
+            document.getElementById("draftOrderModalImportBtn"),
+        ].forEach((button) => {
+            button?.addEventListener("click", () =>
+                triggerDraftOrderImport(button),
+            );
+        });
+        document
+            .getElementById("draftOrderImportChooseFileBtn")
+            ?.addEventListener("click", chooseDraftOrderImportFile);
+        document
+            .getElementById("draftOrderImportGuideModal")
+            ?.addEventListener("hidden.bs.modal", () => {
+                if (draftOrderImportReturnToBuilder) {
+                    draftOrderImportReturnToBuilder = false;
+                    builderModal =
+                        builderModal ||
+                        bootstrap.Modal.getOrCreateInstance(
+                            document.getElementById("draftOrderModal"),
+                        );
+                    builderModal.show();
+                }
+            });
+    }
+
     function sectionMarkup(sectionId) {
         return `
             <div class="card draft-order-section" data-section-id="${sectionId}">
@@ -845,12 +1084,16 @@
             renumberDraftItems();
         });
         section._supplierAc = ac;
-        if (initial.supplier_id && initial.supplier_name) {
-            ac?.setValue({
-                id: initial.supplier_id,
-                name: initial.supplier_name,
-            });
-            supplierIdInput.value = initial.supplier_id;
+        if (initial.supplier_name) {
+            if (initial.supplier_id) {
+                ac?.setValue({
+                    id: initial.supplier_id,
+                    name: initial.supplier_name,
+                });
+                supplierIdInput.value = initial.supplier_id;
+            } else {
+                supplierInput.value = initial.supplier_name;
+            }
         }
 
         section
@@ -1318,13 +1561,20 @@
         bindDraftSharedCartonSupplierAutocomplete(card, row, section);
         syncDraftSharedCartonProductSearch(card, row, section);
 
-        if (initial.supplier_id && initial.supplier_name && row._supplierAc) {
-            row._supplierAc.setValue({
-                id: initial.supplier_id,
-                name: initial.supplier_name,
-            });
-            row.querySelector(".draft-shared-content-supplier-id").value =
-                initial.supplier_id;
+        if (initial.supplier_name) {
+            if (initial.supplier_id && row._supplierAc) {
+                row._supplierAc.setValue({
+                    id: initial.supplier_id,
+                    name: initial.supplier_name,
+                });
+                row.querySelector(".draft-shared-content-supplier-id").value =
+                    initial.supplier_id;
+            } else {
+                const supplierInput = row.querySelector(
+                    ".draft-shared-content-supplier",
+                );
+                if (supplierInput) supplierInput.value = initial.supplier_name;
+            }
         }
         row.querySelector(".draft-shared-content-product-id").value =
             initial.product_id || "";
@@ -2846,7 +3096,9 @@
         migrationModal = bootstrap.Modal.getOrCreateInstance(
             document.getElementById("legacyMigrationModal"),
         );
-        registerUnsavedChangesGuard?.("#draftOrderModal .modal-body");
+        draftOrderUnsavedGuard = registerUnsavedChangesGuard?.(
+            "#draftOrderModal .modal-body",
+        );
         registerUnsavedChangesGuard?.("#legacyMigrationModal .modal-body");
         registerUnsavedChangesGuard?.(
             "#draftSupplierQuickAddModal .modal-body",
@@ -2937,6 +3189,7 @@
         document
             .getElementById("draftOrderCurrency")
             ?.addEventListener("change", updateDraftOrderTotals);
+        bindDraftOrderImportControls();
 
         await refreshDraftLists({ deferLegacy: true });
 

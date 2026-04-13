@@ -13,6 +13,9 @@ require_once dirname(__DIR__, 2) . '/services/OrderItemNumberingService.php';
 require_once dirname(__DIR__, 2) . '/services/TranslationService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
 
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate as SpreadsheetCoordinate;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+
 function draftOrderTableHasColumn(PDO $pdo, string $table, string $column): bool
 {
     static $cache = [];
@@ -1508,6 +1511,703 @@ function draftOrderExportXlsx(PDO $pdo, int $orderId): void
     (new OrderExcelService())->exportOrder($order, $excelItems, $filename);
 }
 
+function draftOrderImportCellString($value): string
+{
+    if ($value === null) {
+        return '';
+    }
+    $value = trim(str_replace("\xC2\xA0", ' ', (string) $value));
+    return preg_replace('/^\xEF\xBB\xBF/', '', $value) ?? $value;
+}
+
+function draftOrderImportRowIsBlank(array $row): bool
+{
+    foreach ($row as $value) {
+        if (draftOrderImportCellString($value) !== '') {
+            return false;
+        }
+    }
+    return true;
+}
+
+function draftOrderImportHeaderKey($value): string
+{
+    $value = strtolower(draftOrderImportCellString($value));
+    return preg_replace('/[^a-z0-9]+/', '', $value) ?? '';
+}
+
+function draftOrderImportColumnAliases(): array
+{
+    return [
+        'photo_count' => ['photocount', 'photo'],
+        'item_no' => ['itemno', 'itemnumber', 'line'],
+        'supplier_name' => ['supplier', 'suppliername'],
+        'description' => ['description', 'productnames', 'productname', 'productnamesdescription', 'productdescription', 'names'],
+        'hs_code' => ['hscode', 'optionalhscode'],
+        'pieces_per_carton' => ['piecescarton', 'piecespercarton', 'qtyctn', 'qtyperctn', 'qtycarton', 'quantitypercarton'],
+        'cartons' => ['cartons', 'totalctns', 'totalcartons', 'ctns'],
+        'quantity' => ['quantity', 'totalqty', 'qty', 'totalquantity'],
+        'factory_price' => ['factoryprice', 'factory'],
+        'customer_price' => ['customerprice', 'customer', 'sellprice'],
+        'unit_price' => ['unitprice', 'price'],
+        'total_amount' => ['totalamount', 'amounttotal'],
+        'cbm' => ['cbm', 'cbmunit', 'cbmperunit'],
+        'total_cbm' => ['totalcbm', 'cbmtotal', 'declaredcbm'],
+        'weight' => ['weightunit', 'gwkg', 'gw', 'weightkg', 'unitweight'],
+        'total_weight' => ['totalweight', 'totalgw', 'weighttotal', 'declaredweight'],
+        'custom_design_required' => ['customdesign', 'design'],
+    ];
+}
+
+function draftOrderImportHeaderMap(array $row): array
+{
+    $aliases = draftOrderImportColumnAliases();
+    $map = [];
+
+    foreach ($row as $index => $label) {
+        $key = draftOrderImportHeaderKey($label);
+        if ($key === '') {
+            continue;
+        }
+        foreach ($aliases as $field => $candidates) {
+            if (in_array($key, $candidates, true) && !array_key_exists($field, $map)) {
+                $map[$field] = $index;
+                break;
+            }
+        }
+    }
+
+    return $map;
+}
+
+function draftOrderImportLooksLikeHeader(array $row): bool
+{
+    $map = draftOrderImportHeaderMap($row);
+    return isset($map['description'])
+        && (
+            isset($map['item_no'])
+            || isset($map['cartons'])
+            || isset($map['pieces_per_carton'])
+            || isset($map['quantity'])
+            || isset($map['supplier_name'])
+        );
+}
+
+function draftOrderImportReadRowsFromUpload(): array
+{
+    if (empty($_FILES['file']) || !is_array($_FILES['file'])) {
+        jsonError('Choose an Excel or CSV file to import.', 400);
+    }
+
+    $file = $_FILES['file'];
+    $name = (string) ($file['name'] ?? 'import');
+    $tmpName = (string) ($file['tmp_name'] ?? '');
+    $error = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+    if ($error !== UPLOAD_ERR_OK || $tmpName === '' || !is_file($tmpName)) {
+        jsonError('Upload failed. Choose the Excel or CSV file again.', 400);
+    }
+
+    $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+    $allowed = ['csv', 'cv', 'xlsx', 'xls'];
+    if (!in_array($ext, $allowed, true)) {
+        jsonError('Unsupported import file. Use XLSX, XLS, or CSV.', 415);
+    }
+
+    $config = require dirname(__DIR__, 2) . '/config/config.php';
+    $maxSize = max((int) ($config['upload_max_size'] ?? 0), 25 * 1024 * 1024);
+    if (!empty($file['size']) && (int) $file['size'] > $maxSize) {
+        jsonError('Import file is too large. Use a smaller Excel or CSV file.', 413);
+    }
+
+    $rows = [];
+    $maxRows = 3000;
+    if (in_array($ext, ['csv', 'cv'], true)) {
+        $handle = fopen($tmpName, 'r');
+        if (!$handle) {
+            jsonError('Could not read the CSV file.', 400);
+        }
+        while (($row = fgetcsv($handle)) !== false) {
+            $rows[] = array_map('draftOrderImportCellString', $row);
+            if (count($rows) > $maxRows) {
+                fclose($handle);
+                jsonError('Import file has too many rows. Keep it under ' . $maxRows . ' rows.', 400);
+            }
+        }
+        fclose($handle);
+    } else {
+        try {
+            $reader = IOFactory::createReaderForFile($tmpName);
+            if (method_exists($reader, 'setReadDataOnly')) {
+                $reader->setReadDataOnly(true);
+            }
+            $spreadsheet = $reader->load($tmpName);
+            $sheet = $spreadsheet->getActiveSheet();
+            $highestRow = min($sheet->getHighestDataRow(), $maxRows);
+            $highestColumn = $sheet->getHighestDataColumn();
+            $highestColumnIndex = min(60, SpreadsheetCoordinate::columnIndexFromString($highestColumn));
+
+            for ($rowNumber = 1; $rowNumber <= $highestRow; $rowNumber++) {
+                $row = [];
+                for ($col = 1; $col <= $highestColumnIndex; $col++) {
+                    $row[] = draftOrderImportCellString(
+                        $sheet->getCellByColumnAndRow($col, $rowNumber)->getFormattedValue()
+                    );
+                }
+                $rows[] = $row;
+            }
+            $spreadsheet->disconnectWorksheets();
+        } catch (Throwable $e) {
+            jsonError('Could not read the Excel file. Export it again or save it as CSV and retry.', 400);
+        }
+    }
+
+    $rows = array_values(array_filter($rows, static fn(array $row): bool => !draftOrderImportRowIsBlank($row)));
+    if (!$rows) {
+        jsonError('Import file has no readable rows.', 400);
+    }
+
+    return [$rows, $name];
+}
+
+function draftOrderImportNumeric($value): ?float
+{
+    $value = draftOrderImportCellString($value);
+    if ($value === '' || $value === '-' || $value === '—') {
+        return null;
+    }
+    $value = preg_replace('/[^\d.\-]+/', '', str_replace(',', '', $value)) ?? '';
+    if ($value === '' || $value === '-' || $value === '.') {
+        return null;
+    }
+    return is_numeric($value) ? (float) $value : null;
+}
+
+function draftOrderImportNumberForForm(?float $value, int $maxDecimals = 4): string
+{
+    if ($value === null) {
+        return '';
+    }
+    return format_display_number($value, $maxDecimals);
+}
+
+function draftOrderImportField(array $row, array $map, string $field): string
+{
+    if (!array_key_exists($field, $map)) {
+        return '';
+    }
+    return draftOrderImportCellString($row[$map[$field]] ?? '');
+}
+
+function draftOrderImportFieldNumber(array $row, array $map, string $field): ?float
+{
+    if (!array_key_exists($field, $map)) {
+        return null;
+    }
+    return draftOrderImportNumeric($row[$map[$field]] ?? '');
+}
+
+function draftOrderImportIsTruthy($value): bool
+{
+    $value = strtolower(draftOrderImportCellString($value));
+    return in_array($value, ['1', 'yes', 'y', 'true', 'required', 'custom', 'x'], true);
+}
+
+function draftOrderImportStripDisplaySuffix(string $value): string
+{
+    $value = trim($value);
+    return trim(preg_replace('/\s*\([^()]*\)\s*$/', '', $value) ?? $value);
+}
+
+function draftOrderImportResolveSupplier(PDO $pdo, string $value): array
+{
+    static $cache = [];
+    $value = trim($value);
+    if ($value === '' || $value === '-' || $value === '—') {
+        return ['id' => null, 'name' => ''];
+    }
+
+    $cacheKey = spl_object_id($pdo) . ':supplier:' . strtolower($value);
+    if (array_key_exists($cacheKey, $cache)) {
+        return $cache[$cacheKey];
+    }
+
+    $columns = ['name', 'code'];
+    if (draftOrderTableHasColumn($pdo, 'suppliers', 'store_id')) {
+        $columns[] = 'store_id';
+    }
+    $conditions = implode(' OR ', array_map(static fn(string $col): string => "`$col` = ?", $columns));
+    $stmt = $pdo->prepare("SELECT id, name FROM suppliers WHERE $conditions ORDER BY id LIMIT 1");
+    $stmt->execute(array_fill(0, count($columns), $value));
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($row) {
+        return $cache[$cacheKey] = ['id' => (int) $row['id'], 'name' => (string) $row['name']];
+    }
+
+    return $cache[$cacheKey] = ['id' => null, 'name' => $value];
+}
+
+function draftOrderImportResolveCustomer(PDO $pdo, string $value): array
+{
+    $value = trim($value);
+    if ($value === '' || $value === '-' || $value === '—') {
+        return ['id' => null, 'name' => '', 'default_shipping_code' => ''];
+    }
+
+    $candidates = array_values(array_unique(array_filter([
+        $value,
+        draftOrderImportStripDisplaySuffix($value),
+    ], static fn(string $candidate): bool => trim($candidate) !== '')));
+
+    $select = 'id, name';
+    if (draftOrderTableHasColumn($pdo, 'customers', 'default_shipping_code')) {
+        $select .= ', default_shipping_code';
+    }
+
+    foreach ($candidates as $candidate) {
+        $columns = ['name'];
+        if (draftOrderTableHasColumn($pdo, 'customers', 'code')) {
+            $columns[] = 'code';
+        }
+        if (draftOrderTableHasColumn($pdo, 'customers', 'default_shipping_code')) {
+            $columns[] = 'default_shipping_code';
+        }
+        $conditions = implode(' OR ', array_map(static fn(string $col): string => "`$col` = ?", $columns));
+        $stmt = $pdo->prepare("SELECT $select FROM customers WHERE $conditions ORDER BY id LIMIT 1");
+        $stmt->execute(array_fill(0, count($columns), $candidate));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            return [
+                'id' => (int) $row['id'],
+                'name' => (string) $row['name'],
+                'default_shipping_code' => (string) ($row['default_shipping_code'] ?? ''),
+            ];
+        }
+    }
+
+    return ['id' => null, 'name' => $value, 'default_shipping_code' => ''];
+}
+
+function draftOrderImportResolveCountry(PDO $pdo, string $value): array
+{
+    $value = trim($value);
+    if ($value === '' || $value === '-' || $value === '—') {
+        return ['id' => null, 'name' => '', 'code' => ''];
+    }
+
+    $name = draftOrderImportStripDisplaySuffix($value);
+    $code = '';
+    if (preg_match('/\(([^()]+)\)\s*$/', $value, $matches)) {
+        $code = strtoupper(trim($matches[1]));
+    }
+
+    try {
+        $stmt = $pdo->prepare(
+            "SELECT id, name, code
+             FROM countries
+             WHERE name = ? OR code = ? OR name = ? OR code = ?
+             ORDER BY id
+             LIMIT 1"
+        );
+        $stmt->execute([$value, strtoupper($value), $name, $code]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            return ['id' => (int) $row['id'], 'name' => (string) $row['name'], 'code' => (string) $row['code']];
+        }
+    } catch (Throwable $e) {
+        return ['id' => null, 'name' => $value, 'code' => ''];
+    }
+
+    return ['id' => null, 'name' => $value, 'code' => $code];
+}
+
+function draftOrderImportNormalizeDate(string $value, array &$warnings): ?string
+{
+    $value = draftOrderImportCellString($value);
+    if ($value === '' || $value === '-' || $value === '—') {
+        return null;
+    }
+    $ts = strtotime($value);
+    if ($ts === false) {
+        $warnings[] = 'Expected Ready could not be parsed and was left empty.';
+        return null;
+    }
+    return date('Y-m-d', $ts);
+}
+
+function draftOrderImportNormalizeCurrency(string $value): string
+{
+    $value = strtoupper(trim($value));
+    return in_array($value, ['USD', 'RMB'], true) ? $value : 'RMB';
+}
+
+function draftOrderImportResolvePerUnit(?float $perUnit, ?float $total, ?float $cartons, ?float $quantity, ?string $preferredScope = null): array
+{
+    $scope = null;
+    $cartons = $cartons !== null ? (float) $cartons : 0.0;
+    $quantity = $quantity !== null ? (float) $quantity : 0.0;
+
+    if ($perUnit !== null) {
+        if ($total !== null && $total > 0 && $perUnit > 0) {
+            $cartonTotal = $cartons > 0 ? $perUnit * $cartons : null;
+            $pieceTotal = $quantity > 0 ? $perUnit * $quantity : null;
+            if ($cartonTotal !== null && abs($cartonTotal - $total) < 0.0001) {
+                $scope = 'carton';
+            } elseif ($pieceTotal !== null && abs($pieceTotal - $total) < 0.0001) {
+                $scope = 'piece';
+            }
+        }
+        return ['value' => $perUnit, 'scope' => $scope];
+    }
+
+    if ($total !== null && $total > 0) {
+        if ($preferredScope === 'piece' && $quantity > 0) {
+            return ['value' => $total / $quantity, 'scope' => 'piece'];
+        }
+        if ($preferredScope === 'carton' && $cartons > 0) {
+            return ['value' => $total / $cartons, 'scope' => 'carton'];
+        }
+        if ($cartons > 0) {
+            return ['value' => $total / $cartons, 'scope' => 'carton'];
+        }
+        if ($quantity > 0) {
+            return ['value' => $total / $quantity, 'scope' => 'piece'];
+        }
+    }
+
+    return ['value' => null, 'scope' => null];
+}
+
+function draftOrderImportStripSharedContentPrefix(string $value): string
+{
+    $value = trim($value);
+    $value = preg_replace('/^(↳|->|=>|-->|-)\s*/u', '', $value) ?? $value;
+    return trim($value);
+}
+
+function draftOrderImportDescriptionWithoutCartonPrefix(string $value): string
+{
+    $value = trim($value);
+    return trim(preg_replace('/^\[[^\]]+\]\s*/u', '', $value) ?? $value);
+}
+
+function draftOrderImportLooksLikeSharedContent(string $itemNo): bool
+{
+    $itemNo = trim($itemNo);
+    return $itemNo !== '' && preg_match('/^(↳|->|=>|-->)/u', $itemNo) === 1;
+}
+
+function draftOrderImportSupplierMarkerName(array $row): string
+{
+    $firstValue = draftOrderImportCellString($row[0] ?? '');
+    $first = draftOrderImportHeaderKey($firstValue);
+    $second = draftOrderImportCellString($row[1] ?? '');
+
+    if ($first === 'supplier' && $second !== '') {
+        return $second;
+    }
+    if (preg_match('/^supplier\s*:\s*(.+)$/i', $firstValue, $matches)) {
+        return draftOrderImportCellString($matches[1]);
+    }
+
+    return '';
+}
+
+function draftOrderImportBuildItem(array $row, array $map): ?array
+{
+    $itemNo = draftOrderImportField($row, $map, 'item_no');
+    $description = draftOrderImportField($row, $map, 'description');
+    $hsCode = draftOrderImportField($row, $map, 'hs_code');
+    $cartons = draftOrderImportFieldNumber($row, $map, 'cartons');
+    $piecesPerCarton = draftOrderImportFieldNumber($row, $map, 'pieces_per_carton');
+    $quantity = draftOrderImportFieldNumber($row, $map, 'quantity');
+    $factoryPrice = draftOrderImportFieldNumber($row, $map, 'factory_price');
+    $customerPrice = draftOrderImportFieldNumber($row, $map, 'customer_price');
+    $plainUnitPrice = draftOrderImportFieldNumber($row, $map, 'unit_price');
+    $unitPrice = $factoryPrice;
+    $sellPrice = $customerPrice;
+    if ($unitPrice === null && $sellPrice === null && $plainUnitPrice !== null) {
+        $sellPrice = $plainUnitPrice;
+    }
+    $totalAmount = draftOrderImportFieldNumber($row, $map, 'total_amount');
+    $rawCbm = draftOrderImportFieldNumber($row, $map, 'cbm');
+    $totalCbm = draftOrderImportFieldNumber($row, $map, 'total_cbm');
+    $rawWeight = draftOrderImportFieldNumber($row, $map, 'weight');
+    $totalWeight = draftOrderImportFieldNumber($row, $map, 'total_weight');
+
+    if ($itemNo === '' && $description === '' && $cartons === null && $quantity === null && $totalAmount === null && $totalCbm === null && $totalWeight === null) {
+        return null;
+    }
+
+    $descriptionToken = draftOrderImportHeaderKey($description);
+    if (in_array($descriptionToken, ['suppliersubtotal', 'grandtotal', 'sectionitemtotal', 'overalltotal'], true)) {
+        return null;
+    }
+
+    if ($piecesPerCarton === null && $quantity !== null && $cartons !== null && $cartons > 0) {
+        $piecesPerCarton = $quantity / $cartons;
+    }
+    if ($cartons === null && $quantity !== null && $piecesPerCarton !== null && $piecesPerCarton > 0) {
+        $derivedCartons = $quantity / $piecesPerCarton;
+        if (abs($derivedCartons - round($derivedCartons)) < 0.0001) {
+            $cartons = (float) round($derivedCartons);
+        }
+    }
+    if ($unitPrice === null && $sellPrice === null && $totalAmount !== null && $quantity !== null && $quantity > 0) {
+        $unitPrice = $totalAmount / $quantity;
+    }
+    if ($unitPrice !== null && $sellPrice !== null && abs($unitPrice - $sellPrice) < 0.0001) {
+        $sellPrice = null;
+    }
+
+    $cbm = draftOrderImportResolvePerUnit($rawCbm, $totalCbm, $cartons, $quantity);
+    $scope = $cbm['scope'] ?: 'carton';
+    $weight = draftOrderImportResolvePerUnit($rawWeight, $totalWeight, $cartons, $quantity, $scope);
+    if (!$cbm['scope'] && $weight['scope']) {
+        $scope = $weight['scope'];
+    }
+
+    $customRaw = draftOrderImportField($row, $map, 'custom_design_required');
+    $descriptionEntry = draftOrderImportDescriptionWithoutCartonPrefix($description);
+
+    return [
+        'product_id' => null,
+        'item_no' => '',
+        'item_no_manual' => 0,
+        'shipping_code' => null,
+        'description_entries' => $descriptionEntry !== '' ? [[
+            'description_text' => $descriptionEntry,
+            'description_translated' => '',
+        ]] : [],
+        'pieces_per_carton' => draftOrderImportNumberForForm($piecesPerCarton, 4),
+        'cartons' => $cartons !== null ? draftOrderImportNumberForForm($cartons, 0) : '',
+        'quantity' => draftOrderImportNumberForForm($quantity, 4),
+        'unit_price' => draftOrderImportNumberForForm($unitPrice, 4),
+        'sell_price' => draftOrderImportNumberForForm($sellPrice, 4),
+        'total_amount' => draftOrderImportNumberForForm($totalAmount, 4),
+        'cbm_mode' => 'direct',
+        'cbm' => draftOrderImportNumberForForm($cbm['value'], 6),
+        'item_length' => '',
+        'item_width' => '',
+        'item_height' => '',
+        'weight' => draftOrderImportNumberForForm($weight['value'], 4),
+        'dimensions_scope' => $scope,
+        'hs_code' => draftOrderNormalizeHsCode($hsCode) ?: '',
+        'photo_paths' => [],
+        'custom_design_required' => draftOrderImportIsTruthy($customRaw) ? 1 : 0,
+        'custom_design_note' => null,
+        'custom_design_paths' => [],
+        'shared_carton_enabled' => 0,
+        'shared_carton_code' => null,
+        'shared_carton_contents' => [],
+    ];
+}
+
+function draftOrderImportBuildSharedContent(PDO $pdo, array $row, array $map, array $fallbackSupplier): ?array
+{
+    $item = draftOrderImportBuildItem($row, $map);
+    if (!$item) {
+        return null;
+    }
+    $supplierName = draftOrderImportField($row, $map, 'supplier_name');
+    $supplier = draftOrderImportResolveSupplier($pdo, $supplierName !== '' ? $supplierName : (string) ($fallbackSupplier['name'] ?? ''));
+
+    return [
+        'supplier_id' => $supplier['id'],
+        'supplier_name' => $supplier['name'],
+        'product_id' => null,
+        'item_no' => '',
+        'item_no_manual' => 0,
+        'shipping_code' => null,
+        'quantity_per_carton' => $item['pieces_per_carton'],
+        'unit_price' => $item['unit_price'],
+        'sell_price' => $item['sell_price'],
+        'hs_code' => $item['hs_code'],
+        'description_entries' => $item['description_entries'],
+        'description_cn' => '',
+        'description_en' => '',
+        'notes' => null,
+    ];
+}
+
+function draftOrderImportSectionKey(array $supplier, array $sections): string
+{
+    if (!empty($supplier['id'])) {
+        return 'id:' . (int) $supplier['id'];
+    }
+    $name = trim((string) ($supplier['name'] ?? ''));
+    if ($name !== '') {
+        return 'name:' . md5(strtolower($name));
+    }
+    return 'blank';
+}
+
+function draftOrderImportAddItemToSections(array &$sections, array $supplier, array $item): void
+{
+    $key = draftOrderImportSectionKey($supplier, $sections);
+    if (!isset($sections[$key])) {
+        $sections[$key] = [
+            'supplier_id' => !empty($supplier['id']) ? (int) $supplier['id'] : null,
+            'supplier_name' => trim((string) ($supplier['name'] ?? '')),
+            'items' => [],
+            'totals' => ['amount' => 0.0, 'cbm' => 0.0, 'weight' => 0.0],
+        ];
+    }
+    $sections[$key]['items'][] = $item;
+}
+
+function draftOrderImportFinalizeShared(array &$sections, ?array &$pendingShared): void
+{
+    if ($pendingShared === null) {
+        return;
+    }
+    $supplier = $pendingShared['supplier'];
+    $item = $pendingShared['item'];
+    $item['shared_carton_contents'] = $pendingShared['contents'];
+    draftOrderImportAddItemToSections($sections, $supplier, $item);
+    $pendingShared = null;
+}
+
+function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename): array
+{
+    $warnings = [];
+    $meta = [
+        'customer_name' => '',
+        'destination_country_name' => '',
+        'expected_ready_date' => null,
+        'currency' => 'RMB',
+    ];
+    $sections = [];
+    $currentSupplier = ['id' => null, 'name' => ''];
+    $currentHeader = null;
+    $pendingShared = null;
+    $importedRows = 0;
+
+    foreach ($rows as $row) {
+        if (draftOrderImportLooksLikeHeader($row)) {
+            draftOrderImportFinalizeShared($sections, $pendingShared);
+            $currentHeader = draftOrderImportHeaderMap($row);
+            continue;
+        }
+
+        $first = draftOrderImportHeaderKey($row[0] ?? '');
+        $second = draftOrderImportCellString($row[1] ?? '');
+
+        if ($first === 'customer' && $second !== '') {
+            $meta['customer_name'] = $second;
+            continue;
+        }
+        if (in_array($first, ['destinationcountry', 'destination'], true) && $second !== '') {
+            $meta['destination_country_name'] = $second;
+            continue;
+        }
+        if ($first === 'expectedready' && $second !== '') {
+            $meta['expected_ready_date'] = draftOrderImportNormalizeDate($second, $warnings);
+            continue;
+        }
+        if ($first === 'currency' && $second !== '') {
+            $meta['currency'] = draftOrderImportNormalizeCurrency($second);
+            continue;
+        }
+        $supplierMarkerName = draftOrderImportSupplierMarkerName($row);
+        if ($supplierMarkerName !== '') {
+            draftOrderImportFinalizeShared($sections, $pendingShared);
+            $currentSupplier = draftOrderImportResolveSupplier($pdo, $supplierMarkerName);
+            continue;
+        }
+        if (draftOrderImportCellString($row[0] ?? '') === '@@' || draftOrderImportHeaderKey($row[1] ?? '') === 'suppliernameandinfo') {
+            draftOrderImportFinalizeShared($sections, $pendingShared);
+            $currentSupplier = draftOrderImportResolveSupplier($pdo, draftOrderImportCellString($row[2] ?? ''));
+            continue;
+        }
+        if (!$currentHeader) {
+            continue;
+        }
+
+        $rowSupplierName = draftOrderImportField($row, $currentHeader, 'supplier_name');
+        $rowSupplier = $rowSupplierName !== ''
+            ? draftOrderImportResolveSupplier($pdo, $rowSupplierName)
+            : $currentSupplier;
+        $itemNo = draftOrderImportField($row, $currentHeader, 'item_no');
+        $description = draftOrderImportField($row, $currentHeader, 'description');
+        $descriptionToken = draftOrderImportHeaderKey($description);
+
+        if ($descriptionToken === 'sharedcartonmultipleitems') {
+            draftOrderImportFinalizeShared($sections, $pendingShared);
+            $summary = draftOrderImportBuildItem($row, $currentHeader);
+            if ($summary) {
+                $summary['shared_carton_enabled'] = 1;
+                $summary['shared_carton_code'] = null;
+                $summary['item_no'] = null;
+                $summary['item_no_manual'] = 0;
+                $summary['description_entries'] = [];
+                $summary['hs_code'] = '';
+                $pendingShared = [
+                    'supplier' => $rowSupplier,
+                    'item' => $summary,
+                    'contents' => [],
+                ];
+                $importedRows++;
+            }
+            continue;
+        }
+
+        if ($pendingShared !== null && draftOrderImportLooksLikeSharedContent($itemNo)) {
+            $content = draftOrderImportBuildSharedContent($pdo, $row, $currentHeader, $pendingShared['supplier']);
+            if ($content) {
+                $pendingShared['contents'][] = $content;
+                $importedRows++;
+            }
+            continue;
+        }
+
+        draftOrderImportFinalizeShared($sections, $pendingShared);
+        $item = draftOrderImportBuildItem($row, $currentHeader);
+        if (!$item) {
+            continue;
+        }
+        draftOrderImportAddItemToSections($sections, $rowSupplier, $item);
+        $importedRows++;
+    }
+    draftOrderImportFinalizeShared($sections, $pendingShared);
+
+    if (!$importedRows || !$sections) {
+        jsonError('No draft-order item rows matched the exported column names. Use headers like "Item No" and "Product / Names", or "ITEM NO" and "DESCRIPTION".', 400);
+    }
+
+    $customer = draftOrderImportResolveCustomer($pdo, $meta['customer_name']);
+    $country = draftOrderImportResolveCountry($pdo, $meta['destination_country_name']);
+
+    if ($customer['name'] !== '' && empty($customer['id'])) {
+        $warnings[] = 'Customer "' . $customer['name'] . '" was not found. Select it before saving.';
+    }
+    foreach ($sections as $section) {
+        if (!empty($section['supplier_name']) && empty($section['supplier_id'])) {
+            $warnings[] = 'Supplier "' . $section['supplier_name'] . '" was not found. Select or quick-add it before saving.';
+        }
+        foreach ($section['items'] as $item) {
+            foreach (($item['shared_carton_contents'] ?? []) as $content) {
+                if (!empty($content['supplier_name']) && empty($content['supplier_id'])) {
+                    $warnings[] = 'Contained supplier "' . $content['supplier_name'] . '" was not found. Select or quick-add it before saving.';
+                }
+            }
+        }
+    }
+
+    return [
+        'customer' => $customer,
+        'destination_country' => $country,
+        'expected_ready_date' => $meta['expected_ready_date'],
+        'currency' => $meta['currency'],
+        'high_alert_notes' => null,
+        'supplier_sections' => array_values($sections),
+        'meta' => [
+            'source_file' => $filename,
+            'rows_imported' => $importedRows,
+            'warnings' => array_values(array_unique($warnings)),
+        ],
+    ];
+}
+
 function draftOrderDeleteExistingItems(PDO $pdo, int $orderId): void
 {
     $stmt = $pdo->prepare("SELECT id FROM order_items WHERE order_id = ?");
@@ -1530,6 +2230,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     }
     if (!hasAnyRole(['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'])) {
         jsonError('Forbidden', 403);
+    }
+
+    if ($method === 'POST' && $id === 'import' && $action === null) {
+        [$rows, $filename] = draftOrderImportReadRowsFromUpload();
+        jsonResponse(['data' => draftOrderImportBuildPayload($pdo, $rows, $filename)]);
     }
 
     if ($method === 'POST' && $id === 'legacy' && $action && preg_match('/^(\d+)\/migrate$/', $action, $matches)) {

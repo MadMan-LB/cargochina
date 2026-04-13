@@ -7,6 +7,7 @@
 
 $root = dirname(__DIR__);
 require_once $root . '/backend/config/database.php';
+require_once $root . '/vendor/autoload.php';
 
 try {
     $pdo = getDb();
@@ -41,6 +42,32 @@ function runHandlerScript(string $root, string $handlerPath, string $method, ?st
     $actionCode = $action === null ? 'null' : var_export($action, true);
     $methodCode = var_export($method, true);
     $code = "<?php\nsession_start();\n\$_SESSION['user_id'] = 1;\n\$_SESSION['user_roles'] = ['ChinaAdmin'];\n\$_GET = $queryCode;\nrequire '$rootEsc/backend/config/database.php';\nrequire '$rootEsc/backend/api/helpers.php';\n\$h = require '$rootEsc/$handlerEsc';\n\$h($methodCode, $idCode, $actionCode, $bodyCode);\n";
+    $tmp = tempnam(sys_get_temp_dir(), 'draft_builder_test_');
+    file_put_contents($tmp . '.php', $code);
+    $php = (defined('PHP_BINARY') && file_exists(PHP_BINARY)) ? PHP_BINARY : 'php';
+    $out = shell_exec(escapeshellcmd($php) . ' ' . escapeshellarg($tmp . '.php') . ' 2>&1');
+    @unlink($tmp . '.php');
+    @unlink($tmp);
+    return $out ?? '';
+}
+
+function runHandlerScriptWithUploadedFile(string $root, string $handlerPath, string $method, ?string $id, ?string $action, string $uploadedFilePath, string $uploadedFileName, array $query = [], array $body = []): string
+{
+    $rootEsc = addslashes(str_replace('\\', '/', $root));
+    $handlerEsc = addslashes($handlerPath);
+    $queryCode = var_export($query, true);
+    $bodyCode = var_export($body, true);
+    $fileCode = var_export([
+        'name' => $uploadedFileName,
+        'type' => 'text/csv',
+        'tmp_name' => $uploadedFilePath,
+        'error' => UPLOAD_ERR_OK,
+        'size' => is_file($uploadedFilePath) ? filesize($uploadedFilePath) : 0,
+    ], true);
+    $idCode = $id === null ? 'null' : var_export($id, true);
+    $actionCode = $action === null ? 'null' : var_export($action, true);
+    $methodCode = var_export($method, true);
+    $code = "<?php\nsession_start();\n\$_SESSION['user_id'] = 1;\n\$_SESSION['user_roles'] = ['ChinaAdmin'];\n\$_GET = $queryCode;\n\$_FILES = ['file' => $fileCode];\nrequire '$rootEsc/backend/config/database.php';\nrequire '$rootEsc/backend/api/helpers.php';\n\$h = require '$rootEsc/$handlerEsc';\n\$h($methodCode, $idCode, $actionCode, $bodyCode);\n";
     $tmp = tempnam(sys_get_temp_dir(), 'draft_builder_test_');
     file_put_contents($tmp . '.php', $code);
     $php = (defined('PHP_BINARY') && file_exists(PHP_BINARY)) ? PHP_BINARY : 'php';
@@ -102,6 +129,152 @@ test('draft-orders list endpoint returns JSON array', function () use ($root) {
     $json = json_decode($out, true);
     if (!is_array($json) || !array_key_exists('data', $json) || !is_array($json['data'])) {
         throw new Exception('Expected {data: []}, got: ' . substr($out, 0, 200));
+    }
+});
+
+test('draft-orders import endpoint previews exported CSV without saving', function () use ($pdo, $root) {
+    $customer = $pdo->query("SELECT id, name FROM customers ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    $supplier = $pdo->query("SELECT id, name FROM suppliers ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    if (!$customer || !$supplier) {
+        throw new Exception('Missing customer or supplier seed data');
+    }
+
+    $ordersBefore = (int) $pdo->query("SELECT COUNT(*) FROM orders")->fetchColumn();
+    $csvPath = tempnam(sys_get_temp_dir(), 'draft_import_');
+    $fh = fopen($csvPath, 'w');
+    fputcsv($fh, ['Draft Order', '#999']);
+    fputcsv($fh, ['Customer', $customer['name']]);
+    fputcsv($fh, ['Expected Ready', '2026-05-01']);
+    fputcsv($fh, ['Currency', 'RMB']);
+    fputcsv($fh, ['']);
+    fputcsv($fh, ['Supplier:', $supplier['name']]);
+    fputcsv($fh, ['Item No', 'Product / Names', 'HS Code', 'Pieces/Carton', 'Cartons', 'Quantity', 'Factory Price', 'Customer Price', 'Total Amount', 'CBM/Unit', 'Total CBM', 'Weight/Unit', 'Total Weight', 'Custom Design']);
+    fputcsv($fh, ['IMP-1-1', 'Imported preview item', '9503.00', '12', '2', '24', '3.5', '4', '96', '0.05', '0.1', '1.2', '2.4', 'No']);
+    fclose($fh);
+
+    try {
+        $out = runHandlerScriptWithUploadedFile(
+            $root,
+            'backend/api/handlers/draft-orders.php',
+            'POST',
+            'import',
+            null,
+            $csvPath,
+            'draft_import.csv'
+        );
+        $json = json_decode($out, true);
+        if (!is_array($json) || empty($json['data']['supplier_sections'][0]['items'][0])) {
+            throw new Exception('Expected imported preview payload, got: ' . substr($out, 0, 300));
+        }
+        if ((int) ($json['data']['customer']['id'] ?? 0) !== (int) $customer['id']) {
+            throw new Exception('Customer was not resolved from export metadata');
+        }
+        if ((int) ($json['data']['supplier_sections'][0]['supplier_id'] ?? 0) !== (int) $supplier['id']) {
+            throw new Exception('Supplier was not resolved from export section');
+        }
+        $item = $json['data']['supplier_sections'][0]['items'][0];
+        if (($item['item_no'] ?? null) !== '' || (int) ($item['item_no_manual'] ?? 1) !== 0) {
+            throw new Exception('Imported item numbers should be left for the draft-order numbering logic');
+        }
+        if (($item['cartons'] ?? '') !== '2' || ($item['pieces_per_carton'] ?? '') !== '12') {
+            throw new Exception('Packaging fields were not imported');
+        }
+        if (($item['cbm'] ?? '') !== '0.05' || ($item['weight'] ?? '') !== '1.2') {
+            throw new Exception('Per-unit CBM/weight were not imported');
+        }
+        $ordersAfter = (int) $pdo->query("SELECT COUNT(*) FROM orders")->fetchColumn();
+        if ($ordersAfter !== $ordersBefore) {
+            throw new Exception('Import preview created an order unexpectedly');
+        }
+    } finally {
+        @unlink($csvPath);
+    }
+});
+
+test('draft-orders import endpoint previews exported XLSX unit price as customer price', function () use ($pdo, $root) {
+    $supplier = $pdo->query("SELECT id, name FROM suppliers ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    if (!$supplier) {
+        throw new Exception('Missing supplier seed data');
+    }
+
+    $xlsxPath = tempnam(sys_get_temp_dir(), 'draft_xlsx_import_');
+    $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+    $sheet = $spreadsheet->getActiveSheet();
+    $sheet->fromArray(
+        ['PHOTO', 'ITEM NO', 'SUPPLIER', 'DESCRIPTION', 'TOTAL CTNS', 'QTY/CTN', 'TOTAL QTY', 'UNIT PRICE', 'TOTAL AMOUNT', 'CBM', 'TOTAL CBM', 'GWKG', 'TOTAL GW'],
+        null,
+        'B1'
+    );
+    $sheet->fromArray(
+        ['', 'XLS-1', $supplier['name'], 'Imported xlsx item', 1, 6, 6, 9.5, 57, 0.2, 0.2, 1, 1],
+        null,
+        'B2'
+    );
+    (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet))->save($xlsxPath);
+    $spreadsheet->disconnectWorksheets();
+
+    try {
+        $out = runHandlerScriptWithUploadedFile(
+            $root,
+            'backend/api/handlers/draft-orders.php',
+            'POST',
+            'import',
+            null,
+            $xlsxPath,
+            'draft_import.xlsx'
+        );
+        $json = json_decode($out, true);
+        $item = $json['data']['supplier_sections'][0]['items'][0] ?? null;
+        if (!$item) {
+            throw new Exception('Expected imported xlsx item, got: ' . substr($out, 0, 300));
+        }
+        if (($item['unit_price'] ?? 'not-empty') !== '' || ($item['sell_price'] ?? '') !== '9.5') {
+            throw new Exception('XLSX UNIT PRICE should import as customer price while factory price stays empty');
+        }
+        if (($item['item_no'] ?? null) !== '' || (int) ($item['item_no_manual'] ?? 1) !== 0) {
+            throw new Exception('XLSX item numbers should be left for the draft-order numbering logic');
+        }
+        if (($item['cartons'] ?? '') !== '1' || ($item['pieces_per_carton'] ?? '') !== '6') {
+            throw new Exception('XLSX packaging fields were not imported');
+        }
+    } finally {
+        @unlink($xlsxPath);
+    }
+});
+
+test('draft-orders import endpoint keeps missing exported fields empty', function () use ($pdo, $root) {
+    $supplierName = (string) $pdo->query("SELECT name FROM suppliers ORDER BY id LIMIT 1")->fetchColumn();
+    if ($supplierName === '') {
+        throw new Exception('Missing supplier seed data');
+    }
+
+    $csvPath = tempnam(sys_get_temp_dir(), 'draft_sparse_import_');
+    $fh = fopen($csvPath, 'w');
+    fputcsv($fh, ['Supplier:', $supplierName]);
+    fputcsv($fh, ['Item No', 'Product / Names', 'Cartons']);
+    fputcsv($fh, ['', 'Sparse imported item', '']);
+    fclose($fh);
+
+    try {
+        $out = runHandlerScriptWithUploadedFile(
+            $root,
+            'backend/api/handlers/draft-orders.php',
+            'POST',
+            'import',
+            null,
+            $csvPath,
+            'draft_sparse_import.csv'
+        );
+        $json = json_decode($out, true);
+        $item = $json['data']['supplier_sections'][0]['items'][0] ?? null;
+        if (!$item) {
+            throw new Exception('Expected imported sparse item, got: ' . substr($out, 0, 300));
+        }
+        if (($item['cartons'] ?? 'not-empty') !== '' || ($item['cbm'] ?? 'not-empty') !== '' || ($item['weight'] ?? 'not-empty') !== '') {
+            throw new Exception('Missing spreadsheet values should remain empty in the preview payload');
+        }
+    } finally {
+        @unlink($csvPath);
     }
 });
 
