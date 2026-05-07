@@ -44,6 +44,11 @@ function printDraftDecodeSharedCartonContents(PDO $pdo, array $row): array
         $content['unit_price'] = isset($content['unit_price']) && $content['unit_price'] !== '' ? (float) $content['unit_price'] : null;
         $content['sell_price'] = isset($content['sell_price']) && $content['sell_price'] !== '' ? (float) $content['sell_price'] : null;
         $content['description_entries'] = [];
+        $content['what_brand'] = trim((string) ($content['what_brand'] ?? ''));
+        $content['copy_normal_goods'] = trim((string) ($content['copy_normal_goods'] ?? ''));
+        $content['code'] = trim((string) ($content['code'] ?? ''));
+        $content['express_number'] = trim((string) ($content['express_number'] ?? ''));
+        $content['size'] = trim((string) ($content['size'] ?? ''));
         $cnParts = array_values(array_filter(array_map('trim', preg_split('/\s*\|\s*/', (string) ($content['description_cn'] ?? '')) ?: [])));
         $enParts = array_values(array_filter(array_map('trim', preg_split('/\s*\|\s*/', (string) ($content['description_en'] ?? '')) ?: [])));
         $entryCount = max(count($cnParts), count($enParts));
@@ -59,6 +64,16 @@ function printDraftDecodeSharedCartonContents(PDO $pdo, array $row): array
     unset($content);
 
     return $decoded;
+}
+
+function printDraftCopyNormalGoodsDisplay($value): string
+{
+    $raw = trim((string) ($value ?? ''));
+    return match (strtolower($raw)) {
+        'copy' => clmsT('Copy Goods'),
+        'normal' => clmsT('Normal Goods'),
+        default => $raw !== '' ? $raw : '—',
+    };
 }
 
 function printDraftEntryRows(array $sections): string
@@ -91,7 +106,7 @@ function printDraftEntryRows(array $sections): string
         $hasMultipleSectionSuppliers = count($sectionSupplierList) > 1;
         ?>
         <tr class="table-light">
-          <td colspan="12"><strong><?= htmlspecialchars($hasMultipleSectionSuppliers ? clmsT('Section suppliers:') : clmsT('Supplier:')) ?></strong> <?= htmlspecialchars($sectionSupplierDisplay) ?></td>
+          <td colspan="17"><strong><?= htmlspecialchars($hasMultipleSectionSuppliers ? clmsT('Section suppliers:') : clmsT('Supplier:')) ?></strong> <?= htmlspecialchars($sectionSupplierDisplay) ?></td>
         </tr>
         <?php foreach (($section['items'] ?? []) as $itemIndex => $item): ?>
             <?php
@@ -107,6 +122,9 @@ function printDraftEntryRows(array $sections): string
                 ?>
                 <tr class="table-warning">
                   <td><?= $itemIndex + 1 ?></td>
+                  <td><?= htmlspecialchars($item['what_brand'] ?? '—') ?></td>
+                  <td><?= htmlspecialchars(printDraftCopyNormalGoodsDisplay($item['copy_normal_goods'] ?? null)) ?></td>
+                  <td><?= htmlspecialchars($item['code'] ?? '—') ?></td>
                   <td><?= htmlspecialchars($item['shared_carton_code'] ?? '—') ?></td>
                   <td><strong><?= htmlspecialchars(clmsT('Shared carton / multiple items')) ?></strong></td>
                   <td>—</td>
@@ -118,6 +136,8 @@ function printDraftEntryRows(array $sections): string
                   <td><strong><?= htmlspecialchars(format_display_number($item['total_amount'] ?? null, 4) ?: '—') ?></strong></td>
                   <td><strong><?= htmlspecialchars(format_display_cbm($totalCbm)) ?></strong></td>
                   <td><strong><?= htmlspecialchars(format_display_weight($totalWeight, 4)) ?></strong></td>
+                  <td><?= htmlspecialchars($item['express_number'] ?? '—') ?></td>
+                  <td><?= htmlspecialchars($item['size'] ?? '—') ?></td>
                 </tr>
                 <?php foreach (($item['shared_carton_contents'] ?? []) as $content): ?>
                     <?php
@@ -135,6 +155,9 @@ function printDraftEntryRows(array $sections): string
                     ?>
                     <tr>
                       <td></td>
+                      <td><?= htmlspecialchars($content['what_brand'] ?: '—') ?></td>
+                      <td><?= htmlspecialchars(printDraftCopyNormalGoodsDisplay($content['copy_normal_goods'] ?? null)) ?></td>
+                      <td><?= htmlspecialchars($content['code'] ?: '—') ?></td>
                       <td><?= htmlspecialchars($content['item_no'] ? ('↳ ' . $content['item_no']) : '↳') ?></td>
                       <td><?= htmlspecialchars($descLabel ?: '—') ?></td>
                       <td><?= htmlspecialchars($content['hs_code'] ?? '—') ?></td>
@@ -146,6 +169,8 @@ function printDraftEntryRows(array $sections): string
                       <td><?= htmlspecialchars(format_display_number($content['total_amount'] ?? null, 4) ?: '—') ?></td>
                       <td>—</td>
                       <td>—</td>
+                      <td><?= htmlspecialchars($content['express_number'] ?: '—') ?></td>
+                      <td><?= htmlspecialchars($content['size'] ?: '—') ?></td>
                     </tr>
                 <?php endforeach; ?>
             <?php else: ?>
@@ -168,6 +193,9 @@ function printDraftEntryRows(array $sections): string
                 ?>
                 <tr>
                   <td><?= $itemIndex + 1 ?></td>
+                  <td><?= htmlspecialchars($item['what_brand'] ?? '—') ?></td>
+                  <td><?= htmlspecialchars(printDraftCopyNormalGoodsDisplay($item['copy_normal_goods'] ?? null)) ?></td>
+                  <td><?= htmlspecialchars($item['code'] ?? '—') ?></td>
                   <td><?= htmlspecialchars($item['item_no'] ?? '—') ?></td>
                   <td><?= htmlspecialchars($desc ?: '—') ?></td>
                   <td><?= htmlspecialchars($item['hs_code'] ?? '—') ?></td>
@@ -179,15 +207,18 @@ function printDraftEntryRows(array $sections): string
                   <td><?= htmlspecialchars(format_display_number($item['total_amount'] ?? null, 4) ?: '—') ?></td>
                   <td><?= htmlspecialchars(format_display_cbm($totalCbm)) ?></td>
                   <td><?= htmlspecialchars(format_display_weight($totalWeight, 4)) ?></td>
+                  <td><?= htmlspecialchars($item['express_number'] ?? '—') ?></td>
+                  <td><?= htmlspecialchars($item['size'] ?? '—') ?></td>
                 </tr>
             <?php endif; ?>
         <?php endforeach; ?>
         <tr class="table-secondary">
-          <td colspan="8"><strong><?= htmlspecialchars($hasMultipleSectionSuppliers ? clmsT('Section subtotal') : clmsT('Supplier subtotal')) ?></strong></td>
+          <td colspan="11"><strong><?= htmlspecialchars($hasMultipleSectionSuppliers ? clmsT('Section subtotal') : clmsT('Supplier subtotal')) ?></strong></td>
           <td>—</td>
           <td><strong><?= htmlspecialchars(format_display_number((float) ($section['totals']['amount'] ?? 0), 4)) ?></strong></td>
           <td><strong><?= htmlspecialchars(format_display_cbm((float) ($section['totals']['cbm'] ?? 0))) ?></strong></td>
           <td><strong><?= htmlspecialchars(format_display_weight((float) ($section['totals']['weight'] ?? 0), 4)) ?></strong></td>
+          <td colspan="2">—</td>
         </tr>
         <?php
     }
@@ -273,6 +304,11 @@ if ($orderId > 0) {
             : (float) (($row['quantity'] ?? 0) ?: 0);
         $sections[$key]['items'][] = [
             'item_no' => $row['item_no'] ?: null,
+            'what_brand' => $row['what_brand'] ?? '',
+            'copy_normal_goods' => $row['copy_normal_goods'] ?? '',
+            'code' => $row['code'] ?? '',
+            'express_number' => $row['express_number'] ?? '',
+            'size' => $row['size'] ?? '',
             'description_entries' => $entries,
             'hs_code' => $row['hs_code'] ?? $row['product_hs_code'] ?? null,
             'pieces_per_carton' => $row['qty_per_carton'] ?? null,
@@ -326,6 +362,11 @@ if ($orderId > 0) {
             $qty = (float) ($item['quantity'] ?? 0);
             return [
                 'item_no' => null,
+                'what_brand' => '',
+                'copy_normal_goods' => '',
+                'code' => '',
+                'express_number' => '',
+                'size' => '',
                 'description_entries' => [[
                     'description_text' => $desc,
                     'description_translated' => $desc,
@@ -398,6 +439,9 @@ if ($orderId > 0) {
       <thead class="table-light">
         <tr>
           <th>#</th>
+          <th><?= htmlspecialchars(clmsT('What Brand')) ?></th>
+          <th><?= htmlspecialchars(clmsT('Copy / Normal Goods')) ?></th>
+          <th><?= htmlspecialchars(clmsT('Code')) ?></th>
           <th><?= htmlspecialchars(clmsT('Item No')) ?></th>
           <th><?= htmlspecialchars(clmsT('Product / Names')) ?></th>
           <th><?= htmlspecialchars(clmsT('HS Code')) ?></th>
@@ -409,15 +453,18 @@ if ($orderId > 0) {
           <th><?= htmlspecialchars(clmsT('Total Amount')) ?></th>
           <th><?= htmlspecialchars(clmsT('Total CBM')) ?></th>
           <th><?= htmlspecialchars(clmsT('Total Weight')) ?></th>
+          <th><?= htmlspecialchars(clmsT('Express Number')) ?></th>
+          <th><?= htmlspecialchars(clmsT('Size')) ?></th>
         </tr>
       </thead>
       <tbody>
         <?= printDraftEntryRows($sections) ?>
         <tr class="table-dark">
-          <td colspan="9"><strong><?= htmlspecialchars(clmsT('Grand total')) ?></strong></td>
+          <td colspan="12"><strong><?= htmlspecialchars(clmsT('Grand total')) ?></strong></td>
           <td><strong><?= htmlspecialchars(format_display_number($grandAmount, 4)) ?></strong></td>
           <td><strong><?= htmlspecialchars(format_display_cbm($grandCbm)) ?></strong></td>
           <td><strong><?= htmlspecialchars(format_display_weight($grandWeight, 4)) ?></strong></td>
+          <td colspan="2">—</td>
         </tr>
       </tbody>
     </table>

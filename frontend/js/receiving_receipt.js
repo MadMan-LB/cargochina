@@ -29,6 +29,36 @@ function escapeHtml(s) {
     return d.innerHTML;
 }
 
+function receiptNumber(value, decimals = 4) {
+    const numeric = parseFloat(value);
+    return Number.isFinite(numeric)
+        ? numeric.toFixed(decimals).replace(/\.?0+$/, "")
+        : "0";
+}
+
+function receiptItemMetaText(item) {
+    const copyNormalRaw = String(item?.copy_normal_goods || "").trim();
+    const copyNormalLabel =
+        copyNormalRaw.toLowerCase() === "copy"
+            ? receiptT("Copy Goods")
+            : copyNormalRaw.toLowerCase() === "normal"
+              ? receiptT("Normal Goods")
+              : copyNormalRaw;
+    return [
+        item?.what_brand ? `${receiptT("What Brand")}: ${item.what_brand}` : "",
+        copyNormalLabel
+            ? `${receiptT("Copy / Normal Goods")}: ${copyNormalLabel}`
+            : "",
+        item?.code ? `${receiptT("Code")}: ${item.code}` : "",
+        item?.express_number
+            ? `${receiptT("Express Number")}: ${item.express_number}`
+            : "",
+        item?.size ? `${receiptT("Size")}: ${item.size}` : "",
+    ]
+        .filter(Boolean)
+        .join(" · ");
+}
+
 async function loadReceipt() {
     const res = await api("/receiving/receipts/" + RECEIPT_ID);
     const r = res.data;
@@ -51,10 +81,11 @@ async function loadReceipt() {
         itemsHtml = `
           <h6 class="mt-3">${escapeHtml(receiptT("Per-Item Actuals"))}</h6>
           <table class="table table-sm">
-            <thead><tr><th>${escapeHtml(receiptT("Item"))}</th><th>${escapeHtml(receiptT("Declared"))}</th><th>${escapeHtml(receiptT("Actual"))}</th><th>${escapeHtml(receiptT("Condition"))}</th><th>${escapeHtml(receiptT("Variance"))}</th><th>${escapeHtml(receiptT("Photos"))}</th></tr></thead>
+            <thead><tr><th>${escapeHtml(receiptT("Item"))}</th><th>${escapeHtml(receiptT("Declared"))}</th><th>${escapeHtml(receiptT("Received Qty"))}</th><th>${escapeHtml(receiptT("Price / Amount"))}</th><th>${escapeHtml(receiptT("Actual CBM / Weight"))}</th><th>${escapeHtml(receiptT("Condition"))}</th><th>${escapeHtml(receiptT("Variance"))}</th><th>${escapeHtml(receiptT("Photos"))}</th></tr></thead>
             <tbody>
               ${r.items
                   .map((it) => {
+                      const metaText = receiptItemMetaText(it);
                       const itemPhotos = (it.photos || [])
                           .map(
                               (p) =>
@@ -63,8 +94,10 @@ async function loadReceipt() {
                           .join("");
                       return `
                 <tr>
-                  <td>${escapeHtml(typeof descText === "function" ? descText(it) : it.description_en || it.description_cn || "-")}</td>
-                  <td>${it.declared_cbm || 0} CBM / ${it.declared_weight || 0} kg</td>
+                  <td>${escapeHtml(typeof descText === "function" ? descText(it) : it.description_en || it.description_cn || "-")}${metaText ? `<div class="small text-muted">${escapeHtml(metaText)}</div>` : ""}</td>
+                  <td>${receiptNumber(it.declared_cbm || 0, 6)} CBM / ${receiptNumber(it.declared_weight || 0, 4)} kg<br><span class="small text-muted">${receiptNumber(it.cartons || 0, 4)} × ${receiptNumber(it.qty_per_carton || 0, 4)} = ${receiptNumber(it.quantity || 0, 4)}</span></td>
+                  <td>${receiptNumber(it.actual_cartons || 0, 4)} × ${receiptNumber(it.actual_pieces_per_carton || 0, 4)} = ${receiptNumber(it.actual_quantity || 0, 4)}</td>
+                  <td>${it.unit_price != null ? receiptNumber(it.unit_price, 4) : "-"} / ${it.total_amount != null ? receiptNumber(it.total_amount, 4) : "-"}</td>
                   <td>${it.actual_cbm ?? "-"} CBM / ${it.actual_weight ?? "-"} kg</td>
                   <td>${escapeHtml(receiptStatusText(it.receipt_condition || it.condition || "good"))}</td>
                   <td>${it.variance_detected ? `<span class="badge bg-warning">${escapeHtml(receiptT("Yes"))}</span>` : "-"}</td>

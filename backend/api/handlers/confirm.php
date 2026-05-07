@@ -38,9 +38,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             jsonError('This order has already been finalized and can no longer be updated from the portal', 400);
         }
 
+        $itemCols = "description_cn, description_en, cartons, quantity, unit,
+             declared_cbm, declared_weight, item_no, shipping_code";
+        foreach (['what_brand', 'copy_normal_goods', 'code', 'express_number', 'size'] as $column) {
+            $chkMeta = @$pdo->query("SHOW COLUMNS FROM order_items LIKE " . $pdo->quote($column));
+            if ($chkMeta && $chkMeta->rowCount() > 0) {
+                $itemCols .= ", $column";
+            }
+        }
         $items = $pdo->prepare(
-            "SELECT description_cn, description_en, cartons, quantity, unit,
-             declared_cbm, declared_weight, item_no, shipping_code
+            "SELECT $itemCols
              FROM order_items WHERE order_id = ? ORDER BY id"
         );
         $items->execute([$order['id']]);

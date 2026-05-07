@@ -218,6 +218,10 @@ require 'includes/layout.php';
                 <th><?= clmsT('Item') ?></th>
                 <th><?= clmsT('Declared') ?></th>
                 <th><?= clmsT('Actual Cartons *') ?></th>
+                <th><?= clmsT('Pieces / Carton') ?></th>
+                <th><?= clmsT('Total Qty') ?></th>
+                <th><?= clmsT('Unit Price / Factory Price') ?></th>
+                <th><?= clmsT('Total Amount') ?></th>
                 <th><?= clmsT('Actual CBM') ?></th>
                 <th><?= clmsT('Actual Weight') ?></th>
                 <th><?= clmsT('Condition') ?></th>

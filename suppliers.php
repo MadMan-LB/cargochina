@@ -12,7 +12,7 @@ require 'includes/layout.php';
     <div class="row g-2 align-items-end flex-wrap">
       <div class="col-12 col-md-4 col-lg-3">
         <label class="form-label small mb-0">Search</label>
-        <input type="text" class="form-control form-control-sm" id="supplierSearch" placeholder="Code, name, phone, store, location...">
+        <input type="text" class="form-control form-control-sm" id="supplierSearch" placeholder="Code, name, phone, store, address...">
       </div>
       <div class="col-12 col-md-4 col-lg-2">
         <label class="form-label small mb-0">Payment status</label>
@@ -29,6 +29,7 @@ require 'includes/layout.php';
           <option value="code">Code</option>
           <option value="store_id">Store ID</option>
           <option value="phone">Phone</option>
+          <option value="address">Address</option>
           <option value="factory_location">Factory</option>
         </select>
       </div>
@@ -62,7 +63,7 @@ require 'includes/layout.php';
             <th>Store ID</th>
             <th>Name</th>
             <th>Phone</th>
-            <th>Factory Location</th>
+            <th>Address / Factory</th>
             <th>Additional IDs</th>
             <th>Actions</th>
           </tr>
@@ -83,10 +84,11 @@ require 'includes/layout.php';
       <div class="modal-body">
         <form id="supplierForm">
           <input type="hidden" id="supplierId">
+          <input type="hidden" id="supplierCode">
           <div class="row form-row-responsive">
-            <div class="col-12 col-md-4 mb-2"><label class="form-label">Code *</label><input type="text" class="form-control" id="supplierCode" required></div>
             <div class="col-12 col-md-4 mb-2"><label class="form-label">Store ID</label><input type="text" class="form-control" id="supplierStoreId" placeholder="Official China store identifier"></div>
             <div class="col-12 col-md-4 mb-2"><label class="form-label">Name *</label><input type="text" class="form-control" id="supplierName" required></div>
+            <div class="col-12 col-md-4 mb-2"><label class="form-label">Address</label><input type="text" class="form-control" id="supplierAddress" placeholder="Full address"></div>
           </div>
           <div class="row form-row-responsive">
             <div class="col-12 col-md-4 mb-2"><label class="form-label">Phone</label>
@@ -101,7 +103,6 @@ require 'includes/layout.php';
             <div class="col-12 col-md-4 mb-2 d-none"><label class="form-label">Commission Type</label><select class="form-select" id="supplierCommissionType"><option value="percentage">Percentage</option><option value="fixed">Fixed</option></select></div>
             <div class="col-12 col-md-4 mb-2 d-none"><label class="form-label">Commission Base</label><select class="form-select" id="supplierCommissionAppliedOn"><option value="buy_value">Buy value</option><option value="sell_value">Sell value</option></select></div>
           </div>
-          <div class="mb-2 d-none"><label class="form-label">Address</label><input type="text" class="form-control" id="supplierAddress" placeholder="Full address (used in order export header)"></div>
           <div class="mb-2"><label class="form-label">Notes</label><textarea class="form-control" id="supplierNotes" rows="2"></textarea></div>
           <div class="mb-3">
             <div class="d-flex justify-content-between align-items-center">
@@ -140,9 +141,9 @@ require 'includes/layout.php';
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <p class="text-muted small">Paste CSV or choose file. Columns: <code>code</code>, <code>name</code>, <code>store_id</code>, <code>phone</code>, <code>factory_location</code>, <code>notes</code>. Duplicate codes are skipped.</p>
+        <p class="text-muted small">Paste CSV or choose file. Columns: <code>name</code>, <code>address</code>, <code>store_id</code>, <code>phone</code>, <code>factory_location</code>, <code>notes</code>. <code>code</code> is optional; if omitted, the system generates it.</p>
         <input type="file" class="form-control form-control-sm mb-2" id="importCsvFile" accept=".csv,.txt" title="Choose CSV file">
-        <textarea class="form-control font-monospace" id="importCsvData" rows="10" placeholder="code,name,store_id,phone,factory_location,notes&#10;S001,Acme Store,ST,+,Yiwu,notes"></textarea>
+        <textarea class="form-control font-monospace" id="importCsvData" rows="10" placeholder="name,address,store_id,phone,factory_location,notes&#10;Acme Store,Yiwu Futian Market,ST,+86 123 4567 8900,Yiwu,notes"></textarea>
         <div id="importResult" class="alert d-none mt-2"></div>
       </div>
       <div class="modal-footer">

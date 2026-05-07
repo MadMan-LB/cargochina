@@ -26,6 +26,22 @@ function supplierTableHasColumn(PDO $pdo, string $table, string $column): bool
     return $cache[$key];
 }
 
+function generateSupplierCode(PDO $pdo, string $name = ''): string
+{
+    $base = strtoupper(preg_replace('/[^A-Z0-9]+/i', '', $name) ?? '');
+    $base = $base !== '' ? substr($base, 0, 8) : 'SUP';
+    $stmt = $pdo->prepare("SELECT 1 FROM suppliers WHERE code = ? LIMIT 1");
+    for ($attempt = 0; $attempt < 20; $attempt++) {
+        $suffix = strtoupper(base_convert((string) random_int(100000, 999999), 10, 36));
+        $code = substr($base . '-' . $suffix, 0, 50);
+        $stmt->execute([$code]);
+        if (!$stmt->fetchColumn()) {
+            return $code;
+        }
+    }
+    return substr('SUP-' . date('YmdHis') . '-' . random_int(100, 999), 0, 50);
+}
+
 function normalizeSupplierPaymentMethodName(?string $value): string
 {
     $normalized = mb_strtolower(trim((string) $value), 'UTF-8');
@@ -354,15 +370,24 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if ($id === null) {
                 $q = trim($_GET['q'] ?? '');
                 $paymentStatus = trim($_GET['payment_status'] ?? '');
-                $sort = in_array($_GET['sort'] ?? '', ['name', 'code', 'store_id', 'phone', 'factory_location']) ? $_GET['sort'] : 'name';
+                $hasAddress = supplierTableHasColumn($pdo, 'suppliers', 'address');
+                $sortOptions = ['name', 'code', 'store_id', 'phone', 'factory_location'];
+                if ($hasAddress) {
+                    $sortOptions[] = 'address';
+                }
+                $sort = in_array($_GET['sort'] ?? '', $sortOptions, true) ? $_GET['sort'] : 'name';
                 $order = strtolower($_GET['order'] ?? '') === 'desc' ? 'DESC' : 'ASC';
 
                 $where = [];
                 $params = [];
                 if (strlen($q) >= 1) {
                     $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
-                    $where[] = "(s.name LIKE ? OR s.code LIKE ? OR (s.phone IS NOT NULL AND s.phone LIKE ?) OR (s.store_id IS NOT NULL AND s.store_id LIKE ?) OR (s.factory_location IS NOT NULL AND s.factory_location LIKE ?))";
+                    $addressSearch = $hasAddress ? " OR (s.address IS NOT NULL AND s.address LIKE ?)" : "";
+                    $where[] = "(s.name LIKE ? OR s.code LIKE ? OR (s.phone IS NOT NULL AND s.phone LIKE ?) OR (s.store_id IS NOT NULL AND s.store_id LIKE ?) OR (s.factory_location IS NOT NULL AND s.factory_location LIKE ?)$addressSearch)";
                     $params = array_merge($params, [$like, $like, $like, $like, $like]);
+                    if ($hasAddress) {
+                        $params[] = $like;
+                    }
                 }
                 $settlementExpr = supplierSettlementDeltaExpr($pdo);
                 if ($paymentStatus === 'outstanding') {
@@ -443,31 +468,48 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if (!$csv) jsonError('No CSV data provided', 400);
                 $lines = preg_split('/\r\n|\r|\n/', $csv);
                 $header = array_map('trim', str_getcsv(array_shift($lines) ?? ''));
-                $codeIdx = array_search('code', array_map('strtolower', $header)) !== false ? array_search('code', array_map('strtolower', $header)) : 0;
-                $nameIdx = array_search('name', array_map('strtolower', $header)) !== false ? array_search('name', array_map('strtolower', $header)) : 1;
-                $storeIdx = array_search('store_id', array_map('strtolower', $header)) !== false ? array_search('store_id', array_map('strtolower', $header)) : null;
-                $phoneIdx = array_search('phone', array_map('strtolower', $header)) !== false ? array_search('phone', array_map('strtolower', $header)) : null;
-                $factoryIdx = array_search('factory_location', array_map('strtolower', $header)) !== false ? array_search('factory_location', array_map('strtolower', $header)) : null;
-                $notesIdx = array_search('notes', array_map('strtolower', $header)) !== false ? array_search('notes', array_map('strtolower', $header)) : null;
+                $headerLower = array_map('strtolower', $header);
+                $codeSearch = array_search('code', $headerLower, true);
+                $nameSearch = array_search('name', $headerLower, true);
+                $codeIdx = $codeSearch !== false ? $codeSearch : null;
+                $nameIdx = $nameSearch !== false ? $nameSearch : ($codeIdx === 0 ? 1 : 0);
+                $storeIdx = array_search('store_id', $headerLower, true) !== false ? array_search('store_id', $headerLower, true) : null;
+                $phoneIdx = array_search('phone', $headerLower, true) !== false ? array_search('phone', $headerLower, true) : null;
+                $factoryIdx = array_search('factory_location', $headerLower, true) !== false ? array_search('factory_location', $headerLower, true) : null;
+                $addressIdx = array_search('address', $headerLower, true) !== false ? array_search('address', $headerLower, true) : null;
+                $notesIdx = array_search('notes', $headerLower, true) !== false ? array_search('notes', $headerLower, true) : null;
+                $hasAddr = supplierTableHasColumn($pdo, 'suppliers', 'address');
                 $created = 0;
                 $skipped = 0;
                 $errors = [];
                 foreach ($lines as $i => $line) {
                     $row = str_getcsv($line);
                     if (count($row) < 2) continue;
-                    $code = trim($row[$codeIdx] ?? $row[0] ?? '');
+                    $code = $codeIdx !== null ? trim($row[$codeIdx] ?? '') : '';
                     $name = trim($row[$nameIdx] ?? $row[1] ?? '');
-                    if (!$code || !$name) {
+                    if (!$name) {
                         $skipped++;
                         continue;
+                    }
+                    if (!$code) {
+                        $code = generateSupplierCode($pdo, $name);
                     }
                     $storeId = $storeIdx !== null && isset($row[$storeIdx]) ? trim($row[$storeIdx]) : null;
                     $phone = $phoneIdx !== null && isset($row[$phoneIdx]) ? trim($row[$phoneIdx]) : null;
                     $factory = $factoryIdx !== null && isset($row[$factoryIdx]) ? trim($row[$factoryIdx]) : null;
+                    $address = $addressIdx !== null && isset($row[$addressIdx]) ? trim($row[$addressIdx]) : null;
                     $notes = $notesIdx !== null && isset($row[$notesIdx]) ? trim($row[$notesIdx]) : null;
                     try {
-                        $pdo->prepare("INSERT INTO suppliers (code, store_id, name, phone, factory_location, notes) VALUES (?,?,?,?,?,?)")
-                            ->execute([$code, $storeId ?: null, $name, $phone ?: null, $factory ?: null, $notes ?: null]);
+                        $columns = "code, store_id, name, phone, factory_location, notes";
+                        $values = "?,?,?,?,?,?";
+                        $params = [$code, $storeId ?: null, $name, $phone ?: null, $factory ?: null, $notes ?: null];
+                        if ($hasAddr) {
+                            $columns .= ", address";
+                            $values .= ",?";
+                            $params[] = $address ?: null;
+                        }
+                        $pdo->prepare("INSERT INTO suppliers ($columns) VALUES ($values)")
+                            ->execute($params);
                         $created++;
                     } catch (PDOException $e) {
                         if ($e->getCode() == 23000) $skipped++;
@@ -601,8 +643,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             $code = trim($input['code'] ?? '');
             $name = trim($input['name'] ?? '');
-            if (!$code || !$name) {
-                jsonError('Missing required fields', 400, ['code' => 'Required', 'name' => 'Required']);
+            if (!$name) {
+                jsonError('Missing required fields', 400, ['name' => 'Required']);
+            }
+            if (!$code) {
+                $code = generateSupplierCode($pdo, $name);
             }
             $phone = isset($input['phone']) ? trim($input['phone']) : null;
             validatePhone($phone);
@@ -674,15 +719,19 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if (!$id) {
                 jsonError('ID required', 400);
             }
-            $stmt = $pdo->prepare("SELECT id FROM suppliers WHERE id = ?");
+            $stmt = $pdo->prepare("SELECT id, code FROM suppliers WHERE id = ?");
             $stmt->execute([$id]);
-            if (!$stmt->fetch()) {
+            $existingSupplier = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$existingSupplier) {
                 jsonError('Supplier not found', 404);
             }
             $code = trim($input['code'] ?? '');
             $name = trim($input['name'] ?? '');
-            if (!$code || !$name) {
+            if (!$name) {
                 jsonError('Missing required fields', 400);
+            }
+            if (!$code) {
+                $code = trim((string) ($existingSupplier['code'] ?? '')) ?: generateSupplierCode($pdo, $name);
             }
             $phone = isset($input['phone']) ? trim($input['phone']) : null;
             validatePhone($phone);

@@ -244,6 +244,21 @@ class DownloadExampleService
             return [
                 'item_no' => $row['item_no'],
                 'shipping_code' => $shippingCode,
+                'what_brand' => match ($row['supplier']) {
+                    'Jinhua Gift Creations' => 'GiftPro',
+                    'Qingdao Pet Utility' => 'PetLine',
+                    'Wenzhou Stationery House' => 'OfficeMate',
+                    default => '',
+                },
+                'copy_normal_goods' => $index % 3 === 0 ? 'Copy' : 'Normal',
+                'code' => 'EX-CODE-' . str_pad((string) ($index + 1), 3, '0', STR_PAD_LEFT),
+                'express_number' => 'EXP' . date('Y') . str_pad((string) ($index + 11), 5, '0', STR_PAD_LEFT),
+                'size' => match ($index % 4) {
+                    0 => '60 x 40 x 38',
+                    1 => '52 x 36 x 30',
+                    2 => '48 x 35 x 28',
+                    default => '45 x 30 x 25',
+                },
                 'supplier_name' => $row['supplier'],
                 'supplier_phone' => match ($row['supplier']) {
                     'Jinhua Gift Creations' => '+86-579-85178151',

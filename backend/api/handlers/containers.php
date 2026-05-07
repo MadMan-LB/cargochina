@@ -174,6 +174,16 @@ function enrichContainerDestination(PDO $pdo, array $container): array
     return $container;
 }
 
+function containerCopyNormalGoodsDisplay($value): string
+{
+    $raw = trim((string) ($value ?? ''));
+    return match (strtolower($raw)) {
+        'copy' => clmsT('Copy Goods'),
+        'normal' => clmsT('Normal Goods'),
+        default => $raw,
+    };
+}
+
 function outputContainerOrdersCsv(array $container, array $ordersWithItems): void
 {
     $code = preg_replace('/[^a-zA-Z0-9_.-]/', '_', (string) ($container['code'] ?? 'container'));
@@ -184,7 +194,7 @@ function outputContainerOrdersCsv(array $container, array $ordersWithItems): voi
     $out = fopen('php://output', 'w');
     fputcsv($out, [clmsT('Container'), (string) ($container['code'] ?? '')]);
     fputcsv($out, ['']);
-    fputcsv($out, array_map('clmsT', ['Order ID', 'Customer', 'Supplier', 'Item No', 'Shipping Code', 'Description', 'Cartons', 'Qty/Carton', 'Total Qty', 'Unit Price', 'Total Amount', 'Declared CBM', 'Declared Weight', 'Photo Count']));
+    fputcsv($out, array_map('clmsT', ['What Brand', 'Copy / Normal Goods', 'Code', 'Order ID', 'Customer', 'Supplier', 'Item No', 'Shipping Code', 'Description', 'Cartons', 'Qty/Carton', 'Total Qty', 'Unit Price', 'Total Amount', 'Declared CBM', 'Declared Weight', 'Express Number', 'Size', 'Photo Count']));
     foreach ($ordersWithItems as $data) {
         $order = $data['order'] ?? [];
         foreach (($data['items'] ?? []) as $item) {
@@ -201,6 +211,9 @@ function outputContainerOrdersCsv(array $container, array $ordersWithItems): voi
                 ? (float) $item['sell_price']
                 : (float) ($item['unit_price'] ?? 0);
             fputcsv($out, [
+                (string) ($item['what_brand'] ?? ''),
+                containerCopyNormalGoodsDisplay($item['copy_normal_goods'] ?? ''),
+                (string) ($item['code'] ?? ''),
                 (int) ($order['id'] ?? 0),
                 OrderExcelService::formatCustomerDisplay($order, $data['items'] ?? []),
                 (string) ($item['supplier_name'] ?? $order['supplier_name'] ?? ''),
@@ -214,6 +227,8 @@ function outputContainerOrdersCsv(array $container, array $ordersWithItems): voi
                 $totalQty > 0 && $unitPrice ? round($totalQty * $unitPrice, 4) : '',
                 round((float) ($item['declared_cbm'] ?? 0), 6),
                 round((float) ($item['declared_weight'] ?? 0), 4),
+                (string) ($item['express_number'] ?? ''),
+                (string) ($item['size'] ?? ''),
                 count($imagePaths),
             ]);
         }

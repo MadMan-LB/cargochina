@@ -268,8 +268,8 @@ require 'includes/layout.php';
     <div class="modal-content">
       <div class="modal-header">
         <div>
-          <h5 class="modal-title mb-1">Quick Add Supplier</h5>
-          <small class="text-muted">Create a supplier without leaving the draft. The saved supplier becomes selectable immediately in this supplier section.</small>
+          <h5 class="modal-title mb-1"><?= clmsT('Quick Add Supplier') ?></h5>
+          <small class="text-muted"><?= clmsT('Create a supplier without leaving the draft. The saved supplier becomes selectable immediately in this supplier section.') ?></small>
         </div>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
@@ -278,31 +278,31 @@ require 'includes/layout.php';
           <input type="hidden" id="draftQuickSupplierTargetSection">
           <div class="row g-3">
             <div class="col-12 col-md-4">
-              <label class="form-label">Code *</label>
-              <input type="text" class="form-control" id="draftQuickSupplierCode" required>
-            </div>
-            <div class="col-12 col-md-4">
-              <label class="form-label">Store ID</label>
+              <label class="form-label"><?= clmsT('Store ID') ?></label>
               <input type="text" class="form-control" id="draftQuickSupplierStoreId">
             </div>
             <div class="col-12 col-md-4">
-              <label class="form-label">Name *</label>
+              <label class="form-label"><?= clmsT('Name *') ?></label>
               <input type="text" class="form-control" id="draftQuickSupplierName" required>
             </div>
             <div class="col-12 col-md-4">
-              <label class="form-label">Phone</label>
+              <label class="form-label"><?= clmsT('Address') ?></label>
+              <input type="text" class="form-control" id="draftQuickSupplierAddress" placeholder="<?= clmsT('Factory or office address') ?>">
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label"><?= clmsT('Phone') ?></label>
               <input type="text" class="form-control" id="draftQuickSupplierPhone">
             </div>
             <div class="col-12 col-md-4">
-              <label class="form-label">Commission</label>
-              <input type="number" min="0" step="0.0001" class="form-control" id="draftQuickSupplierCommission" placeholder="e.g. 5">
+              <label class="form-label"><?= clmsT('Commission') ?></label>
+              <input type="number" min="0" step="0.0001" class="form-control" id="draftQuickSupplierCommission" placeholder="<?= clmsT('e.g. 5') ?>">
             </div>
             <div class="col-12 col-md-4">
-              <label class="form-label">Payment Facility (days)</label>
+              <label class="form-label"><?= clmsT('Payment Facility (days)') ?></label>
               <input type="number" min="0" step="1" class="form-control" id="draftQuickSupplierFacility" placeholder="30">
             </div>
             <div class="col-12">
-              <label class="form-label">Payment Accounts</label>
+              <label class="form-label"><?= clmsT('Payment Accounts') ?></label>
               <div id="draftQuickSupplierPaymentLinks" class="d-flex flex-column gap-2"></div>
               <button type="button" class="btn btn-outline-secondary btn-sm mt-2" onclick="addDraftQuickSupplierPaymentLink()">+ Add Account</button>
             </div>

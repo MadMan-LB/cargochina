@@ -1909,6 +1909,35 @@
                     <div class="col-12">
                       <div class="draft-item-panel draft-item-subgrid">
                         <div class="draft-item-subgrid-block">
+                          <div class="draft-item-subgrid-title">${escapeHtml(draftT("Shipment Details"))}</div>
+                          <div class="row g-2">
+                            <div class="col-12 col-sm-6 col-xl-3">
+                              <label class="form-label draft-item-label">${escapeHtml(draftT("What Brand"))}</label>
+                              <input type="text" class="form-control form-control-sm draft-item-what-brand" placeholder="${escapeHtml(draftT("Brand marker"))}">
+                            </div>
+                            <div class="col-12 col-sm-6 col-xl-2">
+                              <label class="form-label draft-item-label">${escapeHtml(draftT("Copy / Normal Goods"))}</label>
+                              <select class="form-select form-select-sm draft-item-copy-normal-goods">
+                                <option value=""></option>
+                                <option value="Normal">${escapeHtml(draftT("Normal Goods"))}</option>
+                                <option value="Copy">${escapeHtml(draftT("Copy Goods"))}</option>
+                              </select>
+                            </div>
+                            <div class="col-12 col-sm-6 col-xl-2">
+                              <label class="form-label draft-item-label">${escapeHtml(draftT("Code"))}</label>
+                              <input type="text" class="form-control form-control-sm draft-item-code" placeholder="${escapeHtml(draftT("Code"))}">
+                            </div>
+                            <div class="col-12 col-sm-6 col-xl-3">
+                              <label class="form-label draft-item-label">${escapeHtml(draftT("Express Number"))}</label>
+                              <input type="text" class="form-control form-control-sm draft-item-express-number" placeholder="${escapeHtml(draftT("Express no."))}">
+                            </div>
+                            <div class="col-12 col-sm-6 col-xl-2">
+                              <label class="form-label draft-item-label">${escapeHtml(draftT("Size"))}</label>
+                              <input type="text" class="form-control form-control-sm draft-item-size" placeholder="${escapeHtml(draftT("L x W x H"))}">
+                            </div>
+                          </div>
+                        </div>
+                        <div class="draft-item-subgrid-block">
                           <div class="draft-item-subgrid-title">Packaging</div>
                           <div class="row g-2">
                             <div class="col-4">
@@ -2463,6 +2492,14 @@
         card.querySelector(".draft-item-hs-code").value = initial.hs_code || "";
         card.querySelector(".draft-item-shipping-code").value =
             initial.shipping_code || "";
+        card.querySelector(".draft-item-what-brand").value =
+            initial.what_brand || "";
+        card.querySelector(".draft-item-copy-normal-goods").value =
+            initial.copy_normal_goods || "";
+        card.querySelector(".draft-item-code").value = initial.code || "";
+        card.querySelector(".draft-item-express-number").value =
+            initial.express_number || "";
+        card.querySelector(".draft-item-size").value = initial.size || "";
         const isSharedCarton = !!initial.shared_carton_enabled;
         card.querySelector(".draft-item-item-no").value = isSharedCarton
             ? initial.shared_carton_code || ""
@@ -2772,11 +2809,13 @@
             return;
         }
         const payload = {
-            code: document.getElementById("draftQuickSupplierCode").value.trim(),
             store_id:
                 document.getElementById("draftQuickSupplierStoreId").value.trim() ||
                 null,
             name: document.getElementById("draftQuickSupplierName").value.trim(),
+            address:
+                document.getElementById("draftQuickSupplierAddress")?.value?.trim() ||
+                null,
             phone:
                 document.getElementById("draftQuickSupplierPhone").value.trim() ||
                 null,
@@ -2790,8 +2829,8 @@
                 document.getElementById("draftQuickSupplierFacility").value || 30,
             payment_links: collectDraftQuickSupplierPaymentLinks(),
         };
-        if (!payload.code || !payload.name) {
-            showToast("Supplier code and name are required.", "danger");
+        if (!payload.name) {
+            showToast("Supplier name is required.", "danger");
             return;
         }
         const btn = document.getElementById("draftQuickSupplierSaveBtn");
@@ -3165,6 +3204,26 @@
                         shipping_code:
                             card
                                 .querySelector(".draft-item-shipping-code")
+                                ?.value?.trim() || null,
+                        what_brand:
+                            card
+                                .querySelector(".draft-item-what-brand")
+                                ?.value?.trim() || null,
+                        copy_normal_goods:
+                            card
+                                .querySelector(".draft-item-copy-normal-goods")
+                                ?.value?.trim() || null,
+                        code:
+                            card
+                                .querySelector(".draft-item-code")
+                                ?.value?.trim() || null,
+                        express_number:
+                            card
+                                .querySelector(".draft-item-express-number")
+                                ?.value?.trim() || null,
+                        size:
+                            card
+                                .querySelector(".draft-item-size")
                                 ?.value?.trim() || null,
                         description_entries: sharedCartonEnabled
                             ? []

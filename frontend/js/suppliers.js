@@ -90,6 +90,14 @@ async function loadSuppliers() {
                     const addrTitle = [r.address, r.factory_location]
                         .filter(Boolean)
                         .join(" | ");
+                    const addressFactoryHtml = [
+                        r.address ? escapeHtml(r.address) : "",
+                        r.factory_location
+                            ? `<small class="text-muted d-block">${escapeHtml(r.factory_location)}</small>`
+                            : "",
+                    ]
+                        .filter(Boolean)
+                        .join("");
                     return `
       <tr>
         <td>${escapeHtml(r.code)}</td>
@@ -101,7 +109,7 @@ async function loadSuppliers() {
           ${addrTitle ? `<br><small class="text-muted">${escapeHtml(addrTitle.substring(0, 60))}${addrTitle.length > 60 ? "…" : ""}</small>` : ""}
         </td>
         <td>${escapeHtml(r.phone || "-")}${r.fax ? `<br><small class="text-muted">Fax: ${escapeHtml(r.fax)}</small>` : ""}</td>
-        <td>${escapeHtml(r.factory_location || "-")}</td>
+        <td>${addressFactoryHtml || "-"}</td>
         <td><small class="text-muted">${escapeHtml(addIdsStr)}</small></td>
         <td class="table-actions">${actions}</td>
       </tr>
@@ -535,8 +543,8 @@ async function saveSupplier() {
         notes: document.getElementById("supplierNotes").value.trim() || null,
         additional_ids: collectAdditionalIds(),
     };
-    if (!payload.code || !payload.name) {
-        showToast("Code and Name are required", "danger");
+    if (!payload.name) {
+        showToast("Name is required", "danger");
         return;
     }
     try {

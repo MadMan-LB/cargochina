@@ -17,9 +17,9 @@ class OrderExcelService
 {
     private string $backendDir;
 
-    private const STANDARD_LAST_COL = 'N';
-    private const CONTAINER_LAST_COL = 'Q';
-    private const PHOTO_COLUMN = 'B';
+    private const STANDARD_LAST_COL = 'S';
+    private const CONTAINER_LAST_COL = 'V';
+    private const PHOTO_COLUMN = 'E';
     private const PHOTO_COLUMN_WIDTH = 21;
     private const PHOTO_ROW_HEIGHT_PT = 90;
     private const PHOTO_IMAGE_SCALE = 0.82;
@@ -208,12 +208,23 @@ class OrderExcelService
                     $shippingCodes[$shippingCode] = true;
                 }
                 $totalCartons += (int) ($item['cartons'] ?? 0);
-                $itemsSummary[] = trim(sprintf(
-                    '%s %sctn HS:%s',
+                $summaryParts = [
                     $shippingCode !== '' ? $shippingCode : '-',
-                    (string) ((int) ($item['cartons'] ?? 0)),
-                    trim((string) ($item['hs_code'] ?? '')) !== '' ? (string) $item['hs_code'] : '-'
-                ));
+                    (string) ((int) ($item['cartons'] ?? 0)) . 'ctn',
+                    'HS:' . (trim((string) ($item['hs_code'] ?? '')) !== '' ? (string) $item['hs_code'] : '-'),
+                ];
+                foreach ([
+                    'Brand' => $item['what_brand'] ?? '',
+                    'Code' => $item['code'] ?? '',
+                    'Express' => $item['express_number'] ?? '',
+                    'Size' => $item['size'] ?? '',
+                ] as $label => $value) {
+                    $value = trim((string) $value);
+                    if ($value !== '') {
+                        $summaryParts[] = $label . ':' . $value;
+                    }
+                }
+                $itemsSummary[] = trim(implode(' ', $summaryParts));
             }
 
             return [
@@ -238,19 +249,24 @@ class OrderExcelService
     {
         $widths = [
             'A' => 9,
-            'B' => self::PHOTO_COLUMN_WIDTH,
-            'C' => 20.14,
-            'D' => 20.14,
-            'E' => 52.14,
-            'F' => 15.29,
-            'G' => 15.29,
-            'H' => 15.29,
+            'B' => 14,
+            'C' => 18,
+            'D' => 14,
+            'E' => self::PHOTO_COLUMN_WIDTH,
+            'F' => 20.14,
+            'G' => 20.14,
+            'H' => 52.14,
             'I' => 15.29,
             'J' => 15.29,
             'K' => 15.29,
             'L' => 15.29,
-            'M' => 9,
-            'N' => 15.29,
+            'M' => 15.29,
+            'N' => 9,
+            'O' => 15.29,
+            'P' => 15.29,
+            'Q' => 15.29,
+            'R' => 18,
+            'S' => 18,
         ];
 
         foreach ($widths as $col => $width) {
@@ -262,22 +278,27 @@ class OrderExcelService
     {
         $widths = [
             'A' => 5,
-            'B' => self::PHOTO_COLUMN_WIDTH,
+            'B' => 14,
             'C' => 18,
-            'D' => 24,
-            'E' => 18,
-            'F' => 22,
-            'G' => 48,
-            'H' => 12,
-            'I' => 12,
-            'J' => 12,
-            'K' => 14,
-            'L' => 14,
-            'M' => 16,
-            'N' => 12,
-            'O' => 12,
-            'P' => 9,
+            'D' => 14,
+            'E' => self::PHOTO_COLUMN_WIDTH,
+            'F' => 18,
+            'G' => 24,
+            'H' => 18,
+            'I' => 22,
+            'J' => 48,
+            'K' => 12,
+            'L' => 12,
+            'M' => 12,
+            'N' => 14,
+            'O' => 14,
+            'P' => 16,
             'Q' => 12,
+            'R' => 12,
+            'S' => 9,
+            'T' => 12,
+            'U' => 18,
+            'V' => 18,
         ];
 
         foreach ($widths as $col => $width) {
@@ -329,26 +350,31 @@ class OrderExcelService
     private function writeStandardColumnHeaders($sheet, int $row): void
     {
         $headers = [
-            'B' => 'PHOTO',
-            'C' => 'ITEM NO',
-            'D' => 'SUPPLIER',
-            'E' => 'DESCRIPTION',
-            'F' => 'TOTAL CTNS',
-            'G' => 'QTY/CTN',
-            'H' => 'TOTAL QTY',
-            'I' => 'UNIT PRICE',
-            'J' => 'TOTAL AMOUNT',
-            'K' => 'CBM',
-            'L' => 'TOTAL CBM',
-            'M' => 'GWKG',
-            'N' => 'TOTAL GW',
+            'B' => 'WHAT BRAND',
+            'C' => 'copy /NORMAL Goods',
+            'D' => 'CODE',
+            'E' => 'PHOTO',
+            'F' => 'ITEM NO',
+            'G' => 'SUPPLIER',
+            'H' => 'DESCRIPTION',
+            'I' => 'TOTAL CTNS',
+            'J' => 'QTY/CTN',
+            'K' => 'TOTAL QTY',
+            'L' => 'UNIT PRICE',
+            'M' => 'TOTAL AMOUNT',
+            'N' => 'CBM',
+            'O' => 'TOTAL CBM',
+            'P' => 'GWKG',
+            'Q' => 'TOTAL GW',
+            'R' => 'express NO',
+            'S' => 'size',
         ];
 
         foreach ($headers as $col => $label) {
             $sheet->setCellValue($col . $row, $this->tr($label));
         }
 
-        $this->styleRange($sheet, 'B' . $row . ':N' . $row, [
+        $this->styleRange($sheet, 'B' . $row . ':' . self::STANDARD_LAST_COL . $row, [
             'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true, 'color' => ['rgb' => self::HEADER_BLUE]],
             'alignment' => [
                 'horizontal' => Alignment::HORIZONTAL_CENTER,
@@ -387,20 +413,25 @@ class OrderExcelService
                 $cbmPer = $multiplier > 0 ? round((float) ($item['declared_cbm'] ?? 0) / $multiplier, 6) : '';
                 $weightPer = $multiplier > 0 ? round((float) ($item['declared_weight'] ?? 0) / $multiplier, 4) : '';
 
-                $sheet->setCellValue('C' . $row, (string) ($item['item_no'] ?? $item['shipping_code'] ?? ''));
-                $sheet->setCellValue('D' . $row, (string) ($item['supplier_name'] ?? $group['supplier_name'] ?? ''));
-                $sheet->setCellValue('E' . $row, (string) ($item['description_en'] ?? $item['description_cn'] ?? ''));
-                $sheet->setCellValue('F' . $row, $cartons ?: '');
-                $sheet->setCellValue('G' . $row, $qtyPerCarton ?: '');
-                $sheet->setCellValue('H' . $row, $quantity ?: '');
-                $sheet->setCellValue('I' . $row, $unitPrice !== null ? $unitPrice : '');
-                $sheet->setCellValue('J' . $row, ($unitPrice !== null && $quantity > 0) ? round($unitPrice * $quantity, 4) : '');
-                $sheet->setCellValue('K' . $row, $cbmPer);
-                $sheet->setCellValue('L' . $row, round((float) ($item['declared_cbm'] ?? 0), 6));
-                $sheet->setCellValue('M' . $row, $weightPer);
-                $sheet->setCellValue('N' . $row, round((float) ($item['declared_weight'] ?? 0), 4));
+                $sheet->setCellValue('B' . $row, $this->itemText($item, 'what_brand'));
+                $sheet->setCellValue('C' . $row, $this->copyNormalGoodsText($item));
+                $sheet->setCellValue('D' . $row, $this->itemText($item, 'code'));
+                $sheet->setCellValue('F' . $row, (string) ($item['item_no'] ?? $item['shipping_code'] ?? ''));
+                $sheet->setCellValue('G' . $row, (string) ($item['supplier_name'] ?? $group['supplier_name'] ?? ''));
+                $sheet->setCellValue('H' . $row, (string) ($item['description_en'] ?? $item['description_cn'] ?? ''));
+                $sheet->setCellValue('I' . $row, $cartons ?: '');
+                $sheet->setCellValue('J' . $row, $qtyPerCarton ?: '');
+                $sheet->setCellValue('K' . $row, $quantity ?: '');
+                $sheet->setCellValue('L' . $row, $unitPrice !== null ? $unitPrice : '');
+                $sheet->setCellValue('M' . $row, ($unitPrice !== null && $quantity > 0) ? round($unitPrice * $quantity, 4) : '');
+                $sheet->setCellValue('N' . $row, $cbmPer);
+                $sheet->setCellValue('O' . $row, round((float) ($item['declared_cbm'] ?? 0), 6));
+                $sheet->setCellValue('P' . $row, $weightPer);
+                $sheet->setCellValue('Q' . $row, round((float) ($item['declared_weight'] ?? 0), 4));
+                $sheet->setCellValue('R' . $row, $this->itemText($item, 'express_number'));
+                $sheet->setCellValue('S' . $row, $this->resolveItemSize($item));
 
-                $this->styleRange($sheet, 'B' . $row . ':N' . $row, [
+                $this->styleRange($sheet, 'B' . $row . ':' . self::STANDARD_LAST_COL . $row, [
                     'font' => ['name' => 'Arial', 'size' => 11],
                     'alignment' => [
                         'horizontal' => Alignment::HORIZONTAL_CENTER,
@@ -410,12 +441,12 @@ class OrderExcelService
                     'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FFFFFF']],
                     'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
                 ]);
-                $sheet->getStyle('I' . $row . ':J' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
-                $sheet->getStyle('K' . $row . ':L' . $row)->getNumberFormat()->setFormatCode('#,##0.######');
-                $sheet->getStyle('M' . $row . ':N' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
+                $sheet->getStyle('L' . $row . ':M' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
+                $sheet->getStyle('N' . $row . ':O' . $row)->getNumberFormat()->setFormatCode('#,##0.######');
+                $sheet->getStyle('P' . $row . ':Q' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
 
                 $sheet->getRowDimension($row)->setRowHeight(self::PHOTO_ROW_HEIGHT_PT);
-                $this->writePhotoCell($sheet, 'B' . $row, $item['image_paths'] ?? []);
+                $this->writePhotoCell($sheet, self::PHOTO_COLUMN . $row, $item['image_paths'] ?? []);
                 $row++;
             }
         }
@@ -426,29 +457,34 @@ class OrderExcelService
     private function writeContainerColumnHeaders($sheet, int $row): void
     {
         $headers = [
-            'B' => 'PHOTO',
-            'C' => 'ITEM NO',
-            'D' => 'SUPPLIER',
-            'E' => 'SUPPLIER PHONE',
-            'F' => 'ACCOUNT NB',
-            'G' => 'DESCRIPTION',
-            'H' => 'TOTAL CTNS',
-            'I' => 'QTY/CTN',
-            'J' => 'TOTAL QTY',
-            'K' => 'UNIT PRICE',
-            'L' => 'FACTORY PRICE',
-            'M' => 'TOTAL AMOUNT',
-            'N' => 'CBM',
-            'O' => 'TOTAL CBM',
-            'P' => 'GWKG',
-            'Q' => 'TOTAL GW',
+            'B' => 'WHAT BRAND',
+            'C' => 'copy /NORMAL Goods',
+            'D' => 'CODE',
+            'E' => 'PHOTO',
+            'F' => 'ITEM NO',
+            'G' => 'SUPPLIER',
+            'H' => 'SUPPLIER PHONE',
+            'I' => 'ACCOUNT NB',
+            'J' => 'DESCRIPTION',
+            'K' => 'TOTAL CTNS',
+            'L' => 'QTY/CTN',
+            'M' => 'TOTAL QTY',
+            'N' => 'UNIT PRICE',
+            'O' => 'FACTORY PRICE',
+            'P' => 'TOTAL AMOUNT',
+            'Q' => 'CBM',
+            'R' => 'TOTAL CBM',
+            'S' => 'GWKG',
+            'T' => 'TOTAL GW',
+            'U' => 'express NO',
+            'V' => 'size',
         ];
 
         foreach ($headers as $col => $label) {
             $sheet->setCellValue($col . $row, $this->tr($label));
         }
 
-        $this->styleRange($sheet, 'B' . $row . ':Q' . $row, [
+        $this->styleRange($sheet, 'B' . $row . ':' . self::CONTAINER_LAST_COL . $row, [
             'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true, 'color' => ['rgb' => self::HEADER_BLUE]],
             'alignment' => [
                 'horizontal' => Alignment::HORIZONTAL_CENTER,
@@ -458,10 +494,10 @@ class OrderExcelService
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FFFFFF']],
             'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
         ]);
-        $this->styleRange($sheet, 'D' . $row . ':F' . $row, [
+        $this->styleRange($sheet, 'G' . $row . ':I' . $row, [
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_YELLOW]],
         ]);
-        $this->styleRange($sheet, 'L' . $row, [
+        $this->styleRange($sheet, 'O' . $row, [
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_YELLOW]],
         ]);
         $sheet->getRowDimension($row)->setRowHeight(54.75);
@@ -510,15 +546,15 @@ class OrderExcelService
 
         $sheet->setCellValue('A' . $row, '##');
         $sheet->setCellValue('B' . $row, $section['customer_display'] ?: $this->tr('Customer'));
-        $sheet->setCellValue('H' . $row, trim((string) ($section['customer_phone'] ?? '')) !== ''
+        $sheet->setCellValue('K' . $row, trim((string) ($section['customer_phone'] ?? '')) !== ''
             ? $this->tr('Phone: {phone}', ['phone' => $section['customer_phone']])
             : $this->tr('Phone: -'));
-        $sheet->setCellValue('K' . $row, $orderLabel);
-        $sheet->mergeCells('B' . $row . ':G' . $row);
-        $sheet->mergeCells('H' . $row . ':J' . $row);
-        $sheet->mergeCells('K' . $row . ':Q' . $row);
+        $sheet->setCellValue('N' . $row, $orderLabel);
+        $sheet->mergeCells('B' . $row . ':J' . $row);
+        $sheet->mergeCells('K' . $row . ':M' . $row);
+        $sheet->mergeCells('N' . $row . ':' . self::CONTAINER_LAST_COL . $row);
 
-        $this->styleRange($sheet, 'A' . $row . ':Q' . $row, [
+        $this->styleRange($sheet, 'A' . $row . ':' . self::CONTAINER_LAST_COL . $row, [
             'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true],
             'alignment' => [
                 'horizontal' => Alignment::HORIZONTAL_LEFT,
@@ -567,23 +603,28 @@ class OrderExcelService
                 $accountNumber = $this->extractSupplierAccountReference($item, $order);
                 $supplierPhone = trim((string) ($item['supplier_phone'] ?? $group['supplier_phone'] ?? $order['supplier_phone'] ?? ''));
 
-                $sheet->setCellValue('C' . $row, (string) ($item['item_no'] ?? $item['shipping_code'] ?? ''));
-                $sheet->setCellValue('D' . $row, (string) ($item['supplier_name'] ?? $group['supplier_name'] ?? $order['supplier_name'] ?? ''));
-                $sheet->setCellValue('E' . $row, $supplierPhone);
-                $sheet->setCellValue('F' . $row, $accountNumber !== '' ? $accountNumber : $group['supplier_info']);
-                $sheet->setCellValue('G' . $row, (string) ($item['description_en'] ?? $item['description_cn'] ?? ''));
-                $sheet->setCellValue('H' . $row, $cartons ?: '');
-                $sheet->setCellValue('I' . $row, $qtyPerCarton ?: '');
-                $sheet->setCellValue('J' . $row, $quantity ?: '');
-                $sheet->setCellValue('K' . $row, $unitPrice !== null ? $unitPrice : '');
-                $sheet->setCellValue('L' . $row, $factoryPrice !== null ? $factoryPrice : '');
-                $sheet->setCellValue('M' . $row, $sellTotal ?: '');
-                $sheet->setCellValue('N' . $row, $cbmPer);
-                $sheet->setCellValue('O' . $row, $totalCbm ?: '');
-                $sheet->setCellValue('P' . $row, $weightPer);
-                $sheet->setCellValue('Q' . $row, $totalWeight ?: '');
+                $sheet->setCellValue('B' . $row, $this->itemText($item, 'what_brand'));
+                $sheet->setCellValue('C' . $row, $this->copyNormalGoodsText($item));
+                $sheet->setCellValue('D' . $row, $this->itemText($item, 'code'));
+                $sheet->setCellValue('F' . $row, (string) ($item['item_no'] ?? $item['shipping_code'] ?? ''));
+                $sheet->setCellValue('G' . $row, (string) ($item['supplier_name'] ?? $group['supplier_name'] ?? $order['supplier_name'] ?? ''));
+                $sheet->setCellValue('H' . $row, $supplierPhone);
+                $sheet->setCellValue('I' . $row, $accountNumber !== '' ? $accountNumber : $group['supplier_info']);
+                $sheet->setCellValue('J' . $row, (string) ($item['description_en'] ?? $item['description_cn'] ?? ''));
+                $sheet->setCellValue('K' . $row, $cartons ?: '');
+                $sheet->setCellValue('L' . $row, $qtyPerCarton ?: '');
+                $sheet->setCellValue('M' . $row, $quantity ?: '');
+                $sheet->setCellValue('N' . $row, $unitPrice !== null ? $unitPrice : '');
+                $sheet->setCellValue('O' . $row, $factoryPrice !== null ? $factoryPrice : '');
+                $sheet->setCellValue('P' . $row, $sellTotal ?: '');
+                $sheet->setCellValue('Q' . $row, $cbmPer);
+                $sheet->setCellValue('R' . $row, $totalCbm ?: '');
+                $sheet->setCellValue('S' . $row, $weightPer);
+                $sheet->setCellValue('T' . $row, $totalWeight ?: '');
+                $sheet->setCellValue('U' . $row, $this->itemText($item, 'express_number'));
+                $sheet->setCellValue('V' . $row, $this->resolveItemSize($item));
 
-                $this->styleRange($sheet, 'B' . $row . ':Q' . $row, [
+                $this->styleRange($sheet, 'B' . $row . ':' . self::CONTAINER_LAST_COL . $row, [
                     'font' => ['name' => 'Arial', 'size' => 11],
                     'alignment' => [
                         'horizontal' => Alignment::HORIZONTAL_CENTER,
@@ -593,18 +634,18 @@ class OrderExcelService
                     'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FFFFFF']],
                     'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
                 ]);
-                $this->styleRange($sheet, 'D' . $row . ':F' . $row, [
+                $this->styleRange($sheet, 'G' . $row . ':I' . $row, [
                     'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_YELLOW]],
                 ]);
-                $this->styleRange($sheet, 'L' . $row, [
+                $this->styleRange($sheet, 'O' . $row, [
                     'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_YELLOW]],
                 ]);
-                $sheet->getStyle('G' . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_LEFT);
-                $sheet->getStyle('K' . $row . ':M' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
-                $sheet->getStyle('N' . $row . ':O' . $row)->getNumberFormat()->setFormatCode('#,##0.######');
-                $sheet->getStyle('P' . $row . ':Q' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
+                $sheet->getStyle('J' . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_LEFT);
+                $sheet->getStyle('N' . $row . ':P' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
+                $sheet->getStyle('Q' . $row . ':R' . $row)->getNumberFormat()->setFormatCode('#,##0.######');
+                $sheet->getStyle('S' . $row . ':T' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
                 $sheet->getRowDimension($row)->setRowHeight(self::PHOTO_ROW_HEIGHT_PT);
-                $this->writePhotoCell($sheet, 'B' . $row, $item['image_paths'] ?? []);
+                $this->writePhotoCell($sheet, self::PHOTO_COLUMN . $row, $item['image_paths'] ?? []);
 
                 $sectionTotals['cartons'] += $cartons;
                 $sectionTotals['quantity'] += $quantity;
@@ -714,13 +755,13 @@ class OrderExcelService
             }
 
             $sheet->setCellValue('B' . $row, implode(' - ', $labelParts));
-            $sheet->setCellValue('G' . $row, $description);
-            $sheet->setCellValue('M' . $row, $this->formatCurrencyBreakdown([$currency => $amount]));
-            $sheet->mergeCells('B' . $row . ':F' . $row);
-            $sheet->mergeCells('G' . $row . ':L' . $row);
-            $sheet->mergeCells('M' . $row . ':Q' . $row);
+            $sheet->setCellValue('J' . $row, $description);
+            $sheet->setCellValue('P' . $row, $this->formatCurrencyBreakdown([$currency => $amount]));
+            $sheet->mergeCells('B' . $row . ':I' . $row);
+            $sheet->mergeCells('J' . $row . ':O' . $row);
+            $sheet->mergeCells('P' . $row . ':' . self::CONTAINER_LAST_COL . $row);
 
-            $this->styleRange($sheet, 'B' . $row . ':Q' . $row, [
+            $this->styleRange($sheet, 'B' . $row . ':' . self::CONTAINER_LAST_COL . $row, [
                 'font' => ['name' => 'Arial', 'size' => 10],
                 'alignment' => [
                     'horizontal' => Alignment::HORIZONTAL_LEFT,
@@ -730,7 +771,7 @@ class OrderExcelService
                 'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_YELLOW]],
                 'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
             ]);
-            $sheet->getStyle('M' . $row . ':Q' . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+            $sheet->getStyle('P' . $row . ':' . self::CONTAINER_LAST_COL . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
             $sheet->getRowDimension($row)->setRowHeight(22);
 
             $this->addCurrencyTotal($sectionTotals['expenses'], $currency, $amount);
@@ -753,10 +794,10 @@ class OrderExcelService
         foreach ($rows as $entry) {
             [$label, $amounts, $fill] = $entry;
             $sheet->setCellValue('B' . $row, $section['customer_display'] . ' - ' . $this->tr($label));
-            $sheet->setCellValue('M' . $row, $this->formatCurrencyBreakdown($amounts));
-            $sheet->mergeCells('B' . $row . ':L' . $row);
-            $sheet->mergeCells('M' . $row . ':Q' . $row);
-            $this->styleRange($sheet, 'B' . $row . ':Q' . $row, [
+            $sheet->setCellValue('P' . $row, $this->formatCurrencyBreakdown($amounts));
+            $sheet->mergeCells('B' . $row . ':O' . $row);
+            $sheet->mergeCells('P' . $row . ':' . self::CONTAINER_LAST_COL . $row);
+            $this->styleRange($sheet, 'B' . $row . ':' . self::CONTAINER_LAST_COL . $row, [
                 'font' => ['name' => 'Arial', 'size' => 10, 'bold' => true],
                 'alignment' => [
                     'horizontal' => Alignment::HORIZONTAL_LEFT,
@@ -765,7 +806,7 @@ class OrderExcelService
                 'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => $fill]],
                 'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
             ]);
-            $sheet->getStyle('M' . $row . ':Q' . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+            $sheet->getStyle('P' . $row . ':' . self::CONTAINER_LAST_COL . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
             $sheet->getRowDimension($row)->setRowHeight(22);
             $row++;
         }
@@ -776,8 +817,8 @@ class OrderExcelService
     private function writeOverallExpenseBlock($sheet, array $expenses, int $row, array &$overallTotals): int
     {
         $sheet->setCellValue('B' . $row, $this->tr('Container-wide expenses'));
-        $sheet->mergeCells('B' . $row . ':Q' . $row);
-        $this->styleRange($sheet, 'B' . $row . ':Q' . $row, [
+        $sheet->mergeCells('B' . $row . ':' . self::CONTAINER_LAST_COL . $row);
+        $this->styleRange($sheet, 'B' . $row . ':' . self::CONTAINER_LAST_COL . $row, [
             'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true],
             'alignment' => [
                 'horizontal' => Alignment::HORIZONTAL_LEFT,
@@ -798,12 +839,12 @@ class OrderExcelService
             }
 
             $sheet->setCellValue('B' . $row, $this->tr('Container expense'));
-            $sheet->setCellValue('G' . $row, $description);
-            $sheet->setCellValue('M' . $row, $this->formatCurrencyBreakdown([$currency => $amount]));
-            $sheet->mergeCells('B' . $row . ':F' . $row);
-            $sheet->mergeCells('G' . $row . ':L' . $row);
-            $sheet->mergeCells('M' . $row . ':Q' . $row);
-            $this->styleRange($sheet, 'B' . $row . ':Q' . $row, [
+            $sheet->setCellValue('J' . $row, $description);
+            $sheet->setCellValue('P' . $row, $this->formatCurrencyBreakdown([$currency => $amount]));
+            $sheet->mergeCells('B' . $row . ':I' . $row);
+            $sheet->mergeCells('J' . $row . ':O' . $row);
+            $sheet->mergeCells('P' . $row . ':' . self::CONTAINER_LAST_COL . $row);
+            $this->styleRange($sheet, 'B' . $row . ':' . self::CONTAINER_LAST_COL . $row, [
                 'font' => ['name' => 'Arial', 'size' => 10],
                 'alignment' => [
                     'horizontal' => Alignment::HORIZONTAL_LEFT,
@@ -812,7 +853,7 @@ class OrderExcelService
                 'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::SOFT_GREEN]],
                 'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
             ]);
-            $sheet->getStyle('M' . $row . ':Q' . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+            $sheet->getStyle('P' . $row . ':' . self::CONTAINER_LAST_COL . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
             $sheet->getRowDimension($row)->setRowHeight(22);
 
             $this->addCurrencyTotal($overallTotals['expenses'], $currency, $amount);
@@ -839,10 +880,10 @@ class OrderExcelService
                 ? (string) $amounts['METRIC']
                 : $this->formatCurrencyBreakdown($amounts);
             $sheet->setCellValue('B' . $row, $this->tr($label));
-            $sheet->setCellValue('M' . $row, $value);
-            $sheet->mergeCells('B' . $row . ':L' . $row);
-            $sheet->mergeCells('M' . $row . ':Q' . $row);
-            $this->styleRange($sheet, 'B' . $row . ':Q' . $row, [
+            $sheet->setCellValue('P' . $row, $value);
+            $sheet->mergeCells('B' . $row . ':O' . $row);
+            $sheet->mergeCells('P' . $row . ':' . self::CONTAINER_LAST_COL . $row);
+            $this->styleRange($sheet, 'B' . $row . ':' . self::CONTAINER_LAST_COL . $row, [
                 'font' => ['name' => 'Arial', 'size' => 10, 'bold' => true],
                 'alignment' => [
                     'horizontal' => Alignment::HORIZONTAL_LEFT,
@@ -851,7 +892,7 @@ class OrderExcelService
                 'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_RED]],
                 'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
             ]);
-            $sheet->getStyle('M' . $row . ':Q' . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+            $sheet->getStyle('P' . $row . ':' . self::CONTAINER_LAST_COL . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
             $sheet->getRowDimension($row)->setRowHeight(22);
             $row++;
         }
@@ -921,6 +962,41 @@ class OrderExcelService
         return array_values(array_filter(array_map(function ($path): string {
             return trim((string) $path);
         }, $imagePaths), 'strlen'));
+    }
+
+    private function itemText(array $item, string $key): string
+    {
+        return trim((string) ($item[$key] ?? ''));
+    }
+
+    private function copyNormalGoodsText(array $item): string
+    {
+        $value = $this->itemText($item, 'copy_normal_goods');
+        return match (strtolower($value)) {
+            'copy' => $this->tr('Copy Goods'),
+            'normal' => $this->tr('Normal Goods'),
+            default => $value,
+        };
+    }
+
+    private function resolveItemSize(array $item): string
+    {
+        $explicit = $this->itemText($item, 'size');
+        if ($explicit !== '') {
+            return $explicit;
+        }
+
+        $length = $item['item_length'] ?? $item['length'] ?? null;
+        $width = $item['item_width'] ?? $item['width'] ?? null;
+        $height = $item['item_height'] ?? $item['height'] ?? null;
+        $parts = [];
+        foreach ([$length, $width, $height] as $value) {
+            if ($value !== null && $value !== '' && is_numeric($value) && (float) $value > 0) {
+                $parts[] = rtrim(rtrim((string) round((float) $value, 4), '0'), '.');
+            }
+        }
+
+        return count($parts) === 3 ? implode(' x ', $parts) : '';
     }
 
     private function resolveQuantity(array $item): float

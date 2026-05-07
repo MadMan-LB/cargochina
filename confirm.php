@@ -243,6 +243,10 @@ $clientTranslations = clmsGetClientTranslationPayload();
       return n != null ? parseFloat(n).toFixed(digits) : '—';
     }
 
+    function tr(text) {
+      return typeof t === 'function' ? t(text) : text;
+    }
+
     function descLang() {
       return localStorage.getItem('clms_desc_lang') || 'en';
     }
@@ -250,6 +254,25 @@ $clientTranslations = clmsGetClientTranslationPayload();
     function descText(it) {
       const lang = descLang();
       return (lang === 'cn' ? (it.description_cn || it.description_en) : (it.description_en || it.description_cn)) || '—';
+    }
+
+    function copyNormalGoodsLabel(value) {
+      const raw = String(value || '').trim();
+      const normalized = raw.toLowerCase();
+      if (normalized === 'copy') return tr('Copy Goods');
+      if (normalized === 'normal') return tr('Normal Goods');
+      return raw;
+    }
+
+    function itemMetaText(it) {
+      const copyNormal = copyNormalGoodsLabel(it.copy_normal_goods);
+      return [
+        it.what_brand ? `${tr('What Brand')}: ${it.what_brand}` : '',
+        copyNormal ? `${tr('Copy / Normal Goods')}: ${copyNormal}` : '',
+        it.code ? `${tr('Code')}: ${it.code}` : '',
+        it.express_number ? `${tr('Express Number')}: ${it.express_number}` : '',
+        it.size ? `${tr('Size')}: ${it.size}` : ''
+      ].filter(Boolean).join(' · ');
     }
 
     function setDescLang(lang) {
@@ -280,16 +303,19 @@ $clientTranslations = clmsGetClientTranslationPayload();
         `<div class="photos-row">${o.receipt_photos.map(p => `<img src="/cargochina/backend/${esc(p)}" alt="Receipt photo" onclick="window.open(this.src)" title="Click to enlarge">`).join('')}</div>` :
         '';
 
-      const itemsHtml = (o.items || []).map(it => `
+      const itemsHtml = (o.items || []).map(it => {
+        const meta = itemMetaText(it);
+        return `
     <tr>
       <td>${esc(it.item_no || '—')}</td>
-      <td>${esc(descText(it))}</td>
+      <td>${esc(descText(it))}${meta ? `<div class="text-muted" style="font-size:.78rem;">${esc(meta)}</div>` : ''}</td>
       <td>${esc(it.shipping_code || '—')}</td>
       <td>${esc(it.cartons || '—')}</td>
       <td>${esc(it.quantity || '—')} ${esc(it.unit || '')}</td>
       <td>${fmt(it.declared_cbm, 4)}</td>
       <td>${fmt(it.declared_weight, 2)} kg</td>
-    </tr>`).join('');
+    </tr>`;
+      }).join('');
 
       app.innerHTML = `
     <div class="confirm-header">

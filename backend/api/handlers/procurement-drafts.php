@@ -7,6 +7,16 @@
 
 require_once __DIR__ . '/../helpers.php';
 
+function procurementDraftCopyNormalGoodsDisplay($value): string
+{
+    $raw = trim((string) ($value ?? ''));
+    return match (strtolower($raw)) {
+        'copy' => clmsT('Copy Goods'),
+        'normal' => clmsT('Normal Goods'),
+        default => $raw,
+    };
+}
+
 function procurementDraftOutputCsv(array $draft, array $items, string $filename): void
 {
     header('Content-Type: text/csv; charset=utf-8');
@@ -19,7 +29,7 @@ function procurementDraftOutputCsv(array $draft, array $items, string $filename)
     fputcsv($out, [clmsT('Supplier'), (string) ($draft['supplier_name'] ?? '')]);
     fputcsv($out, [clmsT('Status'), clmsStatusLabel((string) ($draft['status'] ?? ''))]);
     fputcsv($out, ['']);
-    fputcsv($out, array_map('clmsT', ['Line', 'Product / Names', 'Notes', 'Quantity', 'Factory Price', 'Customer Price', 'Total Amount', 'CBM Total', 'Weight Total', 'Photo Count']));
+    fputcsv($out, array_map('clmsT', ['What Brand', 'Copy / Normal Goods', 'Code', 'Line', 'Product / Names', 'Notes', 'Quantity', 'Factory Price', 'Customer Price', 'Total Amount', 'CBM Total', 'Weight Total', 'Express Number', 'Size', 'Photo Count']));
     foreach ($items as $index => $item) {
         $qty = (float) ($item['quantity'] ?? 0);
         $cbm = (float) ($item['cbm'] ?? 0);
@@ -27,6 +37,9 @@ function procurementDraftOutputCsv(array $draft, array $items, string $filename)
         $unitPrice = (float) ($item['unit_price'] ?? 0);
         $imagePaths = !empty($item['image_paths']) ? (is_string($item['image_paths']) ? (json_decode($item['image_paths'], true) ?: []) : $item['image_paths']) : [];
         fputcsv($out, [
+            trim((string) ($item['what_brand'] ?? '')),
+            procurementDraftCopyNormalGoodsDisplay($item['copy_normal_goods'] ?? ''),
+            trim((string) ($item['code'] ?? '')),
             'PD-' . (int) ($draft['id'] ?? 0) . '-L' . ($index + 1),
             trim((string) ($item['description_en'] ?? $item['description_cn'] ?? $item['notes'] ?? '')),
             trim((string) ($item['notes'] ?? '')),
@@ -36,6 +49,8 @@ function procurementDraftOutputCsv(array $draft, array $items, string $filename)
             ($qty > 0 && $unitPrice > 0) ? round($qty * $unitPrice, 4) : '',
             ($qty > 0 && $cbm > 0) ? round($cbm * $qty, 6) : '',
             ($qty > 0 && $weight > 0) ? round($weight * $qty, 4) : '',
+            trim((string) ($item['express_number'] ?? '')),
+            trim((string) ($item['size'] ?? '')),
             count($imagePaths),
         ]);
     }
@@ -83,6 +98,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $hasItemSupplier = $pdo->query("SHOW COLUMNS FROM order_items LIKE 'supplier_id'")->rowCount() > 0;
             $insCols = "order_id, product_id, shipping_code, cartons, qty_per_carton, quantity, unit, declared_cbm, declared_weight, unit_price, total_amount, description_cn, description_en";
             $insVals = "?,?,?,?,?,?,?,?,?,?,?,?,?";
+            $itemMetadataCols = [];
+            foreach (['what_brand', 'copy_normal_goods', 'code', 'express_number', 'size'] as $column) {
+                $chkMeta = @$pdo->query("SHOW COLUMNS FROM order_items LIKE " . $pdo->quote($column));
+                if ($chkMeta && $chkMeta->rowCount() > 0) {
+                    $itemMetadataCols[] = $column;
+                    $insCols .= ", $column";
+                    $insVals .= ",?";
+                }
+            }
             if ($hasItemSupplier) {
                 $insCols .= ", supplier_id";
                 $insVals .= ",?";
@@ -98,6 +122,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $weight = (float) ($it['weight'] ?? 0) * $qty;
                 $unitPrice = (float) ($it['unit_price'] ?? 0);
                 $params = [$orderId, $it['product_id'] ? (int) $it['product_id'] : null, null, null, null, $qty, 'pieces', $cbm, $weight, $unitPrice ?: null, $unitPrice && $qty > 0 ? $unitPrice * $qty : null, $descCn, $descEn];
+                foreach ($itemMetadataCols as $column) {
+                    $limit = $column === 'copy_normal_goods' ? 60 : ($column === 'code' ? 100 : 150);
+                    $value = trim((string) ($it[$column] ?? ''));
+                    $params[] = $value !== '' ? substr($value, 0, $limit) : null;
+                }
                 if ($hasItemSupplier) $params[] = $supplierId;
                 $insItem->execute($params);
             }
@@ -153,6 +182,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $desc = trim($it['description_en'] ?? $it['description_cn'] ?? $it['notes'] ?? '');
             $excelItems[] = [
                 'item_no'               => 'PD-' . $draft['id'] . '-L' . ($i + 1),
+                'what_brand'            => trim((string) ($it['what_brand'] ?? '')),
+                'copy_normal_goods'     => trim((string) ($it['copy_normal_goods'] ?? '')),
+                'code'                  => trim((string) ($it['code'] ?? '')),
                 'description_en'        => $desc,
                 'description_cn'        => $it['description_cn'] ?? '',
                 'quantity'              => $qty,
@@ -163,6 +195,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 'unit_price'            => $unitPrice,
                 'sell_price'             => $unitPrice,
                 'supplier_name'          => $orderLike['supplier_name'],
+                'express_number'         => trim((string) ($it['express_number'] ?? '')),
+                'size'                   => trim((string) ($it['size'] ?? '')),
                 'image_paths'            => !empty($it['image_paths']) ? (is_string($it['image_paths']) ? json_decode($it['image_paths'], true) : $it['image_paths']) : [],
                 'dimensions_scope'      => $it['dimensions_scope'] ?? 'piece',
                 'product_dimensions_scope' => $it['dimensions_scope'] ?? 'piece',

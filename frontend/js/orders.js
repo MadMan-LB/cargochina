@@ -152,6 +152,19 @@ function setItemSupplierValue(card, supplierId, supplierName) {
     if (supplierInput) supplierInput.value = supplierName || "";
 }
 
+function setOrderItemMetadata(card, item = {}) {
+    if (!card) return;
+    const set = (selector, value) => {
+        const el = card.querySelector(selector);
+        if (el) el.value = value ?? "";
+    };
+    set(".item-what-brand", item.what_brand);
+    set(".item-copy-normal-goods", item.copy_normal_goods);
+    set(".item-code", item.code);
+    set(".item-express-number", item.express_number);
+    set(".item-size", item.size);
+}
+
 function clearAutocompleteSelection(inputEl) {
     if (!inputEl) return;
     delete inputEl.dataset.selectedId;
@@ -457,6 +470,29 @@ function getOrderDisplayRows(order) {
             ...childRows,
         ];
     });
+}
+
+function orderItemMetaText(item) {
+    const copyNormalRaw = String(item?.copy_normal_goods || "").trim();
+    const copyNormalLabel =
+        copyNormalRaw.toLowerCase() === "copy"
+            ? orderT("Copy Goods")
+            : copyNormalRaw.toLowerCase() === "normal"
+              ? orderT("Normal Goods")
+              : copyNormalRaw;
+    return [
+        item?.what_brand ? `${orderT("What Brand")}: ${item.what_brand}` : "",
+        copyNormalLabel
+            ? `${orderT("Copy / Normal Goods")}: ${copyNormalLabel}`
+            : "",
+        item?.code ? `${orderT("Code")}: ${item.code}` : "",
+        item?.express_number
+            ? `${orderT("Express Number")}: ${item.express_number}`
+            : "",
+        item?.size ? `${orderT("Size")}: ${item.size}` : "",
+    ]
+        .filter(Boolean)
+        .join(" · ");
 }
 
 function getSelectedOrderStatuses() {
@@ -937,6 +973,7 @@ async function loadOrderTemplate(id) {
                 lastKey = k;
                 lastCard.querySelector(".item-product-id").value = it.product_id || "";
                 if (it.supplier_id) setItemSupplierValue(lastCard, it.supplier_id, it.supplier_name);
+                setOrderItemMetadata(lastCard, it);
                 lastCard.querySelector(".item-item-no").value = it.item_no || "";
                 lastCard.querySelector(".item-shipping-code").value = it.shipping_code || "";
                 if (it.item_no) lastCard.dataset.manualItemNo = "1";
@@ -1003,6 +1040,19 @@ function collectItemsForTemplate() {
                     supplier_id: supplierId || null,
                     item_no: itemNo || null,
                     shipping_code: shippingCode || null,
+                    what_brand:
+                        tr.querySelector(".item-what-brand")?.value?.trim() ||
+                        null,
+                    copy_normal_goods:
+                        tr
+                            .querySelector(".item-copy-normal-goods")
+                            ?.value?.trim() || null,
+                    code: tr.querySelector(".item-code")?.value?.trim() || null,
+                    express_number:
+                        tr
+                            .querySelector(".item-express-number")
+                            ?.value?.trim() || null,
+                    size: tr.querySelector(".item-size")?.value?.trim() || null,
                     cartons: cartons || null,
                     qty_per_carton: qtyPerCtn || null,
                     quantity: qty,
@@ -1073,6 +1123,43 @@ function togglePasteCsv() {
     }
 }
 
+const ORDER_CSV_ALIASES = {
+    description: ["description", "productnames", "productname", "productdescription", "names"],
+    item_no: ["itemno", "itemnumber", "line"],
+    cartons: ["cartons", "totalctns", "totalcartons", "ctns"],
+    qty_per_carton: ["qtypercarton", "piecespercarton", "piecescarton", "qtyctn", "qtyperctn"],
+    qty: ["qty", "quantity", "totalqty", "totalquantity"],
+    unit_price: ["unitprice", "factoryprice", "price"],
+    weight: ["weight", "gwkg", "gw", "weightunit", "unitweight"],
+    cbm: ["cbm", "cbmunit", "cbmperunit"],
+    what_brand: ["whatbrand", "whatebrand", "brand"],
+    copy_normal_goods: ["copynormalgoods", "copynormal", "copyornormalgoods"],
+    code: ["code", "serialcode", "serialno", "serialnumber"],
+    express_number: ["expressnumber", "expressno", "trackingnumber", "trackingno"],
+    size: ["size", "cartonsize", "outercartonsize", "outsidecartonsize"],
+};
+
+function orderCsvHeaderKey(value) {
+    return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function mapOrderCsvColumns(firstRow) {
+    const keys = firstRow.map(orderCsvHeaderKey);
+    const colMap = {};
+    Object.entries(ORDER_CSV_ALIASES).forEach(([field, aliases]) => {
+        const index = keys.findIndex((key) => aliases.includes(key));
+        if (index >= 0) colMap[field] = index;
+    });
+    return colMap;
+}
+
+function orderCsvLooksLikeHeader(firstRow) {
+    const keys = firstRow.map(orderCsvHeaderKey);
+    return keys.some((key) =>
+        Object.values(ORDER_CSV_ALIASES).some((aliases) => aliases.includes(key)),
+    );
+}
+
 function importOrderItemsFromCsv() {
     const raw = document.getElementById("pasteCsvData")?.value?.trim();
     if (!raw) {
@@ -1082,9 +1169,7 @@ function importOrderItemsFromCsv() {
     const lines = raw.split(/\r\n|\r|\n/).filter((l) => l.trim());
     if (lines.length === 0) return;
     const firstRow = lines[0].split(",").map((c) => c.trim().toLowerCase());
-    const isHeader = firstRow.some((h) =>
-        /^(description|qty|cartons|unit_price|cbm|item_no|weight)$/.test(h),
-    );
+    const isHeader = orderCsvLooksLikeHeader(firstRow);
     const dataRows = isHeader ? lines.slice(1) : lines;
     const posMap = {
         description: 0,
@@ -1096,22 +1181,7 @@ function importOrderItemsFromCsv() {
         weight: 6,
         cbm: 7,
     };
-    const colMap = {};
-    if (isHeader) {
-        [
-            "description",
-            "item_no",
-            "cartons",
-            "qty_per_carton",
-            "qty",
-            "unit_price",
-            "weight",
-            "cbm",
-        ].forEach((n) => {
-            const i = firstRow.findIndex((h) => h.includes(n) || n.includes(h));
-            if (i >= 0) colMap[n] = i;
-        });
-    }
+    const colMap = isHeader ? mapOrderCsvColumns(firstRow) : {};
     const idx = (arr, name) => {
         const i = colMap[name] ?? posMap[name] ?? -1;
         return i >= 0 && arr[i] !== undefined ? String(arr[i]).trim() : "";
@@ -1133,6 +1203,11 @@ function importOrderItemsFromCsv() {
                 if (el && v !== "") el.value = v;
             };
             set(".item-desc", desc);
+            set(".item-what-brand", idx(row, "what_brand"));
+            set(".item-copy-normal-goods", idx(row, "copy_normal_goods"));
+            set(".item-code", idx(row, "code"));
+            set(".item-express-number", idx(row, "express_number"));
+            set(".item-size", idx(row, "size"));
             set(".item-item-no", idx(row, "item_no"));
             set(".item-cartons", idx(row, "cartons"));
             set(".item-qty-per-ctn", idx(row, "qty_per_carton"));
@@ -1157,9 +1232,7 @@ function parseOrderItemsCsv() {
     const lines = raw.split(/\r\n|\r|\n/).filter((l) => l.trim());
     if (lines.length === 0) return null;
     const firstRow = lines[0].split(",").map((c) => c.trim().toLowerCase());
-    const isHeader = firstRow.some((h) =>
-        /^(description|qty|cartons|unit_price|cbm|item_no|weight)$/.test(h),
-    );
+    const isHeader = orderCsvLooksLikeHeader(firstRow);
     const dataRows = isHeader ? lines.slice(1) : lines;
     const posMap = {
         description: 0,
@@ -1171,22 +1244,7 @@ function parseOrderItemsCsv() {
         weight: 6,
         cbm: 7,
     };
-    const colMap = {};
-    if (isHeader) {
-        [
-            "description",
-            "item_no",
-            "cartons",
-            "qty_per_carton",
-            "qty",
-            "unit_price",
-            "weight",
-            "cbm",
-        ].forEach((n) => {
-            const i = firstRow.findIndex((h) => h.includes(n) || n.includes(h));
-            if (i >= 0) colMap[n] = i;
-        });
-    }
+    const colMap = isHeader ? mapOrderCsvColumns(firstRow) : {};
     const idx = (arr, name) => {
         const i = colMap[name] ?? posMap[name] ?? -1;
         return i >= 0 && arr[i] !== undefined ? String(arr[i]).trim() : "";
@@ -1204,6 +1262,11 @@ function parseOrderItemsCsv() {
         items.push({
             description_cn: desc,
             description_en: desc,
+            what_brand: idx(row, "what_brand") || null,
+            copy_normal_goods: idx(row, "copy_normal_goods") || null,
+            code: idx(row, "code") || null,
+            express_number: idx(row, "express_number") || null,
+            size: idx(row, "size") || null,
             item_no: idx(row, "item_no") || null,
             cartons,
             qty_per_carton: qtyPerCtn,
@@ -1297,6 +1360,39 @@ function addOrderItem() {
               <input type="hidden" class="item-product-id" data-idx="${idx}">
               <small class="product-suggest small text-muted" data-idx="${idx}"></small>
               <div class="product-alert-slot"></div>
+            </div>
+            <div class="col-12">
+              <div class="order-item-subgrid">
+                <div class="order-item-subgrid-block">
+                  <div class="order-item-subgrid-title">${escapeHtml(orderT("Shipment Details"))}</div>
+                  <div class="row g-2">
+                    <div class="col-12 col-sm-6 col-xl-3">
+                      <label class="form-label order-item-label">${escapeHtml(orderT("What Brand"))}</label>
+                      <input type="text" class="form-control form-control-sm item-what-brand" placeholder="${escapeHtml(orderT("Brand marker"))}" data-idx="${idx}">
+                    </div>
+                    <div class="col-12 col-sm-6 col-xl-2">
+                      <label class="form-label order-item-label">${escapeHtml(orderT("Copy / Normal Goods"))}</label>
+                      <select class="form-select form-select-sm item-copy-normal-goods" data-idx="${idx}">
+                        <option value=""></option>
+                        <option value="Normal">${escapeHtml(orderT("Normal Goods"))}</option>
+                        <option value="Copy">${escapeHtml(orderT("Copy Goods"))}</option>
+                      </select>
+                    </div>
+                    <div class="col-12 col-sm-6 col-xl-2">
+                      <label class="form-label order-item-label">${escapeHtml(orderT("Code"))}</label>
+                      <input type="text" class="form-control form-control-sm item-code" placeholder="${escapeHtml(orderT("Code"))}" data-idx="${idx}">
+                    </div>
+                    <div class="col-12 col-sm-6 col-xl-3">
+                      <label class="form-label order-item-label">${escapeHtml(orderT("Express Number"))}</label>
+                      <input type="text" class="form-control form-control-sm item-express-number" placeholder="${escapeHtml(orderT("Express no."))}" data-idx="${idx}">
+                    </div>
+                    <div class="col-12 col-sm-6 col-xl-2">
+                      <label class="form-label order-item-label">${escapeHtml(orderT("Size"))}</label>
+                      <input type="text" class="form-control form-control-sm item-size" placeholder="${escapeHtml(orderT("L x W x H"))}" data-idx="${idx}">
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
             <div class="col-12">
               <div class="order-item-packaging-rows" data-idx="${idx}">
@@ -1954,6 +2050,7 @@ async function copyOrder(id) {
                 if (!copyLastCard) return;
                 copyLastKey = k;
                 if (it.supplier_id) setItemSupplierValue(copyLastCard, it.supplier_id, it.supplier_name);
+                setOrderItemMetadata(copyLastCard, it);
                 copyLastCard.querySelector(".item-desc").value = (it.description_cn || it.description_en || "").substring(0, 100);
                 copyLastCard.querySelector(".item-product-id").value = it.product_id || "";
                 copyLastCard.querySelector(".item-item-no").value = it.item_no || "";
@@ -2094,6 +2191,7 @@ async function editOrder(id) {
                 if (!lastCard) return;
                 lastKey = k;
                 if (it.supplier_id) setItemSupplierValue(lastCard, it.supplier_id, it.supplier_name);
+                setOrderItemMetadata(lastCard, it);
                 lastCard.querySelector(".item-desc").value = (it.description_cn || it.description_en || "").substring(0, 100);
                 lastCard.querySelector(".item-product-id").value = it.product_id || "";
                 lastCard.querySelector(".item-item-no").value = it.item_no || "";
@@ -2194,6 +2292,19 @@ function collectOrderItems() {
                     item_no: itemNo || null,
                     item_no_manual: tr.dataset.manualItemNo ? 1 : 0,
                     shipping_code: shippingCode || null,
+                    what_brand:
+                        tr.querySelector(".item-what-brand")?.value?.trim() ||
+                        null,
+                    copy_normal_goods:
+                        tr
+                            .querySelector(".item-copy-normal-goods")
+                            ?.value?.trim() || null,
+                    code: tr.querySelector(".item-code")?.value?.trim() || null,
+                    express_number:
+                        tr
+                            .querySelector(".item-express-number")
+                            ?.value?.trim() || null,
+                    size: tr.querySelector(".item-size")?.value?.trim() || null,
                     cartons: cartons || null,
                     qty_per_carton: qtyPerCtn || null,
                     quantity: qty,
@@ -2395,15 +2506,18 @@ async function showOrderFinance(id) {
 
         const itemRows = displayRows
             .map(
-                (row) => `
+                (row) => {
+                    const metaText = orderItemMetaText(row.content || row.source || {});
+                    return `
           <tr class="${row.isCartonSummary ? "table-light" : ""}">
-            <td class="small ${row.isCartonSummary ? "fw-semibold" : row.type === "shared-content" ? "ps-4" : ""}">${escapeHtml(row.description || "—")}</td>
+            <td class="small ${row.isCartonSummary ? "fw-semibold" : row.type === "shared-content" ? "ps-4" : ""}">${escapeHtml(row.description || "—")}${metaText ? `<div class="text-muted">${escapeHtml(metaText)}</div>` : ""}</td>
             <td class="small text-muted">${escapeHtml(row.itemNo || "—")}</td>
             <td class="text-end small">${row.cartons ?? "—"}</td>
             <td class="text-end small">${row.quantity ?? "—"}</td>
             <td class="text-end small">${row.unitPrice != null ? fmtOrderAmount(row.unitPrice) : "—"}</td>
             <td class="text-end small fw-semibold">${row.totalAmount != null ? fmtOrderAmount(row.totalAmount) : "—"}</td>
-          </tr>`,
+          </tr>`;
+                },
             )
             .join("");
 
@@ -2558,6 +2672,7 @@ async function showOrderInfo(id) {
                           : `<div class="order-info-thumb-placeholder">📷</div>`;
                 const itemNo = escapeHtml(row.itemNo || "—");
                 const desc = escapeHtml(row.description || "—");
+                const metaText = orderItemMetaText(row.content || source);
                 const supplier = escapeHtml(row.supplierName || "—");
                 const productAlert = row.productAlert
                     ? `<div class="product-alert-badge mt-1" title="${escapeHtml(row.productAlert)}">${escapeHtml(orderT("Alert"))}</div>`
@@ -2586,7 +2701,7 @@ async function showOrderInfo(id) {
                 return `<tr class="${row.isCartonSummary ? "table-light" : ""}">
               <td>${thumb}</td>
               <td class="small ${row.isCartonSummary ? "fw-semibold" : row.type === "shared-content" ? "ps-3" : "fw-semibold"}">${itemNo}</td>
-              <td class="small ${row.type === "shared-content" ? "ps-3" : ""}">${desc}${productAlert}</td>
+              <td class="small ${row.type === "shared-content" ? "ps-3" : ""}">${desc}${metaText ? `<div class="text-muted">${escapeHtml(metaText)}</div>` : ""}${productAlert}</td>
               <td class="small text-muted">${supplier}</td>
               <td class="text-end small">${row.cartons || "—"}${row.qtyPerCarton !== "" && row.qtyPerCarton != null ? ` × ${escapeHtml(String(row.qtyPerCarton))}` : ""} = ${row.quantity || "—"}</td>
               <td class="text-end small">${row.unitPrice != null ? fmtOrderAmount(row.unitPrice) : "—"}</td>
@@ -2594,6 +2709,23 @@ async function showOrderInfo(id) {
               <td class="text-end small">${cbmPer} / ${escapeHtml(String(row.declaredCbm ?? "—"))}</td>
               <td class="text-end small">${gwPer} / ${escapeHtml(String(row.declaredWeight ?? "—"))}</td>
             </tr>`;
+            })
+            .join("");
+
+        const receiptItemRows = (receipt?.items || [])
+            .map((it) => {
+                const metaText = orderItemMetaText(it);
+                const description = escapeHtml(
+                    typeof descText === "function"
+                        ? descText(it)
+                        : it.description_en || it.description_cn || "—",
+                );
+                return `<tr>
+                  <td class="small">${description}${metaText ? `<div class="text-muted">${escapeHtml(metaText)}</div>` : ""}</td>
+                  <td class="text-end small">${it.actual_cartons ?? "—"} × ${it.actual_pieces_per_carton ?? "—"} = ${it.actual_quantity ?? "—"}</td>
+                  <td class="text-end small">${it.unit_price != null ? fmtOrderAmount(it.unit_price) : "—"} / ${it.total_amount != null ? fmtOrderAmount(it.total_amount) : "—"}</td>
+                  <td class="text-end small">${it.actual_cbm ?? "—"} / ${it.actual_weight ?? "—"}</td>
+                </tr>`;
             })
             .join("");
 
@@ -2607,6 +2739,7 @@ async function showOrderInfo(id) {
               <div class="col-6 col-md-3"><div class="order-info-stat-card"><div class="label">Actual Cartons</div><div class="value">${receipt.actual_cartons ?? "—"}</div></div></div>
               <div class="col-6 col-md-3"><div class="order-info-stat-card"><div class="label">Condition</div><div class="value">${escapeHtml(receipt.receipt_condition || "—")}</div></div></div>
             </div>
+            ${receiptItemRows ? `<div class="table-responsive mt-2"><table class="table table-sm mb-0"><thead class="table-light"><tr><th>${escapeHtml(orderT("Item"))}</th><th class="text-end">${escapeHtml(orderT("Received Qty"))}</th><th class="text-end">${escapeHtml(orderT("Price / Amount"))}</th><th class="text-end">${escapeHtml(orderT("CBM / Weight"))}</th></tr></thead><tbody>${receiptItemRows}</tbody></table></div>` : ""}
             ${receipt.photos?.length ? `<div class="d-flex gap-2 flex-wrap mt-2">${receipt.photos.map((p) => `<a href="${escapeHtml(uploadedFileUrl(p))}" target="_blank" rel="noopener"><img src="${escapeHtml(uploadedThumbUrl(p, 72, 72, "cover"))}" class="order-info-thumb" style="width:72px;height:72px" loading="lazy"></a>`).join("")}</div>` : ""}
           </div>`
             : "";

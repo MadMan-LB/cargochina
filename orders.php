@@ -205,8 +205,8 @@ require 'includes/layout.php';
               <button type="button" class="btn btn-outline-secondary btn-sm" id="togglePasteCsv" onclick="togglePasteCsv()">Paste CSV</button>
             </div>
             <div id="pasteCsvArea" class="mb-3 d-none">
-              <textarea class="form-control font-monospace" id="pasteCsvData" rows="6" placeholder="description,item_no,cartons,qty_per_carton,qty,unit_price,weight,cbm&#10;Widget A,A-001,10,100,1000,1.50,0.5,0.25"></textarea>
-              <small class="text-muted d-block mt-1">Paste rows from Excel/Sheets. Optional header row. Columns: description, item_no, cartons, qty_per_carton, qty, unit_price, weight, cbm</small>
+              <textarea class="form-control font-monospace" id="pasteCsvData" rows="6" placeholder="what_brand,copy_normal_goods,code,item_no,description,cartons,qty_per_carton,qty,unit_price,weight,cbm,express_number,size&#10;Brand A,Normal,A-001,SC-1-1,Widget A,10,100,1000,1.50,0.5,0.25,EX123,40 x 30 x 20"></textarea>
+              <small class="text-muted d-block mt-1">Paste rows from Excel/Sheets. Optional header row. Columns: what_brand, copy_normal_goods, code, item_no, description, cartons, qty_per_carton, qty, unit_price, weight, cbm, express_number, size</small>
               <div class="d-flex gap-2 mt-2">
                 <button type="button" class="btn btn-primary btn-sm" onclick="importOrderItemsFromCsv()">Import rows</button>
                 <button type="button" class="btn btn-outline-secondary btn-sm" onclick="saveCsvAsTemplate()">Save as template</button>

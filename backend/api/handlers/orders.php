@@ -120,6 +120,41 @@ function orderTableHasColumn(PDO $pdo, string $table, string $column): bool
     return $cache[$key];
 }
 
+function orderNormalizeItemText($value, int $maxLength = 150): ?string
+{
+    $value = trim(preg_replace('/[\x00-\x1F\x7F]+/u', ' ', (string) ($value ?? '')) ?? '');
+    if ($value === '') {
+        return null;
+    }
+    if (function_exists('mb_substr')) {
+        return mb_substr($value, 0, $maxLength, 'UTF-8');
+    }
+    return substr($value, 0, $maxLength);
+}
+
+function orderCopyNormalGoodsDisplay($value): string
+{
+    $raw = trim((string) ($value ?? ''));
+    return match (strtolower($raw)) {
+        'copy' => clmsT('Copy Goods'),
+        'normal' => clmsT('Normal Goods'),
+        default => $raw,
+    };
+}
+
+function orderNormalizeCopyNormalGoods($value): ?string
+{
+    $raw = trim((string) ($value ?? ''));
+    $normalized = strtolower(preg_replace('/[\s_\-\/]+/', '', $raw) ?? '');
+    if (in_array($normalized, ['copy', 'copygoods', 'replica', '仿牌', '仿货'], true)) {
+        return 'Copy';
+    }
+    if (in_array($normalized, ['normal', 'normalgoods', 'regular', '普通货', '常规货'], true)) {
+        return 'Normal';
+    }
+    return orderNormalizeItemText($raw, 60);
+}
+
 function normalizeOptionalExpectedReadyDate($value): ?string
 {
     $raw = trim((string) ($value ?? ''));
@@ -258,6 +293,11 @@ function buildOrderSearchSql(PDO $pdo, string $query, array &$params, string $or
     $hasDescriptionCn = orderTableHasColumn($pdo, 'order_items', 'description_cn');
     $hasDescriptionEn = orderTableHasColumn($pdo, 'order_items', 'description_en');
     $hasItemHsCode = orderTableHasColumn($pdo, 'order_items', 'hs_code');
+    $hasItemCode = orderTableHasColumn($pdo, 'order_items', 'code');
+    $hasExpressNumber = orderTableHasColumn($pdo, 'order_items', 'express_number');
+    $hasWhatBrand = orderTableHasColumn($pdo, 'order_items', 'what_brand');
+    $hasCopyNormalGoods = orderTableHasColumn($pdo, 'order_items', 'copy_normal_goods');
+    $hasItemSize = orderTableHasColumn($pdo, 'order_items', 'size');
 
     $coll = 'COLLATE utf8mb4_unicode_ci';
     $clauses = [];
@@ -297,6 +337,26 @@ function buildOrderSearchSql(PDO $pdo, string $query, array &$params, string $or
         }
         if ($hasItemNo) {
             $itemClauses[] = "COALESCE(oi.item_no, '') $coll LIKE ?";
+            $params[] = $like;
+        }
+        if ($hasItemCode) {
+            $itemClauses[] = "COALESCE(oi.code, '') $coll LIKE ?";
+            $params[] = $like;
+        }
+        if ($hasExpressNumber) {
+            $itemClauses[] = "COALESCE(oi.express_number, '') $coll LIKE ?";
+            $params[] = $like;
+        }
+        if ($hasWhatBrand) {
+            $itemClauses[] = "COALESCE(oi.what_brand, '') $coll LIKE ?";
+            $params[] = $like;
+        }
+        if ($hasCopyNormalGoods) {
+            $itemClauses[] = "COALESCE(oi.copy_normal_goods, '') $coll LIKE ?";
+            $params[] = $like;
+        }
+        if ($hasItemSize) {
+            $itemClauses[] = "COALESCE(oi.size, '') $coll LIKE ?";
             $params[] = $like;
         }
         if ($hasDescriptionCn) {
@@ -650,7 +710,7 @@ function outputOrderCsv(array $order, array $items, ?string $filename = null): v
     fputcsv($out, [clmsT('Status'), clmsStatusLabel((string) ($order['status'] ?? ''))]);
     fputcsv($out, [clmsT('Currency'), (string) ($order['currency'] ?? '')]);
     fputcsv($out, ['']);
-    fputcsv($out, array_map('clmsT', ['Photo Count', 'Item No', 'Supplier', 'Description', 'Total CTNS', 'QTY/CTN', 'TOTAL QTY', 'UNIT PRICE', 'TOTAL AMOUNT', 'CBM', 'TOTAL CBM', 'GWKG', 'TOTAL GW']));
+    fputcsv($out, array_map('clmsT', ['What Brand', 'Copy / Normal Goods', 'Code', 'Photo Count', 'Item No', 'Supplier', 'Description', 'Total CTNS', 'QTY/CTN', 'TOTAL QTY', 'UNIT PRICE', 'TOTAL AMOUNT', 'CBM', 'TOTAL CBM', 'GWKG', 'TOTAL GW', 'Express Number', 'Size']));
 
     foreach ($items as $item) {
         $imagePaths = $item['image_paths'] ?? [];
@@ -679,6 +739,9 @@ function outputOrderCsv(array $order, array $items, ?string $filename = null): v
         $multiplier = $scope === 'carton' ? $cartons : $totalQty;
 
         fputcsv($out, [
+            (string) ($item['what_brand'] ?? ''),
+            orderCopyNormalGoodsDisplay($item['copy_normal_goods'] ?? ''),
+            (string) ($item['code'] ?? ''),
             count($imagePaths),
             $itemNo,
             (string) ($item['supplier_name'] ?? ''),
@@ -692,6 +755,8 @@ function outputOrderCsv(array $order, array $items, ?string $filename = null): v
             $multiplier > 0 && $cbmPer ? round($cbmPer * $multiplier, 6) : '',
             $gwPer ?: '',
             $multiplier > 0 && $gwPer ? round($gwPer * $multiplier, 4) : '',
+            (string) ($item['express_number'] ?? ''),
+            (string) ($item['size'] ?? ''),
         ]);
     }
     fclose($out);
@@ -1094,7 +1159,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $rip = $pdo->prepare("SELECT * FROM warehouse_receipt_photos WHERE receipt_id = ?");
                 $rip->execute([$receipt['id']]);
                 $row['receipt']['photos'] = $rip->fetchAll(PDO::FETCH_ASSOC);
-                $rii = $pdo->prepare("SELECT wri.*, oi.description_cn, oi.description_en FROM warehouse_receipt_items wri JOIN order_items oi ON wri.order_item_id = oi.id WHERE wri.receipt_id = ?");
+                $receiptItemCols = "oi.description_cn, oi.description_en, oi.item_no, oi.shipping_code, oi.cartons, oi.qty_per_carton, oi.quantity, oi.unit_price as declared_unit_price, oi.total_amount as declared_total_amount";
+                foreach (['what_brand', 'copy_normal_goods', 'code', 'express_number', 'size'] as $column) {
+                    if (orderTableHasColumn($pdo, 'order_items', $column)) {
+                        $receiptItemCols .= ", oi.$column";
+                    }
+                }
+                $rii = $pdo->prepare("SELECT wri.*, $receiptItemCols FROM warehouse_receipt_items wri JOIN order_items oi ON wri.order_item_id = oi.id WHERE wri.receipt_id = ?");
                 $rii->execute([$receipt['id']]);
                 $row['receipt']['items'] = $rii->fetchAll(PDO::FETCH_ASSOC);
                 $config = require dirname(__DIR__, 2) . '/config/config.php';
@@ -1150,8 +1221,18 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $hasHsCode = orderTableHasColumn($pdo, 'order_items', 'hs_code');
                 $hasCustomDesignRequired = orderTableHasColumn($pdo, 'order_items', 'custom_design_required');
                 $hasCustomDesignNote = orderTableHasColumn($pdo, 'order_items', 'custom_design_note');
+                $metadataColumns = [];
+                foreach (['what_brand', 'copy_normal_goods', 'code', 'express_number', 'size'] as $column) {
+                    if (orderTableHasColumn($pdo, 'order_items', $column)) {
+                        $metadataColumns[] = $column;
+                    }
+                }
                 $insCols = "order_id, product_id, item_no, shipping_code, cartons, qty_per_carton, quantity, unit, declared_cbm, declared_weight, item_length, item_width, item_height, unit_price, total_amount, notes, image_paths, description_cn, description_en";
                 $insVals = "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?";
+                foreach ($metadataColumns as $column) {
+                    $insCols .= ", $column";
+                    $insVals .= ",?";
+                }
                 if ($hasItemSupplier) {
                     $insCols .= ", supplier_id";
                     $insVals .= ",?";
@@ -1217,6 +1298,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         $it['description_cn'] ?? null,
                         $it['description_en'] ?? null
                     ];
+                    foreach ($metadataColumns as $column) {
+                        $limit = $column === 'copy_normal_goods' ? 60 : ($column === 'code' ? 100 : 150);
+                        $params[] = $column === 'copy_normal_goods'
+                            ? orderNormalizeCopyNormalGoods($it[$column] ?? null)
+                            : orderNormalizeItemText($it[$column] ?? null, $limit);
+                    }
                     if ($hasItemSupplier) {
                         $params[] = $itemSupplierId ?: null;
                     }
@@ -1314,8 +1401,18 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $hasHsCode = orderTableHasColumn($pdo, 'order_items', 'hs_code');
                     $hasCustomDesignRequired = orderTableHasColumn($pdo, 'order_items', 'custom_design_required');
                     $hasCustomDesignNote = orderTableHasColumn($pdo, 'order_items', 'custom_design_note');
+                    $metadataColumns = [];
+                    foreach (['what_brand', 'copy_normal_goods', 'code', 'express_number', 'size'] as $column) {
+                        if (orderTableHasColumn($pdo, 'order_items', $column)) {
+                            $metadataColumns[] = $column;
+                        }
+                    }
                     $insCols = "order_id, product_id, item_no, shipping_code, cartons, qty_per_carton, quantity, unit, declared_cbm, declared_weight, item_length, item_width, item_height, unit_price, total_amount, notes, image_paths, description_cn, description_en";
                     $insVals = "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?";
+                    foreach ($metadataColumns as $column) {
+                        $insCols .= ", $column";
+                        $insVals .= ",?";
+                    }
                     if ($hasItemSupplier) {
                         $insCols .= ", supplier_id";
                         $insVals .= ",?";
@@ -1378,6 +1475,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                             $it['description_cn'] ?? null,
                             $it['description_en'] ?? null
                         ];
+                        foreach ($metadataColumns as $column) {
+                            $limit = $column === 'copy_normal_goods' ? 60 : ($column === 'code' ? 100 : 150);
+                            $params[] = $column === 'copy_normal_goods'
+                                ? orderNormalizeCopyNormalGoods($it[$column] ?? null)
+                                : orderNormalizeItemText($it[$column] ?? null, $limit);
+                        }
                         if ($hasItemSupplier) {
                             $params[] = $itemSupplierId ?: null;
                         }
@@ -1433,6 +1536,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $actualCartons = (int) ($input['actual_cartons'] ?? 0);
                 $actualCbm = (float) ($input['actual_cbm'] ?? 0);
                 $actualWeight = (float) ($input['actual_weight'] ?? 0);
+                if ($actualCartons < 0 || $actualCbm < 0 || $actualWeight < 0) {
+                    jsonError('Actual cartons, CBM, and weight must be zero or positive', 400);
+                }
                 $condition = $input['condition'] ?? 'good';
                 if (!in_array($condition, ['good', 'damaged', 'partial'])) $condition = 'good';
                 $photoPaths = normalizeStoredUploadPathList($input['photo_paths'] ?? []);
@@ -1449,12 +1555,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $declaredCbm = array_sum(array_column($orderItemsRows, 'declared_cbm'));
                 $declaredWeight = array_sum(array_column($orderItemsRows, 'declared_weight'));
 
-                $hasVariance = false;
+                $orderVariancePct = $declaredCbm > 0 ? abs($actualCbm - $declaredCbm) / $declaredCbm * 100 : 0;
+                $orderVarianceAbs = abs($actualCbm - $declaredCbm);
+                $hasVariance = $orderVariancePct >= $thresholdPct || $orderVarianceAbs >= $thresholdAbs || $condition !== 'good';
                 $itemVariances = [];
                 if (!empty($itemsInput)) {
                     $sumCbm = 0;
                     $sumWeight = 0;
                     $sumCartons = 0;
+                    $hasItemCbm = false;
+                    $hasItemWeight = false;
                     $errors = [];
                     foreach ($itemsInput as $idx => $it) {
                         $oiId = (int) ($it['order_item_id'] ?? 0);
@@ -1472,18 +1582,56 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         $aCbm = isset($it['actual_cbm']) ? (float) $it['actual_cbm'] : null;
                         $aWeight = isset($it['actual_weight']) ? (float) $it['actual_weight'] : null;
                         $aCartons = isset($it['actual_cartons']) ? (int) $it['actual_cartons'] : null;
+                        $aPiecesPerCarton = isset($it['actual_pieces_per_carton']) && $it['actual_pieces_per_carton'] !== ''
+                            ? (float) $it['actual_pieces_per_carton']
+                            : null;
+                        $aQuantity = isset($it['actual_quantity']) && $it['actual_quantity'] !== ''
+                            ? (float) $it['actual_quantity']
+                            : null;
+                        $aUnitPrice = isset($it['unit_price']) && $it['unit_price'] !== ''
+                            ? (float) $it['unit_price']
+                            : null;
+                        $aTotalAmount = isset($it['total_amount']) && $it['total_amount'] !== ''
+                            ? (float) $it['total_amount']
+                            : null;
+                        if (($aQuantity === null || $aQuantity <= 0) && $aCartons !== null && $aPiecesPerCarton !== null && $aCartons > 0 && $aPiecesPerCarton > 0) {
+                            $aQuantity = round($aCartons * $aPiecesPerCarton, 4);
+                        }
+                        if (($aTotalAmount === null || $aTotalAmount <= 0) && $aQuantity !== null && $aUnitPrice !== null && $aQuantity > 0 && $aUnitPrice >= 0) {
+                            $aTotalAmount = round($aQuantity * $aUnitPrice, 4);
+                        }
+                        if (($aPiecesPerCarton !== null && $aPiecesPerCarton < 0)
+                            || ($aQuantity !== null && $aQuantity < 0)
+                            || ($aUnitPrice !== null && $aUnitPrice < 0)
+                            || ($aTotalAmount !== null && $aTotalAmount < 0)) {
+                            $errors["items.$idx.quantity_price"] = 'Quantity and price fields must be zero or positive';
+                        }
+                        if (($aCartons !== null && $aCartons < 0)
+                            || ($aCbm !== null && $aCbm < 0)
+                            || ($aWeight !== null && $aWeight < 0)) {
+                            $errors["items.$idx.actuals"] = 'Actual cartons, CBM, and weight must be zero or positive';
+                        }
                         $itCond = $it['condition'] ?? 'good';
                         if (!in_array($itCond, ['good', 'damaged', 'partial'])) $itCond = 'good';
                         $itPhotos = normalizeStoredUploadPathList($it['photo_paths'] ?? []);
                         $decCbm = (float) $oi['declared_cbm'];
                         $decWeight = (float) $oi['declared_weight'];
-                        $varPct = $decCbm > 0 ? abs(($aCbm ?? 0) - $decCbm) / $decCbm * 100 : 0;
-                        $varAbs = abs(($aCbm ?? 0) - $decCbm);
-                        $itemVar = $varPct >= $thresholdPct || $varAbs >= $thresholdAbs || $itCond !== 'good';
+                        $itemVar = $itCond !== 'good';
+                        if ($aCbm !== null) {
+                            $varPct = $decCbm > 0 ? abs($aCbm - $decCbm) / $decCbm * 100 : 0;
+                            $varAbs = abs($aCbm - $decCbm);
+                            $itemVar = $itemVar || $varPct >= $thresholdPct || $varAbs >= $thresholdAbs;
+                        }
                         $itemVariances[$oiId] = $itemVar;
                         if ($itemVar) $hasVariance = true;
-                        if ($aCbm !== null) $sumCbm += $aCbm;
-                        if ($aWeight !== null) $sumWeight += $aWeight;
+                        if ($aCbm !== null) {
+                            $sumCbm += $aCbm;
+                            $hasItemCbm = true;
+                        }
+                        if ($aWeight !== null) {
+                            $sumWeight += $aWeight;
+                            $hasItemWeight = true;
+                        }
                         if ($aCartons !== null) $sumCartons += $aCartons;
                         if ($photoEvidencePerItem && $itemVar && empty($itPhotos)) {
                             $errors["items.$idx.photo_paths"] = 'Photo evidence required for item with variance';
@@ -1491,13 +1639,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     }
                     if (!empty($errors)) jsonError('Validation failed', 400, $errors);
                     $tolerance = 0.01;
-                    if (abs($sumCbm - $actualCbm) > $tolerance || abs($sumWeight - $actualWeight) > $tolerance) {
+                    if (($hasItemCbm && abs($sumCbm - $actualCbm) > $tolerance)
+                        || ($hasItemWeight && abs($sumWeight - $actualWeight) > $tolerance)) {
                         jsonError('Item-level totals must match order-level actuals (CBM/weight)', 400);
                     }
                 } else {
-                    $variancePct = $declaredCbm > 0 ? abs($actualCbm - $declaredCbm) / $declaredCbm * 100 : 0;
-                    $varianceAbs = abs($actualCbm - $declaredCbm);
-                    $hasVariance = $variancePct >= $thresholdPct || $varianceAbs >= $thresholdAbs || $condition !== 'good';
+                    $hasVariance = $orderVariancePct >= $thresholdPct || $orderVarianceAbs >= $thresholdAbs || $condition !== 'good';
                 }
                 if ($hasVariance && empty($photoPaths)) {
                     jsonError('Evidence photos required when variance or damage is present', 400);
@@ -1516,16 +1663,54 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         $insPhoto->execute([$receiptId, $path]);
                     }
                     if (!empty($itemsInput)) {
-                        $insItem = $pdo->prepare("INSERT INTO warehouse_receipt_items (receipt_id, order_item_id, actual_cartons, actual_cbm, actual_weight, receipt_condition, variance_detected, notes) VALUES (?,?,?,?,?,?,?,?)");
+                        $receiptItemCols = "receipt_id, order_item_id, actual_cartons, actual_cbm, actual_weight, receipt_condition, variance_detected, notes";
+                        $receiptItemVals = "?,?,?,?,?,?,?,?";
+                        $receiptExtraCols = [];
+                        foreach (['actual_pieces_per_carton', 'actual_quantity', 'unit_price', 'total_amount'] as $column) {
+                            if (orderTableHasColumn($pdo, 'warehouse_receipt_items', $column)) {
+                                $receiptExtraCols[] = $column;
+                                $receiptItemCols .= ", $column";
+                                $receiptItemVals .= ",?";
+                            }
+                        }
+                        $insItem = $pdo->prepare("INSERT INTO warehouse_receipt_items ($receiptItemCols) VALUES ($receiptItemVals)");
                         $insItemPhoto = $pdo->prepare("INSERT INTO warehouse_receipt_item_photos (receipt_item_id, file_path) VALUES (?,?)");
                         foreach ($itemsInput as $it) {
                             $oiId = (int) ($it['order_item_id'] ?? 0);
                             $aCbm = isset($it['actual_cbm']) ? (float) $it['actual_cbm'] : null;
                             $aWeight = isset($it['actual_weight']) ? (float) $it['actual_weight'] : null;
                             $aCartons = isset($it['actual_cartons']) ? (int) $it['actual_cartons'] : null;
+                            $aPiecesPerCarton = isset($it['actual_pieces_per_carton']) && $it['actual_pieces_per_carton'] !== ''
+                                ? (float) $it['actual_pieces_per_carton']
+                                : null;
+                            $aQuantity = isset($it['actual_quantity']) && $it['actual_quantity'] !== ''
+                                ? (float) $it['actual_quantity']
+                                : null;
+                            $aUnitPrice = isset($it['unit_price']) && $it['unit_price'] !== ''
+                                ? (float) $it['unit_price']
+                                : null;
+                            $aTotalAmount = isset($it['total_amount']) && $it['total_amount'] !== ''
+                                ? (float) $it['total_amount']
+                                : null;
+                            if (($aQuantity === null || $aQuantity <= 0) && $aCartons !== null && $aPiecesPerCarton !== null && $aCartons > 0 && $aPiecesPerCarton > 0) {
+                                $aQuantity = round($aCartons * $aPiecesPerCarton, 4);
+                            }
+                            if (($aTotalAmount === null || $aTotalAmount <= 0) && $aQuantity !== null && $aUnitPrice !== null && $aQuantity > 0 && $aUnitPrice >= 0) {
+                                $aTotalAmount = round($aQuantity * $aUnitPrice, 4);
+                            }
                             $itCond = in_array($it['condition'] ?? 'good', ['good', 'damaged', 'partial']) ? ($it['condition'] ?? 'good') : 'good';
                             $varDet = $itemVariances[$oiId] ?? 0;
-                            $insItem->execute([$receiptId, $oiId, $aCartons, $aCbm, $aWeight, $itCond, $varDet ? 1 : 0, $it['notes'] ?? null]);
+                            $receiptParams = [$receiptId, $oiId, $aCartons, $aCbm, $aWeight, $itCond, $varDet ? 1 : 0, $it['notes'] ?? null];
+                            foreach ($receiptExtraCols as $column) {
+                                $receiptParams[] = match ($column) {
+                                    'actual_pieces_per_carton' => $aPiecesPerCarton,
+                                    'actual_quantity' => $aQuantity,
+                                    'unit_price' => $aUnitPrice,
+                                    'total_amount' => $aTotalAmount,
+                                    default => null,
+                                };
+                            }
+                            $insItem->execute($receiptParams);
                             $riId = (int) $pdo->lastInsertId();
                             foreach (normalizeStoredUploadPathList($it['photo_paths'] ?? []) as $p) {
                                 $insItemPhoto->execute([$riId, $p]);

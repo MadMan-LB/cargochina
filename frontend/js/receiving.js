@@ -937,6 +937,87 @@ function updateDeclaredSummary(order) {
     if (aw) aw.placeholder = weight > 0 ? fmtReceivingNumber(weight, 4) : "";
 }
 
+function formatReceiveInputNumber(value, decimals = 4) {
+    const numeric = parseFloat(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return "";
+    return numeric.toFixed(decimals).replace(/\.?0+$/, "");
+}
+
+function getReceivingItemMetaText(item) {
+    const copyNormalRaw = String(item?.copy_normal_goods || "").trim();
+    const copyNormalLabel =
+        copyNormalRaw.toLowerCase() === "copy"
+            ? receivingT("Copy Goods")
+            : copyNormalRaw.toLowerCase() === "normal"
+              ? receivingT("Normal Goods")
+              : copyNormalRaw;
+    return [
+        item?.what_brand ? `${receivingT("What Brand")}: ${item.what_brand}` : "",
+        copyNormalLabel
+            ? `${receivingT("Copy / Normal Goods")}: ${copyNormalLabel}`
+            : "",
+        item?.code ? `${receivingT("Code")}: ${item.code}` : "",
+        item?.express_number
+            ? `${receivingT("Express Number")}: ${item.express_number}`
+            : "",
+        item?.size ? `${receivingT("Size")}: ${item.size}` : "",
+    ]
+        .filter(Boolean)
+        .join(" · ");
+}
+
+function recalcReceiveItemRow(row, source = "auto") {
+    if (!row) return;
+    const cartons = parseFloat(
+        row.querySelector(".item-actual-cartons")?.value || 0,
+    );
+    const pieces = parseFloat(
+        row.querySelector(".item-actual-pieces-per-carton")?.value || 0,
+    );
+    const qtyInput = row.querySelector(".item-actual-quantity");
+    const unitInput = row.querySelector(".item-unit-price");
+    const amountInput = row.querySelector(".item-total-amount");
+
+    if (qtyInput && source !== "quantity" && cartons > 0 && pieces > 0) {
+        qtyInput.value = formatReceiveInputNumber(cartons * pieces, 4);
+    }
+
+    const quantity = parseFloat(qtyInput?.value || 0);
+    const unitPrice = parseFloat(unitInput?.value || 0);
+    if (amountInput && source !== "amount" && quantity > 0 && unitPrice > 0) {
+        amountInput.value = formatReceiveInputNumber(quantity * unitPrice, 4);
+    }
+}
+
+function bindReceiveItemCalculation(row) {
+    const markDirty = () => {
+        row.dataset.itemDirty = "1";
+    };
+    row.querySelector(".item-actual-cartons")?.addEventListener("input", () => {
+        markDirty();
+        recalcReceiveItemRow(row, "cartons");
+    });
+    row
+        .querySelector(".item-actual-pieces-per-carton")
+        ?.addEventListener("input", () => {
+            markDirty();
+            recalcReceiveItemRow(row, "pieces");
+        });
+    row.querySelector(".item-actual-quantity")?.addEventListener("input", () => {
+        markDirty();
+        recalcReceiveItemRow(row, "quantity");
+    });
+    row.querySelector(".item-unit-price")?.addEventListener("input", () => {
+        markDirty();
+        recalcReceiveItemRow(row, "unit_price");
+    });
+    row.querySelector(".item-total-amount")?.addEventListener("input", markDirty);
+    row.querySelector(".item-actual-cbm")?.addEventListener("input", markDirty);
+    row.querySelector(".item-actual-weight")?.addEventListener("input", markDirty);
+    row.querySelector(".item-condition")?.addEventListener("change", markDirty);
+    recalcReceiveItemRow(row);
+}
+
 async function loadOrderForReceive(orderId) {
     try {
         const res = await api("GET", "/orders/" + orderId);
@@ -948,18 +1029,28 @@ async function loadOrderForReceive(orderId) {
         if (!tbody) return;
         tbody.innerHTML = receiveOrderItems
             .map(
-                (it, i) => `
+                (it, i) => {
+                    const metaText = getReceivingItemMetaText(it);
+                    return `
           <tr data-order-item-id="${it.id}">
-            <td>${escapeHtml((typeof descText === "function" ? descText(it) : it.description_en || it.description_cn || "Item " + (i + 1)).substring(0, 40))}${it.product_high_alert_note || it.product_required_design ? `<div class="product-alert-badge mt-1" title="${escapeHtml((it.product_required_design ? receivingT("Required design.") + " " : "") + (it.product_high_alert_note || ""))}">${escapeHtml(receivingT("Alert"))}</div>` : ""}</td>
-            <td>${fmtReceivingNumber(it.declared_cbm || 0, 6)} CBM / ${fmtReceivingNumber(it.declared_weight || 0, 4)} kg</td>
-            <td><input type="number" class="form-control form-control-sm item-actual-cartons" min="0" placeholder="0"></td>
+            <td>${escapeHtml((typeof descText === "function" ? descText(it) : it.description_en || it.description_cn || "Item " + (i + 1)).substring(0, 40))}${metaText ? `<div class="small text-muted">${escapeHtml(metaText)}</div>` : ""}${it.product_high_alert_note || it.product_required_design ? `<div class="product-alert-badge mt-1" title="${escapeHtml((it.product_required_design ? receivingT("Required design.") + " " : "") + (it.product_high_alert_note || ""))}">${escapeHtml(receivingT("Alert"))}</div>` : ""}</td>
+            <td>${fmtReceivingNumber(it.declared_cbm || 0, 6)} CBM / ${fmtReceivingNumber(it.declared_weight || 0, 4)} kg<br><span class="small text-muted">${fmtReceivingNumber(it.cartons || 0, 4)} ${escapeHtml(receivingT("cartons"))} × ${fmtReceivingNumber(it.qty_per_carton || 0, 4)} = ${fmtReceivingNumber(it.quantity || 0, 4)}</span></td>
+            <td><input type="number" class="form-control form-control-sm item-actual-cartons" min="0" step="1" placeholder="${escapeHtml(String(it.cartons || 0))}"></td>
+            <td><input type="number" class="form-control form-control-sm item-actual-pieces-per-carton" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.qty_per_carton || 0, 4))}"></td>
+            <td><input type="number" class="form-control form-control-sm item-actual-quantity" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.quantity || 0, 4))}"></td>
+            <td><input type="number" class="form-control form-control-sm item-unit-price" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.unit_price || 0, 4))}"></td>
+            <td><input type="number" class="form-control form-control-sm item-total-amount" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.total_amount || 0, 4))}"></td>
             <td><input type="number" step="0.000001" class="form-control form-control-sm item-actual-cbm" min="0" placeholder="0"></td>
             <td><input type="number" step="0.0001" class="form-control form-control-sm item-actual-weight" min="0" placeholder="0"></td>
             <td><select class="form-select form-select-sm item-condition"><option value="good">${escapeHtml(receivingT("Good"))}</option><option value="damaged">${escapeHtml(receivingT("Damaged"))}</option><option value="partial">${escapeHtml(receivingT("Partial"))}</option></select></td>
             <td><input type="file" class="d-none item-photo-input" accept="image/*" multiple data-order-item-id="${it.id}"><button type="button" class="btn btn-sm btn-outline-secondary item-add-photo">+</button><div class="item-photo-preview d-inline"></div></td>
-          </tr>`,
+          </tr>`;
+                },
             )
             .join("");
+        tbody.querySelectorAll("tr[data-order-item-id]").forEach((row) => {
+            bindReceiveItemCalculation(row);
+        });
         tbody.querySelectorAll(".item-add-photo").forEach((btn) => {
             const row = btn.closest("tr");
             const oiId = row.dataset.orderItemId;
@@ -1070,13 +1161,36 @@ async function submitReceive() {
             const aWeight = parseFloat(
                 row.querySelector(".item-actual-weight")?.value || 0,
             );
+            const aPiecesPerCarton = parseFloat(
+                row.querySelector(".item-actual-pieces-per-carton")?.value || 0,
+            );
+            const aQuantity = parseFloat(
+                row.querySelector(".item-actual-quantity")?.value || 0,
+            );
+            const aUnitPrice = parseFloat(
+                row.querySelector(".item-unit-price")?.value || 0,
+            );
+            const aTotalAmount = parseFloat(
+                row.querySelector(".item-total-amount")?.value || 0,
+            );
             const itCond =
                 row.querySelector(".item-condition")?.value || "good";
             const itPhotos = receiveItemPhotos[it.id] || [];
-            if (aCartons > 0 || aCbm > 0 || aWeight > 0 || itPhotos.length) {
+            const itemDirty = row.dataset.itemDirty === "1";
+            if (
+                itemDirty ||
+                aCartons > 0 ||
+                aCbm > 0 ||
+                aWeight > 0 ||
+                itPhotos.length
+            ) {
                 items.push({
                     order_item_id: it.id,
                     actual_cartons: aCartons || null,
+                    actual_pieces_per_carton: aPiecesPerCarton || null,
+                    actual_quantity: aQuantity || null,
+                    unit_price: aUnitPrice || null,
+                    total_amount: aTotalAmount || null,
                     actual_cbm: aCbm || null,
                     actual_weight: aWeight || null,
                     condition: itCond,
