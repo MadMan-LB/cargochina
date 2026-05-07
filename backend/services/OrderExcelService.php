@@ -36,6 +36,16 @@ class OrderExcelService
         $this->backendDir = dirname(__DIR__);
     }
 
+    private function tr(string $text, array $params = []): string
+    {
+        return function_exists('clmsT') ? clmsT($text, $params) : $text;
+    }
+
+    private function statusText(string $status): string
+    {
+        return function_exists('clmsStatusLabel') ? clmsStatusLabel($status) : $status;
+    }
+
     public function exportOrder(array $order, array $items, ?string $filename = null): void
     {
         $spreadsheet = new Spreadsheet();
@@ -153,7 +163,7 @@ class OrderExcelService
             $supplierDisplay = trim((string) ($row['supplier_name'] ?? ''));
             if ($supplierNames) {
                 $names = array_keys($supplierNames);
-                $supplierDisplay = count($names) === 1 ? $names[0] : 'Multiple (' . implode(', ', $names) . ')';
+                $supplierDisplay = count($names) === 1 ? $names[0] : $this->tr('Multiple ({names})', ['names' => implode(', ', $names)]);
             }
 
             return [
@@ -162,7 +172,7 @@ class OrderExcelService
                 self::formatCustomerDisplay($row, $items),
                 $supplierDisplay,
                 (string) ($row['expected_ready_date'] ?? ''),
-                (string) ($row['status'] ?? ''),
+                $this->statusText((string) ($row['status'] ?? '')),
                 round($cbm, 4),
                 round($weight, 2),
             ];
@@ -212,7 +222,7 @@ class OrderExcelService
                 (string) ($row['supplier_name'] ?? ''),
                 (string) ($row['supplier_phone'] ?? ''),
                 (string) ($row['expected_ready_date'] ?? ''),
-                (string) ($row['status'] ?? ''),
+                $this->statusText((string) ($row['status'] ?? '')),
                 implode('; ', array_keys($shippingCodes)),
                 $totalCartons,
                 round((float) ($row['declared_cbm'] ?? 0), 6),
@@ -335,7 +345,7 @@ class OrderExcelService
         ];
 
         foreach ($headers as $col => $label) {
-            $sheet->setCellValue($col . $row, $label);
+            $sheet->setCellValue($col . $row, $this->tr($label));
         }
 
         $this->styleRange($sheet, 'B' . $row . ':N' . $row, [
@@ -435,7 +445,7 @@ class OrderExcelService
         ];
 
         foreach ($headers as $col => $label) {
-            $sheet->setCellValue($col . $row, $label);
+            $sheet->setCellValue($col . $row, $this->tr($label));
         }
 
         $this->styleRange($sheet, 'B' . $row . ':Q' . $row, [
@@ -494,13 +504,15 @@ class OrderExcelService
     private function writeContainerSectionHeader($sheet, array $section, int $row): int
     {
         $orderIds = array_keys($section['order_ids']);
-        $orderLabel = $orderIds ? ('Orders: #' . implode(', #', $orderIds)) : 'Orders: -';
+        $orderLabel = $orderIds
+            ? $this->tr('Orders: {orders}', ['orders' => '#' . implode(', #', $orderIds)])
+            : $this->tr('Orders: -');
 
         $sheet->setCellValue('A' . $row, '##');
-        $sheet->setCellValue('B' . $row, $section['customer_display'] ?: 'Customer');
+        $sheet->setCellValue('B' . $row, $section['customer_display'] ?: $this->tr('Customer'));
         $sheet->setCellValue('H' . $row, trim((string) ($section['customer_phone'] ?? '')) !== ''
-            ? ('Phone: ' . $section['customer_phone'])
-            : 'Phone: -');
+            ? $this->tr('Phone: {phone}', ['phone' => $section['customer_phone']])
+            : $this->tr('Phone: -'));
         $sheet->setCellValue('K' . $row, $orderLabel);
         $sheet->mergeCells('B' . $row . ':G' . $row);
         $sheet->mergeCells('H' . $row . ':J' . $row);
@@ -618,7 +630,7 @@ class OrderExcelService
     private function writeSupplierGroupHeader($sheet, int $row, string $supplierName, string $supplierPhone, string $supplierInfo, string $lastCol): int
     {
         $sheet->setCellValue('A' . $row, '@@');
-        $sheet->setCellValue('B' . $row, 'supplier name and info');
+        $sheet->setCellValue('B' . $row, $this->tr('supplier name and info'));
         $sheet->setCellValue('C' . $row, $supplierName !== '' ? $supplierName : '-');
         $sheet->setCellValue('D' . $row, $supplierPhone !== '' ? $supplierPhone : '-');
         $sheet->setCellValue('E' . $row, $supplierInfo !== '' ? $supplierInfo : '-');
@@ -684,7 +696,7 @@ class OrderExcelService
         foreach ($expenses as $expense) {
             $currency = $this->normalizeCurrency((string) ($expense['currency'] ?? 'USD'));
             $amount = round((float) ($expense['amount'] ?? 0), 4);
-            $labelParts = ['Expense'];
+            $labelParts = [$this->tr('Expense')];
             $category = trim((string) ($expense['category_name'] ?? ''));
             if ($category !== '') {
                 $labelParts[] = $category;
@@ -698,7 +710,7 @@ class OrderExcelService
                 $description = trim((string) ($expense['reference_no'] ?? ''));
             }
             if ($description === '') {
-                $description = 'Container / customer expense';
+                $description = $this->tr('Container / customer expense');
             }
 
             $sheet->setCellValue('B' . $row, implode(' - ', $labelParts));
@@ -740,7 +752,7 @@ class OrderExcelService
 
         foreach ($rows as $entry) {
             [$label, $amounts, $fill] = $entry;
-            $sheet->setCellValue('B' . $row, $section['customer_display'] . ' - ' . $label);
+            $sheet->setCellValue('B' . $row, $section['customer_display'] . ' - ' . $this->tr($label));
             $sheet->setCellValue('M' . $row, $this->formatCurrencyBreakdown($amounts));
             $sheet->mergeCells('B' . $row . ':L' . $row);
             $sheet->mergeCells('M' . $row . ':Q' . $row);
@@ -763,7 +775,7 @@ class OrderExcelService
 
     private function writeOverallExpenseBlock($sheet, array $expenses, int $row, array &$overallTotals): int
     {
-        $sheet->setCellValue('B' . $row, 'Container-wide expenses');
+        $sheet->setCellValue('B' . $row, $this->tr('Container-wide expenses'));
         $sheet->mergeCells('B' . $row . ':Q' . $row);
         $this->styleRange($sheet, 'B' . $row . ':Q' . $row, [
             'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true],
@@ -781,8 +793,11 @@ class OrderExcelService
             $currency = $this->normalizeCurrency((string) ($expense['currency'] ?? 'USD'));
             $amount = round((float) ($expense['amount'] ?? 0), 4);
             $description = trim((string) ($expense['notes'] ?? $expense['description'] ?? $expense['title'] ?? $expense['category_name'] ?? 'Container expense'));
+            if ($description === 'Container expense') {
+                $description = $this->tr('Container expense');
+            }
 
-            $sheet->setCellValue('B' . $row, 'Container expense');
+            $sheet->setCellValue('B' . $row, $this->tr('Container expense'));
             $sheet->setCellValue('G' . $row, $description);
             $sheet->setCellValue('M' . $row, $this->formatCurrencyBreakdown([$currency => $amount]));
             $sheet->mergeCells('B' . $row . ':F' . $row);
@@ -823,7 +838,7 @@ class OrderExcelService
             $value = array_key_exists('METRIC', $amounts)
                 ? (string) $amounts['METRIC']
                 : $this->formatCurrencyBreakdown($amounts);
-            $sheet->setCellValue('B' . $row, $label);
+            $sheet->setCellValue('B' . $row, $this->tr($label));
             $sheet->setCellValue('M' . $row, $value);
             $sheet->mergeCells('B' . $row . ':L' . $row);
             $sheet->mergeCells('M' . $row . ':Q' . $row);
@@ -862,7 +877,7 @@ class OrderExcelService
 
         $path = $this->backendDir . '/' . $paths[0];
         if (!is_file($path) || !is_readable($path)) {
-            $sheet->setCellValue($cell, count($paths) . ' photo(s)');
+            $sheet->setCellValue($cell, $this->tr('{count} photo(s)', ['count' => count($paths)]));
             return;
         }
 
@@ -888,7 +903,7 @@ class OrderExcelService
             $drawing->setOffsetY($offsetY);
             $drawing->setWorksheet($sheet);
         } catch (Throwable $e) {
-            $sheet->setCellValue($cell, count($paths) . ' photo(s)');
+            $sheet->setCellValue($cell, $this->tr('{count} photo(s)', ['count' => count($paths)]));
         }
     }
 
@@ -1140,9 +1155,11 @@ class OrderExcelService
     {
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
-        $sheet->setTitle(substr($title, 0, 31));
-        $sheet->setCellValue('A1', $title);
-        $lastColumn = Coordinate::stringFromColumnIndex(max(1, count($headers)));
+        $localizedTitle = $this->tr($title);
+        $localizedHeaders = array_map(fn($header) => $this->tr((string) $header), $headers);
+        $sheet->setTitle(substr($localizedTitle, 0, 31));
+        $sheet->setCellValue('A1', $localizedTitle);
+        $lastColumn = Coordinate::stringFromColumnIndex(max(1, count($localizedHeaders)));
         $sheet->mergeCells("A1:{$lastColumn}1");
         $sheet->getStyle("A1:{$lastColumn}1")->applyFromArray([
             'font' => ['name' => 'Calibri', 'size' => 14, 'bold' => true, 'color' => ['rgb' => self::HEADER_BLUE]],
@@ -1154,7 +1171,7 @@ class OrderExcelService
         ]);
         $sheet->getRowDimension(1)->setRowHeight(26);
 
-        foreach ($headers as $index => $header) {
+        foreach ($localizedHeaders as $index => $header) {
             $column = Coordinate::stringFromColumnIndex($index + 1);
             $sheet->setCellValue($column . '2', $header);
             $sheet->getStyle($column . '2')->applyFromArray([
@@ -1193,7 +1210,7 @@ class OrderExcelService
         }
 
         if ($rowNumber === 3) {
-            $sheet->setCellValue('A3', 'No rows available.');
+            $sheet->setCellValue('A3', $this->tr('No rows available.'));
             $sheet->mergeCells("A3:{$lastColumn}3");
             $sheet->getStyle("A3:{$lastColumn}3")->getAlignment()
                 ->setHorizontal(Alignment::HORIZONTAL_CENTER)
@@ -1202,7 +1219,7 @@ class OrderExcelService
             $rowNumber++;
         }
 
-        foreach (range(1, count($headers)) as $index) {
+        foreach (range(1, count($localizedHeaders)) as $index) {
             $column = Coordinate::stringFromColumnIndex($index);
             $sheet->getColumnDimension($column)->setAutoSize(true);
         }

@@ -15,7 +15,7 @@ async function loadPushLog() {
         <tr>
           <td>${r.id}</td>
           <td>#${r.entity_id}</td>
-          <td><span class="badge ${r.status === "success" ? "bg-success" : r.status === "failed" ? "bg-danger" : r.status === "dry_run" ? "bg-info" : "bg-secondary"}">${r.status}</span></td>
+          <td><span class="badge ${r.status === "success" ? "bg-success" : r.status === "failed" ? "bg-danger" : r.status === "dry_run" ? "bg-info" : "bg-secondary"}">${escapeHtml(typeof t === "function" ? t(r.status) : r.status)}</span></td>
           <td>${r.response_code ?? "-"}</td>
           <td>${r.attempt_count ?? 0}</td>
           <td><small class="text-danger">${escapeHtml((r.last_error || "").substring(0, 80))}${(r.last_error || "").length > 80 ? "…" : ""}</small></td>

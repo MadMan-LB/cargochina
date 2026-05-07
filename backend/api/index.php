@@ -222,7 +222,9 @@ try {
         @error_log(date('Y-m-d H:i:s') . " [{$requestId}] " . $e->getMessage() . "\n" . $e->getTraceAsString() . "\n", 3, $logDir . '/php_errors.log');
     }
     $isDev = (($_SERVER['SERVER_NAME'] ?? '') === 'localhost' || ($_ENV['APP_ENV'] ?? '') === 'development');
-    $message = $isDev ? $e->getMessage() . ' (ref: ' . $requestId . ')' : 'An error occurred. Please try again or contact support. (ref: ' . $requestId . ')';
+    $message = $isDev
+        ? $e->getMessage() . ' (ref: ' . $requestId . ')'
+        : clmsT('An error occurred. Please try again or contact support. (ref: {ref})', ['ref' => $requestId]);
     http_response_code(500);
     clmsFinalizeApiTiming(500);
     echo json_encode([

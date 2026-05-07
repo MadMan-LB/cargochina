@@ -304,7 +304,7 @@ function applyClientFilters() {
               }
             </td>
             <td>
-              <span class="badge ${st.cls} me-1">${escHtml(st.label)}</span>
+              <span class="badge ${st.cls} me-1">${escHtml(containerStatusDisplay(c.status))}</span>
               <button class="btn btn-link btn-sm p-0 text-muted js-status-btn" data-id="${c.id}" title="Change status">✎</button>
             </td>
             <td class="small">${shipCell}</td>
@@ -563,7 +563,7 @@ async function viewContainer(id, code) {
                         : escHtml(o.status || "—");
                 return `<tr>
               <td>${o.id}</td>
-              <td>${escHtml(o.customer_name || "—")}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escHtml(o.customer_priority_note || "")}">${escHtml(o.customer_priority_level)}</span>` : ""}${o.high_alert_notes ? ` <span class="badge bg-danger-subtle text-danger border border-danger-subtle ms-1" title="${escHtml(o.high_alert_notes)}">Alert</span>` : ""}</td>
+              <td>${escHtml(o.customer_name || "—")}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escHtml(o.customer_priority_note || "")}">${escHtml(typeof t === "function" ? t(o.customer_priority_level) : o.customer_priority_level)}</span>` : ""}${o.high_alert_notes ? ` <span class="badge bg-danger-subtle text-danger border border-danger-subtle ms-1" title="${escHtml(o.high_alert_notes)}">${escHtml(typeof t === "function" ? t("Alert") : "Alert")}</span>` : ""}</td>
               <td>${escHtml(o.supplier_name || "—")}</td>
               <td>${escHtml(o.expected_ready_date || "—")}</td>
               <td>${sBadge}</td>
@@ -629,7 +629,7 @@ async function viewContainer(id, code) {
                 <div class="d-flex justify-content-between align-items-start">
                   <div>
                     <strong>Draft #${d.id}</strong>
-                    <span class="badge ${d.status === "finalized" ? "bg-success" : "bg-secondary"} ms-1">${escHtml(d.status || "")}</span>
+                    <span class="badge ${d.status === "finalized" ? "bg-success" : "bg-secondary"} ms-1">${escHtml(typeof t === "function" ? t(d.status || "") : d.status || "")}</span>
                     <span class="text-muted small ms-1">${d.order_count || 0} orders</span>
                   </div>
                   <button type="button" class="btn btn-sm btn-outline-primary js-edit-draft-refs" data-draft-id="${d.id}">Edit refs</button>
@@ -748,12 +748,18 @@ async function openAssignOrdersModal(dataset) {
     const subtitleEl = document.getElementById("assignOrdersSubtitle");
     const tbody = document.getElementById("assignOrdersTbody");
     if (titleEl)
-        titleEl.textContent = "Assign Orders → " + _assignContainer.code;
+        titleEl.textContent = (typeof t === "function" ? t("Assign Orders → {code}", { code: _assignContainer.code }) : "Assign Orders → " + _assignContainer.code);
     if (subtitleEl)
-        subtitleEl.textContent = `Capacity: ${_assignContainer.maxCbm} CBM, ${_assignContainer.maxWeight} kg • Destination: ${getContainerDestinationDisplay(_assignContainer)}`;
+        subtitleEl.textContent = (typeof t === "function"
+            ? t("Capacity: {cbm} CBM, {weight} kg • Destination: {destination}", {
+                  cbm: _assignContainer.maxCbm,
+                  weight: _assignContainer.maxWeight,
+                  destination: getContainerDestinationDisplay(_assignContainer),
+              })
+            : `Capacity: ${_assignContainer.maxCbm} CBM, ${_assignContainer.maxWeight} kg • Destination: ${getContainerDestinationDisplay(_assignContainer)}`);
     if (tbody)
         tbody.innerHTML =
-            '<tr><td colspan="7" class="text-center text-muted py-3">Loading eligible orders…</td></tr>';
+            `<tr><td colspan="7" class="text-center text-muted py-3">${escHtml(typeof t === "function" ? t("Loading eligible orders…") : "Loading eligible orders…")}</td></tr>`;
     document.getElementById("assignSelCount").textContent = "0";
     document.getElementById("assignConfirmBtn").disabled = true;
     document.getElementById("assignCapacityWarning").classList.add("d-none");
@@ -796,7 +802,7 @@ async function openAssignOrdersModal(dataset) {
         _renderAssignOrders();
     } catch (e) {
         if (tbody)
-            tbody.innerHTML = `<tr><td colspan="7" class="text-danger py-3 text-center">${escHtml(e.message)}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" class="text-danger py-3 text-center">${escHtml(typeof t === "function" ? t(e.message) : e.message)}</td></tr>`;
     }
 }
 
@@ -810,8 +816,8 @@ function _renderAssignOrders() {
     if (rows.length === 0) {
         tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted py-3">${
             getContainerDestinationCountryId(_assignContainer)
-                ? `No eligible orders match ${escHtml(getContainerDestinationDisplay(_assignContainer))}.`
-                : "No eligible orders (must be ReadyForConsolidation or Confirmed with no pending customer review)."
+                ? escHtml(typeof t === "function" ? t("No eligible orders match {destination}.", { destination: getContainerDestinationDisplay(_assignContainer) }) : `No eligible orders match ${getContainerDestinationDisplay(_assignContainer)}.`)
+                : escHtml(typeof t === "function" ? t("No eligible orders (must be ReadyForConsolidation or Confirmed with no pending customer review).") : "No eligible orders (must be ReadyForConsolidation or Confirmed with no pending customer review).")
         }</td></tr>`;
         return;
     }
@@ -827,7 +833,7 @@ function _renderAssignOrders() {
         <tr>
           <td><input type="checkbox" class="form-check-input assign-order-cb" data-id="${o.id}" data-cbm="${o.total_cbm}" data-weight="${o.total_weight}" onchange="_onAssignSelChange()"></td>
           <td class="fw-semibold">${o.id}</td>
-          <td>${escHtml(o.customer_name || "—")}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escHtml(o.customer_priority_note || "")}">${escHtml(o.customer_priority_level)}</span>` : ""}${o.high_alert_notes ? ` <span class="badge bg-danger-subtle text-danger border border-danger-subtle ms-1" title="${escHtml(o.high_alert_notes)}">Alert</span>` : ""}<div class="small text-muted">${escHtml(getOrderDestinationDisplay(o))}</div></td>
+          <td>${escHtml(o.customer_name || "—")}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escHtml(o.customer_priority_note || "")}">${escHtml(typeof t === "function" ? t(o.customer_priority_level) : o.customer_priority_level)}</span>` : ""}${o.high_alert_notes ? ` <span class="badge bg-danger-subtle text-danger border border-danger-subtle ms-1" title="${escHtml(o.high_alert_notes)}">${escHtml(typeof t === "function" ? t("Alert") : "Alert")}</span>` : ""}<div class="small text-muted">${escHtml(getOrderDestinationDisplay(o))}</div></td>
           <td class="small text-muted">${escHtml((o.supplier_name || "—").substring(0, 22))}</td>
           <td class="text-end">${fmtContainerCbm(o.total_cbm, 3)}</td>
           <td class="text-end">${fmtContainerWeight(o.total_weight, 2)} kg</td>
@@ -878,7 +884,7 @@ function _onAssignSelChange() {
             msgs.push(
                 `Weight ${afterWeight.toFixed(0)} kg > ${c.maxWeight} kg`,
             );
-        warnEl.innerHTML = `<strong>⚠ Over capacity:</strong> ${msgs.join(", ")}. You will be asked to confirm.`;
+        warnEl.innerHTML = `<strong>${escHtml(typeof t === "function" ? t("⚠ Over capacity:") : "⚠ Over capacity:")}</strong> ${escHtml(msgs.join(", "))}. ${escHtml(typeof t === "function" ? t("You will be asked to confirm.") : "You will be asked to confirm.")}`;
         warnEl.classList.remove("d-none");
     } else {
         warnEl.classList.add("d-none");

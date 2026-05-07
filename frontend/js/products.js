@@ -20,7 +20,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 function setProductText(id, value) {
     const el = document.getElementById(id);
-    if (el) el.textContent = value;
+    if (el) el.textContent = typeof t === "function" ? t(value) : value;
 }
 
 function setupProductFilters() {
@@ -463,7 +463,7 @@ async function handleProductFiles(files) {
         const paths = await PHOTO_UPLOADER.uploadPhotos(
             filesArr,
             (i, total) => {
-                if (btn) btn.textContent = `Uploading ${i}/${total}…`;
+                if (btn) btn.textContent = typeof t === "function" ? t("Uploading {current}/{total}…", { current: i, total }) : `Uploading ${i}/${total}…`;
             },
         );
         paths.forEach((p) => {
@@ -476,7 +476,9 @@ async function handleProductFiles(files) {
         setLoading(btn, false);
         if (btn) {
             btn.textContent =
-                btn.id === "productTakePhotoBtn" ? "Take Photo" : "Attach";
+                btn.id === "productTakePhotoBtn"
+                    ? (typeof t === "function" ? t("Take Photo") : "Take Photo")
+                    : (typeof t === "function" ? t("Attach") : "Attach");
         }
         productPhotoSource = "attach";
     }
@@ -520,7 +522,8 @@ function productAlertText(item) {
 function renderProductAlertBadge(item) {
     const text = typeof item === "object" ? productAlertText(item) : item || "";
     if (!text) return '<span class="text-muted">—</span>';
-    return `<span class="product-alert-badge" title="${escapeHtml(text)}">Alert</span>`;
+    const label = typeof t === "function" ? t("Alert") : "Alert";
+    return `<span class="product-alert-badge" title="${escapeHtml(text)}">${escapeHtml(label)}</span>`;
 }
 
 function getProductFilters() {

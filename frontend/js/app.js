@@ -17,10 +17,99 @@ function uiStatuses() {
     return CLMS_UI.statuses || {};
 }
 
+function normalizeTranslationText(text) {
+    return String(text ?? "")
+        .replace(/\u00a0/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function escapeRegExp(text) {
+    return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+let translationPatternCache = null;
+let translationPatternSource = null;
+
+function getTranslationPatterns() {
+    const strings = uiStrings();
+    if (translationPatternCache && translationPatternSource === strings) {
+        return translationPatternCache;
+    }
+
+    translationPatternSource = strings;
+    translationPatternCache = Object.entries(strings)
+        .filter(([key]) => /\{[A-Za-z0-9_]+\}/.test(key))
+        .map(([key, translated]) => {
+            const placeholders = [];
+            const source = normalizeTranslationText(key);
+            const regexSource =
+                "^" +
+                source
+                    .split(/(\{[A-Za-z0-9_]+\})/)
+                    .map((part) => {
+                        const match = part.match(/^\{([A-Za-z0-9_]+)\}$/);
+                        if (!match) return escapeRegExp(part);
+                        placeholders.push(match[1]);
+                        return "(.+?)";
+                    })
+                    .join("") +
+                "$";
+            return {
+                regex: new RegExp(regexSource, "u"),
+                placeholders,
+                translated,
+            };
+        });
+    return translationPatternCache;
+}
+
+function translateUiText(text) {
+    if (text === null || text === undefined) return "";
+    const original = String(text);
+    const normalized = normalizeTranslationText(original);
+    if (!normalized) return original;
+
+    const strings = uiStrings();
+    const statuses = uiStatuses();
+    const exact =
+        strings[original] ||
+        strings[normalized] ||
+        statuses[original] ||
+        statuses[normalized];
+    if (exact) return exact;
+
+    for (const pattern of getTranslationPatterns()) {
+        const match = normalized.match(pattern.regex);
+        if (!match) continue;
+        const replacements = {};
+        pattern.placeholders.forEach((name, index) => {
+            replacements[`{${name}}`] = match[index + 1] || "";
+        });
+        return Object.entries(replacements).reduce(
+            (acc, [key, value]) => acc.replaceAll(key, value),
+            pattern.translated,
+        );
+    }
+
+    if (original.includes("\n")) {
+        let changed = false;
+        const translatedLines = original.split(/(\n+)/).map((part) => {
+            if (part.includes("\n") || !part.trim()) return part;
+            const translatedPart = translateUiText(part);
+            if (translatedPart !== part) changed = true;
+            return translatedPart;
+        });
+        if (changed) return translatedLines.join("");
+    }
+
+    return original;
+}
+
 function t(text, replacements = null) {
     if (text === null || text === undefined) return "";
     const original = String(text);
-    const translated = uiStrings()[original] || original;
+    const translated = translateUiText(original);
     if (!replacements || typeof replacements !== "object") {
         return translated;
     }
@@ -34,13 +123,16 @@ function translateTextNode(node) {
     const parent = node.parentElement;
     if (
         !parent ||
-        parent.closest("[data-no-translate]") ||
+        parent.closest("[data-no-translate], [data-field-value]") ||
         parent.matches("script, style, textarea, code, pre, option[data-no-translate]")
     ) {
         return;
     }
+    if (parent.closest("tbody") && !parent.matches("button, a, td.text-center, [colspan], [data-i18n]")) {
+        return;
+    }
     const shouldTranslateParent = parent.matches(
-        "h1, h2, h3, h4, h5, h6, p, label, th, button, a, option, legend, strong, small, dt, .card-header, .eyebrow, .sidebar-section-label, .sidebar-link, .topbar-title, .modal-title, .modal-subtitle, .form-text, .text-muted, .badge, .btn, .alert, .detail, .title, .subtitle, .summary-text, .filter-toolbar-subtext, .fw-semibold, .small, .label, td.text-muted, td.text-center, [data-i18n]",
+        "h1, h2, h3, h4, h5, h6, p, label, th, button, a, option, legend, strong, small, dt, .card-header, .eyebrow, .sidebar-section-label, .sidebar-link, .topbar-title, .modal-title, .modal-subtitle, .form-text, .text-muted, .small, .alert, .detail, .title, .subtitle, .summary-text, .filter-toolbar-subtext, .label, .info-label, td.text-center, [data-i18n]",
     );
     if (!shouldTranslateParent) {
         return;
@@ -48,7 +140,7 @@ function translateTextNode(node) {
     const raw = node.nodeValue || "";
     const trimmed = raw.trim();
     if (!trimmed) return;
-    const translated = uiStrings()[trimmed];
+    const translated = translateUiText(trimmed);
     if (!translated || translated === trimmed) return;
     const prefixLength = raw.indexOf(trimmed);
     const suffixLength = raw.length - prefixLength - trimmed.length;
@@ -57,14 +149,17 @@ function translateTextNode(node) {
 }
 
 function translateElementAttributes(element) {
-    if (!(element instanceof HTMLElement) || element.closest("[data-no-translate]")) {
+    if (!(element instanceof HTMLElement) || element.closest("[data-no-translate], [data-field-value]")) {
+        return;
+    }
+    if (element.closest("tbody") && !element.matches("button, a, [data-i18n]")) {
         return;
     }
     ["placeholder", "title", "aria-label", "alt", "data-bs-original-title"].forEach(
         (attribute) => {
             const value = element.getAttribute(attribute);
             if (!value) return;
-            const translated = uiStrings()[value];
+            const translated = translateUiText(value);
             if (translated && translated !== value) {
                 element.setAttribute(attribute, translated);
             }
@@ -74,7 +169,7 @@ function translateElementAttributes(element) {
         element instanceof HTMLInputElement &&
         ["button", "submit", "reset"].includes((element.type || "").toLowerCase())
     ) {
-        const translated = uiStrings()[element.value];
+        const translated = translateUiText(element.value);
         if (translated && translated !== element.value) {
             element.value = translated;
         }
@@ -411,6 +506,7 @@ if (typeof window !== "undefined") {
     window.uploadedThumbUrl = uploadedThumbUrl;
     window.closeActiveModalOrPanel = closeActiveModalOrPanel;
     window.translateTree = translateTree;
+    window.translateUiText = translateUiText;
 }
 
 if (typeof window !== "undefined") {
@@ -500,9 +596,11 @@ async function api(method, path, body = null) {
                   .join("; ")
             : "";
         const reqId = err.request_id || data.request_id;
+        const translatedMsg = t(msg);
+        const translatedDetails = details ? t(details) : "";
         throw new Error(
-            msg +
-                (details ? ` ${details}` : "") +
+            translatedMsg +
+                (translatedDetails ? ` ${translatedDetails}` : "") +
                 (reqId ? ` (ref: ${reqId})` : ""),
         );
     }
@@ -589,10 +687,9 @@ async function uploadFile(file, opts = {}) {
         j = text ? JSON.parse(text) : {};
     } catch (_) {
         const snippet = text.substring(0, 200).replace(/</g, "&lt;");
-        throw new Error(
-            "Server returned invalid response (not JSON). " +
-                (snippet ? "Response: " + snippet : ""),
-        );
+        const message = t("Server returned invalid response (not JSON).") +
+            (snippet ? " " + t("Response: {response}", { response: snippet }) : "");
+        throw new Error(message);
     }
     if (!res.ok) {
         const err = j.error || {};

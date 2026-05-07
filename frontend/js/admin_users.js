@@ -138,7 +138,7 @@ async function loadUsers() {
                             <td>${escapeHtml(u.full_name)}</td>
                             <td>${(u.roles || []).join(", ")}</td>
                             <td>${escapeHtml(deptNames)}</td>
-                            <td>${u.is_active ? "Yes" : "No"}</td>
+                            <td>${escapeHtml(typeof t === "function" ? t(u.is_active ? "Yes" : "No") : (u.is_active ? "Yes" : "No"))}</td>
                             <td><button class="btn btn-sm btn-outline-primary me-1" onclick="editUser(${u.id})">Edit</button><button class="btn btn-sm btn-outline-secondary" onclick="showUserActivity(${u.id})">Activity</button></td>
                         </tr>`;
                 })

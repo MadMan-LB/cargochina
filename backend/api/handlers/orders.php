@@ -602,7 +602,7 @@ function outputOrdersListCsv(array $rows, ?string $filename = null): void
     header('Cache-Control: no-cache, no-store, must-revalidate');
 
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['ID', 'Order Type', 'Customer', 'Supplier', 'Expected Ready', 'Status', 'Total CBM', 'Total Weight']);
+    fputcsv($out, array_map('clmsT', ['ID', 'Order Type', 'Customer', 'Supplier', 'Expected Ready', 'Status', 'Total CBM', 'Total Weight']));
     foreach ($rows as $row) {
         $cbm = 0.0;
         $weight = 0.0;
@@ -619,7 +619,7 @@ function outputOrdersListCsv(array $rows, ?string $filename = null): void
         $supplierDisplay = trim((string) ($row['supplier_name_display'] ?? ($row['supplier_name'] ?? '')));
         if ($supplierNames && $supplierDisplay === '') {
             $names = array_keys($supplierNames);
-            $supplierDisplay = count($names) === 1 ? $names[0] : 'Multiple (' . implode(', ', $names) . ')';
+            $supplierDisplay = count($names) === 1 ? $names[0] : clmsT('Multiple ({names})', ['names' => implode(', ', $names)]);
         }
         fputcsv($out, [
             (int) ($row['id'] ?? 0),
@@ -627,7 +627,7 @@ function outputOrdersListCsv(array $rows, ?string $filename = null): void
             OrderExcelService::formatCustomerDisplay($row, $row['items'] ?? []),
             $supplierDisplay,
             (string) ($row['expected_ready_date'] ?? ''),
-            (string) ($row['status'] ?? ''),
+            clmsStatusLabel((string) ($row['status'] ?? '')),
             round($cbm, 4),
             round($weight, 2),
         ]);
@@ -643,14 +643,14 @@ function outputOrderCsv(array $order, array $items, ?string $filename = null): v
     header('Cache-Control: no-cache, no-store, must-revalidate');
 
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['Order', '#' . (int) ($order['id'] ?? 0)]);
-    fputcsv($out, ['Customer', OrderExcelService::formatCustomerDisplay($order, $items)]);
-    fputcsv($out, ['Supplier', (string) ($order['supplier_name'] ?? '')]);
-    fputcsv($out, ['Expected Ready', (string) ($order['expected_ready_date'] ?? '')]);
-    fputcsv($out, ['Status', (string) ($order['status'] ?? '')]);
-    fputcsv($out, ['Currency', (string) ($order['currency'] ?? '')]);
+    fputcsv($out, [clmsT('Order'), '#' . (int) ($order['id'] ?? 0)]);
+    fputcsv($out, [clmsT('Customer'), OrderExcelService::formatCustomerDisplay($order, $items)]);
+    fputcsv($out, [clmsT('Supplier'), (string) ($order['supplier_name'] ?? '')]);
+    fputcsv($out, [clmsT('Expected Ready'), (string) ($order['expected_ready_date'] ?? '')]);
+    fputcsv($out, [clmsT('Status'), clmsStatusLabel((string) ($order['status'] ?? ''))]);
+    fputcsv($out, [clmsT('Currency'), (string) ($order['currency'] ?? '')]);
     fputcsv($out, ['']);
-    fputcsv($out, ['Photo Count', 'Item No', 'Supplier', 'Description', 'Total CTNS', 'QTY/CTN', 'TOTAL QTY', 'UNIT PRICE', 'TOTAL AMOUNT', 'CBM', 'TOTAL CBM', 'GWKG', 'TOTAL GW']);
+    fputcsv($out, array_map('clmsT', ['Photo Count', 'Item No', 'Supplier', 'Description', 'Total CTNS', 'QTY/CTN', 'TOTAL QTY', 'UNIT PRICE', 'TOTAL AMOUNT', 'CBM', 'TOTAL CBM', 'GWKG', 'TOTAL GW']));
 
     foreach ($items as $item) {
         $imagePaths = $item['image_paths'] ?? [];

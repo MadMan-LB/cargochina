@@ -2,12 +2,16 @@ const HS_CODE_TAX_API = window.API_BASE || "/cargochina/api/v1";
 let hsCodeTaxSearchTimer = null;
 let catalogSearchTimer = null;
 
+function hsT(text, replacements = null) {
+    return typeof window.t === "function" ? window.t(text, replacements) : text;
+}
+
 function hsCodeTaxNotify(message, variant = "success") {
     if (typeof showToast === "function") {
-        showToast(message, variant);
+        showToast(hsT(message), variant);
         return;
     }
-    window.alert(message);
+    window.alert(hsT(message));
 }
 
 async function hsCodeTaxApi(method, path, body) {
@@ -23,7 +27,7 @@ async function hsCodeTaxApi(method, path, body) {
     const response = await fetch(HS_CODE_TAX_API + path, options);
     const data = await response.json();
     if (!response.ok || data.error) {
-        throw new Error(data.message || "Request failed");
+        throw new Error(hsT(data.message || "Request failed"));
     }
     return data;
 }
@@ -64,7 +68,7 @@ async function loadTaxRates() {
     const tbody = document.getElementById("taxRatesTableBody");
     if (!tbody) return;
     tbody.innerHTML =
-        '<tr><td colspan="6" class="text-muted text-center py-4">Loading...</td></tr>';
+        `<tr><td colspan="6" class="text-muted text-center py-4">${escapeHsHtml(hsT("Loading..."))}</td></tr>`;
     try {
         const qs = currentTaxRateQuery();
         const res = await hsCodeTaxApi(
@@ -74,7 +78,7 @@ async function loadTaxRates() {
         const rows = res.data || [];
         if (!rows.length) {
             tbody.innerHTML =
-                '<tr><td colspan="6" class="text-muted text-center py-4">No tax rates found.</td></tr>';
+                `<tr><td colspan="6" class="text-muted text-center py-4">${escapeHsHtml(hsT("No tax rates found."))}</td></tr>`;
             return;
         }
         tbody.innerHTML = rows
@@ -84,17 +88,17 @@ async function loadTaxRates() {
             <td><code>${escapeHsHtml(row.hs_code)}</code></td>
             <td>${escapeHsHtml(row.country_code)}</td>
             <td>${formatHsAmount(row.rate_percent)}</td>
-            <td>${escapeHsHtml(row.effective_from || "Current")}</td>
+            <td>${escapeHsHtml(row.effective_from || hsT("Current"))}</td>
             <td>${escapeHsHtml(row.notes || "—")}</td>
             <td class="text-end">
-              <button type="button" class="btn btn-sm btn-outline-primary me-1" onclick="editTaxRate(${row.id})">Edit</button>
-              <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteTaxRate(${row.id})">Delete</button>
+              <button type="button" class="btn btn-sm btn-outline-primary me-1" onclick="editTaxRate(${row.id})">${escapeHsHtml(hsT("Edit"))}</button>
+              <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteTaxRate(${row.id})">${escapeHsHtml(hsT("Delete"))}</button>
             </td>
           </tr>`,
             )
             .join("");
     } catch (error) {
-        tbody.innerHTML = `<tr><td colspan="6" class="text-danger text-center py-4">${escapeHsHtml(error.message)}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="text-danger text-center py-4">${escapeHsHtml(hsT(error.message))}</td></tr>`;
     }
 }
 
@@ -113,8 +117,8 @@ window.openTaxRateForm = function (rate = null) {
     document.getElementById("taxRateForm").reset();
     document.getElementById("taxRateId").value = rate?.id || "";
     document.getElementById("taxRateModalTitle").textContent = rate
-        ? "Edit Tax Rate"
-        : "Add Tax Rate";
+        ? hsT("Edit Tax Rate")
+        : hsT("Add Tax Rate");
     document.getElementById("taxRateHsCode").value = rate?.hs_code || "";
     document.getElementById("taxRateCountryCode").value =
         rate?.country_code || "LB";
@@ -154,7 +158,7 @@ window.saveTaxRate = async function () {
         !payload.country_code ||
         payload.rate_percent === ""
     ) {
-        hsCodeTaxNotify("HS code, country, and rate are required.", "danger");
+        hsCodeTaxNotify(hsT("HS code, country, and rate are required."), "danger");
         return;
     }
     try {
@@ -166,7 +170,7 @@ window.saveTaxRate = async function () {
         bootstrap.Modal.getOrCreateInstance(
             document.getElementById("taxRateModal"),
         ).hide();
-        hsCodeTaxNotify(id ? "Tax rate updated" : "Tax rate created");
+        hsCodeTaxNotify(id ? hsT("Tax rate updated") : hsT("Tax rate created"));
         loadTaxRates();
     } catch (error) {
         hsCodeTaxNotify(error.message, "danger");
@@ -174,10 +178,10 @@ window.saveTaxRate = async function () {
 };
 
 window.deleteTaxRate = async function (id) {
-    if (!window.confirm("Delete this tax rate?")) return;
+    if (!window.confirm(hsT("Delete this tax rate?"))) return;
     try {
         await hsCodeTaxApi("DELETE", "/hs-code-tax/" + id);
-        hsCodeTaxNotify("Tax rate deleted");
+        hsCodeTaxNotify(hsT("Tax rate deleted"));
         loadTaxRates();
     } catch (error) {
         hsCodeTaxNotify(error.message, "danger");
@@ -207,21 +211,21 @@ function buildEstimateQuery() {
     if (declaredValue !== "") params.set("declared_value", declaredValue);
     if (context === "hs_code") {
         const hsCode = document.getElementById("estimateHsCode").value.trim();
-        if (!hsCode) throw new Error("HS code is required.");
+        if (!hsCode) throw new Error(hsT("HS code is required."));
         params.set("hs_code", hsCode);
     } else if (context === "product") {
         const productId = document.getElementById("estimateProductId").value;
-        if (!productId) throw new Error("Select a product first.");
+        if (!productId) throw new Error(hsT("Select a product first."));
         params.set("product_id", productId);
     } else if (context === "order") {
         const orderId = document.getElementById("estimateOrderId").value.trim();
-        if (!orderId) throw new Error("Order ID is required.");
+        if (!orderId) throw new Error(hsT("Order ID is required."));
         params.set("order_id", orderId);
     } else if (context === "container") {
         const containerId = document
             .getElementById("estimateContainerId")
             .value.trim();
-        if (!containerId) throw new Error("Container ID is required.");
+        if (!containerId) throw new Error(hsT("Container ID is required."));
         params.set("container_id", containerId);
     }
     return params.toString();
@@ -232,14 +236,14 @@ function renderEstimate(data) {
     const summaryEl = document.getElementById("estimateSummary");
     const tbody = document.getElementById("estimateResultsBody");
     summaryEl.innerHTML = `
-      <div><strong>Context:</strong> ${escapeHsHtml(data.context_type || "—")} | <strong>Country:</strong> ${escapeHsHtml(data.country_code || "—")} | <strong>Valuation:</strong> ${escapeHsHtml(data.valuation_mode || "auto")}</div>
-      <div class="mt-1"><strong>Lines:</strong> ${summary.line_count || 0} | <strong>Matched:</strong> ${summary.matched_count || 0} | <strong>Unmatched:</strong> ${summary.unmatched_count || 0}</div>
-      <div class="mt-1"><strong>Basis Total:</strong> ${formatHsAmount(summary.basis_value_total || 0)} | <strong>Estimated Tax Total:</strong> ${formatHsAmount(summary.estimated_tax_total || 0)}</div>
+      <div><strong>${escapeHsHtml(hsT("Context:"))}</strong> ${escapeHsHtml(data.context_type || "—")} | <strong>${escapeHsHtml(hsT("Country:"))}</strong> ${escapeHsHtml(data.country_code || "—")} | <strong>${escapeHsHtml(hsT("Valuation:"))}</strong> ${escapeHsHtml(data.valuation_mode || "auto")}</div>
+      <div class="mt-1"><strong>${escapeHsHtml(hsT("Lines:"))}</strong> ${summary.line_count || 0} | <strong>${escapeHsHtml(hsT("Matched:"))}</strong> ${summary.matched_count || 0} | <strong>${escapeHsHtml(hsT("Unmatched:"))}</strong> ${summary.unmatched_count || 0}</div>
+      <div class="mt-1"><strong>${escapeHsHtml(hsT("Basis Total:"))}</strong> ${formatHsAmount(summary.basis_value_total || 0)} | <strong>${escapeHsHtml(hsT("Estimated Tax Total:"))}</strong> ${formatHsAmount(summary.estimated_tax_total || 0)}</div>
     `;
     const lines = data.lines || [];
     if (!lines.length) {
         tbody.innerHTML =
-            '<tr><td colspan="5" class="text-muted text-center py-4">No estimate lines returned.</td></tr>';
+            `<tr><td colspan="5" class="text-muted text-center py-4">${escapeHsHtml(hsT("No estimate lines returned."))}</td></tr>`;
         return;
     }
     tbody.innerHTML = lines
@@ -247,12 +251,12 @@ function renderEstimate(data) {
             (line) => `
           <tr>
             <td>
-              <div class="fw-semibold">${escapeHsHtml(line.description || line.reference_type || "Line")}</div>
-              <div class="small text-muted">${escapeHsHtml(line.reference_type || "")}${line.order_id ? ` | Order #${escapeHsHtml(line.order_id)}` : ""}${line.product_id ? ` | Product #${escapeHsHtml(line.product_id)}` : ""}</div>
+              <div class="fw-semibold">${escapeHsHtml(line.description || line.reference_type || hsT("Line"))}</div>
+              <div class="small text-muted">${escapeHsHtml(line.reference_type || "")}${line.order_id ? ` | ${escapeHsHtml(hsT("Order #{id}", { id: line.order_id }))}` : ""}${line.product_id ? ` | ${escapeHsHtml(hsT("Product #{id}", { id: line.product_id }))}` : ""}</div>
             </td>
-            <td><code>${escapeHsHtml(line.hs_code || "—")}</code><div class="small text-muted">${escapeHsHtml(line.matched_rate_hs_code || "No match")}</div></td>
+            <td><code>${escapeHsHtml(line.hs_code || "—")}</code><div class="small text-muted">${escapeHsHtml(line.matched_rate_hs_code || hsT("No match"))}</div></td>
             <td>${formatHsAmount(line.basis_value || 0)}<div class="small text-muted">${escapeHsHtml(line.basis_source || "")}</div></td>
-            <td>${formatHsAmount(line.matched_rate_percent || 0)}<div class="small text-muted">${escapeHsHtml(line.rate_match_type || "unmatched")}</div></td>
+            <td>${formatHsAmount(line.matched_rate_percent || 0)}<div class="small text-muted">${escapeHsHtml(hsT(line.rate_match_type || "unmatched"))}</div></td>
             <td>${formatHsAmount(line.estimated_tax || 0)}</td>
           </tr>`,
         )
@@ -275,15 +279,15 @@ async function loadCatalogSearch() {
     const q = document.getElementById("catalogSearch")?.value?.trim() || "";
     if (q.length < 1) {
         setCatalogSearchSummary(
-            "Search by the opening digits of an HS code or by the start of a name/category.",
+            hsT("Search by the opening digits of an HS code or by the start of a name/category."),
         );
         tbody.innerHTML =
-            '<tr><td colspan="6" class="text-muted text-center py-4">Type to search the imported tariff catalog.</td></tr>';
+            `<tr><td colspan="6" class="text-muted text-center py-4">${escapeHsHtml(hsT("Type to search the imported tariff catalog."))}</td></tr>`;
         return;
     }
-    setCatalogSearchSummary("Searching the imported tariff catalog...");
+    setCatalogSearchSummary(hsT("Searching the imported tariff catalog..."));
     tbody.innerHTML =
-        '<tr><td colspan="6" class="text-muted text-center py-4">Loading...</td></tr>';
+        `<tr><td colspan="6" class="text-muted text-center py-4">${escapeHsHtml(hsT("Loading..."))}</td></tr>`;
     try {
         const res = await hsCodeTaxApi(
             "GET",
@@ -295,20 +299,20 @@ async function loadCatalogSearch() {
         const returned = Number(meta.returned || rows.length || 0);
         const prefixNote =
             meta.match_mode === "hs_code_prefix"
-                ? "Showing HS code matches from the first digits."
-                : "Showing name/category matches with prefix results first.";
+                ? hsT("Showing HS code matches from the first digits.")
+                : hsT("Showing name/category matches with prefix results first.");
         if (!rows.length) {
             setCatalogSearchSummary(
-                `No catalog entries found for "${q}". Import data from Admin → Configuration → HS Code Tariff Catalog if needed.`,
+                hsT('No catalog entries found for "{query}". Import data from Admin → Configuration → HS Code Tariff Catalog if needed.', { query: q }),
             );
             tbody.innerHTML =
-                '<tr><td colspan="6" class="text-muted text-center py-4">No catalog entries found. Import data from Admin → Configuration → HS Code Tariff Catalog.</td></tr>';
+                `<tr><td colspan="6" class="text-muted text-center py-4">${escapeHsHtml(hsT("No catalog entries found. Import data from Admin → Configuration → HS Code Tariff Catalog."))}</td></tr>`;
             return;
         }
         setCatalogSearchSummary(
             meta.truncated
-                ? `Showing ${returned} of ${total} matches for "${q}". ${prefixNote}`
-                : `Showing ${returned} match${returned === 1 ? "" : "es"} for "${q}". ${prefixNote}`,
+                ? hsT('Showing {returned} of {total} matches for "{query}". {note}', { returned, total, query: q, note: prefixNote })
+                : hsT('Showing {returned} match(es) for "{query}". {note}', { returned, query: q, note: prefixNote }),
         );
         tbody.innerHTML = rows
             .map(
@@ -324,7 +328,7 @@ async function loadCatalogSearch() {
             )
             .join("");
     } catch (error) {
-        tbody.innerHTML = `<tr><td colspan="6" class="text-danger text-center py-4">${escapeHsHtml(error.message)}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="text-danger text-center py-4">${escapeHsHtml(hsT(error.message))}</td></tr>`;
     }
 }
 
@@ -340,7 +344,7 @@ function setupHsCodeCatalogAutocomplete(inputId, extraOnSelect) {
         resource: "hs-code-catalog",
         searchPath: "",
         limit: 50,
-        placeholder: "Start typing HS code or tariff name...",
+        placeholder: hsT("Start typing HS code or tariff name..."),
         renderItem: (item) =>
             [item.hs_code, item.name].filter(Boolean).join(" — ") ||
             item.id ||
@@ -366,9 +370,9 @@ document.addEventListener("DOMContentLoaded", () => {
         );
         Autocomplete.init(document.getElementById("estimateProductSearch"), {
             resource: "products",
-            placeholder: "Search product...",
+            placeholder: hsT("Search product..."),
             renderItem: (item) =>
-                `${item.description_en || item.description_cn || "Product"}${item.hs_code ? ` (HS ${item.hs_code})` : ""}`,
+                `${item.description_en || item.description_cn || hsT("Product")}${item.hs_code ? ` (HS ${item.hs_code})` : ""}`,
             onSelect: (item) => {
                 document.getElementById("estimateProductId").value = item.id;
             },

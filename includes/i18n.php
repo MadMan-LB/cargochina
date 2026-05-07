@@ -31,6 +31,7 @@ function clmsSetUiLocale(?string $locale): string
 {
     $normalized = clmsNormalizeUiLocale($locale);
     $_SESSION['clms_ui_locale'] = $normalized;
+    $GLOBALS['clms_ui_locale_current'] = $normalized;
     setcookie('clms_ui_locale', $normalized, [
         'expires' => time() + (86400 * 365),
         'path' => '/cargochina',
@@ -41,23 +42,20 @@ function clmsSetUiLocale(?string $locale): string
 
 function clmsGetUiLocale(): string
 {
-    static $locale = null;
-    if ($locale !== null) {
-        return $locale;
+    if (!empty($GLOBALS['clms_ui_locale_current'])) {
+        return clmsNormalizeUiLocale($GLOBALS['clms_ui_locale_current']);
     }
 
     if (isset($_SESSION['clms_ui_locale'])) {
-        $locale = clmsNormalizeUiLocale($_SESSION['clms_ui_locale']);
-        return $locale;
+        $GLOBALS['clms_ui_locale_current'] = clmsNormalizeUiLocale($_SESSION['clms_ui_locale']);
+        return $GLOBALS['clms_ui_locale_current'];
     }
 
     if (!empty($_COOKIE['clms_ui_locale'])) {
-        $locale = clmsSetUiLocale($_COOKIE['clms_ui_locale']);
-        return $locale;
+        return clmsSetUiLocale($_COOKIE['clms_ui_locale']);
     }
 
-    $locale = clmsSetUiLocale('en');
-    return $locale;
+    return clmsSetUiLocale('en');
 }
 
 function clmsGetUiQueryParam(): ?string
@@ -132,7 +130,81 @@ function clmsTranslateText(string $text, ?string $locale = null): string
     }
 
     $translations = clmsUiTranslations();
-    return $translations[$locale]['strings'][$text] ?? $text;
+    return clmsResolveUiTranslation($text, $translations[$locale] ?? [], $locale);
+}
+
+function clmsNormalizeTranslationText(string $text): string
+{
+    $text = str_replace("\xc2\xa0", ' ', $text);
+    $text = preg_replace('/\s+/u', ' ', $text) ?? $text;
+    return trim($text);
+}
+
+function clmsTranslationPatternsForLocale(string $locale, array $localeTranslations): array
+{
+    static $patterns = [];
+    if (isset($patterns[$locale])) {
+        return $patterns[$locale];
+    }
+
+    $compiled = [];
+    foreach (($localeTranslations['strings'] ?? []) as $source => $translated) {
+        $normalizedSource = clmsNormalizeTranslationText((string) $source);
+        if (!preg_match_all('/\{([A-Za-z0-9_]+)\}/', $normalizedSource, $matches, PREG_OFFSET_CAPTURE)) {
+            continue;
+        }
+
+        $regex = '';
+        $offset = 0;
+        $placeholders = [];
+        foreach ($matches[0] as $index => $match) {
+            $token = $match[0];
+            $position = $match[1];
+            $regex .= preg_quote(substr($normalizedSource, $offset, $position - $offset), '/');
+            $regex .= '(.+?)';
+            $placeholders[] = $matches[1][$index][0];
+            $offset = $position + strlen($token);
+        }
+        $regex .= preg_quote(substr($normalizedSource, $offset), '/');
+        $compiled[] = [
+            'regex' => '/^' . $regex . '$/u',
+            'placeholders' => $placeholders,
+            'translated' => (string) $translated,
+        ];
+    }
+
+    $patterns[$locale] = $compiled;
+    return $compiled;
+}
+
+function clmsResolveUiTranslation(string $text, array $localeTranslations, ?string $locale = null): string
+{
+    $normalized = clmsNormalizeTranslationText($text);
+    $strings = $localeTranslations['strings'] ?? [];
+    $statuses = $localeTranslations['statuses'] ?? [];
+
+    foreach ([$text, $normalized] as $candidate) {
+        if ($candidate !== '' && isset($strings[$candidate])) {
+            return $strings[$candidate];
+        }
+        if ($candidate !== '' && isset($statuses[$candidate])) {
+            return $statuses[$candidate];
+        }
+    }
+
+    $locale = clmsNormalizeUiLocale($locale ?? clmsGetUiLocale());
+    foreach (clmsTranslationPatternsForLocale($locale, $localeTranslations) as $pattern) {
+        if (!preg_match($pattern['regex'], $normalized, $matches)) {
+            continue;
+        }
+        $translated = $pattern['translated'];
+        foreach ($pattern['placeholders'] as $index => $placeholder) {
+            $translated = str_replace('{' . $placeholder . '}', $matches[$index + 1] ?? '', $translated);
+        }
+        return $translated;
+    }
+
+    return $text;
 }
 
 function clmsT(string $text, array $params = [], ?string $locale = null): string
@@ -170,4 +242,6 @@ function clmsGetClientTranslationPayload(): array
     ];
 }
 
-clmsMaybeHandleUiLocaleSwitch();
+if (!defined('CLMS_I18N_DISABLE_AUTO_SWITCH') || CLMS_I18N_DISABLE_AUTO_SWITCH !== true) {
+    clmsMaybeHandleUiLocaleSwitch();
+}

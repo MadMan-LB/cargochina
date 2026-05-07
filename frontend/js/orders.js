@@ -161,7 +161,7 @@ function clearAutocompleteSelection(inputEl) {
 function productAlertTextFromItem(it) {
     const req = it?.product_required_design || it?.required_design;
     const note = it?.product_high_alert_note || it?.high_alert_note || "";
-    return (req ? "Required design. " : "") + (note || "");
+    return (req ? orderT("Required design.") + " " : "") + (note || "");
 }
 
 function renderProductAlertHint(card, note) {
@@ -172,7 +172,7 @@ function renderProductAlertHint(card, note) {
         slot.innerHTML = "";
         return;
     }
-    slot.innerHTML = `<div class="product-alert-inline"><strong>Product alert:</strong> ${escapeHtml(note)}</div>`;
+    slot.innerHTML = `<div class="product-alert-inline"><strong>${escapeHtml(orderT("Product alert:"))}</strong> ${escapeHtml(note)}</div>`;
 }
 
 function applyCustomerDefaultShippingCode(code) {
@@ -341,7 +341,7 @@ function getOrderSupplierDisplay(order) {
     });
     if (names.size === 0) return orderSupp || "";
     if (names.size === 1) return [...names][0];
-    return "Multiple (" + [...names].join(", ") + ")";
+    return orderT("Multiple ({names})", { names: [...names].join(", ") });
 }
 
 function getOrderItemSupplierNames(item, fallback = "") {
@@ -789,10 +789,10 @@ async function loadOrders() {
       <tr data-order-id="${r.id}" data-status="${escapeHtml(r.status)}" class="${isDeclinedAfterAutoConfirm ? "table-danger" : ""}">
         <td class="text-center">${canBulk ? `<input type="checkbox" class="form-check-input order-bulk-cb" data-order-id="${r.id}" data-status="${escapeHtml(r.status)}">` : ""}</td>
         <td>${r.id}</td>
-        <td>${escapeHtml(r.customer_name)}${r.customer_priority_level && r.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(r.customer_priority_note || "")}">${escapeHtml(r.customer_priority_level)}</span>` : ""}</td>
+        <td>${escapeHtml(r.customer_name)}${r.customer_priority_level && r.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(r.customer_priority_note || "")}">${escapeHtml(orderT(r.customer_priority_level))}</span>` : ""}</td>
         <td>${escapeHtml(suppDisplay)}</td>
         <td>${r.expected_ready_date || "—"}${r.destination_country_name ? `<div class="small text-muted">${escapeHtml(r.destination_country_name)}${r.destination_country_code ? ` (${escapeHtml(r.destination_country_code)})` : ""}</div>` : ""}</td>
-        <td><span class="badge ${typeof statusBadgeClass === "function" ? statusBadgeClass(r.status) : "bg-secondary"}">${escapeHtml(typeof statusLabel === "function" ? statusLabel(r.status) : r.status)}</span>${hasCustomerFeedback ? ' <span class="badge bg-warning text-dark ms-1" title="This warehouse receipt is already in stock and still waiting on customer review.">Customer Feedback Pending</span>' : ""}${isDraftBuilder ? ' <span class="badge bg-dark-subtle text-dark border">Draft Order</span>' : ""}${r.high_alert_notes ? ' <span class="badge bg-warning text-dark" title="' + escapeHtml(r.high_alert_notes) + '">⚠️</span>' : ""}${r.container_code || r.container_eta ? ' <span class="badge bg-info text-dark ms-1" title="Container ' + escapeHtml(r.container_code || "—") + (r.container_eta ? ", ETA " + escapeHtml(r.container_eta) : "") + '">📦 ' + escapeHtml(r.container_code || "—") + (r.container_eta ? " · " + escapeHtml(r.container_eta) : "") + "</span>" : ""}</td>
+        <td><span class="badge ${typeof statusBadgeClass === "function" ? statusBadgeClass(r.status) : "bg-secondary"}">${escapeHtml(typeof statusLabel === "function" ? statusLabel(r.status) : r.status)}</span>${hasCustomerFeedback ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(orderT("This warehouse receipt is already in stock and still waiting on customer review."))}">${escapeHtml(orderT("Customer Feedback Pending"))}</span>` : ""}${isDraftBuilder ? ` <span class="badge bg-dark-subtle text-dark border">${escapeHtml(orderT("Draft Order"))}</span>` : ""}${r.high_alert_notes ? ' <span class="badge bg-warning text-dark" title="' + escapeHtml(r.high_alert_notes) + '">⚠️</span>' : ""}${r.container_code || r.container_eta ? ` <span class="badge bg-info text-dark ms-1" title="${escapeHtml(orderT("Container {code}", { code: r.container_code || "—" }) + (r.container_eta ? ", " + orderT("ETA {date}", { date: r.container_eta }) : ""))}">📦 ${escapeHtml(r.container_code || "—")}${r.container_eta ? " · " + escapeHtml(r.container_eta) : ""}</span>` : ""}</td>
         <td class="table-actions">
           <button class="btn btn-sm btn-outline-info" onclick="showOrderInfo(${r.id})" title="${escapeHtml(orderT("View order details"))}">ℹ</button>
           <button class="btn btn-sm btn-outline-primary" onclick="editOrder(${r.id})">${escapeHtml(orderT(isDraftBuilder ? "Open Builder" : "Edit"))}</button>
@@ -803,7 +803,7 @@ async function loadOrders() {
           ${r.status === "AwaitingCustomerConfirmation" ? `<button class="btn btn-sm btn-warning" onclick="confirmOrder(${r.id})">${escapeHtml(orderT("Confirm"))}</button>` : ""}
           ${canAssignToDraft ? `<button class="btn btn-sm btn-outline-primary" onclick="openAssignDraftModal(${r.id}, '${escapeHtml(r.customer_name)}')" title="${escapeHtml(orderT("Assign to Shipment Draft"))}">→ ${escapeHtml(orderT("Draft"))}</button>` : ""}
           ${isDeclinedAfterAutoConfirm ? `<button class="btn btn-sm btn-outline-danger" onclick="resetOrderAfterDecline(${r.id})" title="${escapeHtml(orderT("Undo the receipt result and move the order back to Submitted"))}">${escapeHtml(orderT("Reset"))}</button>` : ""}
-          <button class="btn btn-sm btn-outline-secondary" onclick="showOrderFinance(${r.id})" title="P&amp;L / Finance">$</button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="showOrderFinance(${r.id})" title="${escapeHtml(orderT("P&L / Finance"))}">$</button>
         </td>
       </tr>
     `;
@@ -1448,8 +1448,8 @@ function addOrderItem() {
                 const suggest = card.querySelector(".product-suggest");
                 if (suggest)
                     suggest.textContent = p.hs_code
-                        ? `From product (HS: ${p.hs_code}) — review and confirm values above.`
-                        : "From product — review and confirm values above.";
+                        ? orderT("From product (HS: {hs}) — review and confirm values above.", { hs: p.hs_code })
+                        : orderT("From product — review and confirm values above.");
                 renderProductAlertHint(card, productAlertTextFromItem(p));
                 const photosContainer = card.querySelector(".item-photos");
                 if (photosContainer) {
@@ -1476,7 +1476,7 @@ function addOrderItem() {
                         wrap.style.background = "#e8f5e9";
                         wrap.dataset.path = firstPath;
                         wrap.dataset.fromProduct = "1";
-                        wrap.innerHTML = `<small class="text-success fw-semibold d-block mb-1">From product</small><img src="${uploadedThumbUrl(firstPath, 64, 64, "cover")}" class="img-thumbnail img-thumbnail-sm" style="max-width:50px" alt="" loading="lazy"><button type="button" class="btn-close btn-close-sm" onclick="this.closest('[data-from-product]').remove()"></button>`;
+                        wrap.innerHTML = `<small class="text-success fw-semibold d-block mb-1">${escapeHtml(orderT("From product"))}</small><img src="${uploadedThumbUrl(firstPath, 64, 64, "cover")}" class="img-thumbnail img-thumbnail-sm" style="max-width:50px" alt="" loading="lazy"><button type="button" class="btn-close btn-close-sm" onclick="this.closest('[data-from-product]').remove()"></button>`;
                         photosContainer.insertBefore(
                             wrap,
                             photosContainer.firstChild,
@@ -2560,7 +2560,7 @@ async function showOrderInfo(id) {
                 const desc = escapeHtml(row.description || "—");
                 const supplier = escapeHtml(row.supplierName || "—");
                 const productAlert = row.productAlert
-                    ? `<div class="product-alert-badge mt-1" title="${escapeHtml(row.productAlert)}">Alert</div>`
+                    ? `<div class="product-alert-badge mt-1" title="${escapeHtml(row.productAlert)}">${escapeHtml(orderT("Alert"))}</div>`
                     : "";
                 const scope = (
                     source.product_dimensions_scope ||
@@ -2635,10 +2635,10 @@ async function showOrderInfo(id) {
                 : `${window.API_BASE || "/cargochina/api/v1"}/orders/${id}/export?format=xlsx`;
 
         document.getElementById("orderInfoBody").innerHTML = `
-          ${o.high_alert_notes ? `<div class="alert alert-warning py-2 mb-3"><strong>⚠️ High Alert:</strong> ${escapeHtml(o.high_alert_notes)}</div>` : ""}
+          ${o.high_alert_notes ? `<div class="alert alert-warning py-2 mb-3"><strong>${escapeHtml(orderT("High Alert:"))}</strong> ${escapeHtml(o.high_alert_notes)}</div>` : ""}
           <div class="row g-2 mb-3">
             <div class="col-auto"><span class="badge ${statusCls}">${escapeHtml(statusLbl)}</span></div>
-            ${o.order_type === "draft_procurement" ? `<div class="col-auto"><span class="badge bg-dark-subtle text-dark border">Draft Order</span></div>` : ""}
+            ${o.order_type === "draft_procurement" ? `<div class="col-auto"><span class="badge bg-dark-subtle text-dark border">${escapeHtml(orderT("Draft Order"))}</span></div>` : ""}
             <div class="col-auto"><span class="badge bg-light text-dark border">${escapeHtml(o.customer_name || "—")}</span></div>
             <div class="col-auto"><span class="badge bg-light text-dark border">${escapeHtml(supplierDisplay)}</span></div>
             <div class="col-auto"><span class="badge bg-light text-dark border">📅 ${escapeHtml(o.expected_ready_date || "—")}</span></div>
@@ -2673,8 +2673,8 @@ async function showOrderInfo(id) {
           ${receiptHtml}
           ${containerHtml}
           <div class="d-flex gap-2 mt-3">
-            <button class="btn btn-sm btn-outline-primary" onclick="bootstrap.Modal.getOrCreateInstance(document.getElementById('orderInfoModal')).hide(); editOrder(${id})">${o.order_type === "draft_procurement" ? "Open Draft Builder" : "Edit Order"}</button>
-            <a class="btn btn-sm btn-outline-success" href="${exportHrefXlsx}" download>Export XLSX</a>
+            <button class="btn btn-sm btn-outline-primary" onclick="bootstrap.Modal.getOrCreateInstance(document.getElementById('orderInfoModal')).hide(); editOrder(${id})">${escapeHtml(orderT(o.order_type === "draft_procurement" ? "Open Draft Builder" : "Edit Order"))}</button>
+            <a class="btn btn-sm btn-outline-success" href="${exportHrefXlsx}" download>${escapeHtml(orderT("Export XLSX"))}</a>
           </div>`;
     } catch (e) {
         document.getElementById("orderInfoBody").innerHTML =
@@ -2719,18 +2719,20 @@ async function openAssignDraftModal(orderId, customerName) {
             .filter((d) => (d.order_ids || []).includes(orderId))
             .map((d) => d.id);
         if (existingDraftIds.length > 0 && warnEl) {
-            warnEl.textContent = `⚠ This order is already in Draft #${existingDraftIds.join(", #")}. Assigning again will add it to another draft (allowed for large/split shipments). Please confirm below.`;
+            warnEl.textContent = orderT("⚠ This order is already in Draft #{ids}. Assigning again will add it to another draft (allowed for large/split shipments). Please confirm below.", {
+                ids: existingDraftIds.join(", #"),
+            });
             warnEl.classList.remove("d-none");
         }
 
         if (drafts.length === 0) {
             listEl.innerHTML =
-                '<p class="text-muted small">No open shipment drafts. Create a new one below.</p>';
+                `<p class="text-muted small">${escapeHtml(orderT("No open shipment drafts. Create a new one below."))}</p>`;
             return;
         }
 
         listEl.innerHTML = `
-            <p class="small text-muted mb-2">Select an open draft to add this order to:</p>
+            <p class="small text-muted mb-2">${escapeHtml(orderT("Select an open draft to add this order to:"))}</p>
             <div class="list-group">
               ${drafts
                   .map((d) => {
@@ -2739,20 +2741,20 @@ async function openAssignDraftModal(orderId, customerName) {
                           ? `<span class="text-muted ms-1">→ ${escapeHtml(d.container_code)}</span>`
                           : "";
                       const badge = alreadyIn
-                          ? '<span class="badge bg-warning text-dark ms-1">Already in this draft</span>'
+                          ? `<span class="badge bg-warning text-dark ms-1">${escapeHtml(orderT("Already in this draft"))}</span>`
                           : "";
                       const orderList =
                           (d.order_ids || []).length > 0
-                              ? `<small class="d-block text-muted">Orders: ${d.order_ids.join(", ")}</small>`
+                              ? `<small class="d-block text-muted">${escapeHtml(orderT("Orders: {orders}", { orders: d.order_ids.join(", ") }))}</small>`
                               : "";
                       return `<button type="button"
                       class="list-group-item list-group-item-action d-flex justify-content-between align-items-start"
                       onclick="confirmAssignToDraft(${d.id}, ${alreadyIn})">
                     <div>
-                      <strong>Draft #${d.id}</strong> ${codeTag} ${badge}
+                      <strong>${escapeHtml(orderT("Draft #{id}", { id: d.id }))}</strong> ${codeTag} ${badge}
                       ${orderList}
                     </div>
-                    <span class="badge bg-primary">${(d.order_ids || []).length} orders</span>
+                    <span class="badge bg-primary">${escapeHtml(orderT("{count} orders", { count: (d.order_ids || []).length }))}</span>
                   </button>`;
                   })
                   .join("")}

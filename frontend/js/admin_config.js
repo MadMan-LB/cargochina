@@ -49,14 +49,14 @@ async function loadConfig() {
             c.whatsapp_api_url ?? "";
         document.getElementById("whatsappApiToken").placeholder =
             c.whatsapp_api_token_set
-                ? "•••••••• (leave blank to keep)"
-                : "Leave blank to keep current";
+                ? (typeof t === "function" ? t("•••••••• (leave blank to keep)") : "•••••••• (leave blank to keep)")
+                : (typeof t === "function" ? t("Leave blank to keep current") : "Leave blank to keep current");
         document.getElementById("whatsappTwilioAccountSid").value =
             c.whatsapp_twilio_account_sid ?? "";
         document.getElementById("whatsappTwilioAuthToken").placeholder =
             c.whatsapp_twilio_auth_token_set
-                ? "•••••••• (leave blank to keep)"
-                : "Leave blank to keep";
+                ? (typeof t === "function" ? t("•••••••• (leave blank to keep)") : "•••••••• (leave blank to keep)")
+                : (typeof t === "function" ? t("Leave blank to keep") : "Leave blank to keep");
         document.getElementById("whatsappTwilioFrom").value =
             c.whatsapp_twilio_from ?? "";
         document.getElementById("whatsappTwilioTo").value =
@@ -79,8 +79,8 @@ async function loadConfig() {
             c.tracking_api_base_url ?? "";
         document.getElementById("trackingApiToken").placeholder =
             c.tracking_api_token_set
-                ? "•••••••• (leave blank to keep)"
-                : "Leave blank to keep current";
+                ? (typeof t === "function" ? t("•••••••• (leave blank to keep)") : "•••••••• (leave blank to keep)")
+                : (typeof t === "function" ? t("Leave blank to keep current") : "Leave blank to keep current");
         document.getElementById("trackingApiPath").value =
             c.tracking_api_path ?? "/api/import/clms";
         document.getElementById("trackingApiTimeout").value =
@@ -129,14 +129,16 @@ async function runHsCatalogImport() {
     const sel = document.getElementById("hsCatalogFile");
     const source = sel?.value?.trim() || "";
     btn.disabled = true;
-    status.textContent = "Importing…";
+    status.textContent = typeof t === "function" ? t("Importing…") : "Importing…";
     try {
         const res = await api("POST", "/hs-code-catalog/import", { source });
         const d = res.data || {};
-        status.textContent = `Imported ${d.imported ?? 0} rows from ${d.file ?? "file"}.`;
-        showToast(`HS catalog: ${d.imported ?? 0} rows imported`);
+        status.textContent = typeof t === "function"
+            ? t("Imported {count} rows from {file}.", { count: d.imported ?? 0, file: d.file ?? "file" })
+            : `Imported ${d.imported ?? 0} rows from ${d.file ?? "file"}.`;
+        showToast(typeof t === "function" ? t("HS catalog: {count} rows imported", { count: d.imported ?? 0 }) : `HS catalog: ${d.imported ?? 0} rows imported`);
     } catch (e) {
-        status.textContent = "Error: " + (e.message || "Import failed");
+        status.textContent = typeof t === "function" ? t("Error: {message}", { message: e.message || "Import failed" }) : "Error: " + (e.message || "Import failed");
         showToast(e.message, "danger");
     } finally {
         btn.disabled = false;

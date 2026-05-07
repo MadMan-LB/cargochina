@@ -159,7 +159,8 @@
         } catch (error) {
             const grid = document.getElementById("calendarGrid");
             if (grid) {
-                grid.innerHTML = `<div class="alert alert-danger">${escapeLocal(error.message || "Failed to load calendar")}</div>`;
+                const message = typeof t === "function" ? t(error.message || "Failed to load calendar") : (error.message || "Failed to load calendar");
+                grid.innerHTML = `<div class="alert alert-danger">${escapeLocal(message)}</div>`;
             }
             document.getElementById("ordersTimeline").innerHTML = "";
             document.getElementById("containersTimeline").innerHTML = "";

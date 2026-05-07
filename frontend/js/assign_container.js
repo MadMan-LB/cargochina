@@ -21,7 +21,8 @@ function containerStatusDisplay(status) {
         arrived: "Arrived",
         available: "Available",
     };
-    return labels[status] || status || "-";
+    const label = labels[status] || status || "-";
+    return typeof t === "function" ? t(label) : label;
 }
 
 function getContainerDestinationCountryId(container) {
@@ -34,7 +35,7 @@ function getContainerDestinationDisplay(container) {
         container?.destination_country_name ||
         container?.destination_country ||
         container?.destination ||
-        "No destination"
+        (typeof t === "function" ? t("No destination") : "No destination")
     );
 }
 
@@ -49,7 +50,7 @@ function getOrderDestinationDisplay(order) {
             ? `${order.destination_country_name} (${order.destination_country_code})`
             : order.destination_country_name;
     }
-    return "No destination";
+    return typeof t === "function" ? t("No destination") : "No destination";
 }
 
 function filterOrdersForContainer(orders, container) {
@@ -106,7 +107,9 @@ function updateSelectedContainerMeta(container) {
     if (!metaEl) return;
     if (!container) {
         metaEl.textContent =
-            "Search for a container to preview current fill and assignment impact.";
+            typeof t === "function"
+                ? t("Search for a container to preview current fill and assignment impact.")
+                : "Search for a container to preview current fill and assignment impact.";
         return;
     }
     const destination = getContainerDestinationDisplay(container);
@@ -265,7 +268,7 @@ function renderOrders() {
           <td>
             ${escHtml(order.customer_name || "-")}
             ${order.customer_priority_level && order.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escHtml(order.customer_priority_note || "")}">${escHtml(order.customer_priority_level)}</span>` : ""}
-            ${order.high_alert_notes ? ` <span class="badge bg-danger-subtle text-danger border border-danger-subtle ms-1" title="${escHtml(order.high_alert_notes)}">Alert</span>` : ""}
+            ${order.high_alert_notes ? ` <span class="badge bg-danger-subtle text-danger border border-danger-subtle ms-1" title="${escHtml(order.high_alert_notes)}">${escHtml(typeof t === "function" ? t("Alert") : "Alert")}</span>` : ""}
             <div class="small text-muted">${escHtml(getOrderDestinationDisplay(order))}</div>
           </td>
           <td class="small text-muted">${escHtml((order.supplier_name || "-").substring(0, 36))}</td>
@@ -440,7 +443,7 @@ function renderContainerSummary() {
                 <div class="fw-semibold">${escHtml(container.code || `Container #${container.id}`)}</div>
                 <div class="small text-muted">${escHtml(destination)}${container.eta_date ? ` • ETA ${escHtml(container.eta_date)}` : ""}</div>
               </div>
-              <button type="button" class="btn btn-outline-primary btn-sm" onclick="pickSummaryContainer(${container.id})">Use</button>
+              <button type="button" class="btn btn-outline-primary btn-sm" onclick="pickSummaryContainer(${container.id})">${escHtml(typeof t === "function" ? t("Use") : "Use")}</button>
             </div>
             <div class="d-flex justify-content-between small text-muted mb-1"><span>${escHtml(status)}</span><span>${pct.toFixed(1)}%</span></div>
             <div class="capacity-meter mb-2"><span style="width:${Math.min(100, pct)}%;background:${barColor(pct)}"></span></div>
@@ -448,7 +451,7 @@ function renderContainerSummary() {
           </div>`;
             })
             .join("") ||
-        '<div class="text-muted text-center py-3">No containers available</div>';
+        `<div class="text-muted text-center py-3">${escHtml(typeof t === "function" ? t("No containers available") : "No containers available")}</div>`;
 }
 
 window.pickSummaryContainer = function (containerId) {
@@ -558,7 +561,7 @@ function updateCapacityPreview() {
                 `Weight would be ${afterWeight.toFixed(0)} / ${maxWeight} kg (over by ${(afterWeight - maxWeight).toFixed(0)} kg)`,
             );
         }
-        warnEl.innerHTML = `<strong>Over capacity:</strong> ${messages.join(". ")}. You can still confirm the assignment if needed.`;
+        warnEl.innerHTML = `<strong>${escHtml(typeof t === "function" ? t("Over capacity:") : "Over capacity:")}</strong> ${escHtml(messages.join(". "))}. ${escHtml(typeof t === "function" ? t("You can still confirm the assignment if needed.") : "You can still confirm the assignment if needed.")}`;
         warnEl.classList.remove("d-none");
     } else {
         warnEl.classList.add("d-none");
@@ -617,7 +620,7 @@ async function doAssign() {
         if (!res.ok) throw new Error(data.message || "Assignment failed");
 
         resEl.className = "alert alert-success mt-2";
-        resEl.innerHTML = `<strong>Done.</strong> ${data.data.orders_added} order(s) assigned to container (Draft #${data.data.draft_id}).${data.data.over_capacity ? ' <span class="text-danger">Container is now over capacity.</span>' : ""}`;
+        resEl.innerHTML = `<strong>${escHtml(typeof t === "function" ? t("Done.") : "Done.")}</strong> ${escHtml(typeof t === "function" ? t("{count} order(s) assigned to container (Draft #{draftId}).", { count: data.data.orders_added, draftId: data.data.draft_id }) : `${data.data.orders_added} order(s) assigned to container (Draft #${data.data.draft_id}).`)}${data.data.over_capacity ? ` <span class="text-danger">${escHtml(typeof t === "function" ? t("Container is now over capacity.") : "Container is now over capacity.")}</span>` : ""}`;
         resEl.classList.remove("d-none");
 
         await Promise.all([loadEligibleOrders(), loadContainers()]);

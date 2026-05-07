@@ -85,7 +85,7 @@ require 'includes/layout.php';
           <div class="border rounded p-2 bg-light small text-break">
             Supplier:, Supplier Name
           </div>
-          <div class="form-text">All following item rows stay in that supplier section until the next Supplier: row.</div>
+          <div class="form-text">All following item rows stay in that supplier section until the next Supplier: row. Item No values from the file are kept.</div>
         </div>
 
         <div class="mb-3">
@@ -98,7 +98,7 @@ require 'includes/layout.php';
         <div class="mb-3">
           <div class="fw-semibold mb-2">Orders XLSX header row</div>
           <div class="border rounded p-2 bg-light small text-break">
-            PHOTO, ITEM NO, SUPPLIER, DESCRIPTION, TOTAL CTNS, QTY/CTN, TOTAL QTY, UNIT PRICE, TOTAL AMOUNT, CBM, TOTAL CBM, GWKG, TOTAL GW
+            PHOTO, ITEM NO, SUPPLIER, DESCRIPTION, DESCRIPTION 2, TOTAL CTNS, QTY/CTN, TOTAL QTY, UNIT PRICE, TOTAL AMOUNT, CBM, TOTAL CBM, GWKG, TOTAL GW
           </div>
         </div>
 
@@ -113,7 +113,7 @@ require 'includes/layout.php';
             <tbody>
               <tr><td>Supplier section</td><td>Supplier: in the first cell, supplier name in the next cell</td></tr>
               <tr><td>Item number</td><td>Item No, Item Number, ITEM NO</td></tr>
-              <tr><td>Description</td><td>Product / Names, Description, DESCRIPTION</td></tr>
+              <tr><td>Description</td><td>Product / Names, Description, DESCRIPTION. Add as many description columns as needed.</td></tr>
               <tr><td>Packaging</td><td>Pieces/Carton, Qty/Ctn, Cartons, Total CTNS, Quantity, Total Qty</td></tr>
               <tr><td>Pricing</td><td>Factory Price, Customer Price, Unit Price, Total Amount</td></tr>
               <tr><td>Volume and weight</td><td>CBM/Unit, CBM, Total CBM, Weight/Unit, GWKG, Total Weight, Total GW</td></tr>
@@ -123,7 +123,7 @@ require 'includes/layout.php';
         </div>
 
         <div class="alert alert-info mb-0">
-          Optional metadata rows before the item headers: Customer, Destination Country, Expected Ready, Currency. Supplier sections start with Supplier: and the supplier name in the next cell.
+          Optional metadata rows before the item headers: Customer, Destination Country, Expected Ready, Currency. Supplier sections start with Supplier: and the supplier name in the next cell. Embedded XLSX images are attached to item photos.
         </div>
       </div>
       <div class="modal-footer">

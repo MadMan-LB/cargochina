@@ -4,6 +4,13 @@
  * API response helpers
  */
 
+if (!function_exists('clmsT')) {
+    if (!defined('CLMS_I18N_DISABLE_AUTO_SWITCH')) {
+        define('CLMS_I18N_DISABLE_AUTO_SWITCH', true);
+    }
+    require_once dirname(__DIR__, 2) . '/includes/i18n.php';
+}
+
 function clmsFinalizeApiTiming(int $status): void
 {
     if (!empty($GLOBALS['__clms_api_timing_finalized'])) {
@@ -74,9 +81,13 @@ function jsonError(string $message, int $status = 400, array $errors = [], ?stri
 {
     $requestId = $requestId ?? bin2hex(random_bytes(8));
     $GLOBALS['__clms_api_request_id'] = $requestId;
-    $body = ['error' => true, 'message' => $message, 'request_id' => $requestId];
+    $localizedMessage = function_exists('clmsT') ? clmsT($message) : $message;
+    $body = ['error' => true, 'message' => $localizedMessage, 'request_id' => $requestId];
     if (!empty($errors)) {
-        $body['errors'] = $errors;
+        $body['errors'] = array_map(
+            static fn($error) => is_string($error) && function_exists('clmsT') ? clmsT($error) : $error,
+            $errors
+        );
     }
     jsonResponse($body, $status);
 }

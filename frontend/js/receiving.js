@@ -402,7 +402,7 @@ async function handleReceivePhotos(files) {
         const paths = await PHOTO_UPLOADER.uploadPhotos(
             filesArr,
             (i, total) => {
-                if (btn) btn.textContent = `Uploading ${i}/${total}…`;
+                if (btn) btn.textContent = receivingT("Uploading {current}/{total}…", { current: i, total });
             },
         );
         paths.forEach((p) => {
@@ -419,7 +419,7 @@ async function handleReceivePhotos(files) {
         );
     } finally {
         setLoading(btn, false);
-        if (btn) btn.textContent = "Add Photo";
+        if (btn) btn.textContent = receivingT("Add Photo");
     }
     if (input) input.value = "";
 }
@@ -649,7 +649,7 @@ function renderWarehouseList() {
           <div class="card warehouse-record-card h-100">
             <div class="card-body">
               <div class="d-flex justify-content-between align-items-start mb-2">
-                <h6 class="mb-0">#${o.id} — ${escapeHtml(o.customer_name)}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(o.customer_priority_note || "")}">${escapeHtml(o.customer_priority_level)}</span>` : ""}</h6>
+                <h6 class="mb-0">#${o.id} — ${escapeHtml(o.customer_name)}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(o.customer_priority_note || "")}">${escapeHtml(typeof statusLabel === "function" ? statusLabel(o.customer_priority_level) : receivingT(o.customer_priority_level))}</span>` : ""}</h6>
                 <span class="badge ${typeof statusBadgeClass === "function" ? statusBadgeClass(o.status) : "bg-secondary"}">${typeof statusLabel === "function" ? statusLabel(o.status) : escapeHtml(o.status)}</span>
               </div>
               <div class="small text-muted mb-2">${escapeHtml(o.expected_ready_date)}</div>
@@ -920,7 +920,12 @@ function updateDeclaredSummary(order) {
                 `${i.shipping_code || "-"} ${i.cartons || 0}ctn ${i.qty_per_carton || ""}/ctn`,
         )
         .join("; ");
-    el.textContent = `${fmtReceivingNumber(cartons, 4)} cartons, ${fmtReceivingNumber(cbm, 6)} CBM, ${fmtReceivingNumber(weight, 4)} kg. Items: ${itemsStr || "—"}`;
+    el.textContent = receivingT("{cartons} cartons, {cbm} CBM, {weight} kg. Items: {items}", {
+        cartons: fmtReceivingNumber(cartons, 4),
+        cbm: fmtReceivingNumber(cbm, 6),
+        weight: fmtReceivingNumber(weight, 4),
+        items: itemsStr || "—",
+    });
 
     // Set declared values as placeholders on Actual inputs so user can verify before entering
     const ac = document.getElementById("actualCartons");
@@ -928,7 +933,7 @@ function updateDeclaredSummary(order) {
     const aw = document.getElementById("actualWeight");
     if (ac) ac.placeholder = String(cartons || "");
     if (acbm)
-        acbm.placeholder = cbm > 0 ? fmtReceivingNumber(cbm, 6) : "Direct or from L×W×H";
+        acbm.placeholder = cbm > 0 ? fmtReceivingNumber(cbm, 6) : receivingT("Direct or from L×W×H");
     if (aw) aw.placeholder = weight > 0 ? fmtReceivingNumber(weight, 4) : "";
 }
 
@@ -945,12 +950,12 @@ async function loadOrderForReceive(orderId) {
             .map(
                 (it, i) => `
           <tr data-order-item-id="${it.id}">
-            <td>${escapeHtml((typeof descText === "function" ? descText(it) : it.description_en || it.description_cn || "Item " + (i + 1)).substring(0, 40))}${it.product_high_alert_note || it.product_required_design ? `<div class="product-alert-badge mt-1" title="${escapeHtml((it.product_required_design ? "Required design. " : "") + (it.product_high_alert_note || ""))}">Alert</div>` : ""}</td>
+            <td>${escapeHtml((typeof descText === "function" ? descText(it) : it.description_en || it.description_cn || "Item " + (i + 1)).substring(0, 40))}${it.product_high_alert_note || it.product_required_design ? `<div class="product-alert-badge mt-1" title="${escapeHtml((it.product_required_design ? receivingT("Required design.") + " " : "") + (it.product_high_alert_note || ""))}">${escapeHtml(receivingT("Alert"))}</div>` : ""}</td>
             <td>${fmtReceivingNumber(it.declared_cbm || 0, 6)} CBM / ${fmtReceivingNumber(it.declared_weight || 0, 4)} kg</td>
             <td><input type="number" class="form-control form-control-sm item-actual-cartons" min="0" placeholder="0"></td>
             <td><input type="number" step="0.000001" class="form-control form-control-sm item-actual-cbm" min="0" placeholder="0"></td>
             <td><input type="number" step="0.0001" class="form-control form-control-sm item-actual-weight" min="0" placeholder="0"></td>
-            <td><select class="form-select form-select-sm item-condition"><option value="good">Good</option><option value="damaged">Damaged</option><option value="partial">Partial</option></select></td>
+            <td><select class="form-select form-select-sm item-condition"><option value="good">${escapeHtml(receivingT("Good"))}</option><option value="damaged">${escapeHtml(receivingT("Damaged"))}</option><option value="partial">${escapeHtml(receivingT("Partial"))}</option></select></td>
             <td><input type="file" class="d-none item-photo-input" accept="image/*" multiple data-order-item-id="${it.id}"><button type="button" class="btn btn-sm btn-outline-secondary item-add-photo">+</button><div class="item-photo-preview d-inline"></div></td>
           </tr>`,
             )

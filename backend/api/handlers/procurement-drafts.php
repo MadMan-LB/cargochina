@@ -14,12 +14,12 @@ function procurementDraftOutputCsv(array $draft, array $items, string $filename)
     header('Cache-Control: no-cache, no-store, must-revalidate');
 
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['Procurement Draft', '#' . (int) ($draft['id'] ?? 0)]);
-    fputcsv($out, ['Name', (string) ($draft['name'] ?? '')]);
-    fputcsv($out, ['Supplier', (string) ($draft['supplier_name'] ?? '')]);
-    fputcsv($out, ['Status', (string) ($draft['status'] ?? '')]);
+    fputcsv($out, [clmsT('Procurement Draft'), '#' . (int) ($draft['id'] ?? 0)]);
+    fputcsv($out, [clmsT('Name'), (string) ($draft['name'] ?? '')]);
+    fputcsv($out, [clmsT('Supplier'), (string) ($draft['supplier_name'] ?? '')]);
+    fputcsv($out, [clmsT('Status'), clmsStatusLabel((string) ($draft['status'] ?? ''))]);
     fputcsv($out, ['']);
-    fputcsv($out, ['Line', 'Product / Names', 'Notes', 'Quantity', 'Factory Price', 'Customer Price', 'Total Amount', 'CBM Total', 'Weight Total', 'Photo Count']);
+    fputcsv($out, array_map('clmsT', ['Line', 'Product / Names', 'Notes', 'Quantity', 'Factory Price', 'Customer Price', 'Total Amount', 'CBM Total', 'Weight Total', 'Photo Count']));
     foreach ($items as $index => $item) {
         $qty = (float) ($item['quantity'] ?? 0);
         $cbm = (float) ($item['cbm'] ?? 0);

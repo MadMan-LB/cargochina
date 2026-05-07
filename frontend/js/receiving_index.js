@@ -4,6 +4,16 @@
 const API = "/cargochina/api/v1";
 const AREA_BASE = "/cargochina/warehouse";
 
+function receivingIndexT(text, replacements = null) {
+    return typeof window.t === "function" ? window.t(text, replacements) : text;
+}
+
+function receivingIndexStatusText(status) {
+    return typeof window.statusLabel === "function"
+        ? window.statusLabel(status)
+        : receivingIndexT(status);
+}
+
 async function api(path) {
     if (typeof window.api === "function") {
         return window.api("GET", path);
@@ -11,7 +21,7 @@ async function api(path) {
     const res = await fetch(API + path, { credentials: "same-origin" });
     const d = await res.json().catch(() => ({}));
     if (!res.ok)
-        throw new Error(d.message || d.error?.message || "Request failed");
+        throw new Error(receivingIndexT(d.message || d.error?.message || "Request failed"));
     return d;
 }
 
@@ -66,11 +76,11 @@ async function loadQueue() {
                     (o) => `
                 <tr>
                     <td><a href="${AREA_BASE}/receiving/receive.php?order_id=${o.id}">#${o.id}</a></td>
-                    <td>${escapeHtml(o.customer_name)}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(o.customer_priority_note || "")}">${escapeHtml(o.customer_priority_level)}</span>` : ""}</td>
+                    <td>${escapeHtml(o.customer_name)}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(o.customer_priority_note || "")}">${escapeHtml(receivingIndexStatusText(o.customer_priority_level))}</span>` : ""}</td>
                     <td>${escapeHtml(o.supplier_name)}</td>
                     <td>${escapeHtml(o.expected_ready_date)}</td>
                     <td>${parseFloat(o.declared_cbm || 0).toFixed(2)} CBM / ${parseFloat(o.declared_weight || 0).toFixed(0)} kg</td>
-                    <td><a class="btn btn-sm btn-primary" href="${AREA_BASE}/receiving/receive.php?order_id=${o.id}">Receive</a></td>
+                    <td><a class="btn btn-sm btn-primary" href="${AREA_BASE}/receiving/receive.php?order_id=${o.id}">${escapeHtml(receivingIndexT("Receive"))}</a></td>
                 </tr>
             `,
                 )
@@ -81,7 +91,7 @@ async function loadQueue() {
         document.getElementById("queueTable")?.classList.remove("d-none");
         document.getElementById("queueBody").innerHTML =
             '<tr><td colspan="6" class="text-danger">' +
-            escapeHtml(e.message) +
+            escapeHtml(receivingIndexT(e.message || "Request failed")) +
             "</td></tr>";
     }
 }
@@ -115,10 +125,10 @@ async function loadHistory() {
                 <tr>
                     <td><a href="${AREA_BASE}/receiving/receipt.php?id=${r.id}">#${r.id}</a></td>
                     <td>#${r.order_id}</td>
-                    <td>${escapeHtml(r.customer_name)}${r.customer_priority_level && r.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(r.customer_priority_note || "")}">${escapeHtml(r.customer_priority_level)}</span>` : ""}</td>
+                    <td>${escapeHtml(r.customer_name)}${r.customer_priority_level && r.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(r.customer_priority_note || "")}">${escapeHtml(receivingIndexStatusText(r.customer_priority_level))}</span>` : ""}</td>
                     <td>${parseFloat(r.actual_cbm || 0).toFixed(2)} CBM / ${parseFloat(r.actual_weight || 0).toFixed(0)} kg</td>
                     <td>${escapeHtml((r.received_at || "").replace(" ", " "))}</td>
-                    <td><a class="btn btn-sm btn-outline-secondary" href="${AREA_BASE}/receiving/receipt.php?id=${r.id}">View</a></td>
+                    <td><a class="btn btn-sm btn-outline-secondary" href="${AREA_BASE}/receiving/receipt.php?id=${r.id}">${escapeHtml(receivingIndexT("View"))}</a></td>
                 </tr>
             `,
                 )
@@ -129,7 +139,7 @@ async function loadHistory() {
         document.getElementById("historyTable")?.classList.remove("d-none");
         document.getElementById("historyBody").innerHTML =
             '<tr><td colspan="6" class="text-danger">' +
-            escapeHtml(e.message) +
+            escapeHtml(receivingIndexT(e.message || "Request failed")) +
             "</td></tr>";
     }
 }
@@ -184,14 +194,14 @@ function setupFilterAutocomplete() {
         filterOrderAc = Autocomplete.init(orderInput, {
             resource: "orders",
             searchPath: "/search",
-            placeholder: "Type to search order…",
+            placeholder: receivingIndexT("Type to search order…"),
             onSelect: () => loadQueue(),
         });
     }
     if (supInput) {
         Autocomplete.init(supInput, {
             resource: "suppliers",
-            placeholder: "Type to search supplier...",
+            placeholder: receivingIndexT("Type to search supplier..."),
             onSelect: (item) => {
                 if (supId) supId.value = item.id;
             },
@@ -203,7 +213,7 @@ function setupFilterAutocomplete() {
     if (custInput) {
         Autocomplete.init(custInput, {
             resource: "customers",
-            placeholder: "Type to search customer...",
+            placeholder: receivingIndexT("Type to search customer..."),
             renderItem: (c) =>
                 `${c.name || ""} — ${c.code || ""}`
                     .replace(/^ — | — $/g, "")

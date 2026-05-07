@@ -1840,6 +1840,7 @@
                       <div class="d-grid gap-2 mt-2">
                         <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action draft-item-photo-btn" data-builder-action="upload-photo">+ Add</button>
                         <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="camera-photo">Camera</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="paste-photo">Paste</button>
                       </div>
                     </div>
                     <div class="draft-item-stats draft-item-sidebar-stats">
@@ -2036,6 +2037,63 @@
         uploaded.forEach((path) => paths.push(path));
         card._photoPaths = paths;
         renderDraftPhotoThumbs(card.querySelector(".draft-item-photos"), paths);
+    }
+
+    function extensionFromImageMime(type = "") {
+        return (
+            {
+                "image/jpeg": "jpg",
+                "image/jpg": "jpg",
+                "image/png": "png",
+                "image/gif": "gif",
+                "image/webp": "webp",
+                "image/bmp": "png",
+            }[String(type).toLowerCase()] || "png"
+        );
+    }
+
+    async function readClipboardImageFiles() {
+        if (!navigator.clipboard?.read) {
+            throw new Error(
+                draftT("Clipboard image paste is not available in this browser. Press Ctrl+V on the photo area instead."),
+            );
+        }
+        const items = await navigator.clipboard.read();
+        const files = [];
+        for (const item of items || []) {
+            const imageTypes = (item.types || []).filter((type) =>
+                String(type).startsWith("image/"),
+            );
+            for (const type of imageTypes) {
+                const blob = await item.getType(type);
+                files.push(
+                    new File(
+                        [blob],
+                        `pasted-image-${Date.now()}.${extensionFromImageMime(type)}`,
+                        { type },
+                    ),
+                );
+            }
+        }
+        if (!files.length) {
+            throw new Error(draftT("No image was found in the clipboard."));
+        }
+        return files;
+    }
+
+    async function pasteClipboardPhoto(card, button = null) {
+        try {
+            setLoading(button, true);
+            const files = await readClipboardImageFiles();
+            await uploadPhotoFiles(card, files);
+            clearDraftSaveValidation();
+            updateDraftOrderTotals();
+            showToast(draftT("Pasted image attached"));
+        } catch (e) {
+            showToast(e.message || draftT("Failed to paste image"), "danger");
+        } finally {
+            setLoading(button, false);
+        }
     }
 
     async function uploadDesignFiles(card, files) {
@@ -2449,6 +2507,10 @@
             "click",
             () => PHOTO_UPLOADER.pickPhotos(card.querySelector(".draft-item-photo-camera"), { capture: "environment" }),
         );
+        card.querySelector('[data-builder-action="paste-photo"]')?.addEventListener(
+            "click",
+            (event) => pasteClipboardPhoto(card, event.currentTarget),
+        );
         card.querySelector('[data-builder-action="add-description-entry"]')?.addEventListener(
             "click",
             () => addDraftDescriptionEntry(card, {}, true),
@@ -2841,6 +2903,222 @@
         }));
     }
 
+    function draftPositiveNumber(value) {
+        const parsed = parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function clearDraftSaveValidation() {
+        document
+            .querySelectorAll("#draftOrderModal .draft-save-invalid-feedback")
+            .forEach((el) => el.remove());
+        document
+            .querySelectorAll("#draftOrderModal [data-draft-save-invalid='1']")
+            .forEach((el) => {
+                el.classList.remove("is-invalid", "border-danger");
+                delete el.dataset.draftSaveInvalid;
+            });
+    }
+
+    function markDraftInvalidField(target, message) {
+        const field =
+            typeof target === "string" ? document.querySelector(target) : target;
+        if (!field) return null;
+        const isField = field.matches?.("input, textarea, select");
+        field.dataset.draftSaveInvalid = "1";
+        field.classList.add(isField ? "is-invalid" : "border-danger");
+        const feedback = document.createElement("div");
+        feedback.className = "invalid-feedback d-block draft-save-invalid-feedback";
+        feedback.textContent = message;
+        if (isField) {
+            field.insertAdjacentElement("afterend", feedback);
+        } else {
+            field.appendChild(feedback);
+        }
+        return field;
+    }
+
+    function scrollToDraftInvalidField(field) {
+        if (!field) return;
+        const focusTarget =
+            field.matches?.("input, textarea, select, button")
+                ? field
+                : field.querySelector("input, textarea, select, button");
+        field.scrollIntoView({ behavior: "smooth", block: "center" });
+        setTimeout(() => focusTarget?.focus?.({ preventScroll: true }), 250);
+    }
+
+    function draftItemHasCbmOrDimensions(card) {
+        if (draftPositiveNumber(card.querySelector(".draft-item-cbm")?.value) > 0) {
+            return true;
+        }
+        return (
+            draftPositiveNumber(card.querySelector(".draft-item-length")?.value) >
+                0 &&
+            draftPositiveNumber(card.querySelector(".draft-item-width")?.value) >
+                0 &&
+            draftPositiveNumber(card.querySelector(".draft-item-height")?.value) >
+                0
+        );
+    }
+
+    function validateDraftOrderBeforeSave(payload) {
+        clearDraftSaveValidation();
+        const invalidFields = [];
+        const addInvalid = (target, message) => {
+            const field = markDraftInvalidField(target, message);
+            if (field) invalidFields.push(field);
+        };
+
+        if (!payload.customer_id) {
+            addInvalid(
+                document.getElementById("draftOrderCustomer"),
+                draftT("Customer is required."),
+            );
+        }
+        if (
+            draftOrderCustomerCountryShipping.length > 1 &&
+            !payload.destination_country_id
+        ) {
+            addInvalid(
+                document.getElementById("draftOrderDestinationCountry"),
+                draftT("Choose one of the selected customer's countries."),
+            );
+        }
+
+        const sections = Array.from(
+            document.querySelectorAll(".draft-order-section"),
+        );
+        if (!sections.length) {
+            addInvalid(
+                document.getElementById("draftOrderSections"),
+                draftT("Add at least one supplier section."),
+            );
+        }
+
+        sections.forEach((section) => {
+            const supplierId = section
+                .querySelector(".draft-section-supplier-id")
+                ?.value?.trim();
+            if (!supplierId) {
+                addInvalid(
+                    section.querySelector(".draft-section-supplier"),
+                    draftT("Supplier is required."),
+                );
+            }
+
+            const cards = Array.from(
+                section.querySelectorAll(".draft-order-item-card"),
+            );
+            if (!cards.length) {
+                addInvalid(section, draftT("Add at least one item."));
+            }
+
+            cards.forEach((card) => {
+                const shared = card.dataset.sharedCartonEnabled === "1";
+                const cartonsInput = card.querySelector(".draft-item-cartons");
+                const piecesInput = card.querySelector(
+                    ".draft-item-pieces-per-carton",
+                );
+                if (draftPositiveNumber(cartonsInput?.value) <= 0) {
+                    addInvalid(cartonsInput, draftT("Cartons are required."));
+                }
+                if (!shared && draftPositiveNumber(piecesInput?.value) <= 0) {
+                    addInvalid(
+                        piecesInput,
+                        draftT("Pieces per carton are required."),
+                    );
+                }
+                if (!draftItemHasCbmOrDimensions(card)) {
+                    addInvalid(
+                        card.querySelector(".draft-item-volume-panel"),
+                        draftT("Add CBM or length, width, and height."),
+                    );
+                }
+
+                const weightInput = card.querySelector(".draft-item-weight");
+                if (parseFloat(weightInput?.value || 0) < 0) {
+                    addInvalid(weightInput, draftT("Weight cannot be negative."));
+                }
+
+                if (shared) {
+                    const rows = getDraftSharedCartonRows(card);
+                    if (!rows.length) {
+                        addInvalid(
+                            card.querySelector(".draft-shared-carton-panel"),
+                            draftT("Shared cartons need contained items."),
+                        );
+                    }
+                    rows.forEach((row) => {
+                        if (
+                            !row
+                                .querySelector(".draft-shared-content-supplier-id")
+                                ?.value?.trim()
+                        ) {
+                            addInvalid(
+                                row.querySelector(".draft-shared-content-supplier"),
+                                draftT("Contained supplier is required."),
+                            );
+                        }
+                        if (
+                            draftPositiveNumber(
+                                row.querySelector(
+                                    ".draft-shared-content-qty-per-carton",
+                                )?.value,
+                            ) <= 0
+                        ) {
+                            addInvalid(
+                                row.querySelector(
+                                    ".draft-shared-content-qty-per-carton",
+                                ),
+                                draftT("Quantity inside the carton is required."),
+                            );
+                        }
+                        const desc = row.querySelector(
+                            ".draft-shared-content-description-input",
+                        );
+                        if (!String(desc?.value || "").trim()) {
+                            addInvalid(
+                                desc,
+                                draftT("Contained item description is required."),
+                            );
+                        }
+                    });
+                } else if (!draftDescriptionHasContent(card)) {
+                    addInvalid(
+                        card.querySelector(".draft-item-description-primary") ||
+                            card.querySelector(
+                                ".draft-item-description-entry-input",
+                            ),
+                        draftT("Item description is required."),
+                    );
+                }
+
+                if (
+                    card.querySelector(".draft-item-custom-design-required")
+                        ?.checked &&
+                    !String(
+                        card.querySelector(".draft-item-custom-design-note")
+                            ?.value || "",
+                    ).trim() &&
+                    !(card._designPaths || []).length
+                ) {
+                    addInvalid(
+                        card.querySelector(".draft-item-custom-design-note"),
+                        draftT("Add a custom design note or file."),
+                    );
+                }
+            });
+        });
+
+        if (invalidFields.length) {
+            scrollToDraftInvalidField(invalidFields[0]);
+            showToast(draftT("Fix the highlighted fields before saving."), "danger");
+            return false;
+        }
+        return true;
+    }
+
     function collectDraftOrderPayload() {
         const customerId = draftOrderCustomerAc?.getSelectedId() || "";
         const expectedReadyDate =
@@ -2965,22 +3243,7 @@
     async function saveDraftOrder() {
         const id = document.getElementById("draftOrderId")?.value || "";
         const payload = collectDraftOrderPayload();
-        if (!payload.customer_id) {
-            showToast("Customer is required.", "danger");
-            return;
-        }
-        if (
-            draftOrderCustomerCountryShipping.length > 1 &&
-            !payload.destination_country_id
-        ) {
-            showToast(
-                "Choose one of the selected customer's countries before saving.",
-                "danger",
-            );
-            return;
-        }
-        if (!payload.supplier_sections.length) {
-            showToast("Add at least one supplier section.", "danger");
+        if (!validateDraftOrderBeforeSave(payload)) {
             return;
         }
         if (
@@ -2997,6 +3260,7 @@
             const res = id
                 ? await api("PUT", "/draft-orders/" + id, payload)
                 : await api("POST", "/draft-orders", payload);
+            clearDraftSaveValidation();
             if (res.warning) showToast(res.warning, "warning");
             showToast(id ? "Draft order updated" : "Draft order created");
             refreshUnsavedBaseline?.(

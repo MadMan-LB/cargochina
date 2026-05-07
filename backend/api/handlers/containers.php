@@ -182,9 +182,9 @@ function outputContainerOrdersCsv(array $container, array $ordersWithItems): voi
     header('Cache-Control: no-cache, no-store, must-revalidate');
 
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['Container', (string) ($container['code'] ?? '')]);
+    fputcsv($out, [clmsT('Container'), (string) ($container['code'] ?? '')]);
     fputcsv($out, ['']);
-    fputcsv($out, ['Order ID', 'Customer', 'Supplier', 'Item No', 'Shipping Code', 'Description', 'Cartons', 'Qty/Carton', 'Total Qty', 'Unit Price', 'Total Amount', 'Declared CBM', 'Declared Weight', 'Photo Count']);
+    fputcsv($out, array_map('clmsT', ['Order ID', 'Customer', 'Supplier', 'Item No', 'Shipping Code', 'Description', 'Cartons', 'Qty/Carton', 'Total Qty', 'Unit Price', 'Total Amount', 'Declared CBM', 'Declared Weight', 'Photo Count']));
     foreach ($ordersWithItems as $data) {
         $order = $data['order'] ?? [];
         foreach (($data['items'] ?? []) as $item) {

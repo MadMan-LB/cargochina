@@ -2,15 +2,25 @@
  * Receipt detail page
  */
 const RECEIPT_ID = window.RECEIPT_ID || 0;
-const API_BASE = "/cargochina/api/v1";
+const RECEIPT_API_BASE = window.API_BASE || "/cargochina/api/v1";
 const AREA_BASE = "/cargochina/warehouse";
 
 async function api(path) {
-    const res = await fetch(API_BASE + path, { credentials: "same-origin" });
+    const res = await fetch(RECEIPT_API_BASE + path, { credentials: "same-origin" });
     const d = await res.json().catch(() => ({}));
     if (!res.ok)
-        throw new Error(d.message || d.error?.message || "Request failed");
+        throw new Error(receiptT(d.message || d.error?.message || "Request failed"));
     return d;
+}
+
+function receiptT(text, replacements = null) {
+    return typeof window.t === "function" ? window.t(text, replacements) : text;
+}
+
+function receiptStatusText(status) {
+    return typeof window.statusLabel === "function"
+        ? window.statusLabel(status)
+        : receiptT(status);
 }
 
 function escapeHtml(s) {
@@ -24,24 +34,24 @@ async function loadReceipt() {
     const r = res.data;
     let statusBadge =
         '<span class="badge bg-success">' +
-        escapeHtml(r.order_status) +
+        escapeHtml(receiptStatusText(r.order_status)) +
         "</span>";
     if (r.order_status === "AwaitingCustomerConfirmation") {
         statusBadge =
-            '<span class="badge bg-secondary">Legacy Awaiting Confirmation</span>';
+            `<span class="badge bg-secondary">${escapeHtml(receiptT("Legacy Awaiting Confirmation"))}</span>`;
     } else if (r.order_status === "Confirmed") {
         statusBadge =
-            '<span class="badge bg-warning text-dark">Auto-confirmed in stock</span>';
+            `<span class="badge bg-warning text-dark">${escapeHtml(receiptT("Auto-confirmed in stock"))}</span>`;
     } else if (r.order_status === "CustomerDeclinedAfterAutoConfirm") {
         statusBadge =
-            '<span class="badge bg-danger">Declined After Auto-Confirm</span>';
+            `<span class="badge bg-danger">${escapeHtml(receiptT("Declined After Auto-Confirm"))}</span>`;
     }
     let itemsHtml = "";
     if (r.items && r.items.length) {
         itemsHtml = `
-          <h6 class="mt-3">Per-Item Actuals</h6>
+          <h6 class="mt-3">${escapeHtml(receiptT("Per-Item Actuals"))}</h6>
           <table class="table table-sm">
-            <thead><tr><th>Item</th><th>Declared</th><th>Actual</th><th>Condition</th><th>Variance</th><th>Photos</th></tr></thead>
+            <thead><tr><th>${escapeHtml(receiptT("Item"))}</th><th>${escapeHtml(receiptT("Declared"))}</th><th>${escapeHtml(receiptT("Actual"))}</th><th>${escapeHtml(receiptT("Condition"))}</th><th>${escapeHtml(receiptT("Variance"))}</th><th>${escapeHtml(receiptT("Photos"))}</th></tr></thead>
             <tbody>
               ${r.items
                   .map((it) => {
@@ -56,8 +66,8 @@ async function loadReceipt() {
                   <td>${escapeHtml(typeof descText === "function" ? descText(it) : it.description_en || it.description_cn || "-")}</td>
                   <td>${it.declared_cbm || 0} CBM / ${it.declared_weight || 0} kg</td>
                   <td>${it.actual_cbm ?? "-"} CBM / ${it.actual_weight ?? "-"} kg</td>
-                  <td>${escapeHtml(it.receipt_condition || it.condition || "good")}</td>
-                  <td>${it.variance_detected ? '<span class="badge bg-warning">Yes</span>' : "-"}</td>
+                  <td>${escapeHtml(receiptStatusText(it.receipt_condition || it.condition || "good"))}</td>
+                  <td>${it.variance_detected ? `<span class="badge bg-warning">${escapeHtml(receiptT("Yes"))}</span>` : "-"}</td>
                   <td>${itemPhotos || "-"}</td>
                 </tr>
               `;
@@ -70,7 +80,7 @@ async function loadReceipt() {
     let photosHtml = "";
     if (r.photos && r.photos.length) {
         photosHtml =
-            '<h6 class="mt-3">Photos</h6><div class="d-flex flex-wrap gap-2">' +
+            `<h6 class="mt-3">${escapeHtml(receiptT("Photos"))}</h6><div class="d-flex flex-wrap gap-2">` +
             r.photos
                 .map(
                     (p) =>
@@ -81,13 +91,13 @@ async function loadReceipt() {
     }
     document.getElementById("receiptContent").innerHTML = `
       <div class="card-body">
-        <p><strong>Order:</strong> #${r.order_id} ${statusBadge}</p>
-        <p><strong>Customer:</strong> ${escapeHtml(r.customer_name)}</p>
-        <p><strong>Supplier:</strong> ${escapeHtml(r.supplier_name)}</p>
-        <p><strong>Received by:</strong> ${escapeHtml(r.received_by_name || "-")}</p>
-        <p><strong>Received at:</strong> ${escapeHtml(r.received_at || "-")}</p>
-        <p><strong>Actual totals:</strong> ${r.actual_cartons || 0} cartons, ${parseFloat(r.actual_cbm || 0).toFixed(2)} CBM, ${parseFloat(r.actual_weight || 0).toFixed(0)} kg</p>
-        <p><strong>Condition:</strong> ${escapeHtml(r.receipt_condition || r.condition || "good")}</p>
+        <p><strong>${escapeHtml(receiptT("Order:"))}</strong> #${r.order_id} ${statusBadge}</p>
+        <p><strong>${escapeHtml(receiptT("Customer:"))}</strong> ${escapeHtml(r.customer_name)}</p>
+        <p><strong>${escapeHtml(receiptT("Supplier:"))}</strong> ${escapeHtml(r.supplier_name)}</p>
+        <p><strong>${escapeHtml(receiptT("Received by:"))}</strong> ${escapeHtml(r.received_by_name || "-")}</p>
+        <p><strong>${escapeHtml(receiptT("Received at:"))}</strong> ${escapeHtml(r.received_at || "-")}</p>
+        <p><strong>${escapeHtml(receiptT("Actual totals:"))}</strong> ${r.actual_cartons || 0} ${escapeHtml(receiptT("cartons"))}, ${parseFloat(r.actual_cbm || 0).toFixed(2)} CBM, ${parseFloat(r.actual_weight || 0).toFixed(0)} kg</p>
+        <p><strong>${escapeHtml(receiptT("Condition:"))}</strong> ${escapeHtml(receiptStatusText(r.receipt_condition || r.condition || "good"))}</p>
         ${itemsHtml}
         ${photosHtml}
       </div>
@@ -97,6 +107,6 @@ async function loadReceipt() {
 loadReceipt().catch((e) => {
     document.getElementById("receiptContent").innerHTML =
         '<div class="card-body"><p class="text-danger">' +
-        escapeHtml(e.message) +
+        escapeHtml(receiptT(e.message || "Request failed")) +
         "</p></div>";
 });

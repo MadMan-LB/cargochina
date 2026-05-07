@@ -4,7 +4,11 @@
  * Customer Portal - one-time token access to view orders and customer follow-up actions
  * No auth required; token in URL validates access
  */
+require_once __DIR__ . '/includes/i18n.php';
 require_once __DIR__ . '/backend/config/database.php';
+
+$uiLocale = clmsGetUiLocale();
+$clientTranslations = clmsGetClientTranslationPayload();
 
 $token = trim($_GET['token'] ?? '');
 $error = null;
@@ -27,7 +31,7 @@ if ($token) {
   $stmt->execute([$hash]);
   $row = $stmt->fetch(PDO::FETCH_ASSOC);
   if (!$row) {
-    $error = 'Invalid or expired link. Please request a new link from Salameh Cargo.';
+    $error = clmsT('Invalid or expired link. Please request a new link from Salameh Cargo.');
   } else {
     $customer = $row;
     $pdo->prepare("UPDATE customer_portal_tokens SET used_at = NOW() WHERE id = ?")->execute([$row['id']]);
@@ -80,12 +84,12 @@ $statusLabels = [
 ];
 ?>
 <!DOCTYPE html>
-<html lang="en">
+<html lang="<?= htmlspecialchars($uiLocale) ?>">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Customer Portal | Salameh Cargo</title>
+    <title><?= htmlspecialchars(clmsT('Customer Portal | Salameh Cargo')) ?></title>
     <link href="/cargochina/frontend/css/bootstrap.min.css" rel="stylesheet">
     <style>
     body {
@@ -203,7 +207,7 @@ $statusLabels = [
                                 <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
                                     <h2 class="h5 mb-0">Order #<?= (int) $order['id'] ?></h2>
                                     <span
-                                        class="badge <?= $badgeClass ?>"><?= htmlspecialchars($pendingReview ? 'Awaiting Your Review' : ($statusLabels[$order['status']] ?? $order['status'])) ?></span>
+                                        class="badge <?= $badgeClass ?>"><?= htmlspecialchars($pendingReview ? clmsT('Awaiting Your Review') : clmsStatusLabel((string) $order['status'])) ?></span>
                                 </div>
                                 <div class="text-muted small">Supplier:
                                     <?= htmlspecialchars($order['supplier_name'] ?: 'Multiple / not specified') ?></div>
@@ -340,6 +344,10 @@ $statusLabels = [
         </div>
         <?php endif; ?>
     </div>
+    <script>
+    window.CLMS_UI = <?= json_encode($clientTranslations, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+    </script>
+    <script src="/cargochina/frontend/js/app.js?v=<?= @filemtime(__DIR__ . '/frontend/js/app.js') ?: time() ?>"></script>
 </body>
 
 </html>

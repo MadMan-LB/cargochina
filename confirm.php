@@ -1,10 +1,15 @@
+<?php
+require_once __DIR__ . '/includes/i18n.php';
+$uiLocale = clmsGetUiLocale();
+$clientTranslations = clmsGetClientTranslationPayload();
+?>
 <!DOCTYPE html>
-<html lang="en">
+<html lang="<?= htmlspecialchars($uiLocale) ?>">
 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Warehouse Receipt Review — Salameh Cargo</title>
+  <title><?= htmlspecialchars(clmsT('Warehouse Receipt Review — Salameh Cargo')) ?></title>
   <link href="/cargochina/frontend/css/bootstrap.min.css" rel="stylesheet">
   <style>
     :root {
@@ -220,6 +225,10 @@
     </div>
   </div>
 
+  <script>
+    window.CLMS_UI = <?= json_encode($clientTranslations, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+  </script>
+  <script src="/cargochina/frontend/js/app.js?v=<?= @filemtime(__DIR__ . '/frontend/js/app.js') ?: time() ?>"></script>
   <script>
     const API = '/cargochina/api/v1';
     const token = new URLSearchParams(location.search).get('token') || '';

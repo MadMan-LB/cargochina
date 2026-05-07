@@ -97,7 +97,7 @@ function receivingOutputQueueCsv(array $rows, ?string $filename = null): void
     header('Cache-Control: no-cache, no-store, must-revalidate');
 
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['Order ID', 'Customer', 'Supplier', 'Supplier Phone', 'Expected Ready', 'Status', 'Shipping Codes', 'Total Cartons', 'Declared CBM', 'Declared Weight (kg)', 'Items Summary']);
+    fputcsv($out, array_map('clmsT', ['Order ID', 'Customer', 'Supplier', 'Supplier Phone', 'Expected Ready', 'Status', 'Shipping Codes', 'Total Cartons', 'Declared CBM', 'Declared Weight (kg)', 'Items Summary']));
     foreach ($rows as $row) {
         $items = is_array($row['items'] ?? null) ? $row['items'] : [];
         $shippingCodes = [];
@@ -122,7 +122,7 @@ function receivingOutputQueueCsv(array $rows, ?string $filename = null): void
             (string) ($row['supplier_name'] ?? ''),
             (string) ($row['supplier_phone'] ?? ''),
             (string) ($row['expected_ready_date'] ?? ''),
-            (string) ($row['status'] ?? ''),
+            clmsStatusLabel((string) ($row['status'] ?? '')),
             implode('; ', array_keys($shippingCodes)),
             $totalCartons,
             round((float) ($row['declared_cbm'] ?? 0), 6),

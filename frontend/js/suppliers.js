@@ -864,7 +864,11 @@ async function showPayHistory(supplierId, name) {
         const balance = balRes.data || {};
         let balHtml = "";
         Object.entries(balance).forEach(([cur, b]) => {
-            balHtml += `<span class="badge bg-secondary me-2">${cur}: Paid ${fmtSupplierAmount(b.total_paid)} / Invoiced ${fmtSupplierAmount(b.total_invoiced)} | Discount ${fmtSupplierAmount(b.total_discount)} | Outstanding ${fmtSupplierAmount(b.outstanding)}</span>`;
+            const paidLabel = typeof t === "function" ? t("Paid") : "Paid";
+            const invoicedLabel = typeof t === "function" ? t("Invoiced") : "Invoiced";
+            const discountLabel = typeof t === "function" ? t("Discount") : "Discount";
+            const outstandingLabel = typeof t === "function" ? t("Outstanding") : "Outstanding";
+            balHtml += `<span class="badge bg-secondary me-2">${cur}: ${paidLabel} ${fmtSupplierAmount(b.total_paid)} / ${invoicedLabel} ${fmtSupplierAmount(b.total_invoiced)} | ${discountLabel} ${fmtSupplierAmount(b.total_discount)} | ${outstandingLabel} ${fmtSupplierAmount(b.outstanding)}</span>`;
         });
         document.getElementById("balanceSummary").innerHTML =
             balHtml || '<span class="text-muted">No payments yet</span>';
@@ -875,7 +879,7 @@ async function showPayHistory(supplierId, name) {
                 <td>${p.created_at}</td>
                 <td>${p.invoice_amount ?? "-"}</td>
                 <td>${p.amount}</td>
-                <td>${(parseFloat(p.settlement_delta || p.discount_amount || 0) > 0 ? fmtSupplierAmount(p.settlement_delta || p.discount_amount) : "-")}${p.marked_full_payment ? ' <span class="badge bg-success">Full</span>' : ""}</td>
+                <td>${(parseFloat(p.settlement_delta || p.discount_amount || 0) > 0 ? fmtSupplierAmount(p.settlement_delta || p.discount_amount) : "-")}${p.marked_full_payment ? ` <span class="badge bg-success">${typeof t === "function" ? t("Full") : "Full"}</span>` : ""}</td>
                 <td>${p.currency}</td>
                 <td>${escapeHtml([p.payment_type, p.payment_channel].filter(Boolean).join(" / ") || "-")}</td>
                 <td>${p.order_id ? "#" + p.order_id : "-"}</td>

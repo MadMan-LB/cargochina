@@ -31,6 +31,7 @@ $sidebarSections = clmsGetSidebarSectionsForRoles($userRoles);
 $visiblePageIds = clmsGetEffectivePageIdsForRoles($userRoles);
 $uiLocale = clmsGetUiLocale();
 $clientTranslations = clmsGetClientTranslationPayload();
+$roleDisplayNames = array_map(static fn($role) => clmsT((string) $role), $userRoles);
 $canViewCustomersPage = in_array('customers', $visiblePageIds, true);
 $canViewPreferences = in_array('notification_preferences', $visiblePageIds, true);
 $canViewNotifications = in_array('notifications', $visiblePageIds, true);
@@ -79,14 +80,14 @@ $canViewDownloads = in_array('downloads', $visiblePageIds, true);
         <svg class="sidebar-icon" viewBox="0 0 24 24">
           <path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z" />
         </svg>
-        Logout
+        <?= htmlspecialchars(clmsT('Logout')) ?>
       </a>
     </div>
   </aside>
 
   <div class="clms-main" id="mainContent">
     <header class="clms-topbar">
-      <button class="sidebar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
+      <button class="sidebar-toggle" id="sidebarToggle" aria-label="<?= htmlspecialchars(clmsT('Toggle sidebar')) ?>">
         <svg viewBox="0 0 24 24" width="22" height="22">
           <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" fill="currentColor" />
         </svg>
@@ -97,7 +98,7 @@ $canViewDownloads = in_array('downloads', $visiblePageIds, true);
           <a href="<?= htmlspecialchars(clmsCurrentUrlWithUiLocale('en')) ?>" class="btn btn-outline-secondary btn-sm<?= $uiLocale === 'en' ? ' active' : '' ?>" data-ui-lang="en">EN</a>
           <a href="<?= htmlspecialchars(clmsCurrentUrlWithUiLocale('zh-CN')) ?>" class="btn btn-outline-secondary btn-sm<?= $uiLocale === 'zh-CN' ? ' active' : '' ?>" data-ui-lang="zh-CN">中文</a>
         </span>
-        <span class="topbar-role badge bg-primary bg-opacity-10 text-primary"><?= htmlspecialchars(implode(', ', $userRoles)) ?></span>
+        <span class="topbar-role badge bg-primary bg-opacity-10 text-primary"><?= htmlspecialchars(implode(', ', $roleDisplayNames)) ?></span>
       </div>
     </header>
     <div class="clms-content">

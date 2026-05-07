@@ -173,8 +173,8 @@ test('draft-orders import endpoint previews exported CSV without saving', functi
             throw new Exception('Supplier was not resolved from export section');
         }
         $item = $json['data']['supplier_sections'][0]['items'][0];
-        if (($item['item_no'] ?? null) !== '' || (int) ($item['item_no_manual'] ?? 1) !== 0) {
-            throw new Exception('Imported item numbers should be left for the draft-order numbering logic');
+        if (($item['item_no'] ?? '') !== 'IMP-1-1' || (int) ($item['item_no_manual'] ?? 0) !== 1) {
+            throw new Exception('Imported item numbers should be preserved from the file');
         }
         if (($item['cartons'] ?? '') !== '2' || ($item['pieces_per_carton'] ?? '') !== '12') {
             throw new Exception('Packaging fields were not imported');
@@ -198,6 +198,8 @@ test('draft-orders import endpoint previews exported XLSX unit price as customer
     }
 
     $xlsxPath = tempnam(sys_get_temp_dir(), 'draft_xlsx_import_');
+    $pngPath = tempnam(sys_get_temp_dir(), 'draft_xlsx_img_') . '.png';
+    file_put_contents($pngPath, base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII='));
     $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
     $sheet = $spreadsheet->getActiveSheet();
     $sheet->fromArray(
@@ -210,6 +212,13 @@ test('draft-orders import endpoint previews exported XLSX unit price as customer
         null,
         'B2'
     );
+    $drawing = new \PhpOffice\PhpSpreadsheet\Worksheet\Drawing();
+    $drawing->setPath($pngPath);
+    $drawing->setCoordinates('B2');
+    $drawing->setResizeProportional(false);
+    $drawing->setWidth(90);
+    $drawing->setHeight(270);
+    $drawing->setWorksheet($sheet);
     (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet))->save($xlsxPath);
     $spreadsheet->disconnectWorksheets();
 
@@ -231,14 +240,20 @@ test('draft-orders import endpoint previews exported XLSX unit price as customer
         if (($item['unit_price'] ?? 'not-empty') !== '' || ($item['sell_price'] ?? '') !== '9.5') {
             throw new Exception('XLSX UNIT PRICE should import as customer price while factory price stays empty');
         }
-        if (($item['item_no'] ?? null) !== '' || (int) ($item['item_no_manual'] ?? 1) !== 0) {
-            throw new Exception('XLSX item numbers should be left for the draft-order numbering logic');
+        if (($item['item_no'] ?? '') !== 'XLS-1' || (int) ($item['item_no_manual'] ?? 0) !== 1) {
+            throw new Exception('XLSX item numbers should be preserved from the file');
         }
         if (($item['cartons'] ?? '') !== '1' || ($item['pieces_per_carton'] ?? '') !== '6') {
             throw new Exception('XLSX packaging fields were not imported');
         }
+        $photoPaths = $item['photo_paths'] ?? [];
+        if (count($photoPaths) !== 1 || !is_file($root . '/backend/' . $photoPaths[0])) {
+            throw new Exception('Embedded XLSX image was not imported into the item photo paths');
+        }
+        @unlink($root . '/backend/' . $photoPaths[0]);
     } finally {
         @unlink($xlsxPath);
+        @unlink($pngPath);
     }
 });
 
@@ -272,6 +287,45 @@ test('draft-orders import endpoint keeps missing exported fields empty', functio
         }
         if (($item['cartons'] ?? 'not-empty') !== '' || ($item['cbm'] ?? 'not-empty') !== '' || ($item['weight'] ?? 'not-empty') !== '') {
             throw new Exception('Missing spreadsheet values should remain empty in the preview payload');
+        }
+    } finally {
+        @unlink($csvPath);
+    }
+});
+
+test('draft-orders import endpoint preserves repeated descriptions and zero-carton pieces', function () use ($pdo, $root) {
+    $supplierName = (string) $pdo->query("SELECT name FROM suppliers ORDER BY id LIMIT 1")->fetchColumn();
+    if ($supplierName === '') {
+        throw new Exception('Missing supplier seed data');
+    }
+
+    $csvPath = tempnam(sys_get_temp_dir(), 'draft_multi_desc_import_');
+    $fh = fopen($csvPath, 'w');
+    fputcsv($fh, ['Supplier:', $supplierName]);
+    fputcsv($fh, ['Item No', 'Description', 'Description 2', 'Description 3', 'Pieces/Carton', 'Cartons']);
+    fputcsv($fh, ['MD-1', 'First description', 'Second description', 'Third description', '24', '0']);
+    fclose($fh);
+
+    try {
+        $out = runHandlerScriptWithUploadedFile(
+            $root,
+            'backend/api/handlers/draft-orders.php',
+            'POST',
+            'import',
+            null,
+            $csvPath,
+            'draft_multi_desc_import.csv'
+        );
+        $json = json_decode($out, true);
+        $item = $json['data']['supplier_sections'][0]['items'][0] ?? null;
+        if (!$item) {
+            throw new Exception('Expected imported multi-description item, got: ' . substr($out, 0, 300));
+        }
+        if (count($item['description_entries'] ?? []) !== 3) {
+            throw new Exception('Repeated description columns were not preserved as multiple descriptions');
+        }
+        if (($item['cartons'] ?? '') !== '1' || ($item['pieces_per_carton'] ?? '') !== '24') {
+            throw new Exception('Zero cartons with a positive pieces value should keep the pieces by autofilling one carton');
         }
     } finally {
         @unlink($csvPath);

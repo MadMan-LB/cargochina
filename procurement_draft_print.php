@@ -87,11 +87,11 @@ function printDraftEntryRows(array $sections): string
         $sectionSupplierList = array_keys($supplierNames);
         $sectionSupplierDisplay = $sectionSupplierList
             ? implode(', ', $sectionSupplierList)
-            : 'Unassigned supplier';
+            : clmsT('Unassigned supplier');
         $hasMultipleSectionSuppliers = count($sectionSupplierList) > 1;
         ?>
         <tr class="table-light">
-          <td colspan="12"><strong><?= $hasMultipleSectionSuppliers ? 'Section suppliers:' : 'Supplier:' ?></strong> <?= htmlspecialchars($sectionSupplierDisplay) ?></td>
+          <td colspan="12"><strong><?= htmlspecialchars($hasMultipleSectionSuppliers ? clmsT('Section suppliers:') : clmsT('Supplier:')) ?></strong> <?= htmlspecialchars($sectionSupplierDisplay) ?></td>
         </tr>
         <?php foreach (($section['items'] ?? []) as $itemIndex => $item): ?>
             <?php
@@ -108,7 +108,7 @@ function printDraftEntryRows(array $sections): string
                 <tr class="table-warning">
                   <td><?= $itemIndex + 1 ?></td>
                   <td><?= htmlspecialchars($item['shared_carton_code'] ?? '—') ?></td>
-                  <td><strong>Shared carton / multiple items</strong></td>
+                  <td><strong><?= htmlspecialchars(clmsT('Shared carton / multiple items')) ?></strong></td>
                   <td>—</td>
                   <td><?= htmlspecialchars(format_display_number($item['pieces_per_carton'] ?? null, 4) ?: '—') ?></td>
                   <td><?= htmlspecialchars(format_display_number($item['cartons'] ?? null, 4) ?: '—') ?></td>
@@ -183,7 +183,7 @@ function printDraftEntryRows(array $sections): string
             <?php endif; ?>
         <?php endforeach; ?>
         <tr class="table-secondary">
-          <td colspan="8"><strong><?= $hasMultipleSectionSuppliers ? 'Section subtotal' : 'Supplier subtotal' ?></strong></td>
+          <td colspan="8"><strong><?= htmlspecialchars($hasMultipleSectionSuppliers ? clmsT('Section subtotal') : clmsT('Supplier subtotal')) ?></strong></td>
           <td>—</td>
           <td><strong><?= htmlspecialchars(format_display_number((float) ($section['totals']['amount'] ?? 0), 4)) ?></strong></td>
           <td><strong><?= htmlspecialchars(format_display_cbm((float) ($section['totals']['cbm'] ?? 0))) ?></strong></td>
@@ -298,8 +298,10 @@ if ($orderId > 0) {
     $grandAmount = array_sum(array_map(static fn($section) => (float) ($section['totals']['amount'] ?? 0), $sections));
     $grandCbm = array_sum(array_map(static fn($section) => (float) ($section['totals']['cbm'] ?? 0), $sections));
     $grandWeight = array_sum(array_map(static fn($section) => (float) ($section['totals']['weight'] ?? 0), $sections));
-    $title = 'Draft Order #' . $orderId;
-    $subtitle = 'Customer: ' . ($order['customer_name'] ?? '—') . ' | Status: ' . ($order['status'] ?? '—') . ' | Expected Ready: ' . ($order['expected_ready_date'] ?? '—');
+    $title = clmsT('Draft Order #{id}', ['id' => $orderId]);
+    $subtitle = clmsT('Customer:') . ' ' . ($order['customer_name'] ?? '—')
+        . ' | ' . clmsT('Status:') . ' ' . clmsStatusLabel((string) ($order['status'] ?? '—'))
+        . ' | ' . clmsT('Expected Ready:') . ' ' . ($order['expected_ready_date'] ?? '—');
 } else {
     if ($legacyId <= 0) {
         header('Location: procurement_drafts.php');
@@ -349,12 +351,12 @@ if ($orderId > 0) {
     $grandAmount = (float) ($sections[0]['totals']['amount'] ?? 0);
     $grandCbm = (float) ($sections[0]['totals']['cbm'] ?? 0);
     $grandWeight = (float) ($sections[0]['totals']['weight'] ?? 0);
-    $title = $draft['name'] ?? 'Legacy Procurement Draft';
-    $subtitle = 'Legacy procurement draft | Status: ' . ($draft['status'] ?? '—');
+    $title = $draft['name'] ?? clmsT('Legacy Procurement Draft');
+    $subtitle = clmsT('Legacy procurement draft') . ' | ' . clmsT('Status:') . ' ' . clmsStatusLabel((string) ($draft['status'] ?? '—'));
 }
 ?>
 <!DOCTYPE html>
-<html lang="en">
+<html lang="<?= htmlspecialchars(clmsGetUiLocale()) ?>">
 
 <head>
   <meta charset="UTF-8">
@@ -385,8 +387,8 @@ if ($orderId > 0) {
 <body>
   <div class="print-container">
     <div class="no-print mb-3 d-flex justify-content-between align-items-center">
-      <a href="<?= $basePath ?>/procurement_drafts.php" class="btn btn-outline-secondary btn-sm">&larr; Back</a>
-      <button type="button" class="btn btn-primary" onclick="window.print()">Print / Save as PDF</button>
+      <a href="<?= $basePath ?>/procurement_drafts.php" class="btn btn-outline-secondary btn-sm">&larr; <?= htmlspecialchars(clmsT('Back')) ?></a>
+      <button type="button" class="btn btn-primary" onclick="window.print()"><?= htmlspecialchars(clmsT('Print / Save as PDF')) ?></button>
     </div>
 
     <h1 class="h4 mb-2"><?= htmlspecialchars($title) ?></h1>
@@ -396,23 +398,23 @@ if ($orderId > 0) {
       <thead class="table-light">
         <tr>
           <th>#</th>
-          <th>Item No</th>
-          <th>Product / Names</th>
-          <th>HS Code</th>
-          <th>Pieces/Carton</th>
-          <th>Cartons</th>
-          <th>Quantity</th>
-          <th>Factory Price</th>
-          <th>Customer Price</th>
-          <th>Total Amount</th>
-          <th>Total CBM</th>
-          <th>Total Weight</th>
+          <th><?= htmlspecialchars(clmsT('Item No')) ?></th>
+          <th><?= htmlspecialchars(clmsT('Product / Names')) ?></th>
+          <th><?= htmlspecialchars(clmsT('HS Code')) ?></th>
+          <th><?= htmlspecialchars(clmsT('Pieces/Carton')) ?></th>
+          <th><?= htmlspecialchars(clmsT('Cartons')) ?></th>
+          <th><?= htmlspecialchars(clmsT('Quantity')) ?></th>
+          <th><?= htmlspecialchars(clmsT('Factory Price')) ?></th>
+          <th><?= htmlspecialchars(clmsT('Customer Price')) ?></th>
+          <th><?= htmlspecialchars(clmsT('Total Amount')) ?></th>
+          <th><?= htmlspecialchars(clmsT('Total CBM')) ?></th>
+          <th><?= htmlspecialchars(clmsT('Total Weight')) ?></th>
         </tr>
       </thead>
       <tbody>
         <?= printDraftEntryRows($sections) ?>
         <tr class="table-dark">
-          <td colspan="9"><strong>Grand total</strong></td>
+          <td colspan="9"><strong><?= htmlspecialchars(clmsT('Grand total')) ?></strong></td>
           <td><strong><?= htmlspecialchars(format_display_number($grandAmount, 4)) ?></strong></td>
           <td><strong><?= htmlspecialchars(format_display_cbm($grandCbm)) ?></strong></td>
           <td><strong><?= htmlspecialchars(format_display_weight($grandWeight, 4)) ?></strong></td>

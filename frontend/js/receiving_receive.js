@@ -2,7 +2,7 @@
  * Receive page - single order, pre-loaded from URL
  */
 const ORDER_ID = window.RECEIVE_ORDER_ID || 0;
-const API_BASE = "/cargochina/api/v1";
+const RECEIVE_API_BASE = window.API_BASE || "/cargochina/api/v1";
 const AREA_BASE = "/cargochina/warehouse";
 
 let receivePhotoPaths = [];
@@ -12,6 +12,16 @@ let declaredCbm = 0,
     declaredWeight = 0;
 let pendingUploads = 0;
 
+function receiveT(text, replacements = null) {
+    return typeof window.t === "function" ? window.t(text, replacements) : text;
+}
+
+function receiveStatusText(status) {
+    return typeof window.statusLabel === "function"
+        ? window.statusLabel(status)
+        : receiveT(status);
+}
+
 async function api(method, path, body) {
     const opts = {
         method,
@@ -20,10 +30,10 @@ async function api(method, path, body) {
     };
     if (body && (method === "POST" || method === "PUT"))
         opts.body = JSON.stringify(body);
-    const res = await fetch(API_BASE + path, opts);
+    const res = await fetch(RECEIVE_API_BASE + path, opts);
     const d = await res.json().catch(() => ({}));
     if (!res.ok)
-        throw new Error(d.message || d.error?.message || "Request failed");
+        throw new Error(receiveT(d.message || d.error?.message || "Request failed"));
     return d;
 }
 
@@ -46,12 +56,12 @@ function showToast(msg, type = "success") {
             document.body.appendChild(x);
             return x;
         })();
-    const t = document.createElement("div");
-    t.className = `toast align-items-center text-bg-${type} border-0`;
-    t.innerHTML = `<div class="d-flex"><div class="toast-body">${escapeHtml(msg)}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>`;
-    c.appendChild(t);
-    new bootstrap.Toast(t).show();
-    t.addEventListener("hidden.bs.toast", () => t.remove());
+    const toast = document.createElement("div");
+    toast.className = `toast align-items-center text-bg-${type} border-0`;
+    toast.innerHTML = `<div class="d-flex"><div class="toast-body">${escapeHtml(receiveT(msg))}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>`;
+    c.appendChild(toast);
+    new bootstrap.Toast(toast).show();
+    toast.addEventListener("hidden.bs.toast", () => toast.remove());
 }
 
 function setLoading(el, loading) {
@@ -78,7 +88,7 @@ async function loadOrder() {
         const addresses = c.addresses || [];
         if (contacts.length) {
             custInfoHtml +=
-                '<p class="mb-1 small text-muted"><strong>Contacts:</strong> ' +
+                '<p class="mb-1 small text-muted"><strong>' + escapeHtml(receiveT("Contacts:")) + "</strong> " +
                 contacts
                     .map((ct) =>
                         escapeHtml(
@@ -92,7 +102,7 @@ async function loadOrder() {
         }
         if (addresses.length) {
             custInfoHtml +=
-                '<p class="mb-1 small text-muted"><strong>Addresses:</strong> ' +
+                '<p class="mb-1 small text-muted"><strong>' + escapeHtml(receiveT("Addresses:")) + "</strong> " +
                 addresses
                     .map((a) =>
                         escapeHtml(
@@ -106,22 +116,22 @@ async function loadOrder() {
         }
         if (c.payment_terms) {
             custInfoHtml +=
-                '<p class="mb-1 small text-muted"><strong>Payment terms:</strong> ' +
+                '<p class="mb-1 small text-muted"><strong>' + escapeHtml(receiveT("Payment terms:")) + "</strong> " +
                 escapeHtml(c.payment_terms) +
                 "</p>";
         }
     } catch (e) {}
     const curSymbol = o.currency === "RMB" ? "¥" : "$";
     document.getElementById("orderOverviewBody").innerHTML = `
-      <p class="mb-1"><strong>Customer:</strong> ${escapeHtml(o.customer_name)}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(o.customer_priority_note || "")}">${escapeHtml(o.customer_priority_level)}</span>` : ""}</p>
-      ${o.high_alert_notes ? `<div class="alert alert-danger py-2 px-3 small mt-2 mb-2"><strong>High alert:</strong> ${escapeHtml(o.high_alert_notes)}</div>` : ""}
+      <p class="mb-1"><strong>${escapeHtml(receiveT("Customer:"))}</strong> ${escapeHtml(o.customer_name)}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(o.customer_priority_note || "")}">${escapeHtml(receiveStatusText(o.customer_priority_level))}</span>` : ""}</p>
+      ${o.high_alert_notes ? `<div class="alert alert-danger py-2 px-3 small mt-2 mb-2"><strong>${escapeHtml(receiveT("High alert:"))}</strong> ${escapeHtml(o.high_alert_notes)}</div>` : ""}
       ${custInfoHtml}
-      <p class="mb-1"><strong>Supplier:</strong> ${escapeHtml(o.supplier_name)}</p>
-      <p class="mb-1"><strong>Expected ready:</strong> ${escapeHtml(o.expected_ready_date)} | <strong>Currency:</strong> ${escapeHtml(o.currency || "USD")}</p>
-      <p class="mb-0"><strong>Items:</strong> ${(o.items || []).length} — Declared: ${declaredCbm.toFixed(2)} CBM / ${declaredWeight.toFixed(0)} kg</p>
+      <p class="mb-1"><strong>${escapeHtml(receiveT("Supplier:"))}</strong> ${escapeHtml(o.supplier_name)}</p>
+      <p class="mb-1"><strong>${escapeHtml(receiveT("Expected ready:"))}</strong> ${escapeHtml(o.expected_ready_date)} | <strong>${escapeHtml(receiveT("Currency:"))}</strong> ${escapeHtml(o.currency || "USD")}</p>
+      <p class="mb-0"><strong>${escapeHtml(receiveT("Items:"))}</strong> ${(o.items || []).length} — ${escapeHtml(receiveT("Declared:"))} ${declaredCbm.toFixed(2)} CBM / ${declaredWeight.toFixed(0)} kg</p>
     `;
     receiveOrderItems = o.items || [];
-    const configRes = await fetch(API_BASE + "/config/receiving", {
+    const configRes = await fetch(RECEIVE_API_BASE + "/config/receiving", {
         credentials: "same-origin",
     })
         .then((r) => r.json())
@@ -141,7 +151,7 @@ async function loadOrder() {
             <td><input type="number" class="form-control form-control-sm item-actual-cartons" min="0" placeholder="0"></td>
             <td><input type="number" step="0.000001" class="form-control form-control-sm item-actual-cbm" min="0" placeholder="0"></td>
             <td><input type="number" step="0.0001" class="form-control form-control-sm item-actual-weight" min="0" placeholder="0"></td>
-            <td><select class="form-select form-select-sm item-condition"><option value="good">Good</option><option value="damaged">Damaged</option><option value="partial">Partial</option></select></td>
+            <td><select class="form-select form-select-sm item-condition"><option value="good">${escapeHtml(receiveT("Good"))}</option><option value="damaged">${escapeHtml(receiveT("Damaged"))}</option><option value="partial">${escapeHtml(receiveT("Partial"))}</option></select></td>
             <td><input type="file" class="d-none item-photo-input" accept="image/*" multiple><button type="button" class="btn btn-sm btn-outline-secondary item-add-photo">+</button><div class="item-photo-preview d-inline"></div></td>
           </tr>
         `,
@@ -222,11 +232,11 @@ function updateVarianceAlert() {
     if (hasVariance) {
         vr.style.display = "block";
         vrb.innerHTML =
-            '<span class="badge bg-warning">Customer follow-up</span> CBM/weight variance or damage detected. The order will still enter stock and a customer review link will be sent.';
+            `<span class="badge bg-warning">${escapeHtml(receiveT("Customer follow-up"))}</span> ${escapeHtml(receiveT("CBM/weight variance or damage detected. The order will still enter stock and a customer review link will be sent."))}`;
     } else {
         vr.style.display = "block";
         vrb.innerHTML =
-            '<span class="badge bg-success">Ready for consolidation</span>';
+            `<span class="badge bg-success">${escapeHtml(receiveT("Ready for consolidation"))}</span>`;
     }
 }
 
@@ -275,7 +285,11 @@ document.getElementById("receivePhotos").onchange = async (e) => {
                 showToast,
                 onProgress: (pct) => {
                     if (btn)
-                        btn.textContent = `Uploading ${i + 1}/${files.length} (${pct}%)…`;
+                        btn.textContent = receiveT("Uploading {current}/{total} ({percent}%)…", {
+                            current: i + 1,
+                            total: files.length,
+                            percent: pct,
+                        });
                 },
             });
             if (p && !receivePhotoPaths.includes(p)) receivePhotoPaths.push(p);
@@ -284,10 +298,10 @@ document.getElementById("receivePhotos").onchange = async (e) => {
         }
         pendingUploads--;
         if (btn)
-            btn.textContent = pendingUploads > 0 ? `Uploading…` : "Add Photo";
+            btn.textContent = pendingUploads > 0 ? receiveT("Uploading…") : receiveT("Add Photo");
     }
     if (submitBtn) submitBtn.disabled = pendingUploads > 0;
-    if (btn) btn.textContent = "Add Photo";
+    if (btn) btn.textContent = receiveT("Add Photo");
     e.target.value = "";
     renderPhotoPreview();
     updateVarianceAlert();
@@ -319,7 +333,7 @@ document.getElementById("submitReceiveBtn").onclick = async () => {
     );
     if (actualCbm <= 0) {
         showToast(
-            "Enter Actual CBM directly or L/H/W (cm) to calculate",
+            receiveT("Enter Actual CBM directly or L/H/W (cm) to calculate"),
             "danger",
         );
         return;
@@ -334,7 +348,7 @@ document.getElementById("submitReceiveBtn").onclick = async () => {
     const hasVariance =
         variancePct >= 10 || varianceAbs >= 0.1 || condition !== "good";
     if (hasVariance && receivePhotoPaths.length === 0) {
-        showToast("Evidence photos required when variance or damage", "danger");
+        showToast(receiveT("Evidence photos required when variance or damage"), "danger");
         return;
     }
     const items = [];
@@ -387,13 +401,13 @@ document.getElementById("submitReceiveBtn").onclick = async () => {
         );
         showToast(
             res.data.variance_detected
-                ? "Received — auto-confirmed, customer follow-up sent"
-                : "Received successfully",
+                ? receiveT("Received — auto-confirmed, customer follow-up sent")
+                : receiveT("Received successfully"),
         );
         window.location.href =
             AREA_BASE + "/receiving/receipt.php?id=" + res.data.receipt_id;
     } catch (e) {
-        showToast(e.message || "Request failed", "danger");
+        showToast(e.message || receiveT("Request failed"), "danger");
     } finally {
         setLoading(btn, false);
     }
@@ -401,5 +415,5 @@ document.getElementById("submitReceiveBtn").onclick = async () => {
 
 loadOrder().catch((e) => {
     document.getElementById("orderOverviewBody").innerHTML =
-        '<p class="text-danger">' + escapeHtml(e.message) + "</p>";
+        '<p class="text-danger">' + escapeHtml(receiveT(e.message || "Request failed")) + "</p>";
 });
