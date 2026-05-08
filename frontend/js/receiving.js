@@ -382,11 +382,15 @@ function setupReceiveDimensionInputs() {
 async function loadReceivingConfig() {
     try {
         const res = await api("GET", "/config/receiving");
-        const enabled = res.data?.item_level_receiving_enabled ?? 0;
         const section = document.getElementById("itemLevelSection");
-        if (section) section.classList.toggle("d-none", !enabled);
+        if (section) {
+            section.classList.remove("d-none");
+            section.dataset.itemLevelRequired = String(
+                res.data?.item_level_receiving_enabled ?? 0,
+            );
+        }
     } catch (_) {
-        document.getElementById("itemLevelSection")?.classList.add("d-none");
+        document.getElementById("itemLevelSection")?.classList.remove("d-none");
     }
 }
 
@@ -885,10 +889,11 @@ document.getElementById("toggleItemLevel")?.addEventListener("click", () => {
     const tbl = document.getElementById("itemLevelTable");
     const btn = document.getElementById("toggleItemLevel");
     tbl.classList.toggle("d-none");
-    btn.setAttribute(
-        "aria-expanded",
-        tbl.classList.contains("d-none") ? "false" : "true",
-    );
+    const hidden = tbl.classList.contains("d-none");
+    btn.setAttribute("aria-expanded", hidden ? "false" : "true");
+    btn.textContent = hidden
+        ? receivingT("Show item details")
+        : receivingT("Hide item details");
 });
 
 function updateDeclaredSummary(order) {
@@ -1035,7 +1040,7 @@ async function loadOrderForReceive(orderId) {
           <tr data-order-item-id="${it.id}">
             <td>${escapeHtml((typeof descText === "function" ? descText(it) : it.description_en || it.description_cn || "Item " + (i + 1)).substring(0, 40))}${metaText ? `<div class="small text-muted">${escapeHtml(metaText)}</div>` : ""}${it.product_high_alert_note || it.product_required_design ? `<div class="product-alert-badge mt-1" title="${escapeHtml((it.product_required_design ? receivingT("Required design.") + " " : "") + (it.product_high_alert_note || ""))}">${escapeHtml(receivingT("Alert"))}</div>` : ""}</td>
             <td>${fmtReceivingNumber(it.declared_cbm || 0, 6)} CBM / ${fmtReceivingNumber(it.declared_weight || 0, 4)} kg<br><span class="small text-muted">${fmtReceivingNumber(it.cartons || 0, 4)} ${escapeHtml(receivingT("cartons"))} × ${fmtReceivingNumber(it.qty_per_carton || 0, 4)} = ${fmtReceivingNumber(it.quantity || 0, 4)}</span></td>
-            <td><input type="number" class="form-control form-control-sm item-actual-cartons" min="0" step="1" placeholder="${escapeHtml(String(it.cartons || 0))}"></td>
+            <td><input type="number" class="form-control form-control-sm item-actual-cartons" min="0" step="1" value="${escapeHtml(formatReceiveInputNumber(it.cartons || 0, 0))}" placeholder="${escapeHtml(String(it.cartons || 0))}"></td>
             <td><input type="number" class="form-control form-control-sm item-actual-pieces-per-carton" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.qty_per_carton || 0, 4))}"></td>
             <td><input type="number" class="form-control form-control-sm item-actual-quantity" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.quantity || 0, 4))}"></td>
             <td><input type="number" class="form-control form-control-sm item-unit-price" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.unit_price || 0, 4))}"></td>

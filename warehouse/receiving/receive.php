@@ -56,7 +56,10 @@ require __DIR__ . '/../../includes/area_layout.php';
 </div>
 
 <div class="card mb-3" id="itemLevelSection">
-    <div class="card-header"><?= htmlspecialchars(clmsT('C) Per-Item Actuals')) ?></div>
+    <div class="card-header">
+        <div class="fw-semibold"><?= htmlspecialchars(clmsT('C) Item Quantity & Price')) ?></div>
+        <div class="small text-muted"><?= htmlspecialchars(clmsT('Edit cartons, pieces per carton, factory price, and totals per item before recording the receipt.')) ?></div>
+    </div>
     <div class="card-body">
         <div id="itemLevelTable" class="table-responsive">
             <table class="table table-sm">

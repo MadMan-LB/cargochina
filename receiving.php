@@ -184,6 +184,35 @@ require 'includes/layout.php';
         <strong><?= clmsT('Declared (verify before entering actuals):') ?></strong>
         <span id="receiveDeclaredText">—</span>
       </div>
+      <div class="mb-3" id="itemLevelSection">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+          <div>
+            <div class="fw-semibold"><?= clmsT('Item Quantity & Price') ?></div>
+            <div class="small text-muted"><?= clmsT('Edit cartons, pieces per carton, factory price, and totals per item before recording the receipt.') ?></div>
+          </div>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="toggleItemLevel" aria-expanded="true" aria-controls="itemLevelTable"><?= clmsT('Hide item details') ?></button>
+        </div>
+        <div id="itemLevelTable" class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th><?= clmsT('Item') ?></th>
+                <th><?= clmsT('Declared') ?></th>
+                <th><?= clmsT('Actual Cartons *') ?></th>
+                <th><?= clmsT('Pieces / Carton') ?></th>
+                <th><?= clmsT('Total Qty') ?></th>
+                <th><?= clmsT('Unit Price / Factory Price') ?></th>
+                <th><?= clmsT('Total Amount') ?></th>
+                <th><?= clmsT('Actual CBM') ?></th>
+                <th><?= clmsT('Actual Weight') ?></th>
+                <th><?= clmsT('Condition') ?></th>
+                <th><?= clmsT('Photos') ?></th>
+              </tr>
+            </thead>
+            <tbody id="itemLevelBody"></tbody>
+          </table>
+        </div>
+      </div>
       <div class="row mb-3 form-row-responsive">
         <div class="col-12 col-md-4 mb-2"><label class="form-label"><?= clmsT('Actual Cartons *') ?></label><input type="number" class="form-control" id="actualCartons" min="0" required></div>
         <div class="col-12 col-md-4 mb-2">
@@ -208,29 +237,6 @@ require 'includes/layout.php';
             <option value="partial"><?= clmsT('Partial') ?></option>
           </select></div>
         <div class="col-12 col-md-8 mb-2"><label class="form-label"><?= clmsT('Notes') ?></label><input type="text" class="form-control" id="receiveNotes"></div>
-      </div>
-      <div class="mb-3" id="itemLevelSection">
-        <button type="button" class="btn btn-outline-secondary btn-sm mb-2" id="toggleItemLevel" aria-expanded="false" aria-controls="itemLevelTable"><?= clmsT('Record per-item actuals (optional)') ?></button>
-        <div id="itemLevelTable" class="d-none table-responsive">
-          <table class="table table-sm">
-            <thead>
-              <tr>
-                <th><?= clmsT('Item') ?></th>
-                <th><?= clmsT('Declared') ?></th>
-                <th><?= clmsT('Actual Cartons *') ?></th>
-                <th><?= clmsT('Pieces / Carton') ?></th>
-                <th><?= clmsT('Total Qty') ?></th>
-                <th><?= clmsT('Unit Price / Factory Price') ?></th>
-                <th><?= clmsT('Total Amount') ?></th>
-                <th><?= clmsT('Actual CBM') ?></th>
-                <th><?= clmsT('Actual Weight') ?></th>
-                <th><?= clmsT('Condition') ?></th>
-                <th><?= clmsT('Photos') ?></th>
-              </tr>
-            </thead>
-            <tbody id="itemLevelBody"></tbody>
-          </table>
-        </div>
       </div>
       <div class="mb-3">
         <label class="form-label"><?= clmsT('Evidence Photos') ?> <span class="text-danger"><?= clmsT('*required if variance or damage') ?></span></label>

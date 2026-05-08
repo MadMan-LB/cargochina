@@ -11,6 +11,7 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 require_once __DIR__ . '/sidebar_permissions.php';
+require_once __DIR__ . '/i18n.php';
 
 if (empty($_SESSION['user_id'])) {
     $loginUrl = '/cargochina/login.php';

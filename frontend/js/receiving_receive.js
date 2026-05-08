@@ -227,11 +227,14 @@ async function loadOrder() {
     })
         .then((r) => r.json())
         .catch(() => ({}));
-    const itemLevelEnabled = configRes.data?.item_level_receiving_enabled ?? 0;
-    document.getElementById("itemLevelSection").style.display = itemLevelEnabled
-        ? "block"
-        : "none";
-    if (itemLevelEnabled && receiveOrderItems.length) {
+    const itemLevelSection = document.getElementById("itemLevelSection");
+    if (itemLevelSection) {
+        itemLevelSection.style.display = "block";
+        itemLevelSection.dataset.itemLevelRequired = String(
+            configRes.data?.item_level_receiving_enabled ?? 0,
+        );
+    }
+    if (receiveOrderItems.length) {
         const tbody = document.getElementById("itemLevelBody");
         tbody.innerHTML = receiveOrderItems
             .map(
@@ -241,7 +244,7 @@ async function loadOrder() {
           <tr data-order-item-id="${it.id}">
             <td>${escapeHtml((it.description_cn || it.description_en || "Item " + (i + 1)).substring(0, 40))}${metaText ? `<div class="small text-muted">${escapeHtml(metaText)}</div>` : ""}</td>
             <td>${formatReceiveDisplayNumber(it.declared_cbm || 0, 6)} CBM / ${formatReceiveDisplayNumber(it.declared_weight || 0, 4)} kg<br><span class="small text-muted">${formatReceiveDisplayNumber(it.cartons || 0, 4)} ${escapeHtml(receiveT("cartons"))} × ${formatReceiveDisplayNumber(it.qty_per_carton || 0, 4)} = ${formatReceiveDisplayNumber(it.quantity || 0, 4)}</span></td>
-            <td><input type="number" class="form-control form-control-sm item-actual-cartons" min="0" step="1" placeholder="${escapeHtml(String(it.cartons || 0))}"></td>
+            <td><input type="number" class="form-control form-control-sm item-actual-cartons" min="0" step="1" value="${escapeHtml(formatReceiveInputNumber(it.cartons || 0, 0))}" placeholder="${escapeHtml(String(it.cartons || 0))}"></td>
             <td><input type="number" class="form-control form-control-sm item-actual-pieces-per-carton" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.qty_per_carton || 0, 4))}"></td>
             <td><input type="number" class="form-control form-control-sm item-actual-quantity" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.quantity || 0, 4))}"></td>
             <td><input type="number" class="form-control form-control-sm item-unit-price" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.unit_price || 0, 4))}"></td>
