@@ -995,7 +995,7 @@
                             <div><strong>Supplier:</strong> ${escapeHtml(supplierDisplay)}</div>
                             <div><strong>Status:</strong> ${getStatusBadge(order.status || "")}</div>
                             <div><strong>Expected Ready:</strong> ${escapeHtml(order.expected_ready_date || "—")}</div>
-                            <div><strong>Destination:</strong> ${escapeHtml(order.destination_country_name || "—")}</div>
+                            <div><strong>${escapeHtml(typeof t === "function" ? t("Destination:") : "Destination:")}</strong> ${escapeHtml(order.destination_country_name && typeof window.formatCountryDisplay === "function" ? window.formatCountryDisplay(order.destination_country_name, order.destination_country_code || "") : order.destination_country_name || "—")}</div>
                             <div><strong>High Alert:</strong> ${escapeHtml(order.high_alert_notes || "—")}</div>
                         </div>
                     </div>

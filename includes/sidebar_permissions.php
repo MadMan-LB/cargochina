@@ -87,6 +87,14 @@ function clmsSidebarPageRegistry(): array
             'icon_svg' => '<svg class="sidebar-icon" viewBox="0 0 24 24"><path d="M3.5 18.49l6-6.01 4 4L22 6.92l-1.41-1.41-7.09 7.97-4-4L2 16.99z" /></svg>',
             'default_roles' => ['ChinaAdmin', 'LebanonAdmin'],
         ],
+        'balances' => [
+            'title' => 'Balances',
+            'description' => 'Employee-safe customer and supplier balances.',
+            'href' => '/cargochina/balances.php',
+            'section' => 'main',
+            'icon_svg' => '<svg class="sidebar-icon" viewBox="0 0 24 24"><path d="M7 4h10a3 3 0 013 3v10a3 3 0 01-3 3H7a3 3 0 01-3-3V7a3 3 0 013-3zm0 2a1 1 0 00-1 1v1h12V7a1 1 0 00-1-1H7zm-1 5v6a1 1 0 001 1h10a1 1 0 001-1v-6H6zm2 2h3v2H8v-2zm5 0h3v2h-3v-2z" /></svg>',
+            'default_roles' => ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin'],
+        ],
         'hs_code_tax' => [
             'title' => 'HS Code Tax',
             'description' => 'HS and tariff planning tools.',
@@ -248,6 +256,7 @@ function clmsSidebarScriptMap(): array
         'assign_container.php' => 'assign_container',
         'expenses.php' => 'expenses',
         'financials.php' => 'financials',
+        'balances.php' => 'balances',
         'hs_code_tax.php' => 'hs_code_tax',
         'calendar.php' => 'calendar',
         'warehouse_stock.php' => 'warehouse_stock',

@@ -142,6 +142,9 @@ class OrderExcelService
             'Supplier',
             'Expected Ready',
             'Status',
+            'Deposit Status',
+            'Paid Amount',
+            'Remaining Balance',
             'Total CBM',
             'Total Weight (kg)',
         ];
@@ -173,6 +176,9 @@ class OrderExcelService
                 $supplierDisplay,
                 (string) ($row['expected_ready_date'] ?? ''),
                 $this->statusText((string) ($row['status'] ?? '')),
+                $this->tr((string) ($row['deposit_status'] ?? 'No Deposit')),
+                round((float) ($row['deposit_paid_amount'] ?? 0), 2),
+                round((float) ($row['remaining_balance'] ?? 0), 2),
                 round($cbm, 4),
                 round($weight, 2),
             ];

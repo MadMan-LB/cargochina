@@ -49,6 +49,10 @@ return [
     'config' => ['SuperAdmin'],
     'expenses' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin', 'WarehouseStaff'],
     'financials' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'],
+    'balances' => [
+        'read' => ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'SuperAdmin'],
+        'write' => ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'SuperAdmin'],
+    ],
     'internal-messages' => ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'SuperAdmin', 'WarehouseStaff'],
     'warehouse-stock' => ['WarehouseStaff', 'ChinaAdmin', 'LebanonAdmin', 'ContainersStaff', 'SuperAdmin'],
     'procurement-drafts' => ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'],

@@ -326,6 +326,8 @@ require 'includes/layout.php';
 $pageScripts = [
   'frontend/js/autocomplete.js?v=' . @filemtime(__DIR__ . '/frontend/js/autocomplete.js'),
   'frontend/js/photo_uploader.js?v=' . @filemtime(__DIR__ . '/frontend/js/photo_uploader.js'),
+  'frontend/js/lib/jsQR.js?v=' . @filemtime(__DIR__ . '/frontend/js/lib/jsQR.js'),
+  'frontend/js/wechat_qr_scanner.js?v=' . @filemtime(__DIR__ . '/frontend/js/wechat_qr_scanner.js'),
 ];
 $pageScript = 'frontend/js/procurement_drafts.js?v=' . @filemtime(__DIR__ . '/frontend/js/procurement_drafts.js');
 require 'includes/footer.php';

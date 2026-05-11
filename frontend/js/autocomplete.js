@@ -15,6 +15,14 @@ function formatAutocompleteParts(...parts) {
         .join(" — ");
 }
 
+function autocompleteCountryDisplay(c) {
+    if (c.label_localized) return c.label_localized;
+    if (typeof window.formatCountryDisplay === "function") {
+        return window.formatCountryDisplay(c.name_localized || c.name || "", c.code || "");
+    }
+    return formatAutocompleteParts(c.name, c.code) || c.code;
+}
+
 const Autocomplete = {
     debounceMs: 120,
     minChars: 1,
@@ -229,7 +237,7 @@ const Autocomplete = {
             ) || `#${o.id}`,
         containers: (c) =>
             formatAutocompleteParts(c.code, `#${c.id}`, c.status) || `#${c.id}`,
-        countries: (c) => formatAutocompleteParts(c.name, c.code) || c.code,
+        countries: autocompleteCountryDisplay,
         expenses: (p) => p.payee || p.name || String(p.id || ""),
     },
 };

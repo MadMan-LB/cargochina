@@ -104,18 +104,22 @@ function setOrderDestinationCountry(countryId, countryName, countryCode) {
         orderDestinationCountryAc.setValue({ id: countryId, name: countryName, code: countryCode });
     }
     const inp = document.getElementById("orderDestinationCountry");
-    if (inp) inp.value = (countryName || "") + " (" + (countryCode || "") + ")";
+    if (inp) {
+        inp.value = typeof window.formatCountryDisplay === "function"
+            ? window.formatCountryDisplay(countryName || "", countryCode || "")
+            : (countryName || "") + " (" + (countryCode || "") + ")";
+    }
 }
 
 function renderOrderDestinationSelect() {
     const sel = document.getElementById("orderDestinationCountrySelect");
     if (!sel) return;
     sel.innerHTML =
-        '<option value="">Select country...</option>' +
+        `<option value="">${escapeHtml(orderT("Select country..."))}</option>` +
         orderCustomerCountryShipping
             .map(
                 (c) =>
-                    `<option value="${c.country_id}">${escapeHtml(c.country_name || "")} (${escapeHtml(c.country_code || "")})</option>`,
+                    `<option value="${c.country_id}">${escapeHtml(typeof window.formatCountryDisplay === "function" ? window.formatCountryDisplay(c.country_name || "", c.country_code || "") : `${c.country_name || ""} (${c.country_code || ""})`)}</option>`,
             )
             .join("");
 }
@@ -682,8 +686,14 @@ document.addEventListener("DOMContentLoaded", () => {
             searchPath: "/search",
             minChars: 0,
             placeholder: orderT("Search country..."),
-            displayValue: (c) => (c.name || "") + " (" + (c.code || "") + ")",
-            renderItem: (c) => (c.name || "") + " (" + (c.code || "") + ")",
+            displayValue: (c) =>
+                typeof window.formatCountryDisplay === "function"
+                    ? window.formatCountryDisplay(c.name || "", c.code || "")
+                    : (c.name || "") + " (" + (c.code || "") + ")",
+            renderItem: (c) =>
+                typeof window.formatCountryDisplay === "function"
+                    ? window.formatCountryDisplay(c.name || "", c.code || "")
+                    : (c.name || "") + " (" + (c.code || "") + ")",
             onSelect: (c) => {
                 document.getElementById("orderDestinationCountryId").value = c.id || "";
             },
@@ -818,6 +828,21 @@ async function loadOrders() {
                             r.status === "Confirmed") &&
                         !hasCustomerFeedback &&
                         !isDeclinedAfterAutoConfirm;
+                    const canRecordDeposit =
+                        !!window.CLMS_CAN_USE_BALANCES &&
+                        !!r.customer_id &&
+                        r.status !== "Draft" &&
+                        r.status !== "CustomerDeclined" &&
+                        r.status !== "CustomerDeclinedAfterAutoConfirm";
+                    const depositStatus = r.deposit_status || "No Deposit";
+                    const depositClass =
+                        depositStatus === "Paid"
+                            ? "bg-success"
+                            : depositStatus === "Overpaid"
+                              ? "bg-warning text-dark"
+                              : depositStatus === "Partial Deposit"
+                                ? "bg-info text-dark"
+                                : "bg-secondary-subtle text-secondary border";
                     const exportHrefXlsx = isDraftBuilder
                         ? `${window.API_BASE || "/cargochina/api/v1"}/draft-orders/${r.id}/export?format=xlsx`
                         : `${window.API_BASE || "/cargochina/api/v1"}/orders/${r.id}/export?format=xlsx`;
@@ -827,8 +852,8 @@ async function loadOrders() {
         <td>${r.id}</td>
         <td>${escapeHtml(r.customer_name)}${r.customer_priority_level && r.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(r.customer_priority_note || "")}">${escapeHtml(orderT(r.customer_priority_level))}</span>` : ""}</td>
         <td>${escapeHtml(suppDisplay)}</td>
-        <td>${r.expected_ready_date || "—"}${r.destination_country_name ? `<div class="small text-muted">${escapeHtml(r.destination_country_name)}${r.destination_country_code ? ` (${escapeHtml(r.destination_country_code)})` : ""}</div>` : ""}</td>
-        <td><span class="badge ${typeof statusBadgeClass === "function" ? statusBadgeClass(r.status) : "bg-secondary"}">${escapeHtml(typeof statusLabel === "function" ? statusLabel(r.status) : r.status)}</span>${hasCustomerFeedback ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(orderT("This warehouse receipt is already in stock and still waiting on customer review."))}">${escapeHtml(orderT("Customer Feedback Pending"))}</span>` : ""}${isDraftBuilder ? ` <span class="badge bg-dark-subtle text-dark border">${escapeHtml(orderT("Draft Order"))}</span>` : ""}${r.high_alert_notes ? ' <span class="badge bg-warning text-dark" title="' + escapeHtml(r.high_alert_notes) + '">⚠️</span>' : ""}${r.container_code || r.container_eta ? ` <span class="badge bg-info text-dark ms-1" title="${escapeHtml(orderT("Container {code}", { code: r.container_code || "—" }) + (r.container_eta ? ", " + orderT("ETA {date}", { date: r.container_eta }) : ""))}">📦 ${escapeHtml(r.container_code || "—")}${r.container_eta ? " · " + escapeHtml(r.container_eta) : ""}</span>` : ""}</td>
+        <td>${r.expected_ready_date || "—"}${r.destination_country_name ? `<div class="small text-muted">${escapeHtml(typeof window.formatCountryDisplay === "function" ? window.formatCountryDisplay(r.destination_country_name, r.destination_country_code || "") : `${r.destination_country_name}${r.destination_country_code ? ` (${r.destination_country_code})` : ""}`)}</div>` : ""}</td>
+        <td><span class="badge ${typeof statusBadgeClass === "function" ? statusBadgeClass(r.status) : "bg-secondary"}">${escapeHtml(typeof statusLabel === "function" ? statusLabel(r.status) : r.status)}</span>${hasCustomerFeedback ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(orderT("This warehouse receipt is already in stock and still waiting on customer review."))}">${escapeHtml(orderT("Customer Feedback Pending"))}</span>` : ""}${isDraftBuilder ? ` <span class="badge bg-dark-subtle text-dark border">${escapeHtml(orderT("Draft Order"))}</span>` : ""}${r.high_alert_notes ? ' <span class="badge bg-warning text-dark" title="' + escapeHtml(r.high_alert_notes) + '">⚠️</span>' : ""}${r.container_code || r.container_eta ? ` <span class="badge bg-info text-dark ms-1" title="${escapeHtml(orderT("Container {code}", { code: r.container_code || "—" }) + (r.container_eta ? ", " + orderT("ETA {date}", { date: r.container_eta }) : ""))}">📦 ${escapeHtml(r.container_code || "—")}${r.container_eta ? " · " + escapeHtml(r.container_eta) : ""}</span>` : ""}<div class="small mt-1"><span class="badge ${depositClass}">${escapeHtml(orderT(depositStatus))}</span>${Number(r.deposit_paid_amount || 0) > 0 ? ` <span class="text-muted">${escapeHtml(r.currency || "")} ${escapeHtml(typeof formatDisplayAmount === "function" ? formatDisplayAmount(r.deposit_paid_amount, { minDecimals: 2 }) : String(r.deposit_paid_amount))}</span>` : ""}</div></td>
         <td class="table-actions">
           <button class="btn btn-sm btn-outline-info" onclick="showOrderInfo(${r.id})" title="${escapeHtml(orderT("View order details"))}">ℹ</button>
           <button class="btn btn-sm btn-outline-primary" onclick="editOrder(${r.id})">${escapeHtml(orderT(isDraftBuilder ? "Open Builder" : "Edit"))}</button>
@@ -838,6 +863,7 @@ async function loadOrders() {
           ${r.status === "Submitted" ? `<button class="btn btn-sm btn-success" onclick="approveOrder(${r.id})">${escapeHtml(orderT("Approve"))}</button>` : ""}
           ${r.status === "AwaitingCustomerConfirmation" ? `<button class="btn btn-sm btn-warning" onclick="confirmOrder(${r.id})">${escapeHtml(orderT("Confirm"))}</button>` : ""}
           ${canAssignToDraft ? `<button class="btn btn-sm btn-outline-primary" onclick="openAssignDraftModal(${r.id}, '${escapeHtml(r.customer_name)}')" title="${escapeHtml(orderT("Assign to Shipment Draft"))}">→ ${escapeHtml(orderT("Draft"))}</button>` : ""}
+          ${canRecordDeposit ? `<a class="btn btn-sm btn-outline-primary" href="/cargochina/balances.php?action=deposit&order_id=${encodeURIComponent(r.id)}">${escapeHtml(orderT("Deposit"))}</a>` : ""}
           ${isDeclinedAfterAutoConfirm ? `<button class="btn btn-sm btn-outline-danger" onclick="resetOrderAfterDecline(${r.id})" title="${escapeHtml(orderT("Undo the receipt result and move the order back to Submitted"))}">${escapeHtml(orderT("Reset"))}</button>` : ""}
           <button class="btn btn-sm btn-outline-secondary" onclick="showOrderFinance(${r.id})" title="${escapeHtml(orderT("P&L / Finance"))}">$</button>
         </td>
@@ -1986,7 +2012,7 @@ async function copyOrder(id) {
                 orderDestinationCountryAc.setValue({ id: destId, name: destName, code: destCode });
             }
             const destInp = document.getElementById("orderDestinationCountry");
-            if (destInp) destInp.value = (destName || "") + " (" + (destCode || "") + ")";
+            if (destInp) destInp.value = typeof window.formatCountryDisplay === "function" ? window.formatCountryDisplay(destName || "", destCode || "") : (destName || "") + " (" + (destCode || "") + ")";
         }
         let custRes;
         try {
@@ -2127,7 +2153,7 @@ async function editOrder(id) {
                 orderDestinationCountryAc.setValue({ id: destId, name: destName, code: destCode });
             }
             const destInp = document.getElementById("orderDestinationCountry");
-            if (destInp) destInp.value = (destName || "") + " (" + (destCode || "") + ")";
+            if (destInp) destInp.value = typeof window.formatCountryDisplay === "function" ? window.formatCountryDisplay(destName || "", destCode || "") : (destName || "") + " (" + (destCode || "") + ")";
         }
         let custRes;
         try {
@@ -2715,6 +2741,18 @@ async function showOrderInfo(id) {
         const receiptItemRows = (receipt?.items || [])
             .map((it) => {
                 const metaText = orderItemMetaText(it);
+                const splits = Array.isArray(it.packaging_splits)
+                    ? it.packaging_splits
+                    : [];
+                const receivedQty = splits.length
+                    ? splits
+                          .map(
+                              (split, index) =>
+                                  `<div>${escapeHtml(orderT("Line {line}", { line: index + 1 }))}: ${split.cartons ?? "—"} × ${split.pieces_per_carton ?? "—"} = ${split.quantity ?? "—"}</div>`,
+                          )
+                          .join("") +
+                      `<div class="text-muted">${escapeHtml(orderT("Item total"))}: ${it.actual_quantity ?? "—"}</div>`
+                    : `${it.actual_cartons ?? "—"} × ${it.actual_pieces_per_carton ?? "—"} = ${it.actual_quantity ?? "—"}`;
                 const description = escapeHtml(
                     typeof descText === "function"
                         ? descText(it)
@@ -2722,7 +2760,7 @@ async function showOrderInfo(id) {
                 );
                 return `<tr>
                   <td class="small">${description}${metaText ? `<div class="text-muted">${escapeHtml(metaText)}</div>` : ""}</td>
-                  <td class="text-end small">${it.actual_cartons ?? "—"} × ${it.actual_pieces_per_carton ?? "—"} = ${it.actual_quantity ?? "—"}</td>
+                  <td class="text-end small">${receivedQty}</td>
                   <td class="text-end small">${it.unit_price != null ? fmtOrderAmount(it.unit_price) : "—"} / ${it.total_amount != null ? fmtOrderAmount(it.total_amount) : "—"}</td>
                   <td class="text-end small">${it.actual_cbm ?? "—"} / ${it.actual_weight ?? "—"}</td>
                 </tr>`;

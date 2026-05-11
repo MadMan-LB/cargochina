@@ -36,17 +36,17 @@ final class OrderCountryService
         if (count($allowedIds) === 1) {
             $onlyId = $allowedIds[0];
             if ($requestedCountryId !== null && $requestedCountryId !== $onlyId) {
-                jsonError('Destination country must match the selected customer country.', 400);
+                jsonError('Destination country must match the selected customer country.', 400, ['destination_country_id' => 'Choose one of the selected customer\'s countries.']);
             }
             return $onlyId;
         }
 
         if ($requestedCountryId === null) {
-            jsonError('Destination country is required when the selected customer has multiple countries.', 400);
+            jsonError('Destination country is required when the selected customer has multiple countries.', 400, ['destination_country_id' => 'Choose one of the selected customer\'s countries.']);
         }
 
         if (!in_array($requestedCountryId, $allowedIds, true)) {
-            jsonError('Destination country must be one of the selected customer countries.', 400);
+            jsonError('Destination country must be one of the selected customer countries.', 400, ['destination_country_id' => 'Choose one of the selected customer\'s countries.']);
         }
 
         return $requestedCountryId;

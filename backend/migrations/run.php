@@ -37,7 +37,13 @@ foreach ($files as $file) {
     foreach ($statements as $st) {
         if ($st === '') continue;
         try {
-            $pdo->exec($st . ';');
+            $result = $pdo->query($st . ';');
+            if ($result instanceof PDOStatement) {
+                do {
+                    $result->fetchAll(PDO::FETCH_ASSOC);
+                } while ($result->nextRowset());
+                $result->closeCursor();
+            }
         } catch (PDOException $e) {
             if (strpos($name, '031_seed') !== false && strpos($e->getMessage(), '1136') !== false) {
                 echo "Warning: Skipping seed statement (schema mismatch): " . substr($st, 0, 80) . "...\n";

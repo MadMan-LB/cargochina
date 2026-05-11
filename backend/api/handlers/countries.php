@@ -26,6 +26,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         );
         $stmt->execute([$like, $like]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as &$row) {
+            $row['name_localized'] = function_exists('clmsCountryDisplayName') ? clmsCountryDisplayName($row['name'] ?? '', $row['code'] ?? '') : ($row['name'] ?? '');
+            $row['label_localized'] = function_exists('clmsCountryDisplayLabel') ? clmsCountryDisplayLabel($row['name'] ?? '', $row['code'] ?? '') : trim(($row['name'] ?? '') . ' (' . ($row['code'] ?? '') . ')');
+        }
+        unset($row);
         jsonResponse(['data' => $rows]);
     }
 
@@ -41,7 +46,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $sql .= " ORDER BY name";
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
-        jsonResponse(['data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as &$row) {
+            $row['name_localized'] = function_exists('clmsCountryDisplayName') ? clmsCountryDisplayName($row['name'] ?? '', $row['code'] ?? '') : ($row['name'] ?? '');
+            $row['label_localized'] = function_exists('clmsCountryDisplayLabel') ? clmsCountryDisplayLabel($row['name'] ?? '', $row['code'] ?? '') : trim(($row['name'] ?? '') . ' (' . ($row['code'] ?? '') . ')');
+        }
+        unset($row);
+        jsonResponse(['data' => $rows]);
     }
 
     jsonError('Not found', 404);

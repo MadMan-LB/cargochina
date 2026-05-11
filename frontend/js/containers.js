@@ -43,6 +43,9 @@ function getContainerDestinationCountryId(container) {
 }
 
 function getContainerDestinationDisplay(container) {
+    if (container?.destination_country_name && typeof window.formatCountryDisplay === "function") {
+        return window.formatCountryDisplay(container.destination_country_name, container.destination_country_code || "");
+    }
     return (
         container?.destination_country_name ||
         container?.destination_country ||
@@ -58,6 +61,9 @@ function getOrderDestinationCountryId(order) {
 
 function getOrderDestinationDisplay(order) {
     if (order?.destination_country_name) {
+        if (typeof window.formatCountryDisplay === "function") {
+            return window.formatCountryDisplay(order.destination_country_name, order.destination_country_code || "");
+        }
         return order.destination_country_code
             ? `${order.destination_country_name} (${order.destination_country_code})`
             : order.destination_country_name;

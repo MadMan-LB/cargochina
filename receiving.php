@@ -190,9 +190,15 @@ require 'includes/layout.php';
             <div class="fw-semibold"><?= clmsT('Item Quantity & Price') ?></div>
             <div class="small text-muted"><?= clmsT('Edit cartons, pieces per carton, factory price, and totals per item before recording the receipt.') ?></div>
           </div>
-          <button type="button" class="btn btn-outline-secondary btn-sm" id="toggleItemLevel" aria-expanded="true" aria-controls="itemLevelTable"><?= clmsT('Hide item details') ?></button>
-        </div>
-        <div id="itemLevelTable" class="table-responsive">
+<button 
+  type="button" 
+  class="btn btn-outline-secondary btn-sm" 
+  id="toggleItemLevel" 
+  aria-expanded="false" 
+  aria-controls="itemLevelTable">
+  <?= clmsT('Show item details') ?>
+</button>        </div>
+        <div id="itemLevelTable" class="table-responsive d-none">
           <table class="table table-sm align-middle">
             <thead>
               <tr>

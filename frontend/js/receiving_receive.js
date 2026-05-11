@@ -72,7 +72,11 @@ function setLoading(el, loading) {
 function formatReceiveInputNumber(value, decimals = 4) {
     const numeric = parseFloat(value);
     if (!Number.isFinite(numeric) || numeric <= 0) return "";
-    return numeric.toFixed(decimals).replace(/\.?0+$/, "");
+    if (decimals <= 0) return numeric.toFixed(0);
+    return numeric
+        .toFixed(decimals)
+        .replace(/(\.\d*?[1-9])0+$/, "$1")
+        .replace(/\.0+$/, "");
 }
 
 function formatReceiveDisplayNumber(value, decimals = 4) {
@@ -129,10 +133,71 @@ function recalcReceiveItemRow(row, source = "auto") {
     if (amountInput && source !== "amount" && quantity > 0 && unitPrice > 0) {
         amountInput.value = formatReceiveInputNumber(quantity * unitPrice, 4);
     }
+    updateReceiveItemSplitTotals(row.dataset.orderItemId || row.dataset.parentOrderItemId);
+}
+
+function getReceiveItemRows(orderItemId) {
+    return Array.from(
+        document.querySelectorAll(
+            `tr[data-order-item-id="${orderItemId}"], tr[data-parent-order-item-id="${orderItemId}"]`,
+        ),
+    );
+}
+
+function updateReceiveItemSplitTotals(orderItemId) {
+    if (!orderItemId) return;
+    const parentRow = document.querySelector(`tr[data-order-item-id="${orderItemId}"]`);
+    if (!parentRow) return;
+    const totals = getReceiveItemRows(orderItemId).reduce(
+        (acc, row) => {
+            acc.cartons += parseFloat(row.querySelector(".item-actual-cartons")?.value || 0) || 0;
+            acc.qty += parseFloat(row.querySelector(".item-actual-quantity")?.value || 0) || 0;
+            acc.amount += parseFloat(row.querySelector(".item-total-amount")?.value || 0) || 0;
+            return acc;
+        },
+        { cartons: 0, qty: 0, amount: 0 },
+    );
+    const target = parentRow.querySelector(".item-split-total");
+    if (target) {
+        target.textContent = receiveT("{cartons} cartons · {qty} pcs · {amount} amount", {
+            cartons: formatReceiveDisplayNumber(totals.cartons, 4),
+            qty: formatReceiveDisplayNumber(totals.qty, 4),
+            amount: formatReceiveDisplayNumber(totals.amount, 4),
+        });
+    }
+    updateReceiveOrderLevelTotals();
+}
+
+function updateReceiveOrderLevelTotals() {
+    const itemRows = Array.from(document.querySelectorAll("tr[data-order-item-id]"));
+    if (!itemRows.length) return;
+    const totals = itemRows.reduce(
+        (acc, row) => {
+            const orderItemId = row.dataset.orderItemId;
+            getReceiveItemRows(orderItemId).forEach((line) => {
+                acc.cartons += parseFloat(line.querySelector(".item-actual-cartons")?.value || 0) || 0;
+            });
+            acc.cbm += parseFloat(row.querySelector(".item-actual-cbm")?.value || 0) || 0;
+            acc.weight += parseFloat(row.querySelector(".item-actual-weight")?.value || 0) || 0;
+            return acc;
+        },
+        { cartons: 0, cbm: 0, weight: 0 },
+    );
+    const cartonsInput = document.getElementById("actualCartons");
+    const cbmInput = document.getElementById("actualCbm");
+    const weightInput = document.getElementById("actualWeight");
+    if (cartonsInput && totals.cartons > 0) cartonsInput.value = formatReceiveInputNumber(totals.cartons, 0);
+    if (cbmInput && totals.cbm > 0) cbmInput.value = formatReceiveInputNumber(totals.cbm, 6);
+    if (weightInput && totals.weight > 0) weightInput.value = formatReceiveInputNumber(totals.weight, 4);
 }
 
 function bindReceiveItemCalculation(row) {
     const markDirty = () => {
+        const parentId = row.dataset.parentOrderItemId;
+        const target = parentId
+            ? document.querySelector(`tr[data-order-item-id="${parentId}"]`)
+            : row;
+        if (target) target.dataset.itemDirty = "1";
         row.dataset.itemDirty = "1";
     };
     row.querySelector(".item-actual-cartons")?.addEventListener("input", () => {
@@ -154,10 +219,75 @@ function bindReceiveItemCalculation(row) {
         recalcReceiveItemRow(row, "unit_price");
     });
     row.querySelector(".item-total-amount")?.addEventListener("input", markDirty);
-    row.querySelector(".item-actual-cbm")?.addEventListener("input", markDirty);
-    row.querySelector(".item-actual-weight")?.addEventListener("input", markDirty);
+    row.querySelector(".item-actual-cbm")?.addEventListener("input", () => {
+        markDirty();
+        updateReceiveOrderLevelTotals();
+    });
+    row.querySelector(".item-actual-weight")?.addEventListener("input", () => {
+        markDirty();
+        updateReceiveOrderLevelTotals();
+    });
     row.querySelector(".item-condition")?.addEventListener("change", markDirty);
     recalcReceiveItemRow(row);
+}
+
+function receivePackagingSplitCells(split = {}, removable = false) {
+    return `
+            <td><input type="number" class="form-control form-control-sm item-actual-cartons" min="0" step="1" value="${escapeHtml(formatReceiveInputNumber(split.cartons || 0, 0))}"></td>
+            <td><input type="number" class="form-control form-control-sm item-actual-pieces-per-carton" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(split.pieces_per_carton || 0, 4))}"></td>
+            <td><input type="number" class="form-control form-control-sm item-actual-quantity" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(split.quantity || 0, 4))}"></td>
+            <td><input type="number" class="form-control form-control-sm item-unit-price" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(split.unit_price || 0, 4))}"></td>
+            <td><input type="number" class="form-control form-control-sm item-total-amount" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(split.total_amount || 0, 4))}">${removable ? `<button type="button" class="btn btn-sm btn-outline-danger mt-1 item-remove-split-line">${escapeHtml(receiveT("Remove split"))}</button>` : ""}</td>`;
+}
+
+function addReceivePackagingSplitLine(orderItemId, split = {}) {
+    const parentRow = document.querySelector(`tr[data-order-item-id="${orderItemId}"]`);
+    if (!parentRow) return;
+    const splitRow = document.createElement("tr");
+    splitRow.className = "item-packaging-split-row";
+    splitRow.dataset.parentOrderItemId = String(orderItemId);
+    splitRow.innerHTML = `
+            <td class="small text-muted ps-4">${escapeHtml(receiveT("Packaging split"))}</td>
+            <td></td>
+            ${receivePackagingSplitCells(split, true)}
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>`;
+    let insertAfter = parentRow;
+    while (insertAfter.nextElementSibling?.dataset?.parentOrderItemId === String(orderItemId)) {
+        insertAfter = insertAfter.nextElementSibling;
+    }
+    insertAfter.after(splitRow);
+    bindReceiveItemCalculation(splitRow);
+    splitRow.querySelector(".item-remove-split-line")?.addEventListener("click", () => {
+        parentRow.dataset.itemDirty = "1";
+        splitRow.remove();
+        updateReceiveItemSplitTotals(orderItemId);
+    });
+    parentRow.dataset.itemDirty = "1";
+    updateReceiveItemSplitTotals(orderItemId);
+}
+
+function collectReceivePackagingSplits(orderItemId) {
+    return getReceiveItemRows(orderItemId)
+        .map((row) => {
+            const cartons = parseFloat(row.querySelector(".item-actual-cartons")?.value || 0) || 0;
+            const pieces = parseFloat(row.querySelector(".item-actual-pieces-per-carton")?.value || 0) || 0;
+            const quantity = parseFloat(row.querySelector(".item-actual-quantity")?.value || 0) || 0;
+            const unitPrice = parseFloat(row.querySelector(".item-unit-price")?.value || 0) || 0;
+            const totalAmount = parseFloat(row.querySelector(".item-total-amount")?.value || 0) || 0;
+            return {
+                cartons: cartons || null,
+                pieces_per_carton: pieces || null,
+                quantity: quantity || null,
+                unit_price: unitPrice || null,
+                total_amount: totalAmount || null,
+            };
+        })
+        .filter((split) =>
+            Object.values(split).some((value) => value !== null && value !== ""),
+        );
 }
 
 async function loadOrder() {
@@ -242,7 +372,7 @@ async function loadOrder() {
                     const metaText = getReceiveItemMetaText(it);
                     return `
           <tr data-order-item-id="${it.id}">
-            <td>${escapeHtml((it.description_cn || it.description_en || "Item " + (i + 1)).substring(0, 40))}${metaText ? `<div class="small text-muted">${escapeHtml(metaText)}</div>` : ""}</td>
+            <td>${escapeHtml((it.description_cn || it.description_en || "Item " + (i + 1)).substring(0, 40))}${metaText ? `<div class="small text-muted">${escapeHtml(metaText)}</div>` : ""}<div class="small text-muted item-split-total mt-1"></div><button type="button" class="btn btn-sm btn-outline-primary mt-1 item-add-split-line" data-order-item-id="${it.id}">+ ${escapeHtml(receiveT("Split"))}</button></td>
             <td>${formatReceiveDisplayNumber(it.declared_cbm || 0, 6)} CBM / ${formatReceiveDisplayNumber(it.declared_weight || 0, 4)} kg<br><span class="small text-muted">${formatReceiveDisplayNumber(it.cartons || 0, 4)} ${escapeHtml(receiveT("cartons"))} × ${formatReceiveDisplayNumber(it.qty_per_carton || 0, 4)} = ${formatReceiveDisplayNumber(it.quantity || 0, 4)}</span></td>
             <td><input type="number" class="form-control form-control-sm item-actual-cartons" min="0" step="1" value="${escapeHtml(formatReceiveInputNumber(it.cartons || 0, 0))}" placeholder="${escapeHtml(String(it.cartons || 0))}"></td>
             <td><input type="number" class="form-control form-control-sm item-actual-pieces-per-carton" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.qty_per_carton || 0, 4))}"></td>
@@ -260,6 +390,11 @@ async function loadOrder() {
             .join("");
         tbody.querySelectorAll("tr[data-order-item-id]").forEach((row) => {
             bindReceiveItemCalculation(row);
+        });
+        tbody.querySelectorAll(".item-add-split-line").forEach((btn) => {
+            btn.addEventListener("click", () => {
+                addReceivePackagingSplitLine(btn.dataset.orderItemId);
+            });
         });
         tbody.querySelectorAll(".item-add-photo").forEach((btn) => {
             const row = btn.closest("tr");
@@ -466,6 +601,16 @@ document.getElementById("submitReceiveBtn").onclick = async () => {
             const aCartons = parseInt(
                 row.querySelector(".item-actual-cartons")?.value || 0,
             );
+            const packagingSplits = collectReceivePackagingSplits(it.id);
+            const splitTotals = packagingSplits.reduce(
+                (acc, split) => {
+                    acc.cartons += parseFloat(split.cartons || 0) || 0;
+                    acc.quantity += parseFloat(split.quantity || 0) || 0;
+                    acc.amount += parseFloat(split.total_amount || 0) || 0;
+                    return acc;
+                },
+                { cartons: 0, quantity: 0, amount: 0 },
+            );
             const aCbm = parseFloat(
                 row.querySelector(".item-actual-cbm")?.value || 0,
             );
@@ -488,6 +633,7 @@ document.getElementById("submitReceiveBtn").onclick = async () => {
             const itemDirty = row.dataset.itemDirty === "1";
             if (
                 itemDirty ||
+                packagingSplits.length > 1 ||
                 aCartons > 0 ||
                 aCbm > 0 ||
                 aWeight > 0 ||
@@ -495,11 +641,12 @@ document.getElementById("submitReceiveBtn").onclick = async () => {
             ) {
                 items.push({
                     order_item_id: it.id,
-                    actual_cartons: aCartons || null,
+                    actual_cartons: splitTotals.cartons || aCartons || null,
                     actual_pieces_per_carton: aPiecesPerCarton || null,
-                    actual_quantity: aQuantity || null,
+                    actual_quantity: splitTotals.quantity || aQuantity || null,
                     unit_price: aUnitPrice || null,
-                    total_amount: aTotalAmount || null,
+                    total_amount: splitTotals.amount || aTotalAmount || null,
+                    packaging_splits: packagingSplits,
                     actual_cbm: aCbm || null,
                     actual_weight: aWeight || null,
                     condition:

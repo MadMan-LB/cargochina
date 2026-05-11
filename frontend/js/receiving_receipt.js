@@ -59,6 +59,21 @@ function receiptItemMetaText(item) {
         .join(" · ");
 }
 
+function receiptPackagingSplitsHtml(item) {
+    const splits = Array.isArray(item?.packaging_splits)
+        ? item.packaging_splits
+        : [];
+    if (!splits.length) {
+        return `${receiptNumber(item.actual_cartons || 0, 4)} × ${receiptNumber(item.actual_pieces_per_carton || 0, 4)} = ${receiptNumber(item.actual_quantity || 0, 4)}`;
+    }
+    return splits
+        .map(
+            (split, index) =>
+                `<div>${escapeHtml(receiptT("Line {line}", { line: index + 1 }))}: ${receiptNumber(split.cartons || 0, 4)} × ${receiptNumber(split.pieces_per_carton || 0, 4)} = ${receiptNumber(split.quantity || 0, 4)}${split.unit_price != null ? ` · ${receiptNumber(split.unit_price, 4)} / ${receiptNumber(split.total_amount || 0, 4)}` : ""}</div>`,
+        )
+        .join("");
+}
+
 async function loadReceipt() {
     const res = await api("/receiving/receipts/" + RECEIPT_ID);
     const r = res.data;
@@ -96,7 +111,7 @@ async function loadReceipt() {
                 <tr>
                   <td>${escapeHtml(typeof descText === "function" ? descText(it) : it.description_en || it.description_cn || "-")}${metaText ? `<div class="small text-muted">${escapeHtml(metaText)}</div>` : ""}</td>
                   <td>${receiptNumber(it.declared_cbm || 0, 6)} CBM / ${receiptNumber(it.declared_weight || 0, 4)} kg<br><span class="small text-muted">${receiptNumber(it.cartons || 0, 4)} × ${receiptNumber(it.qty_per_carton || 0, 4)} = ${receiptNumber(it.quantity || 0, 4)}</span></td>
-                  <td>${receiptNumber(it.actual_cartons || 0, 4)} × ${receiptNumber(it.actual_pieces_per_carton || 0, 4)} = ${receiptNumber(it.actual_quantity || 0, 4)}</td>
+                  <td>${receiptPackagingSplitsHtml(it)}<div class="small text-muted">${escapeHtml(receiptT("Item total"))}: ${receiptNumber(it.actual_quantity || 0, 4)}</div></td>
                   <td>${it.unit_price != null ? receiptNumber(it.unit_price, 4) : "-"} / ${it.total_amount != null ? receiptNumber(it.total_amount, 4) : "-"}</td>
                   <td>${it.actual_cbm ?? "-"} CBM / ${it.actual_weight ?? "-"} kg</td>
                   <td>${escapeHtml(receiptStatusText(it.receipt_condition || it.condition || "good"))}</td>

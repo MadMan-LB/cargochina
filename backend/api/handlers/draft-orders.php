@@ -110,7 +110,7 @@ function draftOrderNormalizeExpectedReadyDate($value): ?string
 
     $ts = strtotime($raw);
     if ($ts === false) {
-        jsonError('Invalid expected_ready_date', 400);
+        jsonError('Invalid expected_ready_date', 400, ['expected_ready_date' => 'Invalid expected ready date.']);
     }
 
     return date('Y-m-d', $ts);
@@ -375,10 +375,10 @@ function draftOrderNormalizeSharedCartonContents(PDO $pdo, array $rawContents, i
 
         $supplierId = (int) ($rawContent['supplier_id'] ?? ($product['supplier_id'] ?? $sectionSupplierId));
         if ($supplierId <= 0) {
-            jsonError('Each contained shared-carton item needs a supplier.', 400);
+            jsonError('Each contained shared-carton item needs a supplier.', 400, ['shared_carton_contents.supplier_id' => 'Contained supplier is required.']);
         }
         if ($product && !empty($product['supplier_id']) && (int) $product['supplier_id'] !== $supplierId) {
-            jsonError('Selected contained product belongs to another supplier.', 400);
+            jsonError('Selected contained product belongs to another supplier.', 400, ['shared_carton_contents.supplier_id' => 'Selected contained product belongs to another supplier.']);
         }
 
         $description = draftOrderBuildDescriptionStrings($pdo, $rawContent['description_entries'] ?? []);
@@ -397,7 +397,7 @@ function draftOrderNormalizeSharedCartonContents(PDO $pdo, array $rawContents, i
 
         $quantityPerCarton = round((float) ($rawContent['quantity_per_carton'] ?? $rawContent['quantity'] ?? 0), 4);
         if ($quantityPerCarton <= 0) {
-            jsonError('Each contained shared-carton item needs quantity inside the carton.', 400);
+            jsonError('Each contained shared-carton item needs quantity inside the carton.', 400, ['shared_carton_contents.quantity_per_carton' => 'Quantity inside the carton is required.']);
         }
 
         $unitPrice = isset($rawContent['unit_price']) && $rawContent['unit_price'] !== ''
@@ -434,7 +434,7 @@ function draftOrderNormalizeSharedCartonContents(PDO $pdo, array $rawContents, i
     }
 
     if (!$normalized) {
-        jsonError('Shared cartons need at least one contained item.', 400);
+        jsonError('Shared cartons need at least one contained item.', 400, ['shared_carton_contents' => 'Shared cartons need contained items.']);
     }
 
     return $normalized;
@@ -660,7 +660,7 @@ function draftOrderSafeSyncProduct(PDO $pdo, array $item): void
     }
 
     if (!empty($product['supplier_id']) && (int) $product['supplier_id'] !== (int) $item['supplier_id']) {
-        jsonError('Selected product belongs to another supplier. Create a separate supplier section instead.', 400);
+        jsonError('Selected product belongs to another supplier. Create a separate supplier section instead.', 400, ['supplier_id' => 'Selected product belongs to another supplier. Create a separate supplier section instead.']);
     }
 
     $assignIfEmpty = static function ($current): bool {
@@ -789,18 +789,18 @@ function draftOrderNormalizeItem(PDO $pdo, array $rawItem, int $supplierId, ?arr
     $cartons = (int) ($rawItem['cartons'] ?? 0);
     $piecesPerCarton = (float) ($rawItem['pieces_per_carton'] ?? $rawItem['qty_per_carton'] ?? 0);
     if ($cartons <= 0 || $piecesPerCarton <= 0) {
-        jsonError('Each item needs cartons and pieces per carton.', 400);
+        jsonError('Each item needs cartons and pieces per carton.', 400, ['items.cartons' => 'Cartons are required.', 'items.pieces_per_carton' => 'Pieces per carton are required.']);
     }
 
     $quantity = round($cartons * $piecesPerCarton, 4);
     $cbmPerUnit = draftOrderPerUnitCbm($rawItem);
     if ($cbmPerUnit <= 0) {
-        jsonError('Each item needs CBM directly or dimensions (L/W/H).', 400);
+        jsonError('Each item needs CBM directly or dimensions (L/W/H).', 400, ['items.cbm' => 'Add CBM or length, width, and height.']);
     }
 
     $weightPerUnit = draftOrderPerUnitWeight($rawItem);
     if ($weightPerUnit < 0) {
-        jsonError('Weight must be zero or positive.', 400);
+        jsonError('Weight must be zero or positive.', 400, ['items.weight' => 'Weight cannot be negative.']);
     }
 
     $multiplier = $dimensionsScope === 'carton' ? $cartons : $quantity;
@@ -815,11 +815,11 @@ function draftOrderNormalizeItem(PDO $pdo, array $rawItem, int $supplierId, ?arr
     $customDesignRequired = !empty($rawItem['custom_design_required']) ? 1 : 0;
     $customDesignNote = trim((string) ($rawItem['custom_design_note'] ?? '')) ?: null;
     if ($customDesignRequired && !$customDesignNote && !$customDesignPaths) {
-        jsonError('Custom design items need a note or at least one design file.', 400);
+        jsonError('Custom design items need a note or at least one design file.', 400, ['items.custom_design' => 'Add a custom design note or file.']);
     }
 
     if ($product && !empty($product['supplier_id']) && (int) $product['supplier_id'] !== $supplierId) {
-        jsonError('Selected product belongs to another supplier. Create a separate supplier section instead.', 400);
+        jsonError('Selected product belongs to another supplier. Create a separate supplier section instead.', 400, ['supplier_id' => 'Selected product belongs to another supplier. Create a separate supplier section instead.']);
     }
 
     $sharedCartonEnabled = !empty($rawItem['shared_carton_enabled']) ? 1 : 0;
@@ -865,7 +865,7 @@ function draftOrderNormalizeItem(PDO $pdo, array $rawItem, int $supplierId, ?arr
             $description = draftOrderBuildDescriptionStrings($pdo, $product['description_entries'] ?? []);
         }
         if (!$description['entries']) {
-            jsonError('Each item needs a description.', 400);
+            jsonError('Each item needs a description.', 400, ['items.description' => 'Item description is required.']);
         }
     }
 
@@ -916,7 +916,7 @@ function draftOrderFlattenSections(PDO $pdo, array $sections): array
     foreach ($sections as $section) {
         $supplierId = (int) ($section['supplier_id'] ?? 0);
         if ($supplierId <= 0) {
-            jsonError('Each supplier section needs a supplier.', 400);
+            jsonError('Each supplier section needs a supplier.', 400, ['supplier_sections.supplier_id' => 'Supplier is required.']);
         }
 
         foreach (($section['items'] ?? []) as $rawItem) {
@@ -932,7 +932,7 @@ function draftOrderFlattenSections(PDO $pdo, array $sections): array
     }
 
     if (!$normalized) {
-        jsonError('At least one supplier section with one item is required.', 400);
+        jsonError('At least one supplier section with one item is required.', 400, ['supplier_sections' => 'Add at least one supplier section.']);
     }
 
     return $normalized;
@@ -1529,7 +1529,7 @@ function draftOrderExportCsv(PDO $pdo, int $orderId): void
         }
     }
     fputcsv($out, [clmsT('Customer'), OrderExcelService::formatCustomerDisplay($order, $customerItems)]);
-    fputcsv($out, [clmsT('Destination Country'), trim((string) (($order['destination_country_name'] ?? '') . (!empty($order['destination_country_code']) ? ' (' . $order['destination_country_code'] . ')' : ''))) ?: '—']);
+    fputcsv($out, [clmsT('Destination Country'), !empty($order['destination_country_name']) ? clmsCountryDisplayLabel($order['destination_country_name'] ?? '', $order['destination_country_code'] ?? '') : '—']);
     fputcsv($out, [clmsT('Expected Ready'), $order['expected_ready_date']]);
     fputcsv($out, [clmsT('Currency'), $order['currency']]);
     fputcsv($out, [clmsT('Status'), clmsStatusLabel((string) $order['status'])]);
@@ -2591,7 +2591,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $expectedDate = draftOrderNormalizeExpectedReadyDate($input['expected_ready_date'] ?? null);
         $currency = strtoupper(trim((string) ($input['currency'] ?? 'USD'))) ?: 'USD';
         if ($customerId <= 0) {
-            jsonError('customer_id is required for legacy migration.', 400);
+            jsonError('customer_id is required for legacy migration.', 400, ['customer_id' => 'Customer is required.']);
         }
         if (!in_array($currency, ['USD', 'RMB'], true)) {
             $currency = 'USD';
@@ -2743,10 +2743,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $currency = strtoupper(trim((string) ($input['currency'] ?? 'USD'))) ?: 'USD';
         $highAlertNotes = trim((string) ($input['high_alert_notes'] ?? '')) ?: null;
         if ($customerId <= 0) {
-            jsonError('customer_id is required.', 400);
+            jsonError('customer_id is required.', 400, ['customer_id' => 'Customer is required.']);
         }
         if (!in_array($currency, ['USD', 'RMB'], true)) {
-            jsonError('Currency must be USD or RMB', 400);
+            jsonError('Currency must be USD or RMB', 400, ['currency' => 'Currency must be USD or RMB.']);
         }
         $destinationCountryId = draftOrderResolveDestinationCountryId($pdo, $customerId, $input);
 
@@ -2807,10 +2807,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             ? (trim((string) ($input['high_alert_notes'] ?? '')) ?: null)
             : ($order['high_alert_notes'] ?? null);
         if ($customerId <= 0) {
-            jsonError('customer_id is required.', 400);
+            jsonError('customer_id is required.', 400, ['customer_id' => 'Customer is required.']);
         }
         if (!in_array($currency, ['USD', 'RMB'], true)) {
-            jsonError('Currency must be USD or RMB', 400);
+            jsonError('Currency must be USD or RMB', 400, ['currency' => 'Currency must be USD or RMB.']);
         }
         $destinationCountryId = draftOrderResolveDestinationCountryId($pdo, $customerId, $input, $order);
 

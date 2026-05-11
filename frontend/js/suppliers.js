@@ -15,11 +15,18 @@ document.addEventListener("DOMContentLoaded", () => {
             .getElementById(id)
             ?.addEventListener("change", applySupplierFilters);
     });
+    const supplierIdFromUrl = new URLSearchParams(window.location.search).get("supplier_id");
+    if (supplierIdFromUrl && isBuyer()) {
+        setTimeout(() => editSupplier(supplierIdFromUrl), 250);
+    }
 });
 
 let additionalIdIndex = 0;
 let supplierAttachments = [];
 let supplierPaymentLinkIndex = 0;
+function supplierT(text, replacements = null) {
+    return typeof t === "function" ? t(text, replacements) : text;
+}
 const fmtSupplierAmount = (value) =>
     typeof window.formatDisplayAmount === "function"
         ? window.formatDisplayAmount(value)
@@ -234,7 +241,7 @@ function setSupplierPaymentQrPreview(row, qrPath = "", fileName = "") {
       <div class="d-flex align-items-center gap-2 mt-2">
         <a href="${typeof uploadedFileUrl === "function" ? uploadedFileUrl(qrPath) : `/cargochina/backend/${escapeHtml(qrPath)}`}" target="_blank" rel="noopener" class="d-inline-flex align-items-center gap-2 text-decoration-none">
           <img src="${typeof uploadedThumbUrl === "function" ? uploadedThumbUrl(qrPath, 48, 48, "cover") : `/cargochina/backend/${escapeHtml(qrPath)}`}" alt="QR" style="width:48px;height:48px;object-fit:cover;border-radius:10px;border:1px solid #dbe4f0;" loading="lazy">
-          <span class="small text-muted">${escapeHtml(fileName || "QR saved")}</span>
+          <span class="small text-muted">${escapeHtml(fileName || supplierT("QR saved"))}</span>
         </a>
         <button type="button" class="btn btn-sm btn-outline-danger supplier-payment-qr-clear">${escapeHtml("×")}</button>
       </div>
@@ -251,13 +258,78 @@ async function handleSupplierPaymentQrFiles(row, files) {
     const path = await uploadFile(file, { category: "supplier-payment-qr" });
     if (!path) return;
     setSupplierPaymentQrPreview(row, path, file.name || "QR image");
-    showToast("Payment QR uploaded");
+    showToast(supplierT("Payment QR uploaded"));
+}
+
+function setSupplierPaymentQrContent(row, decodedContent = "") {
+    const raw = row.querySelector(".supplier-payment-link-qr-raw");
+    const decoded = row.querySelector(".supplier-payment-link-qr-decoded");
+    if (raw) raw.value = decodedContent || "";
+    if (decoded) decoded.value = decodedContent || "";
+}
+
+function fillSupplierFieldIfEmpty(id, value, label) {
+    const field = document.getElementById(id);
+    const nextValue = String(value || "").trim();
+    if (!field || !nextValue) return;
+    const current = field.value.trim();
+    if (!current) {
+        field.value = nextValue;
+        return;
+    }
+    if (current !== nextValue) {
+        showToast(
+            supplierT("{label} already has a value. Existing value was kept.", {
+                label: supplierT(label),
+            }),
+            "warning",
+        );
+    }
+}
+
+function applyWechatQrToSupplierPaymentRow(row, result) {
+    if (!row || !result) return;
+    const method = row.querySelector(".supplier-payment-link-method");
+    const value = row.querySelector(".supplier-payment-link-value");
+    const detail = result.account_detail || result.decoded_qr_content || result.raw_content || "";
+    if (method) method.value = "WeChat";
+    if (value) {
+        if (value.value.trim() && value.value.trim() !== detail) {
+            const replace = window.confirm(
+                supplierT("Replace Existing QR") + "?\n" +
+                    supplierT("The account detail already has a value. Replace it with the scanned QR content?"),
+            );
+            if (!replace) return;
+        }
+        value.value = detail;
+    }
+    setSupplierPaymentQrContent(row, result.raw_content || result.decoded_qr_content || detail);
+    if (result.qr_image_path) {
+        setSupplierPaymentQrPreview(row, result.qr_image_path, supplierT("QR saved"));
+    }
+    fillSupplierFieldIfEmpty("supplierName", result.name, "Name");
+    fillSupplierFieldIfEmpty("supplierPhone", result.phone, "Phone");
+    fillSupplierFieldIfEmpty("supplierAddress", result.address, "Address");
+    showToast(supplierT("WeChat QR detected. Only available QR information was filled. Please complete missing supplier details manually."));
+}
+
+function openSupplierWechatQrScanner(row) {
+    if (typeof window.openWeChatQrScanner !== "function") {
+        showToast(supplierT("QR scanner is not available"), "danger");
+        return;
+    }
+    window.openWeChatQrScanner({
+        excludeSupplierId: () => document.getElementById("supplierId")?.value || "",
+        onResult: (result) => applyWechatQrToSupplierPaymentRow(row, result),
+    });
 }
 
 function bindSupplierPaymentRow(row) {
     const fileInput = row.querySelector(".supplier-payment-qr-input");
     const uploadBtn = row.querySelector(".supplier-payment-qr-btn");
+    const scanBtn = row.querySelector(".supplier-payment-scan-wechat-btn");
     uploadBtn?.addEventListener("click", () => fileInput?.click());
+    scanBtn?.addEventListener("click", () => openSupplierWechatQrScanner(row));
     fileInput?.addEventListener("change", async function () {
         try {
             await handleSupplierPaymentQrFiles(row, this.files || []);
@@ -300,6 +372,8 @@ function addSupplierPaymentLinkRow(rowData = {}) {
             : "RMB";
     const detail = rowData.value || rowData.link || "";
     const qrPath = rowData.qr_image_path || "";
+    const qrRawContent =
+        rowData.qr_raw_content || rowData.decoded_qr_content || "";
     const row = document.createElement("div");
     row.className = "border rounded-3 p-2 supplier-payment-link-row";
     row.dataset.idx = idx;
@@ -316,13 +390,18 @@ function addSupplierPaymentLinkRow(rowData = {}) {
             <option value="USD"${currency === "USD" ? " selected" : ""}>USD</option>
           </select>
         </div>
-        <div class="col-12 col-md-5">
+        <div class="col-12 col-md-4">
           <input type="text" class="form-control form-control-sm supplier-payment-link-value" placeholder="Account / number / URL / account detail" value="${escapeHtml(detail)}">
           <input type="hidden" class="supplier-payment-link-qr" value="${escapeHtml(qrPath)}">
+          <input type="hidden" class="supplier-payment-link-qr-raw" value="${escapeHtml(qrRawContent)}">
+          <input type="hidden" class="supplier-payment-link-qr-decoded" value="${escapeHtml(qrRawContent)}">
           <input type="file" class="d-none supplier-payment-qr-input" accept="image/*,.jpg,.jpeg,.png,.webp,.jfif,.gif,.bmp,.avif">
         </div>
         <div class="col-8 col-md-1">
           <button type="button" class="btn btn-sm btn-outline-secondary w-100 supplier-payment-qr-btn">QR</button>
+        </div>
+        <div class="col-12 col-md-1">
+          <button type="button" class="btn btn-sm btn-outline-primary w-100 supplier-payment-scan-wechat-btn">${escapeHtml(supplierT("Scan WeChat QR"))}</button>
         </div>
         <div class="col-4 col-md-1 text-end">
           <button type="button" class="btn btn-sm btn-outline-danger w-100" onclick="this.closest('.supplier-payment-link-row').remove()">×</button>
@@ -352,6 +431,12 @@ function collectSupplierPaymentLinks() {
             const qrImagePath = row
                 .querySelector(".supplier-payment-link-qr")
                 ?.value?.trim();
+            const qrRawContent = row
+                .querySelector(".supplier-payment-link-qr-raw")
+                ?.value?.trim();
+            const decodedQrContent = row
+                .querySelector(".supplier-payment-link-qr-decoded")
+                ?.value?.trim();
             if (!method && !value && !qrImagePath) return;
             rows.push({
                 method: method || "Bank Transfer",
@@ -360,6 +445,8 @@ function collectSupplierPaymentLinks() {
                 value: value || "",
                 currency: currency === "USD" ? "USD" : "RMB",
                 qr_image_path: qrImagePath || null,
+                qr_raw_content: qrRawContent || null,
+                decoded_qr_content: decodedQrContent || qrRawContent || null,
             });
         });
     return rows;

@@ -5,6 +5,7 @@
  */
 require_once __DIR__ . '/includes/i18n.php';
 require_once __DIR__ . '/includes/sidebar_permissions.php';
+http_response_code(403);
 $roles = $userRoles ?? $_SESSION['user_roles'] ?? [];
 $homeUrl = clmsGetAccessibleHomeUrl($roles);
 ?>

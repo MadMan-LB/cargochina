@@ -146,7 +146,7 @@ function renderCustomerCountryShipping() {
         .map(
             (c) => `
       <div class="d-flex gap-2 mb-2 align-items-center" data-country-shipping-id="${esc(String(c.id))}">
-        <input type="text" class="form-control form-control-sm flex-grow-1 js-country-input" placeholder="Search country..." data-id="${esc(String(c.id))}" value="${esc(c.country_name || "")}" autocomplete="off">
+        <input type="text" class="form-control form-control-sm flex-grow-1 js-country-input" placeholder="${esc(typeof t === "function" ? t("Search country...") : "Search country...")}" data-id="${esc(String(c.id))}" value="${esc(typeof window.formatCountryDisplay === "function" ? window.formatCountryDisplay(c.country_name || "", c.country_code || "") : c.country_name || "")}" autocomplete="off">
         <input type="hidden" class="js-country-id" data-id="${esc(String(c.id))}" value="${c.country_id || ""}">
         <input type="text" class="form-control form-control-sm js-shipping-code-input" style="min-width:120px" placeholder="Shipping code" data-id="${esc(String(c.id))}" value="${esc(c.shipping_code || "")}">
         <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeCustomerCountryShipping('${esc(String(c.id))}')">×</button>
@@ -173,9 +173,15 @@ function initCountryShippingAutocompletes() {
             resource: "countries",
             searchPath: "/search",
             minChars: 0,
-            placeholder: "Search country...",
-            displayValue: (c) => c.name + " (" + c.code + ")",
-            renderItem: (c) => c.name + " (" + c.code + ")",
+            placeholder: typeof t === "function" ? t("Search country...") : "Search country...",
+            displayValue: (c) =>
+                typeof window.formatCountryDisplay === "function"
+                    ? window.formatCountryDisplay(c.name || "", c.code || "")
+                    : c.name + " (" + c.code + ")",
+            renderItem: (c) =>
+                typeof window.formatCountryDisplay === "function"
+                    ? window.formatCountryDisplay(c.name || "", c.code || "")
+                    : c.name + " (" + c.code + ")",
             onSelect: (item) => {
                 const row = customerCountryShipping.find((x) => String(x.id) === dataId);
                 if (row) {

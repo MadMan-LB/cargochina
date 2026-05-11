@@ -65,6 +65,135 @@ function normalizeSupplierPaymentMethodName(?string $value): string
     return '';
 }
 
+function normalizeSupplierQrText(?string $value): ?string
+{
+    $value = trim(preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+/u', ' ', (string) ($value ?? '')) ?? '');
+    if ($value === '') {
+        return null;
+    }
+    return mb_substr($value, 0, 2048, 'UTF-8');
+}
+
+function supplierQrComparable(?string $value): string
+{
+    $value = normalizeSupplierQrText($value);
+    if ($value === null) {
+        return '';
+    }
+    return mb_strtolower(trim($value), 'UTF-8');
+}
+
+function findSupplierByPaymentQrContent(PDO $pdo, ?string $content, ?int $excludeId = null): ?array
+{
+    $needle = supplierQrComparable($content);
+    if ($needle === '' || !supplierTableHasColumn($pdo, 'suppliers', 'payment_links')) {
+        return null;
+    }
+
+    $stmt = $pdo->query("SELECT id, code, name, payment_links FROM suppliers WHERE payment_links IS NOT NULL AND payment_links <> ''");
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $supplier) {
+        if ($excludeId !== null && (int) $supplier['id'] === $excludeId) {
+            continue;
+        }
+        $links = json_decode((string) ($supplier['payment_links'] ?? ''), true);
+        if (!is_array($links)) {
+            continue;
+        }
+        foreach ($links as $link) {
+            if (!is_array($link)) {
+                continue;
+            }
+            $candidates = [
+                $link['qr_raw_content'] ?? null,
+                $link['decoded_qr_content'] ?? null,
+                $link['value'] ?? null,
+                $link['link'] ?? null,
+                $link['account_value'] ?? null,
+            ];
+            foreach ($candidates as $candidate) {
+                if ($needle !== '' && supplierQrComparable($candidate) === $needle) {
+                    return [
+                        'id' => (int) $supplier['id'],
+                        'code' => (string) ($supplier['code'] ?? ''),
+                        'name' => (string) ($supplier['name'] ?? ''),
+                    ];
+                }
+            }
+        }
+    }
+    return null;
+}
+
+function findSupplierByPaymentQrPath(PDO $pdo, ?string $path, ?int $excludeId = null): ?array
+{
+    $needle = trim((string) ($path ?? ''));
+    if ($needle === '' || str_contains($needle, '..') || !supplierTableHasColumn($pdo, 'suppliers', 'payment_links')) {
+        return null;
+    }
+    $stmt = $pdo->query("SELECT id, code, name, payment_links FROM suppliers WHERE payment_links IS NOT NULL AND payment_links <> ''");
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $supplier) {
+        if ($excludeId !== null && (int) $supplier['id'] === $excludeId) {
+            continue;
+        }
+        $links = json_decode((string) ($supplier['payment_links'] ?? ''), true);
+        if (!is_array($links)) {
+            continue;
+        }
+        foreach ($links as $link) {
+            if (is_array($link) && trim((string) ($link['qr_image_path'] ?? '')) === $needle) {
+                return [
+                    'id' => (int) $supplier['id'],
+                    'code' => (string) ($supplier['code'] ?? ''),
+                    'name' => (string) ($supplier['name'] ?? ''),
+                ];
+            }
+        }
+    }
+    return null;
+}
+
+function ensureSupplierQrDuplicateSafety(PDO $pdo, ?string $paymentLinksJson, ?int $excludeId = null): void
+{
+    if (!$paymentLinksJson) {
+        return;
+    }
+    $links = json_decode($paymentLinksJson, true);
+    if (!is_array($links)) {
+        return;
+    }
+    foreach ($links as $link) {
+        if (!is_array($link)) {
+            continue;
+        }
+        foreach ([$link['qr_raw_content'] ?? null, $link['decoded_qr_content'] ?? null] as $content) {
+            $duplicate = findSupplierByPaymentQrContent($pdo, $content, $excludeId);
+            if ($duplicate) {
+                jsonError(
+                    'This QR is Already Linked',
+                    409,
+                    [
+                        'wechat_qr' => 'This QR is Already Linked',
+                        'supplier_id' => $duplicate['id'],
+                        'supplier_name' => $duplicate['name'],
+                    ]
+                );
+            }
+        }
+        $duplicateByPath = findSupplierByPaymentQrPath($pdo, $link['qr_image_path'] ?? null, $excludeId);
+        if ($duplicateByPath) {
+            jsonError(
+                'This QR is Already Linked',
+                409,
+                [
+                    'wechat_qr' => 'This QR is Already Linked',
+                    'supplier_id' => $duplicateByPath['id'],
+                    'supplier_name' => $duplicateByPath['name'],
+                ]
+            );
+        }
+    }
+}
+
 function normalizeSupplierPaymentLinks($value): ?string
 {
     if (!is_array($value)) {
@@ -82,7 +211,9 @@ function normalizeSupplierPaymentLinks($value): ?string
         $content = trim((string) ($row['value'] ?? $row['link'] ?? $row['account_value'] ?? ''));
         $currency = strtoupper(trim((string) ($row['currency'] ?? 'RMB')));
         $qrImagePath = trim((string) ($row['qr_image_path'] ?? $row['qr'] ?? ''));
-        if ($rawMethod === '' && $accountLabel === '' && $content === '' && $qrImagePath === '') {
+        $qrRawContent = normalizeSupplierQrText($row['qr_raw_content'] ?? $row['decoded_qr_content'] ?? null);
+        $decodedQrContent = normalizeSupplierQrText($row['decoded_qr_content'] ?? $qrRawContent);
+        if ($rawMethod === '' && $accountLabel === '' && $content === '' && $qrImagePath === '' && $qrRawContent === null && $decodedQrContent === null) {
             continue;
         }
         if (!in_array($currency, ['RMB', 'USD'], true)) {
@@ -91,7 +222,7 @@ function normalizeSupplierPaymentLinks($value): ?string
         if ($qrImagePath !== '' && str_contains($qrImagePath, '..')) {
             jsonError('Invalid supplier payment QR path', 400);
         }
-        $rows[] = [
+        $normalizedRow = [
             'method' => $method,
             'account_label' => $accountLabel ?: $method,
             'label' => $accountLabel ?: $method,
@@ -99,6 +230,15 @@ function normalizeSupplierPaymentLinks($value): ?string
             'currency' => $currency,
             'qr_image_path' => $qrImagePath !== '' ? $qrImagePath : null,
         ];
+        if ($qrRawContent !== null || $decodedQrContent !== null) {
+            $now = date('Y-m-d H:i:s');
+            $normalizedRow['qr_raw_content'] = $qrRawContent;
+            $normalizedRow['decoded_qr_content'] = $decodedQrContent ?: $qrRawContent;
+            $normalizedRow['created_by'] = isset($row['created_by']) ? (int) $row['created_by'] : (getAuthUserId() ?? null);
+            $normalizedRow['created_at'] = trim((string) ($row['created_at'] ?? '')) ?: $now;
+            $normalizedRow['updated_at'] = $now;
+        }
+        $rows[] = $normalizedRow;
     }
 
     return $rows ? json_encode($rows, JSON_UNESCAPED_UNICODE) : null;
@@ -344,6 +484,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
     switch ($method) {
         case 'GET':
+            if ($id === 'wechat-qr-duplicate') {
+                requireRole($buyerRoles);
+                $content = normalizeSupplierQrText($_GET['content'] ?? '');
+                $excludeId = !empty($_GET['exclude_id']) ? (int) $_GET['exclude_id'] : null;
+                if ($content === null) {
+                    jsonError('QR content is required', 400);
+                }
+                jsonResponse(['data' => ['duplicate' => findSupplierByPaymentQrContent($pdo, $content, $excludeId)]]);
+            }
             if ($id === 'search') {
                 $q = trim($_GET['q'] ?? '');
                 if (strlen($q) < 1) {
@@ -362,9 +511,20 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $extra .= ' OR (factory_location IS NOT NULL AND factory_location LIKE ?)';
                     $extraParams[] = $like;
                 }
-                $stmt = $pdo->prepare("SELECT id, code, name, phone, store_id FROM suppliers WHERE name LIKE ? OR code LIKE ? OR (phone IS NOT NULL AND phone LIKE ?) OR (store_id IS NOT NULL AND store_id LIKE ?)$extra ORDER BY name LIMIT 15");
+                if (supplierTableHasColumn($pdo, 'suppliers', 'payment_links')) {
+                    $extra .= ' OR (payment_links IS NOT NULL AND CONVERT(payment_links USING utf8mb4) COLLATE utf8mb4_unicode_ci LIKE ?)';
+                    $extraParams[] = $like;
+                }
+                $selectPaymentLinks = supplierTableHasColumn($pdo, 'suppliers', 'payment_links') ? ', payment_links' : '';
+                $stmt = $pdo->prepare("SELECT id, code, name, phone, store_id$selectPaymentLinks FROM suppliers WHERE name LIKE ? OR code LIKE ? OR (phone IS NOT NULL AND phone LIKE ?) OR (store_id IS NOT NULL AND store_id LIKE ?)$extra ORDER BY name LIMIT 15");
                 $stmt->execute(array_merge([$like, $like, $like, $like], $extraParams));
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                foreach ($rows as &$row) {
+                    if (array_key_exists('payment_links', $row)) {
+                        $row['payment_links'] = decodeSupplierPaymentLinks($row['payment_links'] ?? null);
+                    }
+                }
+                unset($row);
                 jsonResponse(['data' => $rows]);
             }
             if ($id === null) {
@@ -662,6 +822,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $paymentLinks = normalizeSupplierPaymentLinks($input['payment_links'] ?? null);
             [$commissionRate, $commissionType, $commissionAppliedOn] = normalizeSupplierCommission($input);
             ensureSupplierDuplicateSafety($pdo, $name, $storeId, $phone);
+            ensureSupplierQrDuplicateSafety($pdo, $paymentLinks, null);
             try {
                 $hasAddr = supplierTableHasColumn($pdo, 'suppliers', 'address');
                 $hasFax = supplierTableHasColumn($pdo, 'suppliers', 'fax');
@@ -746,6 +907,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $paymentLinks = normalizeSupplierPaymentLinks($input['payment_links'] ?? null);
             [$commissionRate, $commissionType, $commissionAppliedOn] = normalizeSupplierCommission($input);
             ensureSupplierDuplicateSafety($pdo, $name, $storeId, $phone, (int) $id);
+            ensureSupplierQrDuplicateSafety($pdo, $paymentLinks, (int) $id);
             $hasAddr = supplierTableHasColumn($pdo, 'suppliers', 'address');
             $hasFax = supplierTableHasColumn($pdo, 'suppliers', 'fax');
             $hasCommission = supplierTableHasColumn($pdo, 'suppliers', 'commission_rate');

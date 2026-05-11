@@ -120,6 +120,119 @@ function orderTableHasColumn(PDO $pdo, string $table, string $column): bool
     return $cache[$key];
 }
 
+function orderTableExists(PDO $pdo, string $table): bool
+{
+    static $cache = [];
+    if (array_key_exists($table, $cache)) {
+        return $cache[$table];
+    }
+    try {
+        $stmt = $pdo->prepare("SHOW TABLES LIKE ?");
+        $stmt->execute([$table]);
+        $cache[$table] = (bool) $stmt->fetchColumn();
+    } catch (Throwable $e) {
+        $cache[$table] = false;
+    }
+    return $cache[$table];
+}
+
+function orderNormalizeReceiptPackagingSplits(array $itemInput): array
+{
+    $rawSplits = $itemInput['packaging_splits'] ?? $itemInput['splits'] ?? [];
+    if (!is_array($rawSplits)) {
+        $rawSplits = [];
+    }
+
+    $splits = [];
+    foreach ($rawSplits as $rawSplit) {
+        if (!is_array($rawSplit)) {
+            continue;
+        }
+        $cartons = isset($rawSplit['cartons']) && $rawSplit['cartons'] !== '' ? (float) $rawSplit['cartons'] : null;
+        $pieces = isset($rawSplit['pieces_per_carton']) && $rawSplit['pieces_per_carton'] !== '' ? (float) $rawSplit['pieces_per_carton'] : null;
+        $quantity = isset($rawSplit['quantity']) && $rawSplit['quantity'] !== '' ? (float) $rawSplit['quantity'] : null;
+        $unitPrice = isset($rawSplit['unit_price']) && $rawSplit['unit_price'] !== '' ? (float) $rawSplit['unit_price'] : null;
+        $totalAmount = isset($rawSplit['total_amount']) && $rawSplit['total_amount'] !== '' ? (float) $rawSplit['total_amount'] : null;
+
+        if (($quantity === null || $quantity <= 0) && $cartons !== null && $pieces !== null && $cartons > 0 && $pieces > 0) {
+            $quantity = round($cartons * $pieces, 4);
+        }
+        if (($totalAmount === null || $totalAmount <= 0) && $quantity !== null && $unitPrice !== null && $quantity > 0 && $unitPrice >= 0) {
+            $totalAmount = round($quantity * $unitPrice, 4);
+        }
+
+        if ($cartons === null && $pieces === null && $quantity === null && $unitPrice === null && $totalAmount === null) {
+            continue;
+        }
+
+        $splits[] = [
+            'cartons' => $cartons,
+            'pieces_per_carton' => $pieces,
+            'quantity' => $quantity,
+            'unit_price' => $unitPrice,
+            'total_amount' => $totalAmount,
+        ];
+    }
+
+    if (!$splits) {
+        $cartons = isset($itemInput['actual_cartons']) && $itemInput['actual_cartons'] !== '' ? (float) $itemInput['actual_cartons'] : null;
+        $pieces = isset($itemInput['actual_pieces_per_carton']) && $itemInput['actual_pieces_per_carton'] !== '' ? (float) $itemInput['actual_pieces_per_carton'] : null;
+        $quantity = isset($itemInput['actual_quantity']) && $itemInput['actual_quantity'] !== '' ? (float) $itemInput['actual_quantity'] : null;
+        $unitPrice = isset($itemInput['unit_price']) && $itemInput['unit_price'] !== '' ? (float) $itemInput['unit_price'] : null;
+        $totalAmount = isset($itemInput['total_amount']) && $itemInput['total_amount'] !== '' ? (float) $itemInput['total_amount'] : null;
+        if ($cartons !== null || $pieces !== null || $quantity !== null || $unitPrice !== null || $totalAmount !== null) {
+            $splits[] = [
+                'cartons' => $cartons,
+                'pieces_per_carton' => $pieces,
+                'quantity' => $quantity,
+                'unit_price' => $unitPrice,
+                'total_amount' => $totalAmount,
+            ];
+        }
+    }
+
+    foreach ($splits as &$split) {
+        if (($split['quantity'] === null || $split['quantity'] <= 0)
+            && $split['cartons'] !== null && $split['pieces_per_carton'] !== null
+            && $split['cartons'] > 0 && $split['pieces_per_carton'] > 0) {
+            $split['quantity'] = round($split['cartons'] * $split['pieces_per_carton'], 4);
+        }
+        if (($split['total_amount'] === null || $split['total_amount'] <= 0)
+            && $split['quantity'] !== null && $split['unit_price'] !== null
+            && $split['quantity'] > 0 && $split['unit_price'] >= 0) {
+            $split['total_amount'] = round($split['quantity'] * $split['unit_price'], 4);
+        }
+    }
+    unset($split);
+
+    return $splits;
+}
+
+function orderAggregateReceiptPackagingSplits(array $splits): array
+{
+    $cartons = 0.0;
+    $quantity = 0.0;
+    $amount = 0.0;
+    $unitPrices = [];
+    $piecesValues = [];
+    foreach ($splits as $split) {
+        if ($split['cartons'] !== null) $cartons += (float) $split['cartons'];
+        if ($split['quantity'] !== null) $quantity += (float) $split['quantity'];
+        if ($split['total_amount'] !== null) $amount += (float) $split['total_amount'];
+        if ($split['unit_price'] !== null) $unitPrices[] = (float) $split['unit_price'];
+        if ($split['pieces_per_carton'] !== null) $piecesValues[] = (float) $split['pieces_per_carton'];
+    }
+    $sameUnitPrice = count(array_unique(array_map(static fn($v) => (string) round($v, 4), $unitPrices))) === 1;
+    $samePieces = count(array_unique(array_map(static fn($v) => (string) round($v, 4), $piecesValues))) === 1;
+    return [
+        'actual_cartons' => $cartons > 0 ? round($cartons, 4) : null,
+        'actual_pieces_per_carton' => $samePieces && $piecesValues ? $piecesValues[0] : null,
+        'actual_quantity' => $quantity > 0 ? round($quantity, 4) : null,
+        'unit_price' => $sameUnitPrice && $unitPrices ? $unitPrices[0] : null,
+        'total_amount' => $amount > 0 ? round($amount, 4) : null,
+    ];
+}
+
 function orderNormalizeItemText($value, int $maxLength = 150): ?string
 {
     $value = trim(preg_replace('/[\x00-\x1F\x7F]+/u', ' ', (string) ($value ?? '')) ?? '');
@@ -652,7 +765,100 @@ function fetchOrdersListRowsForRequest(PDO $pdo): array
         $rows = array_values(array_filter($rows, static fn(array $row): bool => orderRowMatchesSupplierFilter($row, $filterSupplierId)));
     }
 
+    orderAttachDepositSummaries($pdo, $rows);
+
     return $rows;
+}
+
+function orderPaymentStatusFor(float $paid, float $due): string
+{
+    if ($paid <= 0.004) {
+        return 'No Deposit';
+    }
+    if ($due > 0 && $paid > $due + 0.004) {
+        return 'Overpaid';
+    }
+    if ($due > 0 && abs($paid - $due) <= 0.004) {
+        return 'Paid';
+    }
+    if ($due > 0 && $paid < $due) {
+        return 'Partial Deposit';
+    }
+    return 'Partial Deposit';
+}
+
+function orderAttachDepositSummaries(PDO $pdo, array &$rows): void
+{
+    if (!$rows) {
+        return;
+    }
+
+    $orderIds = array_values(array_unique(array_map(static fn(array $row): int => (int) ($row['id'] ?? 0), $rows)));
+    $orderIds = array_values(array_filter($orderIds, static fn(int $id): bool => $id > 0));
+    if (!$orderIds) {
+        return;
+    }
+
+    $paidByOrder = array_fill_keys($orderIds, 0.0);
+    $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
+
+    if (orderTableExists($pdo, 'balance_transactions') && orderTableHasColumn($pdo, 'balance_transactions', 'order_id')) {
+        $sql = "SELECT order_id, SUM(amount) as paid_amount
+            FROM balance_transactions
+            WHERE order_id IN ($placeholders)
+              AND party_type = 'customer'
+              AND direction = 'reduce_balance'
+              AND transaction_type IN ('deposit', 'payment_received')
+            GROUP BY order_id";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($orderIds);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $paidByOrder[(int) $row['order_id']] += (float) $row['paid_amount'];
+        }
+    }
+
+    if (orderTableExists($pdo, 'customer_deposits') && orderTableHasColumn($pdo, 'customer_deposits', 'order_id')) {
+        $notLinked = orderTableExists($pdo, 'balance_transactions')
+            ? "AND NOT EXISTS (SELECT 1 FROM balance_transactions bt WHERE bt.source_table = 'customer_deposits' AND bt.source_id = cd.id)"
+            : '';
+        $sql = "SELECT order_id, SUM(amount) as paid_amount
+            FROM customer_deposits cd
+            WHERE order_id IN ($placeholders)
+              $notLinked
+            GROUP BY order_id";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($orderIds);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $paidByOrder[(int) $row['order_id']] += (float) $row['paid_amount'];
+        }
+    }
+
+    foreach ($rows as &$row) {
+        $due = 0.0;
+        foreach (($row['items'] ?? []) as $item) {
+            if (isset($item['total_amount']) && $item['total_amount'] !== null && $item['total_amount'] !== '') {
+                $due += (float) $item['total_amount'];
+                continue;
+            }
+            $quantity = (float) ($item['quantity'] ?? 0);
+            if ($quantity <= 0) {
+                $cartons = (float) ($item['cartons'] ?? 0);
+                $qtyPerCarton = (float) ($item['qty_per_carton'] ?? 0);
+                $quantity = $cartons > 0 && $qtyPerCarton > 0 ? $cartons * $qtyPerCarton : 0;
+            }
+            $unitPrice = isset($item['sell_price']) && $item['sell_price'] !== null && $item['sell_price'] !== ''
+                ? (float) $item['sell_price']
+                : (float) ($item['unit_price'] ?? 0);
+            $due += $quantity * $unitPrice;
+        }
+        $paid = round((float) ($paidByOrder[(int) ($row['id'] ?? 0)] ?? 0), 4);
+        $due = round($due, 4);
+        $row['order_total_amount'] = $due;
+        $row['deposit_paid_amount'] = $paid;
+        $row['remaining_balance'] = round($due - $paid, 4);
+        $row['deposit_status'] = orderPaymentStatusFor($paid, $due);
+    }
+    unset($row);
 }
 
 function outputOrdersListCsv(array $rows, ?string $filename = null): void
@@ -662,7 +868,7 @@ function outputOrdersListCsv(array $rows, ?string $filename = null): void
     header('Cache-Control: no-cache, no-store, must-revalidate');
 
     $out = fopen('php://output', 'w');
-    fputcsv($out, array_map('clmsT', ['ID', 'Order Type', 'Customer', 'Supplier', 'Expected Ready', 'Status', 'Total CBM', 'Total Weight']));
+    fputcsv($out, array_map('clmsT', ['ID', 'Order Type', 'Customer', 'Supplier', 'Expected Ready', 'Status', 'Deposit Status', 'Paid Amount', 'Remaining Balance', 'Total CBM', 'Total Weight']));
     foreach ($rows as $row) {
         $cbm = 0.0;
         $weight = 0.0;
@@ -688,6 +894,9 @@ function outputOrdersListCsv(array $rows, ?string $filename = null): void
             $supplierDisplay,
             (string) ($row['expected_ready_date'] ?? ''),
             clmsStatusLabel((string) ($row['status'] ?? '')),
+            clmsT((string) ($row['deposit_status'] ?? 'No Deposit')),
+            format_display_amount($row['deposit_paid_amount'] ?? 0, 2),
+            format_display_amount($row['remaining_balance'] ?? 0, 2),
             round($cbm, 4),
             round($weight, 2),
         ]);
@@ -1168,6 +1377,32 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $rii = $pdo->prepare("SELECT wri.*, $receiptItemCols FROM warehouse_receipt_items wri JOIN order_items oi ON wri.order_item_id = oi.id WHERE wri.receipt_id = ?");
                 $rii->execute([$receipt['id']]);
                 $row['receipt']['items'] = $rii->fetchAll(PDO::FETCH_ASSOC);
+                if (orderTableExists($pdo, 'warehouse_receipt_item_splits')) {
+                    $splitStmt = $pdo->prepare(
+                        "SELECT wris.* FROM warehouse_receipt_item_splits wris
+                         JOIN warehouse_receipt_items wri ON wris.receipt_item_id = wri.id
+                         WHERE wri.receipt_id = ?
+                         ORDER BY wris.receipt_item_id, wris.line_no, wris.id"
+                    );
+                    $splitStmt->execute([$receipt['id']]);
+                    $receiptSplits = $splitStmt->fetchAll(PDO::FETCH_ASSOC);
+                    foreach ($row['receipt']['items'] as &$receiptItem) {
+                        $splits = array_values(array_filter($receiptSplits, static fn($split) => (int) $split['receipt_item_id'] === (int) $receiptItem['id']));
+                        if (!$splits && ((float) ($receiptItem['actual_cartons'] ?? 0) > 0 || (float) ($receiptItem['actual_quantity'] ?? 0) > 0)) {
+                            $splits = [[
+                                'receipt_item_id' => (int) $receiptItem['id'],
+                                'line_no' => 1,
+                                'cartons' => $receiptItem['actual_cartons'] ?? null,
+                                'pieces_per_carton' => $receiptItem['actual_pieces_per_carton'] ?? null,
+                                'quantity' => $receiptItem['actual_quantity'] ?? null,
+                                'unit_price' => $receiptItem['unit_price'] ?? null,
+                                'total_amount' => $receiptItem['total_amount'] ?? null,
+                            ]];
+                        }
+                        $receiptItem['packaging_splits'] = $splits;
+                    }
+                    unset($receiptItem);
+                }
                 $config = require dirname(__DIR__, 2) . '/config/config.php';
                 $row['customer_photo_visibility'] = $config['customer_photo_visibility'] ?? 'internal-only';
             }
@@ -1181,6 +1416,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if ($container) {
                 $row['container'] = $container;
             }
+            $singleRow = [$row];
+            orderAttachDepositSummaries($pdo, $singleRow);
+            $row = $singleRow[0];
             jsonResponse(['data' => $row]);
             break;
 
@@ -1559,6 +1797,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $orderVarianceAbs = abs($actualCbm - $declaredCbm);
                 $hasVariance = $orderVariancePct >= $thresholdPct || $orderVarianceAbs >= $thresholdAbs || $condition !== 'good';
                 $itemVariances = [];
+                $normalizedReceiptSplitsByItem = [];
                 if (!empty($itemsInput)) {
                     $sumCbm = 0;
                     $sumWeight = 0;
@@ -1578,6 +1817,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         if (!$oi) {
                             $errors["items.$idx.order_item_id"] = 'Invalid order_item_id';
                             continue;
+                        }
+                        $packagingSplits = orderNormalizeReceiptPackagingSplits($it);
+                        if ($packagingSplits) {
+                            $splitTotals = orderAggregateReceiptPackagingSplits($packagingSplits);
+                            $normalizedReceiptSplitsByItem[$oiId] = $packagingSplits;
+                            foreach ($splitTotals as $field => $value) {
+                                if ($value !== null) {
+                                    $it[$field] = $value;
+                                }
+                            }
                         }
                         $aCbm = isset($it['actual_cbm']) ? (float) $it['actual_cbm'] : null;
                         $aWeight = isset($it['actual_weight']) ? (float) $it['actual_weight'] : null;
@@ -1605,6 +1854,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                             || ($aUnitPrice !== null && $aUnitPrice < 0)
                             || ($aTotalAmount !== null && $aTotalAmount < 0)) {
                             $errors["items.$idx.quantity_price"] = 'Quantity and price fields must be zero or positive';
+                        }
+                        foreach ($packagingSplits as $splitIndex => $split) {
+                            if (($split['cartons'] !== null && $split['cartons'] < 0)
+                                || ($split['pieces_per_carton'] !== null && $split['pieces_per_carton'] < 0)
+                                || ($split['quantity'] !== null && $split['quantity'] < 0)
+                                || ($split['unit_price'] !== null && $split['unit_price'] < 0)
+                                || ($split['total_amount'] !== null && $split['total_amount'] < 0)) {
+                                $errors["items.$idx.packaging_splits.$splitIndex"] = 'Packaging split quantity and price fields must be zero or positive';
+                            }
                         }
                         if (($aCartons !== null && $aCartons < 0)
                             || ($aCbm !== null && $aCbm < 0)
@@ -1675,8 +1933,20 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         }
                         $insItem = $pdo->prepare("INSERT INTO warehouse_receipt_items ($receiptItemCols) VALUES ($receiptItemVals)");
                         $insItemPhoto = $pdo->prepare("INSERT INTO warehouse_receipt_item_photos (receipt_item_id, file_path) VALUES (?,?)");
+                        $insSplit = orderTableExists($pdo, 'warehouse_receipt_item_splits')
+                            ? $pdo->prepare("INSERT INTO warehouse_receipt_item_splits (receipt_item_id, line_no, cartons, pieces_per_carton, quantity, unit_price, total_amount) VALUES (?,?,?,?,?,?,?)")
+                            : null;
                         foreach ($itemsInput as $it) {
                             $oiId = (int) ($it['order_item_id'] ?? 0);
+                            $packagingSplits = $normalizedReceiptSplitsByItem[$oiId] ?? orderNormalizeReceiptPackagingSplits($it);
+                            if ($packagingSplits) {
+                                $splitTotals = orderAggregateReceiptPackagingSplits($packagingSplits);
+                                foreach ($splitTotals as $field => $value) {
+                                    if ($value !== null) {
+                                        $it[$field] = $value;
+                                    }
+                                }
+                            }
                             $aCbm = isset($it['actual_cbm']) ? (float) $it['actual_cbm'] : null;
                             $aWeight = isset($it['actual_weight']) ? (float) $it['actual_weight'] : null;
                             $aCartons = isset($it['actual_cartons']) ? (int) $it['actual_cartons'] : null;
@@ -1712,6 +1982,19 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                             }
                             $insItem->execute($receiptParams);
                             $riId = (int) $pdo->lastInsertId();
+                            if ($insSplit && $packagingSplits) {
+                                foreach (array_values($packagingSplits) as $splitIndex => $split) {
+                                    $insSplit->execute([
+                                        $riId,
+                                        $splitIndex + 1,
+                                        $split['cartons'],
+                                        $split['pieces_per_carton'],
+                                        $split['quantity'],
+                                        $split['unit_price'],
+                                        $split['total_amount'],
+                                    ]);
+                                }
+                            }
                             foreach (normalizeStoredUploadPathList($it['photo_paths'] ?? []) as $p) {
                                 $insItemPhoto->execute([$riId, $p]);
                             }

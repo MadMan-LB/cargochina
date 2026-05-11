@@ -272,5 +272,10 @@ require 'includes/layout.php';
     </div>
   </div>
 </div>
-<?php $pageScript = 'frontend/js/suppliers.js?v=' . filemtime(__DIR__ . '/frontend/js/suppliers.js');
+<?php
+$pageScripts = [
+  'frontend/js/lib/jsQR.js?v=' . @filemtime(__DIR__ . '/frontend/js/lib/jsQR.js'),
+  'frontend/js/wechat_qr_scanner.js?v=' . @filemtime(__DIR__ . '/frontend/js/wechat_qr_scanner.js'),
+];
+$pageScript = 'frontend/js/suppliers.js?v=' . filemtime(__DIR__ . '/frontend/js/suppliers.js');
 require 'includes/footer.php'; ?>

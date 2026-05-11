@@ -172,7 +172,7 @@
                         <div><strong>${escapeHtml(stockT("Supplier:"))}</strong> ${escapeHtml(order.supplier_name || "—")}</div>
                         <div><strong>${escapeHtml(stockT("Status:"))}</strong> ${renderStatusBadge(order.status || "")}</div>
                         <div><strong>${escapeHtml(stockT("Expected Ready:"))}</strong> ${escapeHtml(order.expected_ready_date || "—")}</div>
-                        <div><strong>${escapeHtml(stockT("Destination:"))}</strong> ${escapeHtml(order.destination_country_name || "—")}</div>
+                        <div><strong>${escapeHtml(stockT("Destination:"))}</strong> ${escapeHtml(order.destination_country_name && typeof window.formatCountryDisplay === "function" ? window.formatCountryDisplay(order.destination_country_name, order.destination_country_code || "") : order.destination_country_name || "—")}</div>
                         <div><strong>${escapeHtml(stockT("Shipping Code:"))}</strong> ${escapeHtml(order.default_shipping_code || order.shipping_code || "—")}</div>
                         <div><strong>${escapeHtml(stockT("High Alert:"))}</strong> ${escapeHtml(order.high_alert_notes || "—")}</div>
                     </div>

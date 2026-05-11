@@ -118,6 +118,30 @@ function t(text, replacements = null) {
     }, translated);
 }
 
+let zhHantRegionNames = null;
+function localizedCountryName(name, code = "") {
+    const rawName = String(name || "").trim();
+    const rawCode = String(code || "").trim().toUpperCase();
+    if (uiLocale() !== "zh-CN") return rawName;
+    if (rawCode && /^[A-Z]{2}$/.test(rawCode)) {
+        try {
+            zhHantRegionNames =
+                zhHantRegionNames ||
+                new Intl.DisplayNames(["zh-Hant"], { type: "region" });
+            return zhHantRegionNames.of(rawCode) || rawName;
+        } catch (_) {
+            return rawName;
+        }
+    }
+    return translateUiText(rawName) || rawName;
+}
+
+function formatCountryDisplay(name, code = "") {
+    const displayName = localizedCountryName(name, code);
+    const rawCode = String(code || "").trim().toUpperCase();
+    return `${displayName || ""}${rawCode ? ` (${rawCode})` : ""}`.trim();
+}
+
 function translateTextNode(node) {
     if (!node || node.nodeType !== Node.TEXT_NODE) return;
     const parent = node.parentElement;
@@ -507,6 +531,8 @@ if (typeof window !== "undefined") {
     window.closeActiveModalOrPanel = closeActiveModalOrPanel;
     window.translateTree = translateTree;
     window.translateUiText = translateUiText;
+    window.localizedCountryName = localizedCountryName;
+    window.formatCountryDisplay = formatCountryDisplay;
 }
 
 if (typeof window !== "undefined") {
@@ -598,11 +624,15 @@ async function api(method, path, body = null) {
         const reqId = err.request_id || data.request_id;
         const translatedMsg = t(msg);
         const translatedDetails = details ? t(details) : "";
-        throw new Error(
+        const apiError = new Error(
             translatedMsg +
                 (translatedDetails ? ` ${translatedDetails}` : "") +
                 (reqId ? ` (ref: ${reqId})` : ""),
         );
+        apiError.errors = fieldErrors;
+        apiError.status = res.status;
+        apiError.requestId = reqId;
+        throw apiError;
     }
     if (
         method === "GET" &&

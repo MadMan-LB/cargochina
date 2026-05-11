@@ -277,8 +277,34 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $rip2 = $pdo->prepare("SELECT wrp.*, wri.id as receipt_item_id FROM warehouse_receipt_item_photos wrp JOIN warehouse_receipt_items wri ON wrp.receipt_item_id = wri.id WHERE wri.receipt_id = ?");
             $rip2->execute([$receiptId]);
             $itemPhotos = $rip2->fetchAll(PDO::FETCH_ASSOC);
+            $itemSplits = [];
+            try {
+                $splitStmt = $pdo->prepare(
+                    "SELECT wris.* FROM warehouse_receipt_item_splits wris
+                     JOIN warehouse_receipt_items wri ON wris.receipt_item_id = wri.id
+                     WHERE wri.receipt_id = ?
+                     ORDER BY wris.receipt_item_id, wris.line_no, wris.id"
+                );
+                $splitStmt->execute([$receiptId]);
+                $itemSplits = $splitStmt->fetchAll(PDO::FETCH_ASSOC);
+            } catch (Throwable $e) {
+                $itemSplits = [];
+            }
             foreach ($row['items'] as &$it) {
                 $it['photos'] = array_values(array_filter($itemPhotos, fn($p) => (int)$p['receipt_item_id'] === (int)$it['id']));
+                $splits = array_values(array_filter($itemSplits, fn($s) => (int)$s['receipt_item_id'] === (int)$it['id']));
+                if (!$splits && ((float) ($it['actual_cartons'] ?? 0) > 0 || (float) ($it['actual_quantity'] ?? 0) > 0)) {
+                    $splits = [[
+                        'receipt_item_id' => (int) $it['id'],
+                        'line_no' => 1,
+                        'cartons' => $it['actual_cartons'] ?? null,
+                        'pieces_per_carton' => $it['actual_pieces_per_carton'] ?? null,
+                        'quantity' => $it['actual_quantity'] ?? null,
+                        'unit_price' => $it['unit_price'] ?? null,
+                        'total_amount' => $it['total_amount'] ?? null,
+                    ]];
+                }
+                $it['packaging_splits'] = $splits;
             }
             jsonResponse(['data' => $row]);
         }

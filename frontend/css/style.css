@@ -1626,6 +1626,35 @@ body.d-flex {
   color: #dc2626;
 }
 
+.balance-hero-card .btn {
+  min-width: 11rem;
+}
+
+.balance-summary-grid .metric-card {
+  min-height: 118px;
+}
+
+.balance-summary-value {
+  font-size: 1.25rem !important;
+  word-break: break-word;
+}
+
+.balance-amount {
+  display: inline-block;
+  min-width: 7.5rem;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+#balanceTabContent .table td,
+#balanceTabContent .table th {
+  vertical-align: middle;
+}
+
+#balanceTabContent .table th {
+  white-space: nowrap;
+}
+
 @media (max-width: 1200px) {
 
   .metric-card-grid,
@@ -2065,6 +2094,63 @@ body.d-flex {
 
 #draftOrderModal .draft-order-item-card {
   padding: 0.8rem !important;
+}
+
+#draftOrderModal .draft-order-validation-summary {
+  border-color: #fecaca;
+  background: #fff1f2;
+  color: #991b1b;
+  margin-bottom: 0.85rem;
+}
+
+#draftOrderModal .draft-save-invalid-section {
+  border-color: #fca5a5 !important;
+  box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.14), var(--draft-section-shadow);
+}
+
+#draftOrderModal .draft-save-invalid-scope {
+  border-color: #fca5a5 !important;
+  background: linear-gradient(180deg, #fffafa 0%, #fff5f5 100%) !important;
+  box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.13), var(--draft-item-shadow);
+}
+
+#draftOrderModal .draft-save-invalid-box {
+  border-color: #dc3545 !important;
+  background: #fff7f7 !important;
+}
+
+#draftOrderModal .draft-save-invalid-feedback {
+  color: #b42318;
+  font-size: 0.78rem;
+}
+
+.linked-order-panel {
+  border: 1px solid var(--bs-border-color, #dee2e6);
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 0.65rem 0.85rem;
+}
+
+#balanceLinkedOrderWrap.is-invalid .linked-order-panel,
+#balanceTransactionModal .is-invalid.linked-order-panel {
+  border-color: #dc3545;
+  background: #fff5f5;
+}
+
+#balanceTransactionModal .balance-invalid-feedback {
+  font-size: 0.82rem;
+}
+
+.wechat-qr-video-wrap video {
+  max-height: min(56vh, 420px);
+  object-fit: contain;
+}
+
+.supplier-payment-scan-wechat-btn,
+.draft-quick-supplier-payment-scan-wechat-btn {
+  min-height: 31px;
+  white-space: normal;
+  line-height: 1.1;
 }
 
 #draftOrderModal .draft-item-panel {

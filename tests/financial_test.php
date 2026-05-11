@@ -36,6 +36,15 @@ test('Migration 019 tables exist: customer_deposits', function () use ($pdo) {
     $pdo->query("SELECT 1 FROM customer_deposits LIMIT 0");
 });
 
+test('Migration 061 tables exist: balance_transactions', function () use ($pdo) {
+    $pdo->query("SELECT 1 FROM balance_transactions LIMIT 0");
+});
+
+test('Migration 061/063 columns: balance_transactions employee ledger fields', function () use ($pdo) {
+    $cols = $pdo->query("SHOW COLUMNS FROM balance_transactions WHERE Field IN ('party_type','party_id','transaction_type','amount','currency','payment_method','payment_account_label','payment_account_value','payment_account_qr_path','reference_number','notes','created_by','transaction_date','created_at')")->fetchAll(PDO::FETCH_COLUMN);
+    if (count($cols) < 14) throw new Exception('balance_transactions ledger columns missing');
+});
+
 test('Migration 019 columns: orders.currency', function () use ($pdo) {
     $cols = $pdo->query("SHOW COLUMNS FROM orders WHERE Field = 'currency'")->fetchAll(PDO::FETCH_COLUMN);
     if (count($cols) === 0) throw new Exception('orders.currency column missing');

@@ -45,6 +45,7 @@ if (!file_exists($handlerFile)) {
 
 require_once dirname(__DIR__, 2) . '/backend/config/database.php';
 require_once __DIR__ . '/helpers.php';
+require_once dirname(__DIR__, 2) . '/includes/sidebar_permissions.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
 $input = [];
@@ -81,9 +82,19 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
+    if ($resource === 'balances') {
+        $userRoles = $_SESSION['user_roles'] ?? [];
+        if (!clmsCanRolesAccessPage($userRoles, 'balances')) {
+            http_response_code(403);
+            echo json_encode(['error' => true, 'message' => clmsT('You do not have permission')]);
+            exit;
+        }
+    }
+
     $resourcePermissions = $rbac[$resource] ?? null;
     $permissionKey = $method === 'GET' ? 'read' : 'write';
-    $skipGenericPermission = $resource === 'orders' && in_array($action, ['approve', 'receive', 'confirm'], true);
+    $skipGenericPermission = ($resource === 'orders' && in_array($action, ['approve', 'receive', 'confirm'], true))
+        || $resource === 'balances';
     if (
         !$skipGenericPermission &&
         is_array($resourcePermissions) &&

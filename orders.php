@@ -6,6 +6,9 @@ $currentPage = 'orders';
 $pageTitle = 'Orders';
 require 'includes/layout.php';
 ?>
+<script>
+  window.CLMS_CAN_USE_BALANCES = <?= in_array('balances', $visiblePageIds ?? [], true) ? 'true' : 'false' ?>;
+</script>
 <h1 class="mb-4">Orders</h1>
 <p class="text-muted mb-4">Track draft, approval, customer follow-up, and consolidation readiness from one cleaner workspace.</p>
 

@@ -215,18 +215,21 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $cols = ['id', 'code', 'name', 'default_shipping_code'];
                 $hasPhone = false;
                 $hasEmail = false;
+                $hasPaymentLinks = false;
                 try {
-                    $chk = $pdo->query("SHOW COLUMNS FROM customers WHERE Field IN ('phone','email')");
+                    $chk = $pdo->query("SHOW COLUMNS FROM customers WHERE Field IN ('phone','email','payment_links')");
                     if ($chk) {
                         while ($r = $chk->fetch(PDO::FETCH_ASSOC)) {
                             if ($r['Field'] === 'phone') $hasPhone = true;
                             if ($r['Field'] === 'email') $hasEmail = true;
+                            if ($r['Field'] === 'payment_links') $hasPaymentLinks = true;
                         }
                     }
                 } catch (Throwable $e) {
                 }
                 if ($hasPhone) $cols[] = 'phone';
                 if ($hasEmail) $cols[] = 'email';
+                if ($hasPaymentLinks) $cols[] = 'payment_links';
                 $sel = implode(', ', $cols);
                 $coll = 'COLLATE utf8mb4_unicode_ci';
                 $where = "(name $coll LIKE ?) OR (code $coll LIKE ?) OR (default_shipping_code $coll LIKE ?)";
@@ -237,11 +240,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 if ($hasPhone) { $where .= " OR (phone $coll LIKE ?)"; $params[] = $like; }
                 if ($hasEmail) { $where .= " OR (email $coll LIKE ?)"; $params[] = $like; }
+                if ($hasPaymentLinks) { $where .= " OR (payment_links IS NOT NULL AND CONVERT(payment_links USING utf8mb4) $coll LIKE ?)"; $params[] = $like; }
                 $stmt = $pdo->prepare("SELECT $sel FROM customers WHERE $where ORDER BY name LIMIT 20");
                 $stmt->execute($params);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 foreach ($rows as &$row) {
                     $row['por'] = loadCustomerPorValues($pdo, (int) ($row['id'] ?? 0));
+                    if ($hasPaymentLinks) {
+                        $row['payment_links'] = isset($row['payment_links']) && $row['payment_links'] ? json_decode($row['payment_links'], true) : [];
+                    }
                 }
                 unset($row);
                 jsonResponse(['data' => $rows]);

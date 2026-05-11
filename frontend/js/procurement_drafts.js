@@ -51,12 +51,16 @@
 
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) {
-            throw new Error(
+            const error = new Error(
                 data.message ||
                     draftT(
                         "The request could not be completed. Check the highlighted fields and try again.",
                     ),
             );
+            error.status = res.status;
+            error.errors = data.errors || {};
+            error.response = data;
+            throw error;
         }
         return data;
     }
@@ -159,6 +163,62 @@
         showToast(draftT("Payment QR uploaded"));
     }
 
+    function setDraftQuickSupplierQrContent(row, decodedContent = "") {
+        const raw = row.querySelector(".draft-quick-supplier-payment-qr-raw");
+        const decoded = row.querySelector(".draft-quick-supplier-payment-qr-decoded");
+        if (raw) raw.value = decodedContent || "";
+        if (decoded) decoded.value = decodedContent || "";
+    }
+
+    function fillDraftQuickSupplierFieldIfEmpty(id, value, label) {
+        const field = document.getElementById(id);
+        const nextValue = String(value || "").trim();
+        if (!field || !nextValue) return;
+        const current = field.value.trim();
+        if (!current) {
+            field.value = nextValue;
+        } else if (current !== nextValue) {
+            showToast(draftT("{label} already has a value. Existing value was kept.", { label: draftT(label) }), "warning");
+        }
+    }
+
+    function applyWechatQrToDraftQuickSupplierRow(row, result) {
+        if (!row || !result) return;
+        const method = row.querySelector(".draft-quick-supplier-payment-method");
+        const value = row.querySelector(".draft-quick-supplier-payment-value");
+        const detail = result.account_detail || result.decoded_qr_content || result.raw_content || "";
+        if (method) method.value = "WeChat";
+        if (value) {
+            if (value.value.trim() && value.value.trim() !== detail) {
+                const replace = window.confirm(
+                    draftT("Replace Existing QR") + "?\n" +
+                        draftT("The account detail already has a value. Replace it with the scanned QR content?"),
+                );
+                if (!replace) return;
+            }
+            value.value = detail;
+        }
+        setDraftQuickSupplierQrContent(row, result.raw_content || result.decoded_qr_content || detail);
+        if (result.qr_image_path) {
+            setDraftQuickSupplierQrPreview(row, result.qr_image_path, draftT("QR saved"));
+        }
+        fillDraftQuickSupplierFieldIfEmpty("draftQuickSupplierName", result.name, "Name");
+        fillDraftQuickSupplierFieldIfEmpty("draftQuickSupplierPhone", result.phone, "Phone");
+        fillDraftQuickSupplierFieldIfEmpty("draftQuickSupplierAddress", result.address, "Address");
+        showToast(draftT("WeChat QR detected. Only available QR information was filled. Please complete missing supplier details manually."));
+    }
+
+    function openDraftQuickSupplierWechatQrScanner(row) {
+        if (typeof window.openWeChatQrScanner !== "function") {
+            showToast(draftT("QR scanner is not available"), "danger");
+            return;
+        }
+        window.openWeChatQrScanner({
+            excludeSupplierId: () => "",
+            onResult: (result) => applyWechatQrToDraftQuickSupplierRow(row, result),
+        });
+    }
+
     function bindDraftQuickSupplierPaymentRow(row) {
         const fileInput = row.querySelector(
             ".draft-quick-supplier-payment-qr-input",
@@ -166,7 +226,13 @@
         const uploadBtn = row.querySelector(
             ".draft-quick-supplier-payment-qr-btn",
         );
+        const scanBtn = row.querySelector(
+            ".draft-quick-supplier-payment-scan-wechat-btn",
+        );
         uploadBtn?.addEventListener("click", () => fileInput?.click());
+        scanBtn?.addEventListener("click", () =>
+            openDraftQuickSupplierWechatQrScanner(row),
+        );
         fileInput?.addEventListener("change", async function () {
             try {
                 await handleDraftQuickSupplierQrFiles(row, this.files || []);
@@ -272,7 +338,9 @@
         const select = document.getElementById("draftOrderDestinationCountrySelect");
         if (idInput) idInput.value = idValue;
         const display = countryName
-            ? `${countryName}${countryCode ? ` (${countryCode})` : ""}`
+            ? (typeof window.formatCountryDisplay === "function"
+                  ? window.formatCountryDisplay(countryName, countryCode)
+                  : `${countryName}${countryCode ? ` (${countryCode})` : ""}`)
             : "";
         if (input) input.value = display;
         if (draftOrderDestinationCountryAc && countryId && countryName) {
@@ -296,8 +364,13 @@
                 .map(
                     (country) =>
                         `<option value="${country.country_id}">${escapeHtml(
-                            country.country_name || "",
-                        )}${country.country_code ? ` (${escapeHtml(country.country_code)})` : ""}</option>`,
+                            typeof window.formatCountryDisplay === "function"
+                                ? window.formatCountryDisplay(
+                                      country.country_name || "",
+                                      country.country_code || "",
+                                  )
+                                : `${country.country_name || ""}${country.country_code ? ` (${country.country_code})` : ""}`,
+                        )}</option>`,
                 )
                 .join("");
     }
@@ -690,6 +763,7 @@
     }
 
     function resetDraftOrderBuilder() {
+        clearDraftSaveValidation();
         document.getElementById("draftOrderForm")?.reset();
         document.getElementById("draftOrderId").value = "";
         document.getElementById("draftOrderEditable").value = "1";
@@ -1072,12 +1146,14 @@
             placeholder: draftT("Type to search supplier..."),
             onSelect: (item) => {
                 supplierIdInput.value = item.id || "";
+                clearDraftInvalidTarget(supplierInput);
                 refreshSectionProductFilters(section);
                 syncDraftSectionCollapse(section);
                 renumberDraftItems();
             },
         });
         supplierInput.addEventListener("input", () => {
+            clearDraftInvalidTarget(supplierInput);
             supplierIdInput.value = "";
             refreshSectionProductFilters(section);
             syncDraftSectionCollapse(section);
@@ -2066,6 +2142,7 @@
         uploaded.forEach((path) => paths.push(path));
         card._photoPaths = paths;
         renderDraftPhotoThumbs(card.querySelector(".draft-item-photos"), paths);
+        clearDraftInvalidTarget(card.querySelector(".draft-item-photo-panel"));
     }
 
     function extensionFromImageMime(type = "") {
@@ -2131,6 +2208,8 @@
         uploaded.forEach((path) => paths.push(path));
         card._designPaths = paths;
         renderFilePills(card.querySelector(".draft-item-design-files"), paths);
+        clearDraftInvalidTarget(card.querySelector(".draft-item-custom-design-note"));
+        clearDraftInvalidTarget(card.querySelector(".draft-item-design-panel"));
     }
 
     function refreshSectionProductFilters(section) {
@@ -2695,6 +2774,8 @@
                 : "RMB";
         const detail = rowData.value || rowData.link || "";
         const qrPath = rowData.qr_image_path || "";
+        const qrRawContent =
+            rowData.qr_raw_content || rowData.decoded_qr_content || "";
         const row = document.createElement("div");
         row.className =
             "border rounded-3 p-2 draft-quick-supplier-payment-link-row";
@@ -2712,13 +2793,18 @@
                   <option value="USD"${currency === "USD" ? " selected" : ""}>USD</option>
                 </select>
               </div>
-              <div class="col-12 col-md-5">
+              <div class="col-12 col-md-4">
                 <input type="text" class="form-control form-control-sm draft-quick-supplier-payment-value" placeholder="${escapeHtml(draftT("Account / number / URL / account detail"))}" value="${escapeHtml(detail)}">
                 <input type="hidden" class="draft-quick-supplier-payment-qr" value="${escapeHtml(qrPath)}">
+                <input type="hidden" class="draft-quick-supplier-payment-qr-raw" value="${escapeHtml(qrRawContent)}">
+                <input type="hidden" class="draft-quick-supplier-payment-qr-decoded" value="${escapeHtml(qrRawContent)}">
                 <input type="file" class="d-none draft-quick-supplier-payment-qr-input" accept="image/*,.jpg,.jpeg,.png,.webp,.jfif,.gif,.bmp,.avif">
               </div>
               <div class="col-8 col-md-1">
                 <button type="button" class="btn btn-sm btn-outline-secondary w-100 draft-quick-supplier-payment-qr-btn">${escapeHtml(draftT("QR"))}</button>
+              </div>
+              <div class="col-12 col-md-1">
+                <button type="button" class="btn btn-sm btn-outline-primary w-100 draft-quick-supplier-payment-scan-wechat-btn">${escapeHtml(draftT("Scan WeChat QR"))}</button>
               </div>
               <div class="col-4 col-md-1 text-end">
                 <button type="button" class="btn btn-sm btn-outline-danger w-100" onclick="this.closest('.draft-quick-supplier-payment-link-row').remove()">×</button>
@@ -2754,6 +2840,12 @@
                 const qrImagePath = row
                     .querySelector(".draft-quick-supplier-payment-qr")
                     ?.value?.trim();
+                const qrRawContent = row
+                    .querySelector(".draft-quick-supplier-payment-qr-raw")
+                    ?.value?.trim();
+                const decodedQrContent = row
+                    .querySelector(".draft-quick-supplier-payment-qr-decoded")
+                    ?.value?.trim();
                 if (!method && !value && !qrImagePath) return null;
                 return {
                     method: method || "Bank Transfer",
@@ -2762,6 +2854,8 @@
                     value: value || "",
                     currency: currency === "USD" ? "USD" : "RMB",
                     qr_image_path: qrImagePath || null,
+                    qr_raw_content: qrRawContent || null,
+                    decoded_qr_content: decodedQrContent || qrRawContent || null,
                 };
             })
             .filter(Boolean);
@@ -2948,27 +3042,129 @@
     }
 
     function clearDraftSaveValidation() {
+        const summary = document.getElementById("draftOrderValidationSummary");
+        if (summary) {
+            summary.classList.add("d-none");
+            summary.innerHTML = "";
+        }
         document
             .querySelectorAll("#draftOrderModal .draft-save-invalid-feedback")
             .forEach((el) => el.remove());
         document
             .querySelectorAll("#draftOrderModal [data-draft-save-invalid='1']")
             .forEach((el) => {
-                el.classList.remove("is-invalid", "border-danger");
+                el.classList.remove(
+                    "is-invalid",
+                    "border-danger",
+                    "draft-save-invalid-box",
+                );
                 delete el.dataset.draftSaveInvalid;
             });
+        document
+            .querySelectorAll(
+                "#draftOrderModal .draft-save-invalid-scope, #draftOrderModal .draft-save-invalid-section",
+            )
+            .forEach((el) => {
+                el.classList.remove(
+                    "draft-save-invalid-scope",
+                    "draft-save-invalid-section",
+                );
+            });
+    }
+
+    function ensureDraftValidationSummary() {
+        let summary = document.getElementById("draftOrderValidationSummary");
+        if (summary) return summary;
+        const form = document.getElementById("draftOrderForm");
+        if (!form) return null;
+        summary = document.createElement("div");
+        summary.id = "draftOrderValidationSummary";
+        summary.className =
+            "alert alert-danger draft-order-validation-summary d-none";
+        summary.setAttribute("role", "alert");
+        form.prepend(summary);
+        return summary;
+    }
+
+    function showDraftValidationSummary(count = 0, message = null) {
+        const summary = ensureDraftValidationSummary();
+        if (!summary) return;
+        const text =
+            message ||
+            draftT("Please complete the highlighted fields before saving.");
+        summary.innerHTML = `
+            <div class="fw-semibold">${escapeHtml(text)}</div>
+            ${
+                count
+                    ? `<div class="small mt-1">${escapeHtml(
+                          draftT("{count} field(s) need attention.", {
+                              count,
+                          }),
+                      )}</div>`
+                    : ""
+            }
+        `;
+        summary.classList.remove("d-none");
+    }
+
+    function clearDraftInvalidTarget(target) {
+        const field =
+            typeof target === "string" ? document.querySelector(target) : target;
+        if (!field) return;
+        const targets = [field];
+        const feedbackSiblings = [];
+        if (field.matches?.("input, textarea, select")) {
+            let sibling = field.nextElementSibling;
+            while (sibling?.classList?.contains("draft-save-invalid-feedback")) {
+                feedbackSiblings.push(sibling);
+                sibling = sibling.nextElementSibling;
+            }
+        } else {
+            feedbackSiblings.push(
+                ...field.querySelectorAll(":scope > .draft-save-invalid-feedback"),
+            );
+        }
+        feedbackSiblings.forEach((el) => el.remove());
+        targets.forEach((el) => {
+            el.classList.remove(
+                "is-invalid",
+                "border-danger",
+                "draft-save-invalid-box",
+            );
+            delete el.dataset.draftSaveInvalid;
+        });
+        [field.closest(".draft-order-item-card"), field.closest(".draft-order-section")]
+            .filter(Boolean)
+            .forEach((scope) => {
+                if (!scope.querySelector("[data-draft-save-invalid='1']")) {
+                    scope.classList.remove(
+                        "draft-save-invalid-scope",
+                        "draft-save-invalid-section",
+                    );
+                }
+            });
+        if (!document.querySelector("#draftOrderModal [data-draft-save-invalid='1']")) {
+            const summary = document.getElementById("draftOrderValidationSummary");
+            summary?.classList.add("d-none");
+        }
     }
 
     function markDraftInvalidField(target, message) {
         const field =
             typeof target === "string" ? document.querySelector(target) : target;
         if (!field) return null;
+        clearDraftInvalidTarget(field);
         const isField = field.matches?.("input, textarea, select");
         field.dataset.draftSaveInvalid = "1";
         field.classList.add(isField ? "is-invalid" : "border-danger");
+        if (!isField) field.classList.add("draft-save-invalid-box");
+        const card = field.closest(".draft-order-item-card");
+        const section = field.closest(".draft-order-section");
+        if (card) card.classList.add("draft-save-invalid-scope");
+        if (section) section.classList.add("draft-save-invalid-section");
         const feedback = document.createElement("div");
         feedback.className = "invalid-feedback d-block draft-save-invalid-feedback";
-        feedback.textContent = message;
+        feedback.textContent = message || draftT("This field needs attention.");
         if (isField) {
             field.insertAdjacentElement("afterend", feedback);
         } else {
@@ -2979,12 +3175,44 @@
 
     function scrollToDraftInvalidField(field) {
         if (!field) return;
+        const section = field.closest?.(".draft-order-section");
+        if (section?.dataset?.collapsed === "1") {
+            section.dataset.collapsed = "0";
+            syncDraftSectionCollapse(section);
+        }
         const focusTarget =
             field.matches?.("input, textarea, select, button")
                 ? field
                 : field.querySelector("input, textarea, select, button");
-        field.scrollIntoView({ behavior: "smooth", block: "center" });
+        window.setTimeout(
+            () => field.scrollIntoView({ behavior: "smooth", block: "center" }),
+            60,
+        );
         setTimeout(() => focusTarget?.focus?.({ preventScroll: true }), 250);
+    }
+
+    function bindDraftValidationAutoClear(root) {
+        const container = root || document.getElementById("draftOrderModal");
+        if (!container || container.dataset.draftValidationAutoClearBound === "1") {
+            return;
+        }
+        container.dataset.draftValidationAutoClearBound = "1";
+        container.addEventListener("input", (event) => {
+            const target = event.target;
+            if (target?.dataset?.draftSaveInvalid === "1") {
+                clearDraftInvalidTarget(target);
+            }
+        });
+        container.addEventListener("change", (event) => {
+            const target = event.target;
+            if (target?.dataset?.draftSaveInvalid === "1") {
+                clearDraftInvalidTarget(target);
+            }
+            const card = target?.closest?.(".draft-order-item-card");
+            if (card?.dataset?.draftSaveInvalid === "1") {
+                clearDraftInvalidTarget(card);
+            }
+        });
     }
 
     function draftItemHasCbmOrDimensions(card) {
@@ -3019,9 +3247,21 @@
             draftOrderCustomerCountryShipping.length > 1 &&
             !payload.destination_country_id
         ) {
+            const destinationTarget =
+                document
+                    .getElementById("draftOrderDestinationCountrySelectWrap")
+                    ?.classList.contains("d-none")
+                    ? document.getElementById("draftOrderDestinationCountry")
+                    : document.getElementById("draftOrderDestinationCountrySelect");
             addInvalid(
-                document.getElementById("draftOrderDestinationCountry"),
+                destinationTarget,
                 draftT("Choose one of the selected customer's countries."),
+            );
+        }
+        if (!["USD", "RMB"].includes(String(payload.currency || ""))) {
+            addInvalid(
+                document.getElementById("draftOrderCurrency"),
+                draftT("Currency must be USD or RMB."),
             );
         }
 
@@ -3079,6 +3319,29 @@
                 if (parseFloat(weightInput?.value || 0) < 0) {
                     addInvalid(weightInput, draftT("Weight cannot be negative."));
                 }
+                const unitPriceInput = card.querySelector(".draft-item-unit-price");
+                if (parseFloat(unitPriceInput?.value || 0) < 0) {
+                    addInvalid(unitPriceInput, draftT("Price cannot be negative."));
+                }
+                const customerPriceInput = card.querySelector(
+                    ".draft-item-customer-price",
+                );
+                if (parseFloat(customerPriceInput?.value || 0) < 0) {
+                    addInvalid(
+                        customerPriceInput,
+                        draftT("Customer price cannot be negative."),
+                    );
+                }
+                [
+                    [card.querySelector(".draft-item-cbm"), draftT("CBM cannot be negative.")],
+                    [card.querySelector(".draft-item-length"), draftT("Length cannot be negative.")],
+                    [card.querySelector(".draft-item-width"), draftT("Width cannot be negative.")],
+                    [card.querySelector(".draft-item-height"), draftT("Height cannot be negative.")],
+                ].forEach(([input, message]) => {
+                    if (parseFloat(input?.value || 0) < 0) {
+                        addInvalid(input, message);
+                    }
+                });
 
                 if (shared) {
                     const rows = getDraftSharedCartonRows(card);
@@ -3122,6 +3385,24 @@
                                 draftT("Contained item description is required."),
                             );
                         }
+                        const sharedUnitPrice = row.querySelector(
+                            ".draft-shared-content-unit-price",
+                        );
+                        if (parseFloat(sharedUnitPrice?.value || 0) < 0) {
+                            addInvalid(
+                                sharedUnitPrice,
+                                draftT("Price cannot be negative."),
+                            );
+                        }
+                        const sharedSellPrice = row.querySelector(
+                            ".draft-shared-content-sell-price",
+                        );
+                        if (parseFloat(sharedSellPrice?.value || 0) < 0) {
+                            addInvalid(
+                                sharedSellPrice,
+                                draftT("Customer price cannot be negative."),
+                            );
+                        }
                     });
                 } else if (!draftDescriptionHasContent(card)) {
                     addInvalid(
@@ -3151,10 +3432,154 @@
         });
 
         if (invalidFields.length) {
+            showDraftValidationSummary(invalidFields.length);
             scrollToDraftInvalidField(invalidFields[0]);
-            showToast(draftT("Fix the highlighted fields before saving."), "danger");
+            showToast(
+                draftT("Please complete the highlighted fields before saving."),
+                "danger",
+            );
             return false;
         }
+        return true;
+    }
+
+    function firstDraftSection() {
+        return document.querySelector(".draft-order-section");
+    }
+
+    function firstDraftItemCard() {
+        return document.querySelector(".draft-order-item-card");
+    }
+
+    function firstDraftInvalidBySelector(selector, predicate = null) {
+        const nodes = Array.from(document.querySelectorAll(selector));
+        return (
+            nodes.find((node) => {
+                if (typeof predicate === "function") return predicate(node);
+                return true;
+            }) || null
+        );
+    }
+
+    function resolveDraftBackendErrorTarget(key, message = "") {
+        const token = `${key || ""} ${message || ""}`.toLowerCase();
+        if (token.includes("customer_id") || token.includes("customer is required")) {
+            return document.getElementById("draftOrderCustomer");
+        }
+        if (
+            token.includes("destination_country") ||
+            token.includes("selected customer") ||
+            token.includes("customer country")
+        ) {
+            return document
+                .getElementById("draftOrderDestinationCountrySelectWrap")
+                ?.classList.contains("d-none")
+                ? document.getElementById("draftOrderDestinationCountry")
+                : document.getElementById("draftOrderDestinationCountrySelect");
+        }
+        if (token.includes("currency")) {
+            return document.getElementById("draftOrderCurrency");
+        }
+        if (token.includes("expected_ready_date")) {
+            return document.getElementById("draftOrderExpectedDate");
+        }
+        if (token.includes("supplier")) {
+            return (
+                firstDraftInvalidBySelector(".draft-section-supplier", (input) => {
+                    const section = input.closest(".draft-order-section");
+                    return !section
+                        ?.querySelector(".draft-section-supplier-id")
+                        ?.value?.trim();
+                }) || firstDraftSection()
+            );
+        }
+        if (token.includes("description")) {
+            return (
+                firstDraftInvalidBySelector(
+                    ".draft-item-description-primary, .draft-item-description-entry-input, .draft-shared-content-description-input",
+                    (input) => !String(input.value || "").trim(),
+                ) || firstDraftItemCard()
+            );
+        }
+        if (token.includes("piece") || token.includes("qty_per_carton")) {
+            return (
+                firstDraftInvalidBySelector(
+                    ".draft-item-pieces-per-carton, .draft-shared-content-qty-per-carton",
+                    (input) => draftPositiveNumber(input.value) <= 0,
+                ) || firstDraftItemCard()
+            );
+        }
+        if (token.includes("carton")) {
+            return (
+                firstDraftInvalidBySelector(
+                    ".draft-item-cartons",
+                    (input) => draftPositiveNumber(input.value) <= 0,
+                ) || firstDraftItemCard()
+            );
+        }
+        if (
+            token.includes("cbm") ||
+            token.includes("dimension") ||
+            token.includes("length") ||
+            token.includes("width") ||
+            token.includes("height")
+        ) {
+            return (
+                firstDraftInvalidBySelector(".draft-item-volume-panel", (panel) => {
+                    const card = panel.closest(".draft-order-item-card");
+                    return card ? !draftItemHasCbmOrDimensions(card) : true;
+                }) || firstDraftItemCard()
+            );
+        }
+        if (token.includes("weight")) {
+            return firstDraftInvalidBySelector(".draft-item-weight") || firstDraftItemCard();
+        }
+        if (token.includes("price") || token.includes("amount")) {
+            return (
+                firstDraftInvalidBySelector(
+                    ".draft-item-unit-price, .draft-item-customer-price, .draft-shared-content-unit-price, .draft-shared-content-sell-price",
+                    (input) => parseFloat(input.value || 0) < 0,
+                ) || firstDraftItemCard()
+            );
+        }
+        if (token.includes("photo") || token.includes("file") || token.includes("design")) {
+            return (
+                firstDraftInvalidBySelector(".draft-item-custom-design-note") ||
+                firstDraftInvalidBySelector(".draft-item-photo-panel") ||
+                firstDraftItemCard()
+            );
+        }
+        if (token.includes("item")) {
+            return firstDraftItemCard() || firstDraftSection();
+        }
+        return null;
+    }
+
+    function applyDraftBackendValidation(error) {
+        const errors = error?.errors && typeof error.errors === "object" ? error.errors : {};
+        const invalidFields = [];
+        Object.entries(errors).forEach(([key, value]) => {
+            const message = Array.isArray(value) ? value.join(", ") : String(value || "");
+            const target = resolveDraftBackendErrorTarget(key, message);
+            const field = markDraftInvalidField(
+                target || firstDraftItemCard() || firstDraftSection() || document.getElementById("draftOrderForm"),
+                draftT(message || error.message || "This field needs attention."),
+            );
+            if (field) invalidFields.push(field);
+        });
+        if (!invalidFields.length && error?.message) {
+            const target = resolveDraftBackendErrorTarget("", error.message);
+            if (target) {
+                const field = markDraftInvalidField(target, draftT(error.message));
+                if (field) invalidFields.push(field);
+            }
+        }
+        if (!invalidFields.length) return false;
+        showDraftValidationSummary(
+            invalidFields.length,
+            draftT("Please complete the highlighted fields before saving."),
+        );
+        scrollToDraftInvalidField(invalidFields[0]);
         return true;
     }
 
@@ -3328,7 +3753,13 @@
             builderModal?.hide();
             await refreshDraftLists({ deferLegacy: true });
         } catch (e) {
-            showToast(e.message, "danger");
+            const mapped = applyDraftBackendValidation(e);
+            showToast(
+                mapped
+                    ? draftT("Please complete the highlighted fields before saving.")
+                    : e.message,
+                "danger",
+            );
         } finally {
             setLoading(saveBtn, false);
         }
@@ -3426,13 +3857,18 @@
         registerUnsavedChangesGuard?.(
             "#draftSupplierQuickAddModal .modal-body",
         );
+        ensureDraftValidationSummary();
+        bindDraftValidationAutoClear(document.getElementById("draftOrderModal"));
 
         draftOrderCustomerAc = Autocomplete.init(
             document.getElementById("draftOrderCustomer"),
             {
                 resource: "customers",
-                placeholder: "Type to search customer...",
+                placeholder: draftT("Type to search customer..."),
                 onSelect: async (item) => {
+                    clearDraftInvalidTarget(
+                        document.getElementById("draftOrderCustomer"),
+                    );
                     await loadDraftCustomerCountryContext(
                         item.id,
                         item.default_shipping_code || "",
@@ -3446,12 +3882,19 @@
                 resource: "countries",
                 searchPath: "/search",
                 minChars: 0,
-                placeholder: "Search country...",
+                placeholder: draftT("Search country..."),
                 displayValue: (country) =>
-                    `${country.name || ""}${country.code ? ` (${country.code})` : ""}`,
+                    typeof window.formatCountryDisplay === "function"
+                        ? window.formatCountryDisplay(country.name || "", country.code || "")
+                        : `${country.name || ""}${country.code ? ` (${country.code})` : ""}`,
                 renderItem: (country) =>
-                    `${country.name || ""}${country.code ? ` (${country.code})` : ""}`,
+                    typeof window.formatCountryDisplay === "function"
+                        ? window.formatCountryDisplay(country.name || "", country.code || "")
+                        : `${country.name || ""}${country.code ? ` (${country.code})` : ""}`,
                 onSelect: (country) => {
+                    clearDraftInvalidTarget(
+                        document.getElementById("draftOrderDestinationCountry"),
+                    );
                     const idInput = document.getElementById(
                         "draftOrderDestinationCountryId",
                     );
@@ -3467,6 +3910,9 @@
         document
             .getElementById("draftOrderDestinationCountry")
             ?.addEventListener("input", () => {
+                clearDraftInvalidTarget(
+                    document.getElementById("draftOrderDestinationCountry"),
+                );
                 if (
                     draftOrderCustomerCountryShipping.length > 1 ||
                     document
@@ -3483,6 +3929,7 @@
         document
             .getElementById("draftOrderDestinationCountrySelect")
             ?.addEventListener("change", function () {
+                clearDraftInvalidTarget(this);
                 const selected = getDraftDestinationCountryMapping(this.value);
                 const idInput = document.getElementById(
                     "draftOrderDestinationCountryId",
@@ -3506,12 +3953,15 @@
             document.getElementById("legacyMigrationCustomer"),
             {
                 resource: "customers",
-                placeholder: "Type to search customer...",
+                placeholder: draftT("Type to search customer..."),
             },
         );
         document
             .getElementById("draftOrderCurrency")
-            ?.addEventListener("change", updateDraftOrderTotals);
+            ?.addEventListener("change", (event) => {
+                clearDraftInvalidTarget(event.currentTarget);
+                updateDraftOrderTotals();
+            });
         bindDraftOrderImportControls();
 
         await refreshDraftLists({ deferLegacy: true });
