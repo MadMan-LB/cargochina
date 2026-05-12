@@ -83,8 +83,8 @@ if (!in_array($resource, $publicResources)) {
         exit;
     }
     if ($resource === 'balances') {
-        $userRoles = $_SESSION['user_roles'] ?? [];
-        if (!clmsCanRolesAccessPage($userRoles, 'balances')) {
+        $userRoles = getUserRoles();
+        if (!in_array('SuperAdmin', $userRoles, true) && !clmsCanRolesAccessPage($userRoles, 'balances')) {
             http_response_code(403);
             echo json_encode(['error' => true, 'message' => clmsT('You do not have permission')]);
             exit;

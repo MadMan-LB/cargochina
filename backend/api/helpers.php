@@ -10,6 +10,7 @@ if (!function_exists('clmsT')) {
     }
     require_once dirname(__DIR__, 2) . '/includes/i18n.php';
 }
+require_once dirname(__DIR__, 2) . '/includes/session_roles.php';
 
 function clmsFinalizeApiTiming(int $status): void
 {
@@ -250,6 +251,7 @@ function getAuthUserId(): ?int
 function getUserRoles(): array
 {
     ensureSession();
+    clmsRefreshSessionRolesFromDb();
     return $_SESSION['user_roles'] ?? [];
 }
 

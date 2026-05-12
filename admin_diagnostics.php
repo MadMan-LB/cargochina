@@ -17,6 +17,18 @@ require 'includes/layout.php';
   </div>
 </div>
 
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <span>Balances Deployment Health</span>
+    <button type="button" class="btn btn-outline-primary btn-sm" onclick="loadBalancesDeploymentHealth()">Refresh</button>
+  </div>
+  <div class="card-body">
+    <div id="balancesDeploymentHealth" class="small">
+      <span class="badge bg-secondary">Loading...</span>
+    </div>
+  </div>
+</div>
+
 <div class="card">
   <div class="card-header">Notification Delivery Log</div>
   <div class="card-body">

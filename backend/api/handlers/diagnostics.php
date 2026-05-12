@@ -8,7 +8,42 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
+require_once dirname(__DIR__, 3) . '/includes/sidebar_permissions.php';
 require_once dirname(__DIR__, 2) . '/services/NotificationService.php';
+
+function diagnosticsTableExists(PDO $pdo, string $table): bool
+{
+    try {
+        $stmt = $pdo->prepare("SHOW TABLES LIKE ?");
+        $stmt->execute([$table]);
+        return (bool) $stmt->rowCount();
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+function diagnosticsTableHasColumn(PDO $pdo, string $table, string $column): bool
+{
+    try {
+        $stmt = $pdo->prepare("SHOW COLUMNS FROM `$table` LIKE ?");
+        $stmt->execute([$column]);
+        return (bool) $stmt->rowCount();
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+function diagnosticsCountRows(PDO $pdo, string $table): ?int
+{
+    if (!diagnosticsTableExists($pdo, $table)) {
+        return null;
+    }
+    try {
+        return (int) $pdo->query("SELECT COUNT(*) FROM `$table`")->fetchColumn();
+    } catch (Throwable $e) {
+        return null;
+    }
+}
 
 return function (string $method, ?string $id, ?string $action, array $input) {
     requireRole(['SuperAdmin']);
@@ -76,6 +111,114 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 'whatsapp_configured' => $whatsappConfigured,
                 'item_level_enabled' => (bool) $itemLevelEnabled,
                 'retry_configured' => $retryConfigured,
+            ]]);
+        }
+    }
+
+    if ($id === 'balances-deployment') {
+        if ($method === 'GET') {
+            $roles = getUserRoles();
+            $sidebarSettings = clmsLoadRoleSidebarPageSettings($pdo);
+            $roleBalanceAccess = [];
+            foreach (['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'] as $role) {
+                $roleBalanceAccess[$role] = clmsCanRolesAccessPage([$role], 'balances', $pdo);
+            }
+            $migrationNames = [
+                '061_balance_transactions.sql',
+                '062_balance_sidebar_defaults.sql',
+                '063_balance_transaction_payment_accounts.sql',
+                '064_balance_order_linked_deposits.sql',
+                '065_balances_deployment_hardening.sql',
+            ];
+            $appliedMigrations = [];
+            if (diagnosticsTableExists($pdo, '_migrations')) {
+                $placeholders = implode(',', array_fill(0, count($migrationNames), '?'));
+                $stmt = $pdo->prepare("SELECT name, applied_at FROM _migrations WHERE name IN ($placeholders)");
+                $stmt->execute($migrationNames);
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                    $appliedMigrations[$row['name']] = $row['applied_at'];
+                }
+            }
+
+            $balanceColumns = [];
+            foreach ([
+                'party_type',
+                'party_id',
+                'order_id',
+                'order_reference',
+                'transaction_type',
+                'direction',
+                'amount',
+                'currency',
+                'payment_method',
+                'payment_account_label',
+                'payment_account_value',
+                'payment_account_qr_path',
+                'reference_number',
+                'transaction_date',
+            ] as $column) {
+                $balanceColumns[$column] = diagnosticsTableHasColumn($pdo, 'balance_transactions', $column);
+            }
+
+            $depositCheckPresent = false;
+            try {
+                $stmt = $pdo->prepare("
+                    SELECT CHECK_CLAUSE
+                    FROM information_schema.CHECK_CONSTRAINTS
+                    WHERE CONSTRAINT_SCHEMA = DATABASE()
+                      AND CONSTRAINT_NAME = 'chk_balance_tx_type'
+                    LIMIT 1
+                ");
+                $stmt->execute();
+                $clause = (string) ($stmt->fetchColumn() ?: '');
+                $depositCheckPresent = $clause === '' || stripos($clause, 'deposit') !== false;
+            } catch (Throwable $e) {
+                $depositCheckPresent = true;
+            }
+
+            jsonResponse(['data' => [
+                'current_user_roles' => $roles,
+                'current_user_can_access_balances' => clmsCanRolesAccessPage($roles, 'balances', $pdo),
+                'current_user_visible_pages' => clmsGetEffectivePageIdsForRoles($roles, $pdo),
+                'registry_has_balances' => array_key_exists('balances', clmsSidebarPageRegistry()),
+                'script_map_has_balances' => (clmsSidebarScriptMap()['balances.php'] ?? null) === 'balances',
+                'role_balance_access' => $roleBalanceAccess,
+                'sidebar_settings_roles' => array_keys($sidebarSettings),
+                'sidebar_settings_contains_balances' => array_map(
+                    static fn($pages) => is_array($pages) && in_array('balances', $pages, true),
+                    $sidebarSettings
+                ),
+                'tables' => [
+                    'balance_transactions' => diagnosticsTableExists($pdo, 'balance_transactions'),
+                    'customer_deposits' => diagnosticsTableExists($pdo, 'customer_deposits'),
+                    'supplier_payments' => diagnosticsTableExists($pdo, 'supplier_payments'),
+                    'orders' => diagnosticsTableExists($pdo, 'orders'),
+                    'order_items' => diagnosticsTableExists($pdo, 'order_items'),
+                ],
+                'balance_transaction_columns' => $balanceColumns,
+                'deposit_transaction_type_allowed' => $depositCheckPresent,
+                'row_counts' => [
+                    'customers' => diagnosticsCountRows($pdo, 'customers'),
+                    'suppliers' => diagnosticsCountRows($pdo, 'suppliers'),
+                    'orders' => diagnosticsCountRows($pdo, 'orders'),
+                    'order_items' => diagnosticsCountRows($pdo, 'order_items'),
+                    'customer_deposits' => diagnosticsCountRows($pdo, 'customer_deposits'),
+                    'supplier_payments' => diagnosticsCountRows($pdo, 'supplier_payments'),
+                    'balance_transactions' => diagnosticsCountRows($pdo, 'balance_transactions'),
+                ],
+                'migrations' => array_map(
+                    static fn($name) => [
+                        'name' => $name,
+                        'applied' => array_key_exists($name, $appliedMigrations),
+                        'applied_at' => $appliedMigrations[$name] ?? null,
+                    ],
+                    $migrationNames
+                ),
+                'asset_versions' => [
+                    'orders_js' => @filemtime(dirname(__DIR__, 3) . '/frontend/js/orders.js') ?: null,
+                    'balances_js' => @filemtime(dirname(__DIR__, 3) . '/frontend/js/balances.js') ?: null,
+                    'style_css' => @filemtime(dirname(__DIR__, 3) . '/frontend/css/style.css') ?: null,
+                ],
             ]]);
         }
     }

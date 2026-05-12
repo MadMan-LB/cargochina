@@ -1,5 +1,6 @@
 document.addEventListener("DOMContentLoaded", () => {
     loadConfigHealth();
+    loadBalancesDeploymentHealth();
     loadDeliveryLog();
 });
 
@@ -26,6 +27,90 @@ async function loadConfigHealth() {
     } catch (e) {
         document.getElementById("configHealth").innerHTML =
             `<span class="badge bg-danger">Error: ${escapeHtml(e.message)}</span>`;
+    }
+}
+
+function diagnosticBadge(ok, label) {
+    return `<span class="badge ${ok ? "bg-success" : "bg-danger"}">${escapeHtml(label)}: ${ok ? "OK" : "Check"}</span>`;
+}
+
+function renderKeyValueTable(rows) {
+    return `<div class="table-responsive"><table class="table table-sm mb-0 align-middle"><tbody>${rows
+        .map(
+            ([key, value]) =>
+                `<tr><th class="text-muted" style="width:220px">${escapeHtml(key)}</th><td>${value}</td></tr>`,
+        )
+        .join("")}</tbody></table></div>`;
+}
+
+async function loadBalancesDeploymentHealth() {
+    const target = document.getElementById("balancesDeploymentHealth");
+    if (!target) return;
+    target.innerHTML = '<span class="badge bg-secondary">Loading...</span>';
+    try {
+        const res = await api("GET", "/diagnostics/balances-deployment");
+        const d = res.data || {};
+        const requiredColumns = d.balance_transaction_columns || {};
+        const missingColumns = Object.entries(requiredColumns)
+            .filter(([, ok]) => !ok)
+            .map(([name]) => name);
+        const missingMigrations = (d.migrations || [])
+            .filter((m) => !m.applied)
+            .map((m) => m.name);
+        const roles = d.role_balance_access || {};
+        const roleMarkup = Object.entries(roles)
+            .map(([role, ok]) => diagnosticBadge(ok, role))
+            .join(" ");
+        const migrationMarkup = (d.migrations || [])
+            .map((m) => diagnosticBadge(!!m.applied, m.name))
+            .join(" ");
+        const tableMarkup = Object.entries(d.tables || {})
+            .map(([table, ok]) => diagnosticBadge(!!ok, table))
+            .join(" ");
+        const rowCounts = Object.entries(d.row_counts || {})
+            .map(([table, count]) => `${escapeHtml(table)}: ${count ?? "-"}`)
+            .join(" · ");
+        const rows = [
+            [
+                "Current user roles",
+                escapeHtml((d.current_user_roles || []).join(", ") || "-"),
+            ],
+            [
+                "Current user can access balances",
+                diagnosticBadge(!!d.current_user_can_access_balances, "balances"),
+            ],
+            ["Registry / route", diagnosticBadge(!!d.registry_has_balances, "registry") + " " + diagnosticBadge(!!d.script_map_has_balances, "script map")],
+            ["Role access", roleMarkup || "-"],
+            ["Tables", tableMarkup || "-"],
+            [
+                "Required columns",
+                missingColumns.length
+                    ? `<span class="text-danger">${escapeHtml(missingColumns.join(", "))}</span>`
+                    : '<span class="text-success">All present</span>',
+            ],
+            [
+                "Deposit transaction type",
+                diagnosticBadge(!!d.deposit_transaction_type_allowed, "deposit allowed"),
+            ],
+            [
+                "Migrations",
+                missingMigrations.length
+                    ? migrationMarkup
+                    : migrationMarkup || '<span class="text-success">All tracked</span>',
+            ],
+            ["Row counts", escapeHtml(rowCounts || "-")],
+            [
+                "Asset mtimes",
+                escapeHtml(
+                    Object.entries(d.asset_versions || {})
+                        .map(([name, ts]) => `${name}: ${ts || "-"}`)
+                        .join(" · "),
+                ),
+            ],
+        ];
+        target.innerHTML = renderKeyValueTable(rows);
+    } catch (e) {
+        target.innerHTML = `<span class="badge bg-danger">Error: ${escapeHtml(e.message)}</span>`;
     }
 }
 
