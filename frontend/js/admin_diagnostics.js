@@ -34,6 +34,16 @@ function diagnosticBadge(ok, label) {
     return `<span class="badge ${ok ? "bg-success" : "bg-danger"}">${escapeHtml(label)}: ${ok ? "OK" : "Check"}</span>`;
 }
 
+function diagnosticRoleAccessBadge(role, ok, expectedByDefault) {
+    if (ok) {
+        return `<span class="badge bg-success">${escapeHtml(role)}: OK</span>`;
+    }
+    if (!expectedByDefault) {
+        return `<span class="badge bg-secondary">${escapeHtml(role)}: No default access</span>`;
+    }
+    return `<span class="badge bg-danger">${escapeHtml(role)}: Check</span>`;
+}
+
 function renderKeyValueTable(rows) {
     return `<div class="table-responsive"><table class="table table-sm mb-0 align-middle"><tbody>${rows
         .map(
@@ -58,8 +68,9 @@ async function loadBalancesDeploymentHealth() {
             .filter((m) => !m.applied)
             .map((m) => m.name);
         const roles = d.role_balance_access || {};
+        const expectedRoles = d.role_balance_access_expected_by_default || {};
         const roleMarkup = Object.entries(roles)
-            .map(([role, ok]) => diagnosticBadge(ok, role))
+            .map(([role, ok]) => diagnosticRoleAccessBadge(role, ok, !!expectedRoles[role]))
             .join(" ");
         const migrationMarkup = (d.migrations || [])
             .map((m) => diagnosticBadge(!!m.applied, m.name))
@@ -89,8 +100,10 @@ async function loadBalancesDeploymentHealth() {
                     : '<span class="text-success">All present</span>',
             ],
             [
-                "Deposit transaction type",
-                diagnosticBadge(!!d.deposit_transaction_type_allowed, "deposit allowed"),
+                "Transaction types",
+                diagnosticBadge(!!d.deposit_transaction_type_allowed, "deposit allowed") +
+                    " " +
+                    diagnosticBadge(!!d.invoice_transaction_type_allowed, "invoice allowed"),
             ],
             [
                 "Migrations",

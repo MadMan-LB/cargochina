@@ -123,12 +123,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             foreach (['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'] as $role) {
                 $roleBalanceAccess[$role] = clmsCanRolesAccessPage([$role], 'balances', $pdo);
             }
+            $rolesExpectedByDefault = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'SuperAdmin'];
             $migrationNames = [
                 '061_balance_transactions.sql',
                 '062_balance_sidebar_defaults.sql',
                 '063_balance_transaction_payment_accounts.sql',
                 '064_balance_order_linked_deposits.sql',
                 '065_balances_deployment_hardening.sql',
+                '066_balance_invoice_documents.sql',
             ];
             $appliedMigrations = [];
             if (diagnosticsTableExists($pdo, '_migrations')) {
@@ -161,6 +163,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
 
             $depositCheckPresent = false;
+            $invoiceCheckPresent = false;
             try {
                 $stmt = $pdo->prepare("
                     SELECT CHECK_CLAUSE
@@ -172,8 +175,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt->execute();
                 $clause = (string) ($stmt->fetchColumn() ?: '');
                 $depositCheckPresent = $clause === '' || stripos($clause, 'deposit') !== false;
+                $invoiceCheckPresent = $clause === '' || stripos($clause, 'invoice') !== false;
             } catch (Throwable $e) {
                 $depositCheckPresent = true;
+                $invoiceCheckPresent = true;
             }
             $sidebarPermissionsPath = dirname(__DIR__, 3) . '/includes/sidebar_permissions.php';
 
@@ -184,6 +189,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 'registry_has_balances' => array_key_exists('balances', clmsSidebarPageRegistry()),
                 'script_map_has_balances' => (clmsSidebarScriptMap()['balances.php'] ?? null) === 'balances',
                 'role_balance_access' => $roleBalanceAccess,
+                'role_balance_access_expected_by_default' => array_fill_keys($rolesExpectedByDefault, true),
                 'sidebar_settings_roles' => array_keys($sidebarSettings),
                 'sidebar_settings_contains_balances' => array_map(
                     static fn($pages) => is_array($pages) && in_array('balances', $pages, true),
@@ -198,6 +204,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 ],
                 'balance_transaction_columns' => $balanceColumns,
                 'deposit_transaction_type_allowed' => $depositCheckPresent,
+                'invoice_transaction_type_allowed' => $invoiceCheckPresent,
                 'row_counts' => [
                     'customers' => diagnosticsCountRows($pdo, 'customers'),
                     'suppliers' => diagnosticsCountRows($pdo, 'suppliers'),
