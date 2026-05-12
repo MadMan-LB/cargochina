@@ -7,6 +7,40 @@ function clmsSidebarConfigKey(): string
     return 'ROLE_SIDEBAR_PAGES_JSON';
 }
 
+function clmsBalancesSidebarPageMeta(): array
+{
+    return [
+        'title' => 'Balances',
+        'description' => 'Employee-safe customer and supplier balances.',
+        'href' => '/cargochina/balances.php',
+        'section' => 'main',
+        'icon_svg' => '<svg class="sidebar-icon" viewBox="0 0 24 24"><path d="M7 4h10a3 3 0 013 3v10a3 3 0 01-3 3H7a3 3 0 01-3-3V7a3 3 0 013-3zm0 2a1 1 0 00-1 1v1h12V7a1 1 0 00-1-1H7zm-1 5v6a1 1 0 001 1h10a1 1 0 001-1v-6H6zm2 2h3v2H8v-2zm5 0h3v2h-3v-2z" /></svg>',
+        'default_roles' => ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin'],
+    ];
+}
+
+function clmsEnsureBalancesRegistryEntry(array $registry): array
+{
+    if (isset($registry['balances'])) {
+        return $registry;
+    }
+
+    $balancesMeta = clmsBalancesSidebarPageMeta();
+    $rebuilt = [];
+    $inserted = false;
+    foreach ($registry as $pageId => $meta) {
+        $rebuilt[$pageId] = $meta;
+        if ($pageId === 'financials') {
+            $rebuilt['balances'] = $balancesMeta;
+            $inserted = true;
+        }
+    }
+    if (!$inserted) {
+        $rebuilt['balances'] = $balancesMeta;
+    }
+    return $rebuilt;
+}
+
 function clmsSidebarPageRegistry(): array
 {
     static $registry = null;
@@ -231,6 +265,8 @@ function clmsSidebarPageRegistry(): array
         ],
     ];
 
+    $registry = clmsEnsureBalancesRegistryEntry($registry);
+
     return $registry;
 }
 
@@ -246,7 +282,7 @@ function clmsSidebarSectionLabels(): array
 
 function clmsSidebarScriptMap(): array
 {
-    return [
+    $map = [
         'index.php' => 'dashboard',
         'orders.php' => 'orders',
         'receiving.php' => 'receiving',
@@ -278,6 +314,8 @@ function clmsSidebarScriptMap(): array
         'tracking-push-log.php' => 'admin_tracking',
         'users.php' => 'admin_users',
     ];
+    $map['balances.php'] = 'balances';
+    return $map;
 }
 
 function clmsResolveCurrentPageId(?string $scriptPath = null): ?string

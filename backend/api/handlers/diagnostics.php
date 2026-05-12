@@ -175,6 +175,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             } catch (Throwable $e) {
                 $depositCheckPresent = true;
             }
+            $sidebarPermissionsPath = dirname(__DIR__, 3) . '/includes/sidebar_permissions.php';
 
             jsonResponse(['data' => [
                 'current_user_roles' => $roles,
@@ -218,6 +219,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     'orders_js' => @filemtime(dirname(__DIR__, 3) . '/frontend/js/orders.js') ?: null,
                     'balances_js' => @filemtime(dirname(__DIR__, 3) . '/frontend/js/balances.js') ?: null,
                     'style_css' => @filemtime(dirname(__DIR__, 3) . '/frontend/css/style.css') ?: null,
+                    'sidebar_permissions_php' => @filemtime($sidebarPermissionsPath) ?: null,
+                    'orders_php' => @filemtime(dirname(__DIR__, 3) . '/orders.php') ?: null,
+                ],
+                'source_fingerprints' => [
+                    'sidebar_permissions_sha1' => is_file($sidebarPermissionsPath) ? sha1_file($sidebarPermissionsPath) : null,
+                    'balances_meta_helper_loaded' => function_exists('clmsBalancesSidebarPageMeta'),
+                    'balances_registry_guard_loaded' => function_exists('clmsEnsureBalancesRegistryEntry'),
                 ],
             ]]);
         }

@@ -5,9 +5,11 @@ requireRoleForPage(['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin']);
 $currentPage = 'orders';
 $pageTitle = 'Orders';
 require 'includes/layout.php';
+$canUseBalancesFromRole = $isSuperAdmin
+  || in_array('balances', $visiblePageIds ?? [], true);
 ?>
 <script>
-  window.CLMS_CAN_USE_BALANCES = <?= in_array('balances', $visiblePageIds ?? [], true) ? 'true' : 'false' ?>;
+  window.CLMS_CAN_USE_BALANCES = <?= $canUseBalancesFromRole ? 'true' : 'false' ?>;
 </script>
 <h1 class="mb-4">Orders</h1>
 <p class="text-muted mb-4">Track draft, approval, customer follow-up, and consolidation readiness from one cleaner workspace.</p>

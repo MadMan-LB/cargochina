@@ -107,6 +107,14 @@ async function loadBalancesDeploymentHealth() {
                         .join(" · "),
                 ),
             ],
+            [
+                "Source fingerprints",
+                escapeHtml(
+                    Object.entries(d.source_fingerprints || {})
+                        .map(([name, value]) => `${name}: ${value ?? "-"}`)
+                        .join(" · "),
+                ),
+            ],
         ];
         target.innerHTML = renderKeyValueTable(rows);
     } catch (e) {
