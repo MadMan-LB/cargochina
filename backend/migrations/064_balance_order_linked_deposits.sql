@@ -85,4 +85,4 @@ DEALLOCATE PREPARE stmt;
 
 ALTER TABLE balance_transactions
   ADD CONSTRAINT chk_balance_tx_type
-  CHECK (transaction_type IN ('payment_received', 'payment_sent', 'deposit', 'adjustment', 'refund', 'other'));
+  CHECK (transaction_type IN ('payment_received', 'payment_sent', 'deposit', 'invoice', 'adjustment', 'refund', 'other'));

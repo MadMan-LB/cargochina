@@ -121,6 +121,9 @@ require 'includes/layout.php';
   <li class="nav-item" role="presentation">
     <button class="nav-link" id="balance-transactions-tab" data-bs-toggle="tab" data-bs-target="#balance-transactions-pane" type="button" role="tab"><?= htmlspecialchars(clmsT('Transactions History')) ?></button>
   </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="balance-documents-tab" data-bs-toggle="tab" data-bs-target="#balance-documents-pane" type="button" role="tab"><?= htmlspecialchars(clmsT('Receipts & Invoices')) ?></button>
+  </li>
 </ul>
 
 <div class="tab-content" id="balanceTabContent">
@@ -204,10 +207,70 @@ require 'includes/layout.php';
                 <th><?= htmlspecialchars(clmsT('Reference Number')) ?></th>
                 <th><?= htmlspecialchars(clmsT('Recorded By')) ?></th>
                 <th><?= htmlspecialchars(clmsT('Notes')) ?></th>
+                <th><?= htmlspecialchars(clmsT('Actions')) ?></th>
               </tr>
             </thead>
             <tbody id="transactionsBody"></tbody>
           </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-pane fade" id="balance-documents-pane" role="tabpanel">
+    <div class="row g-4">
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <span><?= htmlspecialchars(clmsT('Receipts')) ?></span>
+            <small class="text-muted" id="balanceReceiptsSummary"><?= htmlspecialchars(clmsT('Waiting for data...')) ?></small>
+          </div>
+          <div class="card-body">
+            <div class="table-responsive">
+              <table class="table table-hover align-middle table-sm">
+                <thead>
+                  <tr>
+                    <th><?= htmlspecialchars(clmsT('Document No.')) ?></th>
+                    <th><?= htmlspecialchars(clmsT('Date')) ?></th>
+                    <th><?= htmlspecialchars(clmsT('Name')) ?></th>
+                    <th><?= htmlspecialchars(clmsT('Document Type')) ?></th>
+                    <th><?= htmlspecialchars(clmsT('Amount')) ?></th>
+                    <th><?= htmlspecialchars(clmsT('Payment Method')) ?></th>
+                    <th><?= htmlspecialchars(clmsT('Linked Order')) ?></th>
+                    <th><?= htmlspecialchars(clmsT('Actions')) ?></th>
+                  </tr>
+                </thead>
+                <tbody id="balanceReceiptsBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <span><?= htmlspecialchars(clmsT('Invoices / Balance Documents')) ?></span>
+            <small class="text-muted" id="balanceInvoicesSummary"><?= htmlspecialchars(clmsT('Waiting for data...')) ?></small>
+          </div>
+          <div class="card-body">
+            <div class="table-responsive">
+              <table class="table table-hover align-middle table-sm">
+                <thead>
+                  <tr>
+                    <th><?= htmlspecialchars(clmsT('Document No.')) ?></th>
+                    <th><?= htmlspecialchars(clmsT('Date')) ?></th>
+                    <th><?= htmlspecialchars(clmsT('Name')) ?></th>
+                    <th><?= htmlspecialchars(clmsT('Document Type')) ?></th>
+                    <th><?= htmlspecialchars(clmsT('Amount')) ?></th>
+                    <th><?= htmlspecialchars(clmsT('Reference Number')) ?></th>
+                    <th><?= htmlspecialchars(clmsT('Linked Order')) ?></th>
+                    <th><?= htmlspecialchars(clmsT('Actions')) ?></th>
+                  </tr>
+                </thead>
+                <tbody id="balanceInvoicesBody"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -253,6 +316,7 @@ require 'includes/layout.php';
             <label class="form-label" for="balanceTxnType"><?= htmlspecialchars(clmsT('Transaction Type')) ?></label>
             <select class="form-select" id="balanceTxnType">
               <option value="deposit"><?= htmlspecialchars(clmsT('Deposit')) ?></option>
+              <option value="invoice"><?= htmlspecialchars(clmsT('Invoice')) ?></option>
               <option value="payment_received"><?= htmlspecialchars(clmsT('Payment Received')) ?></option>
               <option value="payment_sent"><?= htmlspecialchars(clmsT('Payment Sent')) ?></option>
               <option value="adjustment"><?= htmlspecialchars(clmsT('Adjustment')) ?></option>
@@ -321,6 +385,25 @@ require 'includes/layout.php';
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"><?= htmlspecialchars(clmsT('Cancel')) ?></button>
         <button type="button" class="btn btn-primary" id="balanceTxnSubmitBtn" onclick="submitBalanceTransaction()"><?= htmlspecialchars(clmsT('Record Transaction')) ?></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="balanceDocumentModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-fullscreen-md-down">
+    <div class="modal-content">
+      <div class="modal-header d-print-none">
+        <h5 class="modal-title" id="balanceDocumentModalTitle"><?= htmlspecialchars(clmsT('Receipt / Invoice')) ?></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="<?= htmlspecialchars(clmsT('Close')) ?>"></button>
+      </div>
+      <div class="modal-body">
+        <div id="balanceDocumentPreview"></div>
+      </div>
+      <div class="modal-footer d-print-none">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal"><?= htmlspecialchars(clmsT('Close')) ?></button>
+        <button type="button" class="btn btn-outline-primary" id="balanceDocumentPrintBtn"><?= htmlspecialchars(clmsT('Print')) ?></button>
+        <button type="button" class="btn btn-primary" id="balanceDocumentPdfBtn"><?= htmlspecialchars(clmsT('Save PDF')) ?></button>
       </div>
     </div>
   </div>

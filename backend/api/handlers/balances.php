@@ -85,7 +85,7 @@ function balancesNormalizePartyType(?string $partyType): ?string
 function balancesNormalizeTransactionType(?string $type): string
 {
     $type = strtolower(trim((string) $type));
-    $allowed = ['payment_received', 'payment_sent', 'deposit', 'adjustment', 'refund', 'other'];
+    $allowed = ['payment_received', 'payment_sent', 'deposit', 'invoice', 'adjustment', 'refund', 'other'];
     return in_array($type, $allowed, true) ? $type : 'other';
 }
 
@@ -177,6 +177,35 @@ function balancesStatusLabel(string $status): string
         'credit' => 'Credit',
         default => 'Settled',
     };
+}
+
+function balancesDocumentTypeForRow(array $row): string
+{
+    $partyType = (string) ($row['party_type'] ?? '');
+    $direction = (string) ($row['direction'] ?? '');
+    $transactionType = (string) ($row['transaction_type'] ?? '');
+    if ($direction === 'increase_balance') {
+        return $transactionType === 'refund' ? 'Credit Note' : 'Invoice';
+    }
+    if ($partyType === 'supplier') {
+        return 'Payment Voucher';
+    }
+    return $transactionType === 'refund' ? 'Refund Receipt' : 'Receipt';
+}
+
+function balancesDocumentNumberForRow(array $row): string
+{
+    $type = balancesDocumentTypeForRow($row);
+    $prefix = match ($type) {
+        'Invoice' => 'INV',
+        'Credit Note' => 'CRN',
+        'Payment Voucher' => 'PV',
+        'Refund Receipt' => 'RFR',
+        default => 'RCP',
+    };
+    $date = preg_replace('/\D+/', '', (string) ($row['transaction_date'] ?? date('Y-m-d'))) ?: date('Ymd');
+    $id = (int) ($row['id'] ?? 0);
+    return sprintf('%s-%s-%05d', $prefix, $date, $id);
 }
 
 function balancesIdPlaceholders(array $ids): string
@@ -817,8 +846,13 @@ function balancesListTransactions(PDO $pdo, array $filters): array
         $sql .= ' AND tx.party_id = ?';
         $params[] = $partyId;
     }
+    $transactionId = !empty($filters['transaction_id']) ? (int) $filters['transaction_id'] : 0;
+    if ($transactionId > 0) {
+        $sql .= ' AND tx.id = ?';
+        $params[] = $transactionId;
+    }
     $transactionType = strtolower(trim((string) ($filters['transaction_type'] ?? '')));
-    if (in_array($transactionType, ['payment_received', 'payment_sent', 'deposit', 'adjustment', 'refund', 'other'], true)) {
+    if (in_array($transactionType, ['payment_received', 'payment_sent', 'deposit', 'invoice', 'adjustment', 'refund', 'other'], true)) {
         $sql .= ' AND tx.transaction_type = ?';
         $params[] = $transactionType;
     }
@@ -865,7 +899,13 @@ function balancesListTransactions(PDO $pdo, array $filters): array
     $sql .= ' ORDER BY tx.transaction_date DESC, tx.created_at DESC, tx.id DESC LIMIT 500';
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
-    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as &$row) {
+        $row['document_type'] = balancesDocumentTypeForRow($row);
+        $row['document_number'] = balancesDocumentNumberForRow($row);
+    }
+    unset($row);
+    return $rows;
 }
 
 function balancesValidateParty(PDO $pdo, string $partyType, int $partyId): array
@@ -1178,9 +1218,18 @@ function balancesCreateTransaction(PDO $pdo, array $input): array
         throw $e;
     }
 
+    $rows = balancesListTransactions($pdo, ['transaction_id' => $newId]);
+    if ($rows) {
+        return $rows[0];
+    }
     $stmt = $pdo->prepare("SELECT * FROM balance_transactions WHERE id = ?");
     $stmt->execute([$newId]);
-    return $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    if ($row) {
+        $row['document_type'] = balancesDocumentTypeForRow($row);
+        $row['document_number'] = balancesDocumentNumberForRow($row);
+    }
+    return $row;
 }
 
 function balancesExportCsv(string $filename, array $headers, array $rows): void
@@ -1242,6 +1291,30 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 balancesExportCsv(
                     $dataset . '_balances_' . date('Y-m-d') . '.csv',
                     ['Name', 'Phone', 'Currency', 'Current Balance', 'Total Paid', 'Total Due', 'Last Payment Date', 'Status'],
+                    $rows
+                );
+            }
+
+            if ($dataset === 'documents') {
+                $rows = [];
+                foreach (balancesListTransactions($pdo, $_GET) as $row) {
+                    $rows[] = [
+                        $row['document_number'],
+                        clmsT($row['document_type']),
+                        $row['transaction_date'],
+                        clmsT($row['party_type'] === 'customer' ? 'Customer' : 'Supplier'),
+                        $row['party_name'],
+                        format_display_amount($row['amount'], 2),
+                        $row['currency'],
+                        $row['payment_method'],
+                        $row['order_reference'],
+                        $row['reference_number'],
+                        $row['created_by_name'],
+                    ];
+                }
+                balancesExportCsv(
+                    'balance_documents_' . date('Y-m-d') . '.csv',
+                    ['Document No.', 'Document Type', 'Date', 'Type', 'Name', 'Amount', 'Currency', 'Payment Method', 'Linked Order', 'Reference Number', 'Recorded By'],
                     $rows
                 );
             }

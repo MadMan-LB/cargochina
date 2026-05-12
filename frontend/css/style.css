@@ -535,6 +535,161 @@ body {
   font-size: 0.82rem;
 }
 
+.balance-document-sheet {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 2rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: #fff;
+  color: var(--text-primary);
+}
+
+.balance-document-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+  border-bottom: 2px solid var(--text-primary);
+}
+
+.balance-document-brand {
+  font-size: 1.4rem;
+  font-weight: 800;
+}
+
+.balance-document-title {
+  font-size: 1.45rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.balance-document-number {
+  color: var(--text-muted);
+  font-size: 0.86rem;
+}
+
+.balance-document-meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.balance-document-meta>div,
+.balance-document-party,
+.balance-document-notes {
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: #fff;
+}
+
+.balance-document-meta span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.balance-document-party h3 {
+  margin: 0.25rem 0;
+  font-size: 1.1rem;
+}
+
+.balance-document-table {
+  width: 100%;
+  margin-top: 1rem;
+  border-collapse: collapse;
+}
+
+.balance-document-table th,
+.balance-document-table td {
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.balance-document-table th {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.balance-document-total {
+  background: rgba(37, 99, 235, 0.08) !important;
+}
+
+.balance-document-notes {
+  margin-top: 1rem;
+}
+
+.balance-document-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+@media (max-width: 767.98px) {
+  .balance-document-sheet {
+    padding: 1rem;
+  }
+
+  .balance-document-header,
+  .balance-document-footer {
+    flex-direction: column;
+  }
+
+  .balance-document-meta {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  body:has(#balanceDocumentModal.show) .clms-sidebar,
+  body:has(#balanceDocumentModal.show) .clms-topbar,
+  body:has(#balanceDocumentModal.show) .page-hero-card,
+  body:has(#balanceDocumentModal.show) .metric-card-grid,
+  body:has(#balanceDocumentModal.show) .filter-toolbar-card,
+  body:has(#balanceDocumentModal.show) #balanceTabs,
+  body:has(#balanceDocumentModal.show) #balanceTabContent,
+  body:has(#balanceDocumentModal.show) .modal-backdrop,
+  body:has(#balanceDocumentModal.show) .modal-header,
+  body:has(#balanceDocumentModal.show) .modal-footer {
+    display: none !important;
+  }
+
+  body:has(#balanceDocumentModal.show) .clms-main,
+  body:has(#balanceDocumentModal.show) .clms-content,
+  body:has(#balanceDocumentModal.show) #balanceDocumentModal,
+  body:has(#balanceDocumentModal.show) #balanceDocumentModal .modal-dialog,
+  body:has(#balanceDocumentModal.show) #balanceDocumentModal .modal-content,
+  body:has(#balanceDocumentModal.show) #balanceDocumentModal .modal-body {
+    position: static !important;
+    display: block !important;
+    width: auto !important;
+    max-width: none !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    border: 0 !important;
+    box-shadow: none !important;
+  }
+
+  body:has(#balanceDocumentModal.show) .balance-document-sheet {
+    max-width: none;
+    border: 0;
+    border-radius: 0;
+  }
+}
+
 /* ── Order modal (tablet-friendly card layout) ─────────────── */
 #orderModal .modal-dialog {
   max-width: min(1280px, calc(100vw - 2rem));

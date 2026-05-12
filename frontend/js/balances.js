@@ -8,6 +8,7 @@
     let activeDataset = "customers";
     let balanceTxnAccounts = [];
     let balanceAccountSuggestionIndex = -1;
+    const balanceDocumentRows = new Map();
 
     function balancesT(text, replacements = null) {
         return typeof t === "function" ? t(text, replacements) : text;
@@ -112,12 +113,18 @@
         setText("customerBalancesSummary", balanceLoading);
         setText("supplierBalancesSummary", balanceLoading);
         setText("transactionsSummary", transactionsLoading);
+        setText("balanceReceiptsSummary", balancesT("Loading documents..."));
+        setText("balanceInvoicesSummary", balancesT("Loading documents..."));
         el("customerBalancesBody").innerHTML =
             `<tr><td colspan="9" class="text-center text-muted py-4">${escapeHtml(balanceLoading)}</td></tr>`;
         el("supplierBalancesBody").innerHTML =
             `<tr><td colspan="9" class="text-center text-muted py-4">${escapeHtml(balanceLoading)}</td></tr>`;
         el("transactionsBody").innerHTML =
-            `<tr><td colspan="11" class="text-center text-muted py-4">${escapeHtml(transactionsLoading)}</td></tr>`;
+            `<tr><td colspan="12" class="text-center text-muted py-4">${escapeHtml(transactionsLoading)}</td></tr>`;
+        el("balanceReceiptsBody").innerHTML =
+            `<tr><td colspan="8" class="text-center text-muted py-4">${escapeHtml(balancesT("Loading documents..."))}</td></tr>`;
+        el("balanceInvoicesBody").innerHTML =
+            `<tr><td colspan="8" class="text-center text-muted py-4">${escapeHtml(balancesT("Loading documents..."))}</td></tr>`;
     }
 
     function statusBadge(status, label) {
@@ -134,6 +141,7 @@
     function transactionTypeLabel(type) {
         const labels = {
             deposit: "Deposit",
+            invoice: "Invoice",
             payment_received: "Payment Received",
             payment_sent: "Payment Sent",
             adjustment: "Adjustment",
@@ -145,6 +153,39 @@
 
     function partyTypeLabel(type) {
         return balancesT(type === "supplier" ? "Supplier" : "Customer");
+    }
+
+    function documentKey(row) {
+        return [
+            row?.source_table || "balance_transactions",
+            row?.source_id || "",
+            row?.id || "",
+            row?.document_number || "",
+        ].join(":");
+    }
+
+    function documentType(row) {
+        if (row?.document_type) return balancesT(row.document_type);
+        if (row?.direction === "increase_balance") return balancesT(row.transaction_type === "refund" ? "Credit Note" : "Invoice");
+        if (row?.party_type === "supplier") return balancesT("Payment Voucher");
+        return balancesT(row?.transaction_type === "refund" ? "Refund Receipt" : "Receipt");
+    }
+
+    function documentNumber(row) {
+        if (row?.document_number) return row.document_number;
+        const date = String(row?.transaction_date || todayIso()).replace(/\D/g, "") || todayIso().replace(/\D/g, "");
+        const type = row?.direction === "increase_balance"
+            ? (row?.transaction_type === "refund" ? "CRN" : "INV")
+            : row?.party_type === "supplier"
+              ? "PV"
+              : row?.transaction_type === "refund"
+                ? "RFR"
+                : "RCP";
+        return `${type}-${date}-${String(row?.id || 0).padStart(5, "0")}`;
+    }
+
+    function isReceiptDocument(row) {
+        return row?.direction !== "increase_balance";
     }
 
     function normalizeAccountLabel(row) {
@@ -418,6 +459,8 @@
     function renderTransactions(rows) {
         const body = el("transactionsBody");
         const safeRows = Array.isArray(rows) ? rows : [];
+        balanceDocumentRows.clear();
+        safeRows.forEach((row) => balanceDocumentRows.set(documentKey(row), row));
         setText(
             "transactionsSummary",
             safeRows.length
@@ -425,11 +468,14 @@
                 : balancesT("No transactions"),
         );
         if (!safeRows.length) {
-            body.innerHTML = `<tr><td colspan="11" class="text-center text-muted py-4">${escapeHtml(balancesT("No transactions found."))}</td></tr>`;
+            body.innerHTML = `<tr><td colspan="12" class="text-center text-muted py-4">${escapeHtml(balancesT("No transactions found."))}</td></tr>`;
+            renderDocuments([]);
             return;
         }
         body.innerHTML = safeRows
-            .map((row) => `
+            .map((row) => {
+                const key = documentKey(row);
+                return `
                 <tr>
                     <td>${escapeHtml(row.transaction_date || "-")}</td>
                     <td>${escapeHtml(partyTypeLabel(row.party_type))}</td>
@@ -442,9 +488,209 @@
                     <td data-no-translate>${escapeHtml(row.reference_number || "-")}</td>
                     <td data-no-translate>${escapeHtml(row.created_by_name || "-")}</td>
                     <td data-no-translate>${escapeHtml(row.notes || "")}</td>
+                    <td>
+                        <div class="btn-group btn-group-sm">
+                            <button type="button" class="btn btn-outline-primary balance-document-view-btn" data-document-key="${escapeHtml(key)}">${escapeHtml(balancesT("View"))}</button>
+                            <button type="button" class="btn btn-outline-secondary balance-document-print-btn" data-document-key="${escapeHtml(key)}">${escapeHtml(balancesT("Print"))}</button>
+                        </div>
+                    </td>
                 </tr>
-            `)
+            `;
+            })
             .join("");
+        renderDocuments(safeRows);
+    }
+
+    function renderDocumentRows(rows, bodyId, summaryId, emptyMessage) {
+        const body = el(bodyId);
+        const safeRows = Array.isArray(rows) ? rows : [];
+        setText(
+            summaryId,
+            safeRows.length
+                ? balancesT("{count} document(s)", { count: safeRows.length })
+                : balancesT("No documents"),
+        );
+        if (!safeRows.length) {
+            body.innerHTML = `<tr><td colspan="8" class="text-center text-muted py-4">${escapeHtml(emptyMessage)}</td></tr>`;
+            return;
+        }
+        body.innerHTML = safeRows
+            .map((row) => {
+                const key = documentKey(row);
+                return `
+                    <tr>
+                        <td data-no-translate>${escapeHtml(documentNumber(row))}</td>
+                        <td>${escapeHtml(row.transaction_date || "-")}</td>
+                        <td data-no-translate>${escapeHtml(row.party_name || "-")}</td>
+                        <td>${escapeHtml(documentType(row))}</td>
+                        <td><strong>${escapeHtml(formatMoney(row.currency, row.amount))}</strong></td>
+                        <td>${escapeHtml(row.payment_method || row.reference_number || "-")}</td>
+                        <td data-no-translate>${row.order_id ? `<a href="/cargochina/orders.php?order_id=${encodeURIComponent(row.order_id)}">${escapeHtml(row.order_reference || "#" + row.order_id)}</a>` : "-"}</td>
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                <button type="button" class="btn btn-outline-primary balance-document-view-btn" data-document-key="${escapeHtml(key)}">${escapeHtml(balancesT("View"))}</button>
+                                <button type="button" class="btn btn-outline-secondary balance-document-print-btn" data-document-key="${escapeHtml(key)}">${escapeHtml(balancesT("Print"))}</button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            })
+            .join("");
+    }
+
+    function renderDocuments(rows) {
+        const receipts = rows.filter(isReceiptDocument);
+        const invoices = rows.filter((row) => !isReceiptDocument(row));
+        renderDocumentRows(receipts, "balanceReceiptsBody", "balanceReceiptsSummary", balancesT("No receipts found."));
+        renderDocumentRows(invoices, "balanceInvoicesBody", "balanceInvoicesSummary", balancesT("No invoices found."));
+    }
+
+    function documentSheetHtml(row) {
+        const orderHtml = row.order_id
+            ? `<a data-no-translate href="/cargochina/orders.php?order_id=${encodeURIComponent(row.order_id)}">${escapeHtml(row.order_reference || "#" + row.order_id)}</a>`
+            : "-";
+        return `
+            <article class="balance-document-sheet">
+                <header class="balance-document-header">
+                    <div>
+                        <div class="balance-document-brand">CLMS</div>
+                        <div class="text-muted small">${escapeHtml(balancesT("Salameh Global Logistics"))}</div>
+                    </div>
+                    <div class="text-end">
+                        <div class="balance-document-title">${escapeHtml(documentType(row))}</div>
+                        <div class="balance-document-number" data-no-translate>${escapeHtml(documentNumber(row))}</div>
+                    </div>
+                </header>
+                <section class="balance-document-meta">
+                    <div>
+                        <span>${escapeHtml(balancesT("Date"))}</span>
+                        <strong>${escapeHtml(row.transaction_date || "-")}</strong>
+                    </div>
+                    <div>
+                        <span>${escapeHtml(balancesT("Party Type"))}</span>
+                        <strong>${escapeHtml(partyTypeLabel(row.party_type))}</strong>
+                    </div>
+                    <div>
+                        <span>${escapeHtml(balancesT("Linked Order"))}</span>
+                        <strong data-no-translate>${orderHtml}</strong>
+                    </div>
+                    <div>
+                        <span>${escapeHtml(balancesT("Recorded By"))}</span>
+                        <strong data-no-translate>${escapeHtml(row.created_by_name || "-")}</strong>
+                    </div>
+                </section>
+                <section class="balance-document-party">
+                    <div class="small text-muted">${escapeHtml(row.party_type === "supplier" ? balancesT("Supplier") : balancesT("Customer"))}</div>
+                    <h3 data-no-translate>${escapeHtml(row.party_name || "-")}</h3>
+                    <div data-no-translate>${escapeHtml([row.party_code, row.party_phone].filter(Boolean).join(" | ") || "-")}</div>
+                </section>
+                <table class="balance-document-table">
+                    <thead>
+                        <tr>
+                            <th>${escapeHtml(balancesT("Description"))}</th>
+                            <th>${escapeHtml(balancesT("Payment Method"))}</th>
+                            <th>${escapeHtml(balancesT("Account Number"))}</th>
+                            <th class="text-end">${escapeHtml(balancesT("Amount"))}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>${escapeHtml(transactionTypeLabel(row.transaction_type))}</td>
+                            <td>${escapeHtml(row.payment_method || "-")}</td>
+                            <td data-no-translate>${escapeHtml(row.payment_account_value || "-")}</td>
+                            <td class="text-end"><strong>${escapeHtml(formatMoney(row.currency, row.amount))}</strong></td>
+                        </tr>
+                    </tbody>
+                </table>
+                <section class="balance-document-meta mt-3">
+                    <div>
+                        <span>${escapeHtml(balancesT("Reference Number"))}</span>
+                        <strong data-no-translate>${escapeHtml(row.reference_number || "-")}</strong>
+                    </div>
+                    <div>
+                        <span>${escapeHtml(balancesT("Currency"))}</span>
+                        <strong>${escapeHtml(row.currency || "-")}</strong>
+                    </div>
+                    <div class="balance-document-total">
+                        <span>${escapeHtml(balancesT("Total"))}</span>
+                        <strong>${escapeHtml(formatMoney(row.currency, row.amount))}</strong>
+                    </div>
+                </section>
+                ${row.notes ? `
+                    <section class="balance-document-notes">
+                        <div class="small text-muted">${escapeHtml(balancesT("Notes"))}</div>
+                        <div data-no-translate>${escapeHtml(row.notes)}</div>
+                    </section>
+                ` : ""}
+                <footer class="balance-document-footer">
+                    <div>${escapeHtml(balancesT("Generated from the balances transaction ledger."))}</div>
+                    <div>${escapeHtml(balancesT("Signature"))}: ____________________</div>
+                </footer>
+            </article>
+        `;
+    }
+
+    function openBalanceDocument(rowOrKey) {
+        const row = typeof rowOrKey === "string" ? balanceDocumentRows.get(rowOrKey) : rowOrKey;
+        if (!row) {
+            showToast(balancesT("Document not found"), "warning");
+            return;
+        }
+        balanceDocumentRows.set(documentKey(row), row);
+        setText("balanceDocumentModalTitle", documentType(row));
+        el("balanceDocumentPreview").innerHTML = documentSheetHtml(row);
+        el("balanceDocumentPrintBtn").dataset.documentKey = documentKey(row);
+        el("balanceDocumentPdfBtn").dataset.documentKey = documentKey(row);
+        bootstrap.Modal.getOrCreateInstance(el("balanceDocumentModal")).show();
+    }
+
+    function printBalanceDocument(rowOrKey) {
+        const row = typeof rowOrKey === "string" ? balanceDocumentRows.get(rowOrKey) : rowOrKey;
+        if (!row) {
+            showToast(balancesT("Document not found"), "warning");
+            return;
+        }
+        const title = `${documentType(row)} ${documentNumber(row)}`;
+        const popup = window.open("", "_blank", "width=900,height=700");
+        if (!popup) {
+            showToast(balancesT("Please allow pop-ups to print or save PDF."), "warning");
+            return;
+        }
+        popup.document.write(`
+            <!doctype html>
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <title>${escapeHtml(title)}</title>
+                <style>
+                    body{font-family:Arial,sans-serif;margin:0;background:#f6f7fb;color:#111827}
+                    a{color:inherit;text-decoration:none}
+                    .balance-document-sheet{width:210mm;min-height:297mm;margin:0 auto;background:#fff;padding:18mm;box-sizing:border-box}
+                    .balance-document-header{display:flex;justify-content:space-between;gap:24px;border-bottom:2px solid #111827;padding-bottom:18px;margin-bottom:18px}
+                    .balance-document-brand{font-size:24px;font-weight:800}
+                    .balance-document-title{font-size:28px;font-weight:800;text-transform:uppercase}
+                    .balance-document-number{font-size:13px;color:#64748b;margin-top:4px}
+                    .text-end{text-align:right}.text-muted{color:#64748b}.small{font-size:12px}
+                    .balance-document-meta{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+                    .balance-document-meta div,.balance-document-party,.balance-document-notes{border:1px solid #dbe4f0;border-radius:8px;padding:10px}
+                    .balance-document-meta span{display:block;font-size:11px;text-transform:uppercase;color:#64748b;letter-spacing:.04em}
+                    .balance-document-party h3{margin:4px 0;font-size:18px}
+                    .balance-document-table{width:100%;border-collapse:collapse;margin-top:18px}
+                    .balance-document-table th,.balance-document-table td{border-bottom:1px solid #dbe4f0;padding:10px;text-align:left}
+                    .balance-document-table th{font-size:12px;text-transform:uppercase;color:#475569}
+                    .balance-document-total{background:#eef4ff}
+                    .balance-document-notes{margin-top:18px}
+                    .balance-document-footer{display:flex;justify-content:space-between;gap:24px;margin-top:36px;padding-top:18px;border-top:1px solid #dbe4f0;color:#64748b;font-size:12px}
+                    @page{size:A4;margin:0}
+                    @media print{body{background:#fff}.balance-document-sheet{margin:0;box-shadow:none}}
+                </style>
+            </head>
+            <body>${documentSheetHtml(row)}</body>
+            </html>
+        `);
+        popup.document.close();
+        popup.focus();
+        setTimeout(() => popup.print(), 250);
     }
 
     function updateFilterSummary() {
@@ -518,7 +764,7 @@
     };
 
     window.exportActiveBalanceView = function () {
-        const params = buildParams(activeDataset === "transactions");
+        const params = buildParams(activeDataset === "transactions" || activeDataset === "documents");
         params.set("dataset", activeDataset);
         window.location.href = API + "/balances/export?" + params.toString();
     };
@@ -550,7 +796,10 @@
         const txType = el("balanceTxnType")?.value || "payment_received";
         let direction = "increase_balance";
         let help = balancesT("Adjustments can increase or reduce the selected balance.");
-        if (
+        if (txType === "invoice") {
+            direction = "increase_balance";
+            help = balancesT("Invoices increase the selected balance.");
+        } else if (
             (partyType === "customer" && (txType === "payment_received" || txType === "deposit")) ||
             (partyType === "supplier" && (txType === "payment_sent" || txType === "deposit"))
         ) {
@@ -744,14 +993,17 @@
         const button = el("balanceTxnSubmitBtn");
         try {
             button.disabled = true;
-            await api("/balances/transactions", {
+            const response = await api("/balances/transactions", {
                 method: "POST",
                 body: JSON.stringify(payload),
             });
             showToast(balancesT(payload.transaction_type === "deposit" ? "Deposit Saved" : "Transaction recorded"));
             refreshUnsavedBaseline?.(el("balanceTransactionModal")?.querySelector(".modal-body"));
             bootstrap.Modal.getInstance(el("balanceTransactionModal"))?.hide();
-            loadBalancePageData();
+            await loadBalancePageData();
+            if (response?.data?.id) {
+                openBalanceDocument(response.data);
+            }
         } catch (error) {
             if (error?.errors && typeof error.errors === "object") {
                 showBalanceTxnErrors(error.errors, partyType);
@@ -880,6 +1132,26 @@
             activeDataset = "transactions";
             window.history.replaceState(null, "", "#transactions");
         });
+        document.getElementById("balance-documents-tab")?.addEventListener("shown.bs.tab", () => {
+            activeDataset = "documents";
+            window.history.replaceState(null, "", "#documents");
+        });
+        document.addEventListener("click", (event) => {
+            const viewBtn = event.target.closest(".balance-document-view-btn");
+            const printBtn = event.target.closest(".balance-document-print-btn");
+            if (viewBtn) {
+                openBalanceDocument(viewBtn.dataset.documentKey || "");
+            } else if (printBtn) {
+                printBalanceDocument(printBtn.dataset.documentKey || "");
+            }
+        });
+        el("balanceDocumentPrintBtn")?.addEventListener("click", () => {
+            printBalanceDocument(el("balanceDocumentPrintBtn").dataset.documentKey || "");
+        });
+        el("balanceDocumentPdfBtn")?.addEventListener("click", () => {
+            showToast(balancesT("Choose Save as PDF in the print dialog."));
+            printBalanceDocument(el("balanceDocumentPdfBtn").dataset.documentKey || "");
+        });
 
         const hash = (window.location.hash || "").replace("#", "");
         if (hash === "suppliers") {
@@ -888,6 +1160,9 @@
         } else if (hash === "transactions") {
             activeDataset = "transactions";
             bootstrap.Tab.getOrCreateInstance(el("balance-transactions-tab")).show();
+        } else if (hash === "documents") {
+            activeDataset = "documents";
+            bootstrap.Tab.getOrCreateInstance(el("balance-documents-tab")).show();
         }
 
         setPartyTypeVisible(false);
