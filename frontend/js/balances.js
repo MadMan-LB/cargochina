@@ -7,6 +7,7 @@
     let balanceSupplierAc = null;
     let activeDataset = "customers";
     let balanceTxnAccounts = [];
+    let balanceAccountSuggestionIndex = -1;
 
     function balancesT(text, replacements = null) {
         return typeof t === "function" ? t(text, replacements) : text;
@@ -155,32 +156,156 @@
         return [method || label, currency, detail].filter(Boolean).join(" - ");
     }
 
+    function accountValue(row) {
+        return String(row?.value || row?.account_value || row?.link || "").trim();
+    }
+
+    function accountLabel(row) {
+        return String(row?.account_label || row?.label || row?.name || row?.method || balancesT("Account")).trim();
+    }
+
+    function accountMatches(row, query) {
+        const needle = String(query || "").trim().toLowerCase();
+        if (!needle) return true;
+        return [normalizeAccountLabel(row), accountLabel(row), accountValue(row), row?.method || "", row?.currency || ""]
+            .join(" ")
+            .toLowerCase()
+            .includes(needle);
+    }
+
     function selectedAccountOption() {
         return el("balanceTxnAccountOption")?.selectedOptions?.[0] || null;
     }
 
+    function hideBalanceAccountSuggestions() {
+        const box = el("balanceTxnAccountSuggestions");
+        box?.classList.add("d-none");
+        balanceAccountSuggestionIndex = -1;
+    }
+
+    function setBalanceAccountHelpForInput() {
+        const detail = el("balanceTxnAccountDetail")?.value.trim() || "";
+        const exactMatch = detail && balanceTxnAccounts.some((row) => accountValue(row).toLowerCase() === detail.toLowerCase());
+        if (exactMatch) {
+            setText("balanceTxnAccountHelp", balancesT("Using saved account."));
+            return;
+        }
+        if (detail) {
+            setText("balanceTxnAccountHelp", balancesT("This new account will be saved with this party after recording."));
+            return;
+        }
+        setText(
+            "balanceTxnAccountHelp",
+            balanceTxnAccounts.length
+                ? balancesT("Choose a saved account or type a new account number.")
+                : balancesT("No saved accounts. Type an account number to save it with this party."),
+        );
+    }
+
+    function renderBalanceAccountSuggestions(query = "") {
+        const box = el("balanceTxnAccountSuggestions");
+        if (!box) return;
+        const matches = balanceTxnAccounts
+            .map((row, index) => ({ row, index }))
+            .filter(({ row }) => accountMatches(row, query));
+        balanceAccountSuggestionIndex = -1;
+        if (!matches.length) {
+            box.innerHTML = `<div class="balance-account-suggestion-empty">${
+                escapeHtml(
+                    balanceTxnAccounts.length
+                        ? balancesT("No saved accounts match this entry.")
+                        : balancesT("No saved accounts. Type an account number to save it with this party."),
+                )
+            }</div>`;
+            return;
+        }
+        box.innerHTML = matches
+            .map(({ row, index }) => {
+                const title = accountLabel(row);
+                const details = [row.method || "", row.currency || "", accountValue(row)].filter(Boolean).join(" - ");
+                return `
+                    <button type="button" class="balance-account-suggestion" data-index="${index}" role="option">
+                        <span class="balance-account-suggestion-title">${escapeHtml(title)}</span>
+                        <span class="balance-account-suggestion-detail">${escapeHtml(details || normalizeAccountLabel(row))}</span>
+                    </button>
+                `;
+            })
+            .join("");
+    }
+
+    function showBalanceAccountSuggestions() {
+        const box = el("balanceTxnAccountSuggestions");
+        if (!box) return;
+        renderBalanceAccountSuggestions(el("balanceTxnAccountDetail")?.value || "");
+        box.classList.remove("d-none");
+    }
+
+    function applyBalanceAccount(row, index = null) {
+        if (!row) return;
+        const select = el("balanceTxnAccountOption");
+        if (select && index !== null) {
+            select.value = String(index);
+        }
+        el("balanceTxnAccountDetail").value = accountValue(row);
+        const method = row.method || "";
+        if (method) {
+            const methodEl = el("balanceTxnMethod");
+            if (methodEl && Array.from(methodEl.options).some((option) => option.value === method)) {
+                methodEl.value = method;
+            }
+        }
+        if (row.currency) {
+            el("balanceTxnCurrency").value = row.currency;
+        }
+        setBalanceAccountHelpForInput();
+        hideBalanceAccountSuggestions();
+    }
+
     function clearBalanceAccountOptions(message = "Choose saved account...") {
         balanceTxnAccounts = [];
+        hideBalanceAccountSuggestions();
         const select = el("balanceTxnAccountOption");
         if (!select) return;
         select.innerHTML = `<option value="">${escapeHtml(balancesT(message))}</option>`;
         el("balanceTxnAccountDetail").value = "";
-        setText("balanceTxnAccountHelp", balancesT("Choose a saved account or type a new account number."));
+        setBalanceAccountHelpForInput();
     }
 
     function syncBalanceAccountSelection() {
         const option = selectedAccountOption();
         if (!option || option.value === "") return;
-        el("balanceTxnAccountDetail").value = option.dataset.value || "";
-        if (option.dataset.method) {
-            const methodEl = el("balanceTxnMethod");
-            if (methodEl && Array.from(methodEl.options).some((o) => o.value === option.dataset.method)) {
-                methodEl.value = option.dataset.method;
-            }
-        }
-        if (option.dataset.currency) {
-            el("balanceTxnCurrency").value = option.dataset.currency;
-        }
+        const index = Number(option.value);
+        applyBalanceAccount(balanceTxnAccounts[index] || {
+            account_label: option.dataset.label || "",
+            method: option.dataset.method || "",
+            value: option.dataset.value || "",
+            currency: option.dataset.currency || "",
+            qr_image_path: option.dataset.qr || "",
+        }, Number.isFinite(index) ? index : null);
+    }
+
+    function moveBalanceAccountSuggestion(step) {
+        const box = el("balanceTxnAccountSuggestions");
+        if (!box || box.classList.contains("d-none")) return;
+        const buttons = Array.from(box.querySelectorAll(".balance-account-suggestion"));
+        if (!buttons.length) return;
+        balanceAccountSuggestionIndex =
+            balanceAccountSuggestionIndex < 0
+                ? (step > 0 ? 0 : buttons.length - 1)
+                : (balanceAccountSuggestionIndex + step + buttons.length) % buttons.length;
+        buttons.forEach((button, index) => button.classList.toggle("is-active", index === balanceAccountSuggestionIndex));
+        buttons[balanceAccountSuggestionIndex]?.scrollIntoView({ block: "nearest" });
+    }
+
+    function commitBalanceAccountSuggestion() {
+        const box = el("balanceTxnAccountSuggestions");
+        if (!box || box.classList.contains("d-none")) return false;
+        const buttons = Array.from(box.querySelectorAll(".balance-account-suggestion"));
+        const button = buttons[balanceAccountSuggestionIndex >= 0 ? balanceAccountSuggestionIndex : 0];
+        if (!button) return false;
+        const index = Number(button.dataset.index);
+        applyBalanceAccount(balanceTxnAccounts[index], Number.isFinite(index) ? index : null);
+        return true;
     }
 
     async function loadBalancePartyAccounts(partyType, partyId) {
@@ -213,12 +338,7 @@
                 select.value = "0";
                 syncBalanceAccountSelection();
             }
-            setText(
-                "balanceTxnAccountHelp",
-                balanceTxnAccounts.length
-                    ? balancesT("Choose a saved account or type a new account number.")
-                    : balancesT("No saved accounts. Type an account number to save it with this party."),
-            );
+            setBalanceAccountHelpForInput();
         } catch (error) {
             clearBalanceAccountOptions();
             showToast(error.message || balancesT("Failed to load saved accounts"), "warning");
@@ -685,11 +805,47 @@
         el("balanceTxnPartyType")?.addEventListener("change", () => setPartyTypeVisible(true));
         el("balanceTxnType")?.addEventListener("change", updateDirectionDefault);
         el("balanceTxnAccountOption")?.addEventListener("change", syncBalanceAccountSelection);
+        el("balanceTxnAccountDetail")?.addEventListener("focus", showBalanceAccountSuggestions);
+        el("balanceTxnAccountDetail")?.addEventListener("click", showBalanceAccountSuggestions);
         el("balanceTxnAccountDetail")?.addEventListener("input", () => {
             const option = selectedAccountOption();
             if (option && option.value !== "" && el("balanceTxnAccountDetail").value !== (option.dataset.value || "")) {
                 el("balanceTxnAccountOption").value = "";
             }
+            renderBalanceAccountSuggestions(el("balanceTxnAccountDetail").value);
+            showBalanceAccountSuggestions();
+            setBalanceAccountHelpForInput();
+        });
+        el("balanceTxnAccountDetail")?.addEventListener("keydown", (event) => {
+            if (event.key === "ArrowDown") {
+                event.preventDefault();
+                showBalanceAccountSuggestions();
+                moveBalanceAccountSuggestion(1);
+            } else if (event.key === "ArrowUp") {
+                event.preventDefault();
+                showBalanceAccountSuggestions();
+                moveBalanceAccountSuggestion(-1);
+            } else if (event.key === "Enter" && commitBalanceAccountSuggestion()) {
+                event.preventDefault();
+            } else if (event.key === "Escape") {
+                hideBalanceAccountSuggestions();
+            }
+        });
+        el("balanceTxnAccountSuggestions")?.addEventListener("mousedown", (event) => {
+            event.preventDefault();
+            const button = event.target.closest(".balance-account-suggestion");
+            if (!button) return;
+            const index = Number(button.dataset.index);
+            applyBalanceAccount(balanceTxnAccounts[index], Number.isFinite(index) ? index : null);
+        });
+        document.addEventListener("mousedown", (event) => {
+            const picker = event.target.closest(".balance-account-picker");
+            if (!picker) {
+                hideBalanceAccountSuggestions();
+            }
+        });
+        el("balanceTransactionModal")?.addEventListener("hidden.bs.modal", () => {
+            hideBalanceAccountSuggestions();
         });
         [
             "balanceTxnPartyType",

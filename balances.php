@@ -302,7 +302,10 @@ require 'includes/layout.php';
           </div>
           <div class="col-md-6">
             <label class="form-label" for="balanceTxnAccountDetail"><?= htmlspecialchars(clmsT('Account Number')) ?></label>
-            <input type="text" class="form-control" id="balanceTxnAccountDetail" placeholder="<?= htmlspecialchars(clmsT('Account / number / URL / account detail')) ?>">
+            <div class="balance-account-picker">
+              <input type="text" class="form-control" id="balanceTxnAccountDetail" autocomplete="off" placeholder="<?= htmlspecialchars(clmsT('Account / number / URL / account detail')) ?>">
+              <div class="balance-account-suggestions d-none" id="balanceTxnAccountSuggestions" role="listbox"></div>
+            </div>
             <div class="form-text" id="balanceTxnAccountHelp"><?= htmlspecialchars(clmsT('Choose a saved account or type a new account number.')) ?></div>
           </div>
           <div class="col-md-6">

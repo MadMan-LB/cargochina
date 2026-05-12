@@ -184,6 +184,11 @@ function balancesIdPlaceholders(array $ids): string
     return implode(',', array_fill(0, count($ids), '?'));
 }
 
+function balancesUnionTextExpr(string $expr): string
+{
+    return "CONVERT($expr USING utf8mb4) COLLATE utf8mb4_unicode_ci";
+}
+
 function balancesSearchClause(string $alias, array $columns, string $q, array &$params): string
 {
     if ($q === '') {
@@ -698,16 +703,22 @@ function balancesTransactionUnionSql(PDO $pdo): string
     $btOrderReference = balancesTableHasColumn($pdo, 'balance_transactions', 'order_reference') ? "COALESCE(bt.order_reference, CONCAT('#', bt.order_id))" : 'NULL';
 
     if (balancesTableExists($pdo, 'balance_transactions')) {
-        $selects[] = "SELECT bt.id, bt.party_type, bt.party_id,
-                CASE WHEN bt.party_type = 'customer' THEN c.name ELSE s.name END as party_name,
-                CASE WHEN bt.party_type = 'customer' THEN c.code ELSE s.code END as party_code,
-                CASE WHEN bt.party_type = 'customer' THEN $customerPhoneExpr ELSE $supplierPhoneExpr END as party_phone,
-                bt.transaction_type, bt.direction, bt.amount, bt.currency, bt.payment_method,
-                $btAccountLabel as payment_account_label, $btAccountValue as payment_account_value,
-                $btAccountQrPath as payment_account_qr_path,
-                $btOrderId as order_id, $btOrderReference as order_reference,
-                bt.reference_number, bt.notes, bt.created_by, u.full_name as created_by_name,
-                bt.transaction_date, bt.created_at, bt.source_table, bt.source_id
+        $selects[] = "SELECT bt.id, " . balancesUnionTextExpr('bt.party_type') . " as party_type, bt.party_id,
+                " . balancesUnionTextExpr("CASE WHEN bt.party_type = 'customer' THEN c.name ELSE s.name END") . " as party_name,
+                " . balancesUnionTextExpr("CASE WHEN bt.party_type = 'customer' THEN c.code ELSE s.code END") . " as party_code,
+                " . balancesUnionTextExpr("CASE WHEN bt.party_type = 'customer' THEN $customerPhoneExpr ELSE $supplierPhoneExpr END") . " as party_phone,
+                " . balancesUnionTextExpr('bt.transaction_type') . " as transaction_type,
+                " . balancesUnionTextExpr('bt.direction') . " as direction,
+                bt.amount, " . balancesUnionTextExpr('bt.currency') . " as currency,
+                " . balancesUnionTextExpr('bt.payment_method') . " as payment_method,
+                " . balancesUnionTextExpr($btAccountLabel) . " as payment_account_label,
+                " . balancesUnionTextExpr($btAccountValue) . " as payment_account_value,
+                " . balancesUnionTextExpr($btAccountQrPath) . " as payment_account_qr_path,
+                $btOrderId as order_id, " . balancesUnionTextExpr($btOrderReference) . " as order_reference,
+                " . balancesUnionTextExpr('bt.reference_number') . " as reference_number,
+                " . balancesUnionTextExpr('bt.notes') . " as notes,
+                bt.created_by, " . balancesUnionTextExpr('u.full_name') . " as created_by_name,
+                bt.transaction_date, bt.created_at, " . balancesUnionTextExpr('bt.source_table') . " as source_table, bt.source_id
             FROM balance_transactions bt
             LEFT JOIN customers c ON bt.party_type = 'customer' AND bt.party_id = c.id
             LEFT JOIN suppliers s ON bt.party_type = 'supplier' AND bt.party_id = s.id
@@ -719,17 +730,23 @@ function balancesTransactionUnionSql(PDO $pdo): string
         $notLinked = balancesTableExists($pdo, 'balance_transactions')
             ? "WHERE NOT EXISTS (SELECT 1 FROM balance_transactions bt WHERE bt.source_table = 'customer_deposits' AND bt.source_id = cd.id)"
             : '';
-        $selects[] = "SELECT cd.id, 'customer' as party_type, cd.customer_id as party_id,
-                c.name as party_name, c.code as party_code, $customerPhoneExpr as party_phone,
-                'payment_received' as transaction_type, 'reduce_balance' as direction,
-                cd.amount, cd.currency, cd.payment_method,
-                NULL as payment_account_label, NULL as payment_account_value,
-                NULL as payment_account_qr_path, $cdOrderId as order_id,
-                CASE WHEN $cdOrderId IS NULL THEN NULL ELSE CONCAT('#', $cdOrderId) END as order_reference,
-                cd.reference_no as reference_number,
-                cd.notes, cd.created_by, u.full_name as created_by_name,
+        $selects[] = "SELECT cd.id, " . balancesUnionTextExpr("'customer'") . " as party_type, cd.customer_id as party_id,
+                " . balancesUnionTextExpr('c.name') . " as party_name,
+                " . balancesUnionTextExpr('c.code') . " as party_code,
+                " . balancesUnionTextExpr($customerPhoneExpr) . " as party_phone,
+                " . balancesUnionTextExpr("'payment_received'") . " as transaction_type,
+                " . balancesUnionTextExpr("'reduce_balance'") . " as direction,
+                cd.amount, " . balancesUnionTextExpr('cd.currency') . " as currency,
+                " . balancesUnionTextExpr('cd.payment_method') . " as payment_method,
+                " . balancesUnionTextExpr('NULL') . " as payment_account_label,
+                " . balancesUnionTextExpr('NULL') . " as payment_account_value,
+                " . balancesUnionTextExpr('NULL') . " as payment_account_qr_path, $cdOrderId as order_id,
+                " . balancesUnionTextExpr("CASE WHEN $cdOrderId IS NULL THEN NULL ELSE CONCAT('#', $cdOrderId) END") . " as order_reference,
+                " . balancesUnionTextExpr('cd.reference_no') . " as reference_number,
+                " . balancesUnionTextExpr('cd.notes') . " as notes,
+                cd.created_by, " . balancesUnionTextExpr('u.full_name') . " as created_by_name,
                 DATE(cd.created_at) as transaction_date, cd.created_at,
-                'customer_deposits' as source_table, cd.id as source_id
+                " . balancesUnionTextExpr("'customer_deposits'") . " as source_table, cd.id as source_id
             FROM customer_deposits cd
             JOIN customers c ON cd.customer_id = c.id
             LEFT JOIN users u ON cd.created_by = u.id
@@ -755,16 +772,23 @@ function balancesTransactionUnionSql(PDO $pdo): string
         $notLinked = balancesTableExists($pdo, 'balance_transactions')
             ? "WHERE NOT EXISTS (SELECT 1 FROM balance_transactions bt WHERE bt.source_table = 'supplier_payments' AND bt.source_id = sp.id)"
             : '';
-        $selects[] = "SELECT sp.id, 'supplier' as party_type, sp.supplier_id as party_id,
-                s.name as party_name, s.code as party_code, $supplierPhoneExpr as party_phone,
-                'payment_sent' as transaction_type, 'reduce_balance' as direction,
-                sp.amount, sp.currency, $paymentMethod as payment_method,
-                $paymentAccountLabel as payment_account_label, $paymentAccountValue as payment_account_value,
-                $paymentAccountQrPath as payment_account_qr_path, sp.order_id as order_id,
-                CASE WHEN sp.order_id IS NULL THEN NULL ELSE CONCAT('#', sp.order_id) END as order_reference,
-                NULL as reference_number, sp.notes, $createdBy as created_by,
-                u.full_name as created_by_name, DATE(sp.created_at) as transaction_date,
-                sp.created_at, 'supplier_payments' as source_table, sp.id as source_id
+        $selects[] = "SELECT sp.id, " . balancesUnionTextExpr("'supplier'") . " as party_type, sp.supplier_id as party_id,
+                " . balancesUnionTextExpr('s.name') . " as party_name,
+                " . balancesUnionTextExpr('s.code') . " as party_code,
+                " . balancesUnionTextExpr($supplierPhoneExpr) . " as party_phone,
+                " . balancesUnionTextExpr("'payment_sent'") . " as transaction_type,
+                " . balancesUnionTextExpr("'reduce_balance'") . " as direction,
+                sp.amount, " . balancesUnionTextExpr('sp.currency') . " as currency,
+                " . balancesUnionTextExpr($paymentMethod) . " as payment_method,
+                " . balancesUnionTextExpr($paymentAccountLabel) . " as payment_account_label,
+                " . balancesUnionTextExpr($paymentAccountValue) . " as payment_account_value,
+                " . balancesUnionTextExpr($paymentAccountQrPath) . " as payment_account_qr_path, sp.order_id as order_id,
+                " . balancesUnionTextExpr("CASE WHEN sp.order_id IS NULL THEN NULL ELSE CONCAT('#', sp.order_id) END") . " as order_reference,
+                " . balancesUnionTextExpr('NULL') . " as reference_number,
+                " . balancesUnionTextExpr('sp.notes') . " as notes,
+                $createdBy as created_by,
+                " . balancesUnionTextExpr('u.full_name') . " as created_by_name, DATE(sp.created_at) as transaction_date,
+                sp.created_at, " . balancesUnionTextExpr("'supplier_payments'") . " as source_table, sp.id as source_id
             FROM supplier_payments sp
             JOIN suppliers s ON sp.supplier_id = s.id
             LEFT JOIN users u ON $createdBy = u.id

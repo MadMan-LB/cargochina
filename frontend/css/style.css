@@ -479,6 +479,62 @@ body {
   color: var(--sidebar-active);
 }
 
+.balance-account-picker {
+  position: relative;
+}
+
+.balance-account-suggestions {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  z-index: 1080;
+  max-height: 230px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  box-shadow: var(--shadow-lg);
+  padding: 0.25rem;
+}
+
+.balance-account-suggestion {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 0.4rem;
+  background: transparent;
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.balance-account-suggestion:hover,
+.balance-account-suggestion:focus,
+.balance-account-suggestion.is-active {
+  background: rgba(37, 99, 235, 0.1);
+  outline: none;
+}
+
+.balance-account-suggestion-title {
+  font-weight: 700;
+  font-size: 0.86rem;
+}
+
+.balance-account-suggestion-detail {
+  margin-top: 0.15rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.balance-account-suggestion-empty {
+  padding: 0.65rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
 /* ── Order modal (tablet-friendly card layout) ─────────────── */
 #orderModal .modal-dialog {
   max-width: min(1280px, calc(100vw - 2rem));

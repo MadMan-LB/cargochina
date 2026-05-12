@@ -37,6 +37,22 @@
             phone: "",
             address: "",
         };
+        const setField = (key, value) => {
+            const clean = safeText(value).replace(/^;+|;+$/g, "").replace(/;+$/g, "");
+            if (clean && !result[key]) {
+                result[key] = clean;
+            }
+        };
+        const rawLines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        rawLines.forEach((line) => {
+            const match = line.match(/^(FN|N|NAME|TEL|PHONE|MOBILE|ADR|ADDRESS)[:=](.+)$/i);
+            if (!match) return;
+            const key = match[1].toUpperCase();
+            const value = match[2].split(";").filter(Boolean).join(" ").trim();
+            if (key === "FN" || key === "N" || key === "NAME") setField("name", value);
+            if (key === "TEL" || key === "PHONE" || key === "MOBILE") setField("phone", value);
+            if (key === "ADR" || key === "ADDRESS") setField("address", value);
+        });
         const lines = text.split(/\r?\n|;+/).map((line) => line.trim()).filter(Boolean);
         const pairPatterns = [
             ["name", /^(?:n|fn|name|supplier|公司|名称|姓名)[:=](.+)$/i],
@@ -47,13 +63,22 @@
             pairPatterns.forEach(([key, pattern]) => {
                 const match = line.match(pattern);
                 if (match && !result[key]) {
-                    result[key] = safeText(match[1]).replace(/^;+|;+$/g, "");
+                    setField(key, match[1]);
                 }
             });
         });
+        try {
+            const parsedUrl = new URL(text);
+            const params = parsedUrl.searchParams;
+            setField("name", params.get("name") || params.get("fn") || params.get("nickname") || "");
+            setField("phone", params.get("phone") || params.get("tel") || params.get("mobile") || "");
+            setField("address", params.get("address") || params.get("addr") || params.get("adr") || "");
+        } catch (error) {
+            // Plain WeChat QR payloads are often not URLs with readable profile fields.
+        }
         const phoneMatch = text.match(/(?:\+?\d[\d\s().-]{5,}\d)/);
         if (!result.phone && phoneMatch) {
-            result.phone = safeText(phoneMatch[0]);
+            setField("phone", phoneMatch[0]);
         }
         return result;
     }
