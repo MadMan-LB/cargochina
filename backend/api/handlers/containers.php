@@ -270,6 +270,16 @@ function fetchContainerExportExpenses(PDO $pdo, int $containerId, array $orderId
             LEFT JOIN suppliers s ON e.supplier_id = s.id
             WHERE (" . implode(' OR ', $clauses) . ")
             ORDER BY e.expense_date ASC, e.id ASC";
+    $expenseCustomerScope = clmsCustomerIdVisibilityClause($pdo, 'e.customer_id', 'cvcexp');
+    $orderCustomerScope = clmsCustomerIdVisibilityClause($pdo, 'o.customer_id', 'cvcorder');
+    $sql = str_replace(
+        "ORDER BY e.expense_date ASC, e.id ASC",
+        "AND (e.customer_id IS NULL OR {$expenseCustomerScope['sql']})
+            AND (o.customer_id IS NULL OR {$orderCustomerScope['sql']})
+            ORDER BY e.expense_date ASC, e.id ASC",
+        $sql
+    );
+    $params = array_merge($params, $expenseCustomerScope['params'], $orderCustomerScope['params']);
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
@@ -308,6 +318,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $custCols = 'c.name as customer_name';
                 $chkPrio = @$pdo->query("SHOW COLUMNS FROM customers LIKE 'priority_level'");
                 if ($chkPrio && $chkPrio->rowCount() > 0) $custCols .= ', c.priority_level as customer_priority_level, c.priority_note as customer_priority_note';
+                $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
                 $stmt = $pdo->prepare(
                     "SELECT o.id, o.status, o.expected_ready_date, o.currency, o.high_alert_notes,
                             $custCols,
@@ -318,12 +329,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                      JOIN orders o ON sdo.order_id = o.id
                      JOIN customers c ON o.customer_id = c.id
                      LEFT JOIN suppliers s ON o.supplier_id = s.id
-                     WHERE sd.container_id = ?
+                     WHERE sd.container_id = ? AND {$customerScope['sql']}
                      GROUP BY o.id, o.status, o.expected_ready_date, o.currency, o.high_alert_notes, c.name, s.name" .
                     (($chkPrio && $chkPrio->rowCount() > 0) ? ", c.priority_level, c.priority_note" : "") .
                     " ORDER BY draft_id, o.id"
                 );
-                $stmt->execute([$id]);
+                $stmt->execute(array_merge([$id], $customerScope['params']));
                 $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 $totals = [
                     'order_count' => count($orders),
@@ -395,8 +406,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $expenses = fetchContainerExportExpenses($pdo, (int) $id, array_map('intval', $orderIds));
                 $ordersWithItems = [];
                 foreach ($orderIds as $oid) {
-                    $stmt = $pdo->prepare("SELECT o.*, $custCols, $suppCols FROM orders o JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id WHERE o.id = ?");
-                    $stmt->execute([$oid]);
+                    $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
+                    $stmt = $pdo->prepare("SELECT o.*, $custCols, $suppCols FROM orders o JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id WHERE o.id = ? AND {$customerScope['sql']}");
+                    $stmt->execute(array_merge([$oid], $customerScope['params']));
                     $order = $stmt->fetch(PDO::FETCH_ASSOC);
                     if (!$order) continue;
                     $items = normalizeOrderItems(fetchOrderItems($pdo, (int) $oid));
@@ -426,6 +438,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     : (trim((string) $statusParam) !== '' ? [trim((string) $statusParam)] : []);
                 $statusMode = strtolower(trim((string) ($_GET['status_mode'] ?? 'include')));
                 $statusMode = $statusMode === 'exclude' ? 'exclude' : 'include';
+                $containerOrderScope = clmsCustomerVisibilityClause($pdo, 'cvis');
                 $sql = "SELECT c.*,
                     COALESCE(cu.used_cbm, 0) AS used_cbm,
                     COALESCE(cu.used_weight, 0) AS used_weight,
@@ -440,13 +453,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         SELECT DISTINCT sd.container_id, sdo.order_id
                         FROM shipment_draft_orders sdo
                         JOIN shipment_drafts sd ON sdo.shipment_draft_id = sd.id
-                        WHERE sd.container_id IS NOT NULL
+                        JOIN orders ovis ON sdo.order_id = ovis.id
+                        JOIN customers cvis ON ovis.customer_id = cvis.id
+                        WHERE sd.container_id IS NOT NULL AND {$containerOrderScope['sql']}
                     ) ord
                     LEFT JOIN order_items oi ON oi.order_id = ord.order_id
                     GROUP BY ord.container_id
                 ) cu ON cu.container_id = c.id
                 WHERE 1=1";
-                $params = [];
+                $params = $containerOrderScope['params'];
                 if ($search !== '') {
                     $like = '%' . $search . '%';
                     $coll = 'COLLATE utf8mb4_unicode_ci';
@@ -471,7 +486,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         LEFT JOIN order_items oi2 ON oi2.order_id = o2.id
                         WHERE sd2.container_id = c.id AND (" . $innerCond . ")
                     ))";
+                    $searchCustomerScope = clmsCustomerVisibilityClause($pdo, 'cu2');
+                    $sql = str_replace(
+                        "WHERE sd2.container_id = c.id AND (" . $innerCond . ")",
+                        "WHERE sd2.container_id = c.id AND {$searchCustomerScope['sql']} AND (" . $innerCond . ")",
+                        $sql
+                    );
                     $params[] = $like;
+                    $params = array_merge($params, $searchCustomerScope['params']);
                     foreach ($innerParams as $p) $params[] = $p;
                 }
                 if (!empty($statusFilter)) {

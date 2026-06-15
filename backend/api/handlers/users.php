@@ -63,9 +63,9 @@ function buildUserPermissionOverrideRegistry(PDO $pdo): array
     }
 
     $manual = [
-        'customers.create' => ['Add customer', 'Allow creating customers without changing the user role.', 'Customer', ['ChinaAdmin', 'SuperAdmin']],
+        'customers.create' => ['Add customer', 'Allow creating customers without changing the user role.', 'Customer', ['SuperAdmin']],
         'customers.import' => ['Import customers', 'Allow customer CSV import without changing the user role.', 'Customer', ['ChinaAdmin', 'SuperAdmin']],
-        'page:customers' => ['View customer page', 'Allow opening the Customers page and seeing it in the sidebar.', 'Customer', ['ChinaAdmin', 'SuperAdmin']],
+        'page:customers' => ['View customer page', 'Allow opening the Customers page and seeing it in the sidebar.', 'Customer', ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin']],
         'page:receiving' => ['View receiving page', 'Allow opening the Warehouse Receiving page and seeing it in the sidebar.', 'Receiving', ['WarehouseStaff', 'SuperAdmin']],
         'orders.receive' => ['Receiving from warehouse', 'Allow recording warehouse receipts for approved or in-transit orders.', 'Receiving', ['WarehouseStaff', 'SuperAdmin']],
         'receiving.import' => ['Import Excel receiving', 'Allow previewing and committing warehouse receiving Excel imports.', 'Receiving', ['WarehouseStaff', 'SuperAdmin']],
@@ -126,6 +126,80 @@ function ensureUserPermissionOverrideTable(PDO $pdo): void
     }
 }
 
+function ensureCustomerVisibilityTables(PDO $pdo): void
+{
+    if (!clmsCustomerCreatedByColumnExists($pdo)
+        || !clmsCustomerVisibilityTableExists($pdo, 'customer_visibility_exceptions')
+        || !clmsCustomerVisibilityTableExists($pdo, 'customer_visibility_allowed_creators')) {
+        jsonError('Customer visibility tables are missing. Run database migrations first.', 500);
+    }
+}
+
+function loadCustomerVisibilitySettings(PDO $pdo, ?int $userId = null): array
+{
+    ensureCustomerVisibilityTables($pdo);
+    $sql = "SELECT user_id, can_see_all_customers, created_by, updated_by, created_at, updated_at FROM customer_visibility_exceptions";
+    $params = [];
+    if ($userId !== null) {
+        $sql .= " WHERE user_id = ?";
+        $params[] = $userId;
+    }
+    $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
+    if ($params) {
+        $stmt->execute($params);
+    }
+    $settings = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $uid = (int) $row['user_id'];
+        $settings[$uid] = [
+            'user_id' => $uid,
+            'can_see_all_customers' => (int) $row['can_see_all_customers'],
+            'allowed_creator_user_ids' => [],
+            'created_by' => isset($row['created_by']) ? (int) $row['created_by'] : null,
+            'updated_by' => isset($row['updated_by']) ? (int) $row['updated_by'] : null,
+            'created_at' => $row['created_at'] ?? null,
+            'updated_at' => $row['updated_at'] ?? null,
+        ];
+    }
+
+    $allowedSql = "SELECT user_id, allowed_creator_user_id FROM customer_visibility_allowed_creators";
+    $allowedParams = [];
+    if ($userId !== null) {
+        $allowedSql .= " WHERE user_id = ?";
+        $allowedParams[] = $userId;
+    }
+    $allowedStmt = $allowedParams ? $pdo->prepare($allowedSql) : $pdo->query($allowedSql);
+    if ($allowedParams) {
+        $allowedStmt->execute($allowedParams);
+    }
+    foreach ($allowedStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $uid = (int) $row['user_id'];
+        if (!isset($settings[$uid])) {
+            $settings[$uid] = [
+                'user_id' => $uid,
+                'can_see_all_customers' => 0,
+                'allowed_creator_user_ids' => [],
+            ];
+        }
+        $settings[$uid]['allowed_creator_user_ids'][] = (int) $row['allowed_creator_user_id'];
+    }
+
+    foreach ($settings as &$setting) {
+        $setting['allowed_creator_user_ids'] = array_values(array_unique($setting['allowed_creator_user_ids']));
+        $setting['mode'] = !empty($setting['can_see_all_customers'])
+            ? 'all'
+            : (!empty($setting['allowed_creator_user_ids']) ? 'selected' : 'own');
+    }
+    unset($setting);
+
+    return $userId !== null ? ($settings[$userId] ?? [
+        'user_id' => $userId,
+        'can_see_all_customers' => 0,
+        'allowed_creator_user_ids' => [],
+        'mode' => 'own',
+    ]) : $settings;
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     requireRole(['SuperAdmin']);
 
@@ -140,6 +214,17 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     'registry' => buildUserPermissionOverrideRegistry($pdo),
                     'overrides' => loadUserPermissionOverrides($pdo),
                     'users' => $users,
+                ],
+            ]);
+        }
+        if ($id === 'customer-visibility' && $action === null) {
+            ensureCustomerVisibilityTables($pdo);
+            $users = $pdo->query("SELECT id, email, full_name, is_active FROM users ORDER BY full_name, email")->fetchAll(PDO::FETCH_ASSOC);
+            jsonResponse([
+                'data' => [
+                    'users' => $users,
+                    'settings' => loadCustomerVisibilitySettings($pdo),
+                    'full_visibility_roles' => clmsCustomerFullVisibilityRoles(),
                 ],
             ]);
         }
@@ -342,6 +427,23 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 ],
             ]);
         }
+        if ($id && $action === 'customer-visibility') {
+            ensureCustomerVisibilityTables($pdo);
+            $userId = (int) $id;
+            $chk = $pdo->prepare("SELECT id, email, full_name, is_active FROM users WHERE id = ?");
+            $chk->execute([$userId]);
+            $user = $chk->fetch(PDO::FETCH_ASSOC);
+            if (!$user) jsonError('User not found', 404);
+            $users = $pdo->query("SELECT id, email, full_name, is_active FROM users ORDER BY full_name, email")->fetchAll(PDO::FETCH_ASSOC);
+            jsonResponse([
+                'data' => [
+                    'user' => $user,
+                    'users' => $users,
+                    'setting' => loadCustomerVisibilitySettings($pdo, $userId),
+                    'full_visibility_roles' => clmsCustomerFullVisibilityRoles(),
+                ],
+            ]);
+        }
         $stmt = $pdo->prepare("SELECT id, email, full_name, is_active FROM users WHERE id = ?");
         $stmt->execute([$id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -458,6 +560,80 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     }
 
     if ($method === 'PUT' && $id) {
+        if ($action === 'customer-visibility') {
+            ensureCustomerVisibilityTables($pdo);
+            $targetUserId = (int) $id;
+            $chk = $pdo->prepare("SELECT id FROM users WHERE id = ?");
+            $chk->execute([$targetUserId]);
+            if (!$chk->fetch()) jsonError('User not found', 404);
+
+            $mode = trim((string) ($input['mode'] ?? 'own'));
+            if (!in_array($mode, ['own', 'selected', 'all'], true)) {
+                jsonError('Invalid customer visibility mode', 400);
+            }
+            $allowedCreatorIds = is_array($input['allowed_creator_user_ids'] ?? null)
+                ? array_values(array_unique(array_filter(array_map('intval', $input['allowed_creator_user_ids']))))
+                : [];
+            $allowedCreatorIds = array_values(array_filter($allowedCreatorIds, static fn($uid) => $uid > 0 && $uid !== $targetUserId));
+            if ($mode !== 'selected') {
+                $allowedCreatorIds = [];
+            }
+            if ($allowedCreatorIds) {
+                $placeholders = implode(',', array_fill(0, count($allowedCreatorIds), '?'));
+                $existsStmt = $pdo->prepare("SELECT id FROM users WHERE id IN ($placeholders)");
+                $existsStmt->execute($allowedCreatorIds);
+                $existingIds = array_map('intval', array_column($existsStmt->fetchAll(PDO::FETCH_ASSOC), 'id'));
+                $missing = array_values(array_diff($allowedCreatorIds, $existingIds));
+                if ($missing) {
+                    jsonError('Unknown creator user selected', 400, ['allowed_creator_user_ids' => implode(', ', $missing)]);
+                }
+            }
+
+            $old = loadCustomerVisibilitySettings($pdo, $targetUserId);
+            $adminUserId = getAuthUserId();
+            $pdo->beginTransaction();
+            try {
+                $pdo->prepare("DELETE FROM customer_visibility_allowed_creators WHERE user_id = ?")->execute([$targetUserId]);
+                if ($mode === 'own') {
+                    $pdo->prepare("DELETE FROM customer_visibility_exceptions WHERE user_id = ?")->execute([$targetUserId]);
+                } else {
+                    $canSeeAll = $mode === 'all' ? 1 : 0;
+                    $pdo->prepare(
+                        "INSERT INTO customer_visibility_exceptions (user_id, can_see_all_customers, created_by, updated_by)
+                         VALUES (?, ?, ?, ?)
+                         ON DUPLICATE KEY UPDATE can_see_all_customers = VALUES(can_see_all_customers), updated_by = VALUES(updated_by)"
+                    )->execute([$targetUserId, $canSeeAll, $adminUserId, $adminUserId]);
+                    if ($allowedCreatorIds) {
+                        $ins = $pdo->prepare("INSERT INTO customer_visibility_allowed_creators (user_id, allowed_creator_user_id, created_by) VALUES (?, ?, ?)");
+                        foreach ($allowedCreatorIds as $creatorUserId) {
+                            $ins->execute([$targetUserId, $creatorUserId, $adminUserId]);
+                        }
+                    }
+                }
+                $new = loadCustomerVisibilitySettings($pdo, $targetUserId);
+                $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, old_value, new_value, user_id) VALUES ('customer_visibility_exception', ?, 'update', ?, ?, ?)")
+                    ->execute([
+                        $targetUserId,
+                        json_encode($old, JSON_UNESCAPED_UNICODE),
+                        json_encode($new, JSON_UNESCAPED_UNICODE),
+                        $adminUserId,
+                    ]);
+                logClms('customer_visibility_update', [
+                    'target_user_id' => $targetUserId,
+                    'user_id' => $adminUserId,
+                    'mode' => $mode,
+                    'allowed_creator_user_ids' => $allowedCreatorIds,
+                ]);
+                $pdo->commit();
+                jsonResponse(['data' => ['user_id' => $targetUserId, 'setting' => $new]]);
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+        }
+
         if ($action === 'permission-overrides') {
             ensureUserPermissionOverrideTable($pdo);
             $targetUserId = (int) $id;

@@ -70,6 +70,16 @@ function findDuplicateCustomerShippingCode(PDO $pdo, ?string $shippingCode, int 
     }
 }
 
+function customerDuplicateShippingCodeMessage(PDO $pdo, string $shippingCode, array $duplicate): string
+{
+    $message = 'Shipping code "' . $shippingCode . '" already belongs to another customer.';
+    if (clmsCanAccessCustomer($pdo, (int) ($duplicate['id'] ?? 0))) {
+        $label = $duplicate['code'] ?: ('#' . $duplicate['id']);
+        $message = 'Shipping code "' . $shippingCode . '" already belongs to customer ' . $label . ' (' . $duplicate['name'] . ')';
+    }
+    return $message;
+}
+
 function loadCountryShipping(PDO $pdo, int $customerId): array
 {
     try {
@@ -241,8 +251,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if ($hasPhone) { $where .= " OR (phone $coll LIKE ?)"; $params[] = $like; }
                 if ($hasEmail) { $where .= " OR (email $coll LIKE ?)"; $params[] = $like; }
                 if ($hasPaymentLinks) { $where .= " OR (payment_links IS NOT NULL AND CONVERT(payment_links USING utf8mb4) $coll LIKE ?)"; $params[] = $like; }
-                $stmt = $pdo->prepare("SELECT $sel FROM customers WHERE $where ORDER BY name LIMIT 20");
-                $stmt->execute($params);
+                $scope = clmsCustomerVisibilityClause($pdo, 'customers');
+                $stmt = $pdo->prepare("SELECT $sel FROM customers WHERE ($where) AND {$scope['sql']} ORDER BY name LIMIT 20");
+                $stmt->execute(array_merge($params, $scope['params']));
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 foreach ($rows as &$row) {
                     $row['por'] = loadCustomerPorValues($pdo, (int) ($row['id'] ?? 0));
@@ -255,6 +266,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             if ($id === null) {
                 $q = trim($_GET['q'] ?? '');
+                $scope = clmsCustomerVisibilityClause($pdo, 'customers');
                 $sql = "SELECT * FROM customers";
                 $params = [];
                 if (strlen($q) >= 1) {
@@ -274,7 +286,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     } catch (Throwable $e) {
                     }
                     $coll = 'COLLATE utf8mb4_unicode_ci';
-                    $sql .= " WHERE (name $coll LIKE ?) OR (code $coll LIKE ?)";
+                    $sql .= " WHERE ((name $coll LIKE ?) OR (code $coll LIKE ?)";
                     $params = [$like, $like];
                     if ($hasPhone) { $sql .= " OR (phone $coll LIKE ?)"; $params[] = $like; }
                     if ($hasEmail) { $sql .= " OR (email $coll LIKE ?)"; $params[] = $like; }
@@ -283,6 +295,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         $sql .= " OR EXISTS (SELECT 1 FROM customer_pors cp WHERE cp.customer_id = customers.id AND cp.por_value $coll LIKE ?)";
                         $params[] = $like;
                     }
+                    $sql .= ") AND {$scope['sql']}";
+                    $params = array_merge($params, $scope['params']);
+                } else {
+                    $sql .= " WHERE {$scope['sql']}";
+                    $params = $scope['params'];
                 }
                 $sql .= " ORDER BY name";
                 $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
@@ -297,6 +314,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 jsonResponse(['data' => $rows]);
             }
+            clmsRequireCustomerAccess($pdo, (int) $id);
             $stmt = $pdo->prepare("SELECT * FROM customers WHERE id = ?");
             $stmt->execute([$id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -358,6 +376,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $hasPaymentLinks = (bool) @$pdo->query("SHOW COLUMNS FROM customers LIKE 'payment_links'")->rowCount();
                 $hasEmail = (bool) @$pdo->query("SHOW COLUMNS FROM customers LIKE 'email'")->rowCount();
                 $hasDefaultShippingCode = (bool) @$pdo->query("SHOW COLUMNS FROM customers LIKE 'default_shipping_code'")->rowCount();
+                $hasCreatedBy = customerTableHas($pdo, 'customers', 'created_by');
+                $importUserId = getAuthUserId() ?? 1;
                 foreach ($lines as $i => $line) {
                     $row = str_getcsv($line);
                     if (count($row) < 2) continue;
@@ -400,6 +420,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                             $cols[] = 'email';
                             $vals[] = $email;
                         }
+                        if ($hasCreatedBy) {
+                            $cols[] = 'created_by';
+                            $vals[] = $importUserId;
+                        }
                         $ph = implode(',', array_fill(0, count($vals), '?'));
                         $pdo->prepare("INSERT INTO customers (" . implode(',', $cols) . ") VALUES ($ph)")->execute($vals);
                         $created++;
@@ -411,9 +435,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 jsonResponse(['data' => ['created' => $created, 'skipped' => $skipped, 'errors' => $errors]]);
             }
             if ($id && $action === 'deposits') {
-                $stmt = $pdo->prepare("SELECT id FROM customers WHERE id = ?");
-                $stmt->execute([$id]);
-                if (!$stmt->fetch()) jsonError('Customer not found', 404);
+                clmsRequireCustomerAccess($pdo, (int) $id);
                 $amount = (float) ($input['amount'] ?? 0);
                 if ($amount <= 0) jsonError('Amount must be positive', 400);
                 $currency = trim($input['currency'] ?? 'RMB');
@@ -438,7 +460,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt->execute([$newId]);
                 jsonResponse(['data' => $stmt->fetch(PDO::FETCH_ASSOC)], 201);
             }
-            requirePermission('customers.create', ['ChinaAdmin', 'SuperAdmin']);
+            requirePermission('customers.create', []);
             $name = trim($input['name'] ?? '');
             if (!$name) {
                 jsonError('Missing required fields', 400, ['name' => 'Required']);
@@ -490,7 +512,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if ($sc === '') continue;
                 $duplicate = findDuplicateCustomerShippingCode($pdo, $sc);
                 if ($duplicate) {
-                    $duplicateWarning = 'Shipping code "' . $sc . '" already belongs to customer ' . ($duplicate['code'] ?: ('#' . $duplicate['id'])) . ' (' . $duplicate['name'] . ')';
+                    $duplicateWarning = customerDuplicateShippingCodeMessage($pdo, $sc, $duplicate);
                     $duplicateAction = getBusinessSetting($pdo, 'SHIPPING_CODE_DUPLICATE_ACTION', 'warn');
                     if ($duplicateAction === 'block') {
                         jsonError($duplicateWarning, 409);
@@ -534,6 +556,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $cols[] = 'email';
                 $vals[] = $email;
             }
+            $actingUserId = getAuthUserId() ?? 1;
+            if (customerTableHas($pdo, 'customers', 'created_by')) {
+                $cols[] = 'created_by';
+                $vals[] = $actingUserId;
+            }
             $ph = implode(',', array_fill(0, count($vals), '?'));
             $colStr = implode(', ', $cols);
             try {
@@ -543,8 +570,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $newId = (int) $pdo->lastInsertId();
                 persistCountryShipping($pdo, $newId, $countryShipping);
                 persistCustomerPorValues($pdo, $newId, $porValues);
-                $actingUserId = getAuthUserId() ?? 1;
-                $usedSpecialAccess = !hasAnyRole(['ChinaAdmin', 'SuperAdmin'])
+                $usedSpecialAccess = !hasAnyRole(['SuperAdmin'])
                     && clmsUserHasPermissionOverride('customers.create', $actingUserId, $pdo);
                 $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('customer', ?, 'create', ?, ?)")
                     ->execute([
@@ -590,6 +616,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if (!$id) {
                 jsonError('ID required', 400);
             }
+            clmsRequireCustomerAccess($pdo, (int) $id);
             $stmt = $pdo->prepare("SELECT id, code FROM customers WHERE id = ?");
             $stmt->execute([$id]);
             $existing = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -648,7 +675,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if ($sc === '') continue;
                 $duplicate = findDuplicateCustomerShippingCode($pdo, $sc, (int) $id);
                 if ($duplicate) {
-                    $duplicateWarning = 'Shipping code "' . $sc . '" already belongs to customer ' . ($duplicate['code'] ?: ('#' . $duplicate['id'])) . ' (' . $duplicate['name'] . ')';
+                    $duplicateWarning = customerDuplicateShippingCodeMessage($pdo, $sc, $duplicate);
                     $duplicateAction = getBusinessSetting($pdo, 'SHIPPING_CODE_DUPLICATE_ACTION', 'warn');
                     if ($duplicateAction === 'block') {
                         jsonError($duplicateWarning, 409);
@@ -723,6 +750,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if (!$id) {
                 jsonError('ID required', 400);
             }
+            clmsRequireCustomerAccess($pdo, (int) $id);
             $stmt = $pdo->prepare("DELETE FROM customers WHERE id = ?");
             $stmt->execute([$id]);
             if ($stmt->rowCount() === 0) {

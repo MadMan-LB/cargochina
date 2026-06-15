@@ -226,15 +226,17 @@ function printDraftEntryRows(array $sections): string
 }
 
 if ($orderId > 0) {
+    $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
     $stmt = $pdo->prepare(
         "SELECT o.*, c.name as customer_name, c.default_shipping_code, s.name as supplier_name
          FROM orders o
          JOIN customers c ON o.customer_id = c.id
          LEFT JOIN suppliers s ON o.supplier_id = s.id
          WHERE o.id = ?
-           AND o.order_type = 'draft_procurement'"
+           AND o.order_type = 'draft_procurement'
+           AND {$customerScope['sql']}"
     );
-    $stmt->execute([$orderId]);
+    $stmt->execute(array_merge([$orderId], $customerScope['params']));
     $order = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$order) {
         header('Location: procurement_drafts.php');

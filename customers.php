@@ -1,12 +1,12 @@
 <?php
 require_once 'includes/auth_check.php';
 require_once 'includes/page_guard.php';
-requireRoleForPage(['ChinaAdmin', 'SuperAdmin']);
+requireRoleForPage(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin']);
 $currentPage = 'customers';
 $pageTitle = 'Customers';
 $roles = $_SESSION['user_roles'] ?? [];
 $userId = isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null;
-$canCreateCustomers = clmsUserCan('customers.create', ['ChinaAdmin', 'SuperAdmin'], null, $userId, $roles);
+$canCreateCustomers = clmsUserCan('customers.create', [], null, $userId, $roles);
 $canImportCustomers = clmsUserCan('customers.import', ['ChinaAdmin', 'SuperAdmin'], null, $userId, $roles);
 $canGeneratePortalLinks = in_array('ChinaAdmin', $roles, true) || in_array('SuperAdmin', $roles, true);
 require 'includes/layout.php';

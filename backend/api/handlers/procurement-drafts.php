@@ -73,6 +73,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $expectedReady = trim((string) ($input['expected_ready_date'] ?? ''));
         $currency = trim($input['currency'] ?? 'USD') ?: 'USD';
         if (!$customerId) jsonError('customer_id required', 400);
+        clmsRequireCustomerAccess($pdo, $customerId);
         if (!in_array($currency, ['USD', 'RMB'], true)) $currency = 'USD';
         $expectedDate = null;
         if ($expectedReady !== '') {

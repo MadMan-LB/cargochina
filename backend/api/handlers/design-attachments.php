@@ -22,6 +22,22 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if (!in_array($entityType, $validTypes, true) || $entityId <= 0) {
                 jsonError('entity_type (product|order_item|customer|supplier) and entity_id required', 400);
             }
+            if ($entityType === 'customer') {
+                clmsRequireCustomerAccess($pdo, $entityId);
+            } elseif ($entityType === 'order_item') {
+                $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
+                $chk = $pdo->prepare(
+                    "SELECT 1
+                     FROM order_items oi
+                     JOIN orders o ON oi.order_id = o.id
+                     JOIN customers c ON o.customer_id = c.id
+                     WHERE oi.id = ?
+                       AND {$customerScope['sql']}
+                     LIMIT 1"
+                );
+                $chk->execute(array_merge([$entityId], $customerScope['params']));
+                if (!$chk->fetchColumn()) jsonError('Order item not found', 404);
+            }
             $stmt = $pdo->prepare("SELECT id, entity_type, entity_id, file_path, file_type, internal_note, uploaded_at FROM design_attachments WHERE entity_type = ? AND entity_id = ? ORDER BY uploaded_at DESC");
             $stmt->execute([$entityType, $entityId]);
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -50,17 +66,24 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $chk->execute([$entityId]);
                 if (!$chk->fetch()) jsonError('Product not found', 404);
             } elseif ($entityType === 'customer') {
-                $chk = $pdo->prepare("SELECT 1 FROM customers WHERE id = ?");
-                $chk->execute([$entityId]);
-                if (!$chk->fetch()) jsonError('Customer not found', 404);
+                clmsRequireCustomerAccess($pdo, $entityId);
             } elseif ($entityType === 'supplier') {
                 $chk = $pdo->prepare("SELECT 1 FROM suppliers WHERE id = ?");
                 $chk->execute([$entityId]);
                 if (!$chk->fetch()) jsonError('Supplier not found', 404);
             } else {
-                $chk = $pdo->prepare("SELECT 1 FROM order_items WHERE id = ?");
-                $chk->execute([$entityId]);
-                if (!$chk->fetch()) jsonError('Order item not found', 404);
+                $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
+                $chk = $pdo->prepare(
+                    "SELECT 1
+                     FROM order_items oi
+                     JOIN orders o ON oi.order_id = o.id
+                     JOIN customers c ON o.customer_id = c.id
+                     WHERE oi.id = ?
+                       AND {$customerScope['sql']}
+                     LIMIT 1"
+                );
+                $chk->execute(array_merge([$entityId], $customerScope['params']));
+                if (!$chk->fetchColumn()) jsonError('Order item not found', 404);
             }
             $stmt = $pdo->prepare("INSERT INTO design_attachments (entity_type, entity_id, file_path, file_type, uploaded_by, internal_note) VALUES (?,?,?,?,?,?)");
             $stmt->execute([$entityType, $entityId, $filePath, $fileType, $userId ?: null, $internalNote]);

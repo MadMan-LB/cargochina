@@ -17,6 +17,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         case 'POST':
             $customerId = (int) ($input['customer_id'] ?? 0);
             if (!$customerId) jsonError('customer_id required', 400);
+            clmsRequireCustomerAccess($pdo, $customerId);
             $hours = (int) ($input['hours'] ?? 24);
             if ($hours < 1 || $hours > 168) $hours = 24;
             $token = bin2hex(random_bytes(32));
@@ -40,6 +41,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         case 'GET':
             $customerId = $_GET['customer_id'] ?? null;
             if (!$customerId) jsonError('customer_id required', 400);
+            clmsRequireCustomerAccess($pdo, (int) $customerId);
             $stmt = $pdo->prepare("SELECT id, customer_id, expires_at, used_at, created_at FROM customer_portal_tokens WHERE customer_id = ? ORDER BY created_at DESC LIMIT 20");
             $stmt->execute([$customerId]);
             jsonResponse(['data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);

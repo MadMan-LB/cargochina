@@ -167,6 +167,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     LEFT JOIN suppliers s ON e.supplier_id = s.id
                     WHERE 1=1";
                 $params = [];
+                $customerScope = clmsCustomerIdVisibilityClause($pdo, 'e.customer_id', 'cvexp');
+                $sql .= " AND (e.customer_id IS NULL OR {$customerScope['sql']})";
+                $params = array_merge($params, $customerScope['params']);
                 if ($dateFrom) {
                     $sql .= " AND e.expense_date >= ?";
                     $params[] = $dateFrom;
@@ -221,6 +224,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     LEFT JOIN suppliers s ON e.supplier_id = s.id
                     WHERE 1=1";
                 $sumParams = [];
+                $sumCustomerScope = clmsCustomerIdVisibilityClause($pdo, 'e.customer_id', 'cvexpsum');
+                $sumSql .= " AND (e.customer_id IS NULL OR {$sumCustomerScope['sql']})";
+                $sumParams = array_merge($sumParams, $sumCustomerScope['params']);
                 if ($dateFrom) {
                     $sumSql .= " AND e.expense_date >= ?";
                     $sumParams[] = $dateFrom;
@@ -265,15 +271,17 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
                 jsonResponse(['data' => $rows, 'summary' => $summary]);
             }
-            $stmt = $pdo->prepare("SELECT e.*, ec.name as category_name, o.expected_ready_date as order_expected_ready_date, c.name as customer_name, co.code as container_code, s.name as supplier_name
+            $expenseSql = "SELECT e.*, ec.name as category_name, o.expected_ready_date as order_expected_ready_date, c.name as customer_name, co.code as container_code, s.name as supplier_name
                 FROM expenses e
                 JOIN expense_categories ec ON e.category_id = ec.id
                 LEFT JOIN orders o ON e.order_id = o.id
                 LEFT JOIN customers c ON e.customer_id = c.id
                 LEFT JOIN containers co ON e.container_id = co.id
                 LEFT JOIN suppliers s ON e.supplier_id = s.id
-                WHERE e.id = ?");
-            $stmt->execute([$id]);
+                WHERE e.id = ?";
+            $customerScope = clmsCustomerIdVisibilityClause($pdo, 'e.customer_id', 'cvexpone');
+            $stmt = $pdo->prepare($expenseSql . " AND (e.customer_id IS NULL OR {$customerScope['sql']})");
+            $stmt->execute(array_merge([$id], $customerScope['params']));
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$row) jsonError('Expense not found', 404);
             jsonResponse(['data' => $row]);
@@ -307,6 +315,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             if (!in_array($currency, ['USD', 'RMB', 'EUR'], true)) {
                 $currency = 'USD';
+            }
+            if ($customerId) {
+                clmsRequireCustomerAccess($pdo, $customerId);
             }
 
             $chkSupp = @$pdo->query("SHOW COLUMNS FROM expenses LIKE 'supplier_id'");
@@ -354,6 +365,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         if ($v <= 0) continue;
                     } elseif (in_array($col, ['order_id', 'container_id', 'customer_id', 'supplier_id'])) {
                         $v = !empty($input[$col]) ? (int) $input[$col] : null;
+                        if ($col === 'customer_id' && $v) {
+                            clmsRequireCustomerAccess($pdo, $v);
+                        }
                     } elseif ($col === 'category_id') {
                         $v = (int) $input[$col];
                         if ($v <= 0) continue;

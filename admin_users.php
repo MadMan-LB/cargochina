@@ -56,6 +56,60 @@ require 'includes/layout.php';
   </div>
 </div>
 
+<div class="card mt-4 shadow-sm" id="customerVisibilityPanel">
+  <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-3 py-3 bg-light">
+    <div>
+      <h5 class="mb-1">Customer Visibility Exceptions</h5>
+      <p class="text-muted mb-0 small">Control whether a user sees only their own customers, selected creators' customers, or all customers.</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <select class="form-select form-select-sm" id="customerVisibilityUserSelect" style="min-width:260px"></select>
+      <button type="button" class="btn btn-primary btn-sm" id="customerVisibilitySaveBtn">Save Customer Visibility</button>
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="alert alert-info py-2 small mb-3">
+      SuperAdmin, ChinaAdmin, and LebanonAdmin see all customers by role. Other users see their own created customers unless an exception is configured here.
+    </div>
+    <div id="customerVisibilityLoading" class="text-center py-4 text-muted">Loading customer visibility…</div>
+    <div id="customerVisibilityEditor" class="d-none">
+      <div id="customerVisibilityStatus" class="alert alert-light border small mb-3"></div>
+      <div class="row g-3">
+        <div class="col-12 col-lg-4">
+          <div class="list-group">
+            <label class="list-group-item d-flex gap-2 align-items-start">
+              <input class="form-check-input mt-1 customer-visibility-mode" type="radio" name="customerVisibilityMode" value="own">
+              <span>
+                <span class="fw-semibold d-block">Own customers only</span>
+                <span class="small text-muted">The user sees customers they personally created.</span>
+              </span>
+            </label>
+            <label class="list-group-item d-flex gap-2 align-items-start">
+              <input class="form-check-input mt-1 customer-visibility-mode" type="radio" name="customerVisibilityMode" value="selected">
+              <span>
+                <span class="fw-semibold d-block">Own + selected creators</span>
+                <span class="small text-muted">The user also sees customers created by selected users.</span>
+              </span>
+            </label>
+            <label class="list-group-item d-flex gap-2 align-items-start">
+              <input class="form-check-input mt-1 customer-visibility-mode" type="radio" name="customerVisibilityMode" value="all">
+              <span>
+                <span class="fw-semibold d-block">All customers</span>
+                <span class="small text-muted">The user sees every customer without changing role.</span>
+              </span>
+            </label>
+          </div>
+        </div>
+        <div class="col-12 col-lg-8">
+          <label class="form-label small fw-medium">Additional creator users</label>
+          <div id="customerVisibilityCreatorGrid" class="sidebar-page-grid"></div>
+        </div>
+      </div>
+    </div>
+    <div id="customerVisibilitySummary" class="table-responsive mt-3"></div>
+  </div>
+</div>
+
 <div class="card mt-4 shadow-sm" id="sidebarAccessPanel">
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-3 py-3 bg-light">
     <div>
@@ -104,6 +158,7 @@ require 'includes/layout.php';
             <option value="design_attachment">Design attachment</option>
             <option value="user">User</option>
             <option value="user_permission_override">Permission override</option>
+            <option value="customer_visibility_exception">Customer visibility exception</option>
             <option value="receiving_excel_import">Receiving Excel import</option>
             <option value="system_config">System config</option>
             <option value="internal_message">Internal message</option>

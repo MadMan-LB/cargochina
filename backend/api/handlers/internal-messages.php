@@ -18,6 +18,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $customerId = $_GET['customer_id'] ?? null;
             $orderId = $_GET['order_id'] ?? null;
             if (!$customerId) jsonError('customer_id required', 400);
+            clmsRequireCustomerAccess($pdo, (int) $customerId);
             $sql = "SELECT m.*, u.full_name as sender_name FROM internal_messages m LEFT JOIN users u ON m.sender_id = u.id WHERE m.customer_id = ?";
             $params = [$customerId];
             if ($orderId) {
@@ -34,6 +35,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         case 'POST':
             $customerId = (int) ($input['customer_id'] ?? 0);
             if (!$customerId) jsonError('customer_id required', 400);
+            clmsRequireCustomerAccess($pdo, $customerId);
             $body = trim($input['body'] ?? '');
             if (strlen($body) < 1) jsonError('Message body required', 400);
             $orderId = !empty($input['order_id']) ? (int) $input['order_id'] : null;

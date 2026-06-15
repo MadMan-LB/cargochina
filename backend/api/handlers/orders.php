@@ -688,6 +688,9 @@ function fetchOrdersListRowsForRequest(PDO $pdo): array
         FROM orders o
         JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id$destJoin WHERE 1=1";
     $params = [];
+    $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
+    $sql .= " AND {$customerScope['sql']}";
+    $params = array_merge($params, $customerScope['params']);
     if (!empty($statuses)) {
         $placeholders = implode(',', array_fill(0, count($statuses), '?'));
         $sql .= $statusMode === 'exclude'
@@ -1257,6 +1260,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 $params = [];
                 $where = strlen($q) >= 1 ? buildOrderSearchSql($pdo, $q, $params, 'o', 'c', 's') : '1=1';
+                $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
+                $where .= " AND {$customerScope['sql']}";
+                $params = array_merge($params, $customerScope['params']);
                 if ($customerId) {
                     $where .= ' AND o.customer_id = ?';
                     $params[] = $customerId;
@@ -1327,8 +1333,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if ($chk && $chk->rowCount() > 0) $suppCols .= ', s.address as supplier_address';
                 $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'fax'");
                 if ($chk && $chk->rowCount() > 0) $suppCols .= ', s.fax as supplier_fax';
-                $stmt = $pdo->prepare("SELECT o.*, c.name as customer_name, $suppCols FROM orders o JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id WHERE o.id = ?");
-                $stmt->execute([$id]);
+                $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
+                $stmt = $pdo->prepare("SELECT o.*, c.name as customer_name, $suppCols FROM orders o JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id WHERE o.id = ? AND {$customerScope['sql']}");
+                $stmt->execute(array_merge([(int) $id], $customerScope['params']));
                 $order = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$order) jsonError('Order not found', 404);
                 $items = normalizeOrderItems($pdo, fetchOrderItems($pdo, (int) $id));
@@ -1351,8 +1358,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $destJoin = orderTableHasColumn($pdo, 'orders', 'destination_country_id')
                 ? ' LEFT JOIN countries co ON o.destination_country_id = co.id'
                 : '';
-            $stmt = $pdo->prepare("SELECT o.*, $custCols, s.name as supplier_name$destCols FROM orders o JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id$destJoin WHERE o.id = ?");
-            $stmt->execute([$id]);
+            $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
+            $stmt = $pdo->prepare("SELECT o.*, $custCols, s.name as supplier_name$destCols FROM orders o JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id$destJoin WHERE o.id = ? AND {$customerScope['sql']}");
+            $stmt->execute(array_merge([(int) $id], $customerScope['params']));
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$row) jsonError('Order not found', 404);
             $row['items'] = normalizeOrderItems($pdo, fetchOrderItems($pdo, (int) $id));
@@ -1429,7 +1437,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $stmt->execute([$id]);
             $order = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$order) jsonError('Order not found', 404);
+            clmsRequireCustomerAccess($pdo, (int) $order['customer_id']);
             $customerId = (int) ($input['customer_id'] ?? $order['customer_id']);
+            clmsRequireCustomerAccess($pdo, $customerId);
             $supplierId = isset($input['supplier_id'])
                 ? normalizeExistingSupplierId($pdo, $input['supplier_id'], 'supplier_id')
                 : normalizeExistingSupplierId($pdo, $order['supplier_id'] ?? null, 'supplier_id');
@@ -1595,6 +1605,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if (!$customerId) {
                     jsonError('Missing required: customer_id', 400);
                 }
+                clmsRequireCustomerAccess($pdo, $customerId);
                 if (!in_array($currency, ['USD', 'RMB'], true)) {
                     jsonError('Currency must be USD or RMB', 400);
                 }
@@ -1764,6 +1775,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
             }
             if ($id && $action === 'receive') {
+                $stmt = $pdo->prepare("SELECT customer_id FROM orders WHERE id = ? LIMIT 1");
+                $stmt->execute([(int) $id]);
+                $customerId = (int) ($stmt->fetchColumn() ?: 0);
+                if ($customerId <= 0) jsonError('Order not found', 404);
+                clmsRequireCustomerAccess($pdo, $customerId);
                 try {
                     $result = (new OrderReceivingService())->receive($pdo, (int) $id, $input, $userId);
                     jsonResponse(['data' => $result]);
@@ -2040,6 +2056,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 // Allow staff session-based confirm OR token-based public confirm
                 if ($token && !hash_equals((string)($order['confirmation_token'] ?? ''), $token)) {
                     jsonError('Invalid or expired customer follow-up token', 403);
+                } elseif (!$token) {
+                    clmsRequireCustomerAccess($pdo, (int) $order['customer_id']);
                 }
                 OrderReceiptWorkflowService::acceptAutoConfirmedOrder($pdo, (int) $id, $userId, 'confirm');
                 jsonResponse(['data' => ['status' => 'ReadyForConsolidation']]);
@@ -2054,6 +2072,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt->execute([$id]);
                 $order = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$order) jsonError('Order not found', 404);
+                clmsRequireCustomerAccess($pdo, (int) $order['customer_id']);
                 if ($action === 'submit') {
                     orderHandleLifecycleTransition('submit', (string) ($order['status'] ?? ''), 'Submitted');
                     $si = $pdo->prepare("SELECT COUNT(*) FROM order_items WHERE order_id = ?");

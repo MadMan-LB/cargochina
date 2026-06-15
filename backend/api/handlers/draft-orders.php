@@ -1294,6 +1294,7 @@ function draftOrderFetchOrderPayload(PDO $pdo, int $orderId): array
     $destJoin = draftOrderTableHasColumn($pdo, 'orders', 'destination_country_id')
         ? " LEFT JOIN countries co ON co.id = o.destination_country_id"
         : "";
+    $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
     $stmt = $pdo->prepare(
         "SELECT o.*, c.name as customer_name, c.default_shipping_code, s.name as supplier_name$destCols
          FROM orders o
@@ -1301,9 +1302,10 @@ function draftOrderFetchOrderPayload(PDO $pdo, int $orderId): array
          LEFT JOIN suppliers s ON o.supplier_id = s.id
          $destJoin
          WHERE o.id = ?
-           AND o.order_type = 'draft_procurement'"
+           AND o.order_type = 'draft_procurement'
+           AND {$customerScope['sql']}"
     );
-    $stmt->execute([$orderId]);
+    $stmt->execute(array_merge([$orderId], $customerScope['params']));
     $order = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$order) {
         jsonError('Draft order not found', 404);
@@ -1490,12 +1492,16 @@ function draftOrderBuildExportRows(array $sections): array
 
 function draftOrderListRows(PDO $pdo): array
 {
-    $stmt = $pdo->query(
-        "SELECT id
-         FROM orders
-         WHERE order_type = 'draft_procurement'
-         ORDER BY created_at DESC, id DESC"
+    $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
+    $stmt = $pdo->prepare(
+        "SELECT o.id
+         FROM orders o
+         JOIN customers c ON o.customer_id = c.id
+         WHERE o.order_type = 'draft_procurement'
+           AND {$customerScope['sql']}
+         ORDER BY o.created_at DESC, o.id DESC"
     );
+    $stmt->execute($customerScope['params']);
 
     $list = [];
     foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $orderId) {
@@ -2086,8 +2092,9 @@ function draftOrderImportResolveCustomer(PDO $pdo, string $value): array
             $columns[] = 'default_shipping_code';
         }
         $conditions = implode(' OR ', array_map(static fn(string $col): string => "`$col` = ?", $columns));
-        $stmt = $pdo->prepare("SELECT $select FROM customers WHERE $conditions ORDER BY id LIMIT 1");
-        $stmt->execute(array_fill(0, count($columns), $candidate));
+        $customerScope = clmsCustomerVisibilityClause($pdo, 'customers');
+        $stmt = $pdo->prepare("SELECT $select FROM customers WHERE ($conditions) AND {$customerScope['sql']} ORDER BY id LIMIT 1");
+        $stmt->execute(array_merge(array_fill(0, count($columns), $candidate), $customerScope['params']));
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row) {
             return [
@@ -2593,6 +2600,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if ($customerId <= 0) {
             jsonError('customer_id is required for legacy migration.', 400, ['customer_id' => 'Customer is required.']);
         }
+        clmsRequireCustomerAccess($pdo, $customerId);
         if (!in_array($currency, ['USD', 'RMB'], true)) {
             $currency = 'USD';
         }
@@ -2745,6 +2753,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if ($customerId <= 0) {
             jsonError('customer_id is required.', 400, ['customer_id' => 'Customer is required.']);
         }
+        clmsRequireCustomerAccess($pdo, $customerId);
         if (!in_array($currency, ['USD', 'RMB'], true)) {
             jsonError('Currency must be USD or RMB', 400, ['currency' => 'Currency must be USD or RMB.']);
         }
@@ -2796,6 +2805,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if (!$order) {
             jsonError('Draft order not found', 404);
         }
+        clmsRequireCustomerAccess($pdo, (int) $order['customer_id']);
         if (($order['status'] ?? '') !== 'Draft') {
             jsonError('Only draft-status draft orders can be edited in the builder.', 400);
         }
@@ -2809,6 +2819,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if ($customerId <= 0) {
             jsonError('customer_id is required.', 400, ['customer_id' => 'Customer is required.']);
         }
+        clmsRequireCustomerAccess($pdo, $customerId);
         if (!in_array($currency, ['USD', 'RMB'], true)) {
             jsonError('Currency must be USD or RMB', 400, ['currency' => 'Currency must be USD or RMB.']);
         }

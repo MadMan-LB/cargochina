@@ -53,7 +53,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     ];
     $stats = array_fill_keys(array_values($statusKeyMap), 0);
 
-    $statusStmt = $pdo->query("SELECT status, COUNT(*) AS total FROM orders GROUP BY status");
+    $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
+    $statusStmt = $pdo->prepare(
+        "SELECT o.status, COUNT(*) AS total
+         FROM orders o
+         JOIN customers c ON o.customer_id = c.id
+         WHERE {$customerScope['sql']}
+         GROUP BY o.status"
+    );
+    $statusStmt->execute($customerScope['params']);
     foreach ($statusStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $status = $row['status'] ?? '';
         if (isset($statusKeyMap[$status])) {
@@ -66,7 +74,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $stmt = $pdo->query("SELECT COUNT(*) FROM shipment_drafts WHERE status = 'draft'");
     $stats['draft_shipments'] = (int) $stmt->fetchColumn();
 
-    $stmt = $pdo->query("SELECT COUNT(*) FROM orders WHERE COALESCE(confirmation_token, '') <> ''");
+    $feedbackScope = clmsCustomerVisibilityClause($pdo, 'cf');
+    $stmt = $pdo->prepare(
+        "SELECT COUNT(*)
+         FROM orders o
+         JOIN customers cf ON o.customer_id = cf.id
+         WHERE COALESCE(o.confirmation_token, '') <> ''
+           AND {$feedbackScope['sql']}"
+    );
+    $stmt->execute($feedbackScope['params']);
     $stats['customer_feedback_pending'] = (int) $stmt->fetchColumn();
 
     if ($userId) {
@@ -117,12 +133,30 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $staleReceiptWhere = dashboardWarehouseReceiptHasColumn($pdo, 'voided_at')
         ? ' AND wr.voided_at IS NULL'
         : '';
-    $staleConfirm = $pdo->prepare("SELECT COUNT(*) FROM orders o JOIN warehouse_receipts wr ON wr.order_id = o.id WHERE COALESCE(o.confirmation_token, '') <> ''$staleReceiptWhere AND wr.received_at < DATE_SUB(NOW(), INTERVAL ? DAY)");
-    $staleConfirm->execute([$threshold]);
+    $staleConfirmScope = clmsCustomerVisibilityClause($pdo, 'csc');
+    $staleConfirm = $pdo->prepare(
+        "SELECT COUNT(*)
+         FROM orders o
+         JOIN customers csc ON o.customer_id = csc.id
+         JOIN warehouse_receipts wr ON wr.order_id = o.id
+         WHERE COALESCE(o.confirmation_token, '') <> ''
+           $staleReceiptWhere
+           AND wr.received_at < DATE_SUB(NOW(), INTERVAL ? DAY)
+           AND {$staleConfirmScope['sql']}"
+    );
+    $staleConfirm->execute(array_merge([$threshold], $staleConfirmScope['params']));
     $stats['stale_customer_feedback'] = (int) $staleConfirm->fetchColumn();
 
-    $staleApproved = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE status IN ('Approved','InTransitToWarehouse') AND expected_ready_date < DATE_SUB(CURDATE(), INTERVAL ? DAY)");
-    $staleApproved->execute([$threshold]);
+    $staleApprovedScope = clmsCustomerVisibilityClause($pdo, 'csa');
+    $staleApproved = $pdo->prepare(
+        "SELECT COUNT(*)
+         FROM orders o
+         JOIN customers csa ON o.customer_id = csa.id
+         WHERE o.status IN ('Approved','InTransitToWarehouse')
+           AND o.expected_ready_date < DATE_SUB(CURDATE(), INTERVAL ? DAY)
+           AND {$staleApprovedScope['sql']}"
+    );
+    $staleApproved->execute(array_merge([$threshold], $staleApprovedScope['params']));
     $stats['stale_overdue'] = (int) $staleApproved->fetchColumn();
     $stats['stale_threshold_days'] = $threshold;
 

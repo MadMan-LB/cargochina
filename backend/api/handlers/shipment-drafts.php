@@ -9,6 +9,38 @@ require_once dirname(__DIR__, 2) . '/services/TrackingPushService.php';
 require_once dirname(__DIR__, 2) . '/services/NotificationService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderCountryService.php';
 
+function shipmentDraftVisibleOrderIds(PDO $pdo, int $draftId): array
+{
+    $scope = clmsCustomerVisibilityClause($pdo, 'c');
+    $stmt = $pdo->prepare(
+        "SELECT sdo.order_id
+         FROM shipment_draft_orders sdo
+         JOIN orders o ON sdo.order_id = o.id
+         JOIN customers c ON o.customer_id = c.id
+         WHERE sdo.shipment_draft_id = ? AND {$scope['sql']}
+         ORDER BY sdo.order_id"
+    );
+    $stmt->execute(array_merge([$draftId], $scope['params']));
+    return array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'order_id');
+}
+
+function shipmentDraftFetchVisibleOrder(PDO $pdo, int $orderId): array
+{
+    $scope = clmsCustomerVisibilityClause($pdo, 'c');
+    $stmt = $pdo->prepare(
+        "SELECT o.id, o.status, o.destination_country_id, o.confirmation_token
+         FROM orders o
+         JOIN customers c ON o.customer_id = c.id
+         WHERE o.id = ? AND {$scope['sql']}"
+    );
+    $stmt->execute(array_merge([$orderId], $scope['params']));
+    $order = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$order) {
+        jsonError("Order $orderId not found", 404);
+    }
+    return $order;
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     requireRole(['ChinaAdmin', 'LebanonAdmin', 'ContainersStaff', 'SuperAdmin']);
     $pdo = getDb();
@@ -46,9 +78,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 $svc = new TrackingPushService($pdo);
                 foreach ($rows as &$r) {
-                    $so = $pdo->prepare("SELECT order_id FROM shipment_draft_orders WHERE shipment_draft_id = ?");
-                    $so->execute([$r['id']]);
-                    $r['order_ids'] = array_column($so->fetchAll(PDO::FETCH_ASSOC), 'order_id');
+                    $r['order_ids'] = shipmentDraftVisibleOrderIds($pdo, (int) $r['id']);
                     $pushStatus = $svc->getPushStatus((int) $r['id']);
                     $r['push_status'] = $pushStatus ? $pushStatus['status'] : null;
                     $r['push_last_error'] = $pushStatus['last_error'] ?? null;
@@ -59,9 +89,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $stmt->execute([$id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$row) jsonError('Shipment draft not found', 404);
-            $so = $pdo->prepare("SELECT order_id FROM shipment_draft_orders WHERE shipment_draft_id = ?");
-            $so->execute([$id]);
-            $orderIds = array_column($so->fetchAll(PDO::FETCH_ASSOC), 'order_id');
+            $orderIds = shipmentDraftVisibleOrderIds($pdo, (int) $id);
             $row['order_ids'] = $orderIds;
             if (!empty($orderIds)) {
                 $ph = implode(',', array_fill(0, count($orderIds), '?'));
@@ -109,9 +137,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $stmt = $pdo->prepare("SELECT sd.*, c.code as container_code FROM shipment_drafts sd LEFT JOIN containers c ON sd.container_id = c.id WHERE sd.id = ?");
             $stmt->execute([$id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
-            $so = $pdo->prepare("SELECT order_id FROM shipment_draft_orders WHERE shipment_draft_id = ?");
-            $so->execute([$id]);
-            $row['order_ids'] = array_column($so->fetchAll(PDO::FETCH_ASSOC), 'order_id');
+            $row['order_ids'] = shipmentDraftVisibleOrderIds($pdo, (int) $id);
             $docs = $pdo->prepare("SELECT id, file_path, doc_type, created_at FROM shipment_draft_documents WHERE shipment_draft_id = ? ORDER BY created_at");
             $docs->execute([$id]);
             $row['documents'] = array_map(function (array $doc) {
@@ -144,9 +170,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $container = $containerStmt->fetch(PDO::FETCH_ASSOC) ?: null;
                 }
                 foreach ($orderIds as $oid) {
-                    $st = $pdo->prepare("SELECT id, status, destination_country_id, confirmation_token FROM orders WHERE id = ?");
-                    $st->execute([$oid]);
-                    $order = $st->fetch(PDO::FETCH_ASSOC);
+                    $order = shipmentDraftFetchVisibleOrder($pdo, (int) $oid);
                     $s = $order['status'] ?? null;
                     if (!in_array($s, $eligible, true)) {
                         jsonError("Order $oid is not eligible (must be ReadyForConsolidation or Confirmed)", 400);
@@ -175,29 +199,20 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt = $pdo->prepare("SELECT * FROM shipment_drafts WHERE id = ?");
                 $stmt->execute([$id]);
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
-                $so = $pdo->prepare("SELECT order_id FROM shipment_draft_orders WHERE shipment_draft_id = ?");
-                $so->execute([$id]);
-                $row['order_ids'] = array_column($so->fetchAll(PDO::FETCH_ASSOC), 'order_id');
+                $row['order_ids'] = shipmentDraftVisibleOrderIds($pdo, (int) $id);
                 jsonResponse(['data' => $row]);
                 break;
             }
             if ($action === 'assign-container') {
                 $containerId = (int) ($input['container_id'] ?? 0);
                 if (!$containerId) jsonError('container_id required', 400);
-                $so = $pdo->prepare("SELECT order_id FROM shipment_draft_orders WHERE shipment_draft_id = ?");
-                $so->execute([$id]);
-                $orderIds = array_column($so->fetchAll(PDO::FETCH_ASSOC), 'order_id');
+                $orderIds = shipmentDraftVisibleOrderIds($pdo, (int) $id);
                 $containerStmt = $pdo->prepare("SELECT * FROM containers WHERE id = ?");
                 $containerStmt->execute([$containerId]);
                 $container = $containerStmt->fetch(PDO::FETCH_ASSOC);
                 if (!$container) jsonError('Container not found', 404);
                 foreach ($orderIds as $oid) {
-                    $orderStmt = $pdo->prepare("SELECT id, status, destination_country_id, confirmation_token FROM orders WHERE id = ?");
-                    $orderStmt->execute([$oid]);
-                    $order = $orderStmt->fetch(PDO::FETCH_ASSOC);
-                    if (!$order) {
-                        jsonError("Order $oid not found", 404);
-                    }
+                    $order = shipmentDraftFetchVisibleOrder($pdo, (int) $oid);
                     if (trim((string) ($order['confirmation_token'] ?? '')) !== '') {
                         jsonError("Order $oid is still waiting for customer feedback and cannot be assigned to a container yet.", 400);
                     }
@@ -227,8 +242,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt = $pdo->prepare("SELECT sd.*, c.code as container_code FROM shipment_drafts sd LEFT JOIN containers c ON sd.container_id = c.id WHERE sd.id = ?");
                 $stmt->execute([$id]);
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
-                $so->execute([$id]);
-                $row['order_ids'] = array_column($so->fetchAll(PDO::FETCH_ASSOC), 'order_id');
+                $row['order_ids'] = shipmentDraftVisibleOrderIds($pdo, (int) $id);
                 jsonResponse(['data' => $row]);
                 break;
             }
@@ -237,14 +251,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt->execute([$id]);
                 $sd = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$sd || $sd['status'] === 'finalized') jsonError('Invalid or already finalized', 400);
-                $so = $pdo->prepare("SELECT order_id FROM shipment_draft_orders WHERE shipment_draft_id = ?");
-                $so->execute([$id]);
-                $orderIds = array_column($so->fetchAll(PDO::FETCH_ASSOC), 'order_id');
+                $orderIds = shipmentDraftVisibleOrderIds($pdo, (int) $id);
                 if (empty($orderIds)) jsonError('Draft must have at least one order to finalize', 400);
                 foreach ($orderIds as $oid) {
-                    $st = $pdo->prepare("SELECT status FROM orders WHERE id = ?");
-                    $st->execute([$oid]);
-                    if ($st->fetchColumn() !== 'AssignedToContainer') {
+                    $order = shipmentDraftFetchVisibleOrder($pdo, (int) $oid);
+                    if (($order['status'] ?? null) !== 'AssignedToContainer') {
                         jsonError("Order $oid must be AssignedToContainer before finalizing", 400);
                     }
                 }

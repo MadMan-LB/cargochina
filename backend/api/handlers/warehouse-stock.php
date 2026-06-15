@@ -71,6 +71,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         ) wr ON wr.order_id = o.id
         WHERE o.status IN ('ReceivedAtWarehouse','AwaitingCustomerConfirmation','Confirmed','ReadyForConsolidation')";
     $params = [];
+    $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
+    $sql .= " AND {$customerScope['sql']}";
+    $params = array_merge($params, $customerScope['params']);
     if ($customerId) {
         $sql .= " AND o.customer_id = ?";
         $params[] = $customerId;

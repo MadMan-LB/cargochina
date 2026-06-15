@@ -12,6 +12,7 @@ if (!function_exists('clmsT')) {
 }
 require_once dirname(__DIR__, 2) . '/includes/session_roles.php';
 require_once dirname(__DIR__, 2) . '/includes/permission_overrides.php';
+require_once dirname(__DIR__, 2) . '/includes/customer_visibility.php';
 
 function clmsFinalizeApiTiming(int $status): void
 {

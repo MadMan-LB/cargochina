@@ -36,9 +36,7 @@ function setCustomerSaveState(isEditing) {
     if (!saveBtn) return;
     const blocked = !isEditing && !canCreateCustomers();
     saveBtn.disabled = blocked;
-    saveBtn.title = blocked
-        ? "Only Admin and Super Admin can add customers"
-        : "";
+    saveBtn.title = blocked ? "You do not have permission to add customers" : "";
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -246,7 +244,7 @@ window.updatePaymentLinkValue = function updatePaymentLinkValue(id, v) {
 
 function openCustomerForm() {
     if (!canCreateCustomers()) {
-        showToast("Only Admin and Super Admin can add customers", "warning");
+        showToast("You do not have permission to add customers", "warning");
         return;
     }
     document.getElementById("customerForm").reset();
@@ -316,7 +314,7 @@ async function editCustomer(id) {
 async function saveCustomer() {
     const id = document.getElementById("customerId").value;
     if (!id && !canCreateCustomers()) {
-        showToast("Only Admin and Super Admin can add customers", "danger");
+        showToast("You do not have permission to add customers", "danger");
         return;
     }
     const payload = {

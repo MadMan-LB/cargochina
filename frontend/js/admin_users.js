@@ -13,6 +13,10 @@ let permissionOverrideRegistry = {};
 let permissionOverrideUsers = [];
 let permissionOverrideMap = {};
 let selectedPermissionOverrideUserId = null;
+let customerVisibilityUsers = [];
+let customerVisibilitySettings = {};
+let customerVisibilityFullRoles = [];
+let selectedCustomerVisibilityUserId = null;
 
 document.addEventListener("DOMContentLoaded", async () => {
     setupResetPwToggle();
@@ -22,6 +26,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         loadSidebarAccessConfig(),
         loadPermissionOverrideConfig(),
     ]);
+    await loadCustomerVisibilityConfig();
     const createBtn = document.getElementById("createUserBtn");
     if (createBtn) createBtn.addEventListener("click", openCreateUserModal);
     const saveSidebarBtn = document.getElementById("sidebarAccessSaveBtn");
@@ -44,6 +49,28 @@ document.addEventListener("DOMContentLoaded", async () => {
     const overrideSaveBtn = document.getElementById("permissionOverrideSaveBtn");
     if (overrideSaveBtn) {
         overrideSaveBtn.addEventListener("click", savePermissionOverrides);
+    }
+    const customerVisibilitySelect = document.getElementById(
+        "customerVisibilityUserSelect",
+    );
+    if (customerVisibilitySelect) {
+        customerVisibilitySelect.addEventListener("change", () => {
+            selectedCustomerVisibilityUserId =
+                customerVisibilitySelect.value || null;
+            renderCustomerVisibilityEditor();
+        });
+    }
+    document.querySelectorAll(".customer-visibility-mode").forEach((radio) => {
+        radio.addEventListener("change", renderCustomerVisibilityCreatorState);
+    });
+    const customerVisibilitySaveBtn = document.getElementById(
+        "customerVisibilitySaveBtn",
+    );
+    if (customerVisibilitySaveBtn) {
+        customerVisibilitySaveBtn.addEventListener(
+            "click",
+            saveCustomerVisibility,
+        );
     }
 });
 
@@ -119,7 +146,9 @@ async function createUser() {
         bootstrap.Modal.getInstance(
             document.getElementById("userCreateModal"),
         ).hide();
-        loadUsers();
+        await loadUsers();
+        await loadPermissionOverrideConfig();
+        await loadCustomerVisibilityConfig();
     } catch (e) {
         showToast(e.message, "danger");
     } finally {
@@ -289,7 +318,9 @@ async function saveUser() {
         bootstrap.Modal.getInstance(
             document.getElementById("userEditModal"),
         ).hide();
-        loadUsers();
+        await loadUsers();
+        renderCustomerVisibilityEditor();
+        renderCustomerVisibilitySummary();
     } catch (e) {
         showToast(e.message, "danger");
     } finally {
@@ -366,6 +397,8 @@ function getActivityEntityLink(entityType, entityId) {
         case "design_attachment":
             return `Attachment #${id}`;
         case "user_permission_override":
+            return `<a href="${base}/admin_users.php" onclick="event.stopPropagation()">User #${id}</a>`;
+        case "customer_visibility_exception":
             return `<a href="${base}/admin_users.php" onclick="event.stopPropagation()">User #${id}</a>`;
         case "receiving_excel_import":
             return `<a href="${base}/receiving.php" onclick="event.stopPropagation()">Import #${id}</a>`;
@@ -585,6 +618,241 @@ async function savePermissionOverrides() {
             res.data?.overrides || [];
         renderPermissionOverrideGrid();
         showToast("Permission overrides saved");
+    } catch (e) {
+        showToast(e.message, "danger");
+    } finally {
+        setLoading(btn, false);
+    }
+}
+
+async function loadCustomerVisibilityConfig() {
+    const loadingEl = document.getElementById("customerVisibilityLoading");
+    const editorEl = document.getElementById("customerVisibilityEditor");
+    try {
+        const res = await api("GET", "/users/customer-visibility");
+        const data = res.data || {};
+        customerVisibilityUsers = data.users || [];
+        customerVisibilitySettings = data.settings || {};
+        customerVisibilityFullRoles = data.full_visibility_roles || [];
+        const select = document.getElementById("customerVisibilityUserSelect");
+        if (select) {
+            select.innerHTML =
+                '<option value="">Select user…</option>' +
+                customerVisibilityUsers
+                    .map(
+                        (u) =>
+                            `<option value="${u.id}">${escapeHtml(u.full_name || u.email || "User")} (#${u.id})</option>`,
+                    )
+                    .join("");
+        }
+        selectedCustomerVisibilityUserId = select?.value || null;
+        renderCustomerVisibilityEditor();
+        renderCustomerVisibilitySummary();
+        loadingEl?.classList.add("d-none");
+        editorEl?.classList.remove("d-none");
+    } catch (e) {
+        if (loadingEl) {
+            loadingEl.textContent =
+                e.message || "Failed to load customer visibility.";
+            loadingEl.classList.remove("text-muted");
+            loadingEl.classList.add("text-danger");
+        }
+        editorEl?.classList.add("d-none");
+    }
+}
+
+function getCustomerVisibilitySetting(userId) {
+    return (
+        customerVisibilitySettings[userId] || {
+            mode: "own",
+            can_see_all_customers: 0,
+            allowed_creator_user_ids: [],
+        }
+    );
+}
+
+function customerVisibilityUserRoles(userId) {
+    return (
+        allUsers.find((u) => String(u.id) === String(userId))?.roles || []
+    );
+}
+
+function customerVisibilityStatusForUser(user) {
+    const roles = customerVisibilityUserRoles(user.id);
+    const roleGrantsAll = roles.some((role) =>
+        customerVisibilityFullRoles.includes(role),
+    );
+    const setting = getCustomerVisibilitySetting(user.id);
+    const mode = roleGrantsAll ? "all" : setting.mode || "own";
+    const creatorIds = (setting.allowed_creator_user_ids || []).map((id) =>
+        String(id),
+    );
+    const creatorNames = customerVisibilityUsers
+        .filter((u) => creatorIds.includes(String(u.id)))
+        .map((u) => u.full_name || u.email || `User #${u.id}`);
+    return {
+        mode,
+        roleGrantsAll,
+        text: roleGrantsAll
+            ? "All customers by role"
+            : mode === "all"
+              ? "All customers by exception"
+              : mode === "selected"
+                ? "Own + selected creators"
+                : "Own customers only",
+        detail:
+            mode === "selected" && creatorNames.length
+                ? creatorNames.join(", ")
+                : "—",
+    };
+}
+
+function renderCustomerVisibilitySummary() {
+    const summaryEl = document.getElementById("customerVisibilitySummary");
+    if (!summaryEl) return;
+    summaryEl.innerHTML = customerVisibilityUsers.length
+        ? `<table class="table table-sm table-hover align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>User</th>
+                    <th>Visibility</th>
+                    <th>Additional creators</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${customerVisibilityUsers
+                    .map((user) => {
+                        const status = customerVisibilityStatusForUser(user);
+                        return `<tr>
+                            <td>${escapeHtml(user.full_name || user.email || "User")} <span class="text-muted">#${user.id}</span></td>
+                            <td>${escapeHtml(status.text)}</td>
+                            <td>${escapeHtml(status.detail)}</td>
+                        </tr>`;
+                    })
+                    .join("")}
+            </tbody>
+        </table>`
+        : "";
+}
+
+function renderCustomerVisibilityEditor() {
+    const editorEl = document.getElementById("customerVisibilityEditor");
+    const statusEl = document.getElementById("customerVisibilityStatus");
+    const creatorGrid = document.getElementById("customerVisibilityCreatorGrid");
+    if (!editorEl || !statusEl || !creatorGrid) return;
+    if (!selectedCustomerVisibilityUserId) {
+        statusEl.textContent =
+            "Select a user to manage customer visibility exceptions.";
+        creatorGrid.innerHTML = "";
+        document
+            .querySelectorAll(".customer-visibility-mode")
+            .forEach((radio) => {
+                radio.checked = radio.value === "own";
+            });
+        renderCustomerVisibilityCreatorState();
+        return;
+    }
+
+    const user = customerVisibilityUsers.find(
+        (u) => String(u.id) === String(selectedCustomerVisibilityUserId),
+    );
+    const roles = customerVisibilityUserRoles(selectedCustomerVisibilityUserId);
+    const roleGrantsAll = roles.some((role) =>
+        customerVisibilityFullRoles.includes(role),
+    );
+    const setting = getCustomerVisibilitySetting(selectedCustomerVisibilityUserId);
+    const mode = roleGrantsAll ? "all" : setting.mode || "own";
+    document
+        .querySelectorAll(".customer-visibility-mode")
+        .forEach((radio) => {
+            radio.checked = radio.value === mode;
+            radio.disabled = roleGrantsAll;
+        });
+
+    const selectedCreators = new Set(
+        (setting.allowed_creator_user_ids || []).map((id) => String(id)),
+    );
+    creatorGrid.innerHTML = customerVisibilityUsers
+        .filter((u) => String(u.id) !== String(selectedCustomerVisibilityUserId))
+        .map((u) => {
+            const checked = selectedCreators.has(String(u.id)) ? "checked" : "";
+            return `
+                <label class="sidebar-page-tile ${checked ? "is-selected" : ""}">
+                    <input type="checkbox" class="form-check-input customer-visibility-creator" value="${u.id}" ${checked}>
+                    <div class="sidebar-page-tile-body">
+                        <div class="sidebar-page-copy">
+                            <div class="sidebar-page-title">${escapeHtml(u.full_name || u.email || "User")}</div>
+                            <div class="sidebar-page-description">${escapeHtml(u.email || "")} #${u.id}</div>
+                        </div>
+                    </div>
+                </label>`;
+        })
+        .join("");
+    creatorGrid
+        .querySelectorAll(".customer-visibility-creator")
+        .forEach((checkbox) => {
+            checkbox.addEventListener("change", () => {
+                checkbox
+                    .closest(".sidebar-page-tile")
+                    ?.classList.toggle("is-selected", checkbox.checked);
+            });
+        });
+
+    const label = user ? user.full_name || user.email || `User #${user.id}` : "User";
+    const modeText = roleGrantsAll
+        ? "All customers by role"
+        : mode === "all"
+          ? "All customers by exception"
+          : mode === "selected"
+            ? "Own customers plus selected creators"
+            : "Own customers only";
+    statusEl.textContent = `${label}: ${modeText}`;
+    renderCustomerVisibilityCreatorState();
+}
+
+function renderCustomerVisibilityCreatorState() {
+    const selectedMode =
+        document.querySelector(".customer-visibility-mode:checked")?.value ||
+        "own";
+    const enabled = selectedMode === "selected";
+    document
+        .querySelectorAll(".customer-visibility-creator")
+        .forEach((checkbox) => {
+            checkbox.disabled = !enabled;
+            checkbox.closest(".sidebar-page-tile")?.classList.toggle(
+                "is-disabled",
+                !enabled,
+            );
+        });
+}
+
+async function saveCustomerVisibility() {
+    if (!selectedCustomerVisibilityUserId) {
+        showToast("Select a user first", "warning");
+        return;
+    }
+    const mode =
+        document.querySelector(".customer-visibility-mode:checked")?.value ||
+        "own";
+    const allowedCreatorUserIds = Array.from(
+        document.querySelectorAll(".customer-visibility-creator:checked"),
+    ).map((checkbox) => Number(checkbox.value));
+    const btn = document.getElementById("customerVisibilitySaveBtn");
+    try {
+        setLoading(btn, true);
+        const res = await api(
+            "PUT",
+            "/users/" + selectedCustomerVisibilityUserId + "/customer-visibility",
+            {
+                mode,
+                allowed_creator_user_ids: allowedCreatorUserIds,
+            },
+        );
+        customerVisibilitySettings[selectedCustomerVisibilityUserId] =
+            res.data?.setting || {};
+        renderCustomerVisibilityEditor();
+        renderCustomerVisibilitySummary();
+        showToast("Customer visibility saved");
     } catch (e) {
         showToast(e.message, "danger");
     } finally {
