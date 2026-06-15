@@ -10,6 +10,8 @@
 
 require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
+require_once dirname(__DIR__, 2) . '/services/ReceivingExcelImportService.php';
+require_once dirname(__DIR__, 2) . '/services/OrderReceivingService.php';
 
 function receivingFetchQueueRowsForRequest(PDO $pdo): array
 {
@@ -161,12 +163,187 @@ function receivingOutputQueueCsv(array $rows, ?string $filename = null): void
     exit;
 }
 
+function receivingEnsureExcelImportTable(PDO $pdo): void
+{
+    try {
+        $stmt = $pdo->query("SHOW TABLES LIKE 'receiving_excel_imports'");
+        if ($stmt && $stmt->fetchColumn()) {
+            return;
+        }
+    } catch (Throwable $e) {
+    }
+    jsonError('Receiving Excel import table is missing. Run database migrations first.', 500);
+}
+
+function receivingStoreExcelImportPreview(PDO $pdo, array $file, array $preview, int $userId): array
+{
+    receivingEnsureExcelImportTable($pdo);
+    $token = bin2hex(random_bytes(24));
+    $status = !empty($preview['is_valid']) ? 'preview_ready' : 'invalid';
+    $stmt = $pdo->prepare(
+        "INSERT INTO receiving_excel_imports
+         (preview_token, original_filename, file_hash, status, row_count, valid_count, error_count, preview_json, created_by)
+         VALUES (?,?,?,?,?,?,?,?,?)"
+    );
+    $stmt->execute([
+        $token,
+        (string) ($file['name'] ?? 'receiving_import.xlsx'),
+        (string) ($preview['file_hash'] ?? ''),
+        $status,
+        (int) ($preview['row_count'] ?? 0),
+        (int) ($preview['valid_count'] ?? 0),
+        (int) ($preview['error_count'] ?? 0),
+        json_encode($preview, JSON_UNESCAPED_UNICODE),
+        $userId,
+    ]);
+    $importId = (int) $pdo->lastInsertId();
+    $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('receiving_excel_import', ?, 'preview', ?, ?)")
+        ->execute([
+            $importId,
+            json_encode([
+                'status' => $status,
+                'row_count' => (int) ($preview['row_count'] ?? 0),
+                'valid_count' => (int) ($preview['valid_count'] ?? 0),
+                'error_count' => (int) ($preview['error_count'] ?? 0),
+                'filename' => (string) ($file['name'] ?? ''),
+            ], JSON_UNESCAPED_UNICODE),
+            $userId,
+        ]);
+    logClms('receiving_excel_import_preview', [
+        'import_id' => $importId,
+        'user_id' => $userId,
+        'status' => $status,
+        'rows' => (int) ($preview['row_count'] ?? 0),
+        'errors' => (int) ($preview['error_count'] ?? 0),
+    ]);
+
+    return [$importId, $token, $status];
+}
+
+function receivingLoadExcelImportPreview(PDO $pdo, string $token, int $userId): array
+{
+    receivingEnsureExcelImportTable($pdo);
+    $stmt = $pdo->prepare("SELECT * FROM receiving_excel_imports WHERE preview_token = ? AND created_by = ? LIMIT 1");
+    $stmt->execute([$token, $userId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        jsonError('Import preview not found or expired', 404);
+    }
+    if (($row['status'] ?? '') !== 'preview_ready') {
+        jsonError('Import preview has errors and cannot be committed', 400);
+    }
+    $preview = json_decode((string) ($row['preview_json'] ?? ''), true);
+    if (!is_array($preview)) {
+        jsonError('Import preview data is unavailable', 400);
+    }
+    return [$row, $preview];
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
-    requireRole(['WarehouseStaff', 'SuperAdmin']);
+    requirePermission('page:receiving', ['WarehouseStaff', 'SuperAdmin']);
+    $pdo = getDb();
+    $userId = getAuthUserId() ?? 1;
+
+    if ($id === 'import' && $action === 'preview') {
+        requirePermission('receiving.import', ['WarehouseStaff', 'SuperAdmin']);
+        if ($method !== 'POST') {
+            jsonError('Method not allowed', 405);
+        }
+        try {
+            $file = $_FILES['file'] ?? [];
+            $preview = (new ReceivingExcelImportService())->previewFromUploadedFile($pdo, $file);
+            [$importId, $token, $status] = receivingStoreExcelImportPreview($pdo, $file, $preview, $userId);
+            unset($preview['payloads']);
+            unset($preview['raw_rows']);
+            jsonResponse(['data' => array_merge($preview, [
+                'import_id' => $importId,
+                'preview_token' => $token,
+                'status' => $status,
+            ])]);
+        } catch (InvalidArgumentException $e) {
+            jsonError($e->getMessage(), 400);
+        } catch (Throwable $e) {
+            throw $e;
+        }
+    }
+
+    if ($id === 'import' && $action === 'commit') {
+        requirePermission('receiving.import', ['WarehouseStaff', 'SuperAdmin']);
+        if ($method !== 'POST') {
+            jsonError('Method not allowed', 405);
+        }
+        $token = trim((string) ($input['preview_token'] ?? ''));
+        if ($token === '') {
+            jsonError('preview_token is required', 400);
+        }
+        [$importRow, $preview] = receivingLoadExcelImportPreview($pdo, $token, $userId);
+        $importId = (int) $importRow['id'];
+        $service = new ReceivingExcelImportService();
+        $revalidated = $service->validateRows($pdo, $preview['raw_rows'] ?? []);
+        if (empty($revalidated['is_valid'])) {
+            $pdo->prepare("UPDATE receiving_excel_imports SET status = 'invalid', row_count = ?, valid_count = ?, error_count = ?, preview_json = ? WHERE id = ?")
+                ->execute([
+                    (int) ($revalidated['row_count'] ?? 0),
+                    (int) ($revalidated['valid_count'] ?? 0),
+                    (int) ($revalidated['error_count'] ?? 0),
+                    json_encode($revalidated, JSON_UNESCAPED_UNICODE),
+                    $importId,
+                ]);
+            jsonError('Import rows changed or became invalid. Review the preview again.', 400, ['rows' => 'Revalidation failed']);
+        }
+
+        $payloads = $revalidated['payloads'] ?? [];
+        if (!$payloads) {
+            jsonError('No valid receiving rows to import', 400);
+        }
+
+        $results = [];
+        try {
+            $pdo->beginTransaction();
+            $receivingService = new OrderReceivingService();
+            foreach ($payloads as $orderId => $payload) {
+                $results[(int) $orderId] = $receivingService->receive($pdo, (int) $orderId, $payload, $userId, false, [
+                    'source' => 'excel_import',
+                    'import_id' => $importId,
+                ]);
+            }
+            $resultPayload = [
+                'orders_imported' => count($results),
+                'receipts' => $results,
+                'row_count' => (int) ($revalidated['row_count'] ?? 0),
+            ];
+            $pdo->prepare("UPDATE receiving_excel_imports SET status = 'committed', result_json = ?, committed_by = ?, committed_at = NOW() WHERE id = ?")
+                ->execute([json_encode($resultPayload, JSON_UNESCAPED_UNICODE), $userId, $importId]);
+            $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('receiving_excel_import', ?, 'commit', ?, ?)")
+                ->execute([$importId, json_encode($resultPayload, JSON_UNESCAPED_UNICODE), $userId]);
+            logClms('receiving_excel_import_commit', [
+                'import_id' => $importId,
+                'user_id' => $userId,
+                'orders_imported' => count($results),
+                'rows' => (int) ($revalidated['row_count'] ?? 0),
+            ]);
+            $pdo->commit();
+            jsonResponse(['data' => $resultPayload]);
+        } catch (OrderReceivingValidationException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $pdo->prepare("UPDATE receiving_excel_imports SET status = 'failed', result_json = ? WHERE id = ?")
+                ->execute([json_encode(['message' => $e->getMessage(), 'errors' => $e->getFieldErrors()], JSON_UNESCAPED_UNICODE), $importId]);
+            jsonError($e->getMessage(), $e->getStatusCode(), $e->getFieldErrors());
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $pdo->prepare("UPDATE receiving_excel_imports SET status = 'failed', result_json = ? WHERE id = ?")
+                ->execute([json_encode(['message' => $e->getMessage()], JSON_UNESCAPED_UNICODE), $importId]);
+            throw $e;
+        }
+    }
+
     if ($method !== 'GET') {
         jsonError('Method not allowed', 405);
     }
-    $pdo = getDb();
 
     if ($id === 'search') {
         $q = trim($_GET['q'] ?? '');

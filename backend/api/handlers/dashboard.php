@@ -34,7 +34,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
     setCacheHeaders(15);
     $userRoles = getUserRoles();
-    $canSeePage = static fn(string $pageId) => clmsCanRolesAccessPage($userRoles, $pageId, $pdo);
+    $userId = getAuthUserId() ?? 0;
+    $canSeePage = static fn(string $pageId) => clmsCanRolesAccessPage($userRoles, $pageId, $pdo, $userId ?: null);
 
     $statusKeyMap = [
         'Draft' => 'draft',
@@ -68,7 +69,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $stmt = $pdo->query("SELECT COUNT(*) FROM orders WHERE COALESCE(confirmation_token, '') <> ''");
     $stats['customer_feedback_pending'] = (int) $stmt->fetchColumn();
 
-    $userId = getAuthUserId() ?? 0;
     if ($userId) {
         $stmt = $pdo->prepare("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read_at IS NULL");
         $stmt->execute([$userId]);

@@ -36,6 +36,26 @@ require 'includes/layout.php';
   </div>
 </div>
 
+<div class="card mt-4 shadow-sm" id="permissionOverridesPanel">
+  <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-3 py-3 bg-light">
+    <div>
+      <h5 class="mb-1">Special User Access Overrides</h5>
+      <p class="text-muted mb-0 small">Grant page or action access to a specific user without changing their main role.</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <select class="form-select form-select-sm" id="permissionOverrideUserSelect" style="min-width:260px"></select>
+      <button type="button" class="btn btn-primary btn-sm" id="permissionOverrideSaveBtn">Save Overrides</button>
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="alert alert-info py-2 small mb-3">
+      Overrides extend existing role permissions. Backend checks still apply to protected actions and direct URLs.
+    </div>
+    <div id="permissionOverrideLoading" class="text-center py-4 text-muted">Loading permission overrides…</div>
+    <div id="permissionOverrideGrid" class="row g-3 d-none"></div>
+  </div>
+</div>
+
 <div class="card mt-4 shadow-sm" id="sidebarAccessPanel">
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-3 py-3 bg-light">
     <div>
@@ -83,6 +103,8 @@ require 'includes/layout.php';
             <option value="customer_portal_token">Customer portal token</option>
             <option value="design_attachment">Design attachment</option>
             <option value="user">User</option>
+            <option value="user_permission_override">Permission override</option>
+            <option value="receiving_excel_import">Receiving Excel import</option>
             <option value="system_config">System config</option>
             <option value="internal_message">Internal message</option>
           </select>

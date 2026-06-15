@@ -11,6 +11,7 @@ require_once dirname(__DIR__, 2) . '/services/OrderCountryService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderItemNumberingService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderReceiptWorkflowService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
+require_once dirname(__DIR__, 2) . '/services/OrderReceivingService.php';
 
 function orderSupportsSharedCartons(PDO $pdo): bool
 {
@@ -1763,6 +1764,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
             }
             if ($id && $action === 'receive') {
+                try {
+                    $result = (new OrderReceivingService())->receive($pdo, (int) $id, $input, $userId);
+                    jsonResponse(['data' => $result]);
+                } catch (OrderReceivingValidationException $e) {
+                    jsonError($e->getMessage(), $e->getStatusCode(), $e->getFieldErrors());
+                }
+            }
+            if (false && $id && $action === 'receive') {
                 $stmt = $pdo->prepare("SELECT * FROM orders WHERE id = ?");
                 $stmt->execute([$id]);
                 $order = $stmt->fetch(PDO::FETCH_ASSOC);

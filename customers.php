@@ -5,18 +5,22 @@ requireRoleForPage(['ChinaAdmin', 'SuperAdmin']);
 $currentPage = 'customers';
 $pageTitle = 'Customers';
 $roles = $_SESSION['user_roles'] ?? [];
-$canCreateCustomers = in_array('ChinaAdmin', $roles, true) || in_array('SuperAdmin', $roles, true);
+$userId = isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null;
+$canCreateCustomers = clmsUserCan('customers.create', ['ChinaAdmin', 'SuperAdmin'], null, $userId, $roles);
+$canImportCustomers = clmsUserCan('customers.import', ['ChinaAdmin', 'SuperAdmin'], null, $userId, $roles);
 $canGeneratePortalLinks = in_array('ChinaAdmin', $roles, true) || in_array('SuperAdmin', $roles, true);
 require 'includes/layout.php';
 ?>
 <h1 class="mb-4">Customers</h1>
-<div class="card" id="customersPage" data-can-create-customers="<?= $canCreateCustomers ? '1' : '0' ?>" data-can-generate-portal="<?= $canGeneratePortalLinks ? '1' : '0' ?>">
+<div class="card" id="customersPage" data-can-create-customers="<?= $canCreateCustomers ? '1' : '0' ?>" data-can-import-customers="<?= $canImportCustomers ? '1' : '0' ?>" data-can-generate-portal="<?= $canGeneratePortalLinks ? '1' : '0' ?>">
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2 py-3">
     <span class="fw-semibold">Customer List</span>
     <div class="d-flex gap-2 align-items-center flex-wrap">
       <input type="text" class="form-control form-control-sm" id="customerSearch" placeholder="Search by name, shipping code, POR, phone, or email..." style="min-width:220px">
-      <?php if ($canCreateCustomers): ?>
+      <?php if ($canImportCustomers): ?>
         <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#importModal" onclick="openImportModal('customers')">Import CSV</button>
+      <?php endif; ?>
+      <?php if ($canCreateCustomers): ?>
         <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#customerModal" onclick="openCustomerForm()">+ Add Customer</button>
       <?php endif; ?>
     </div>

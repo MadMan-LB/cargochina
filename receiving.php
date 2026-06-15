@@ -4,8 +4,15 @@ require_once 'includes/page_guard.php';
 requireRoleForPage(['WarehouseStaff', 'SuperAdmin']);
 $currentPage = 'receiving';
 $pageTitle = clmsT('Warehouse Receiving');
+$roles = $_SESSION['user_roles'] ?? [];
+$userId = isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null;
+$canRecordReceiving = clmsUserCan('orders.receive', ['WarehouseStaff', 'SuperAdmin'], null, $userId, $roles);
+$canImportReceiving = clmsUserCan('receiving.import', ['WarehouseStaff', 'SuperAdmin'], null, $userId, $roles);
 require 'includes/layout.php';
 ?>
+<div id="receivingPage"
+  data-can-record-receiving="<?= $canRecordReceiving ? '1' : '0' ?>"
+  data-can-import-receiving="<?= $canImportReceiving ? '1' : '0' ?>">
 <div class="card page-hero-card mb-4">
   <div class="card-body d-flex flex-wrap justify-content-between align-items-start gap-3">
     <div>
@@ -13,7 +20,12 @@ require 'includes/layout.php';
       <p class="text-muted mb-0"><?= clmsT('Review inbound orders, spot special handling early, and record actual warehouse measurements with evidence before the next workflow step.') ?></p>
     </div>
     <div class="d-flex flex-wrap gap-2">
-      <button type="button" class="btn btn-primary" onclick="document.getElementById('receiveOrderSearch')?.focus()"><?= clmsT('Quick Receive') ?></button>
+      <?php if ($canRecordReceiving): ?>
+        <button type="button" class="btn btn-primary" onclick="document.getElementById('receiveOrderSearch')?.focus()"><?= clmsT('Quick Receive') ?></button>
+      <?php endif; ?>
+      <?php if ($canImportReceiving): ?>
+        <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#receivingImportModal"><?= clmsT('Import Excel') ?></button>
+      <?php endif; ?>
       <button type="button" class="btn btn-outline-success" onclick="exportReceivingXlsx()" title="<?= clmsT('Export queue to XLSX') ?>"><?= clmsT('Export XLSX') ?></button>
     </div>
   </div>
@@ -166,9 +178,14 @@ require 'includes/layout.php';
 <div class="card mt-4">
   <div class="card-header d-flex justify-content-between align-items-center">
     <span><?= clmsT('Receive Order') ?></span>
-    <button class="btn btn-primary btn-sm" id="receiveNewBtn" onclick="showReceiveForm()"><?= clmsT('+ New receive') ?></button>
+    <?php if ($canRecordReceiving): ?>
+      <button class="btn btn-primary btn-sm" id="receiveNewBtn" onclick="showReceiveForm()"><?= clmsT('+ New receive') ?></button>
+    <?php endif; ?>
   </div>
   <div class="card-body">
+    <?php if (!$canRecordReceiving): ?>
+      <div class="alert alert-info py-2"><?= clmsT('You can view the receiving queue, but recording receipts requires receiving action access.') ?></div>
+    <?php endif; ?>
     <div id="receiveSelectSection">
       <div class="row mb-3 form-row-responsive">
         <div class="col-12 col-md-6">
@@ -190,15 +207,18 @@ require 'includes/layout.php';
             <div class="fw-semibold"><?= clmsT('Item Quantity & Price') ?></div>
             <div class="small text-muted"><?= clmsT('Edit cartons, pieces per carton, factory price, and totals per item before recording the receipt.') ?></div>
           </div>
-<button 
+<div class="d-flex flex-wrap gap-2">
+<button
   type="button" 
   class="btn btn-outline-secondary btn-sm" 
   id="toggleItemLevel" 
-  aria-expanded="false" 
+  aria-expanded="true"
   aria-controls="itemLevelTable">
-  <?= clmsT('Show item details') ?>
-</button>        </div>
-        <div id="itemLevelTable" class="table-responsive d-none">
+  <?= clmsT('Hide item details') ?>
+</button>
+<button type="button" class="btn btn-outline-primary btn-sm" onclick="fillReceiveActualsFromDeclared()"><?= clmsT('Fill from declared') ?></button>
+</div>        </div>
+        <div id="itemLevelTable" class="table-responsive">
           <table class="table table-sm align-middle">
             <thead>
               <tr>
@@ -258,6 +278,56 @@ require 'includes/layout.php';
     </div>
   </div>
 </div>
+</div>
+
+<?php if ($canImportReceiving): ?>
+<div class="modal fade" id="receivingImportModal" tabindex="-1">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><?= clmsT('Import Receiving From Excel') ?></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-light border small">
+          <?= clmsT('Columns: order_id, order_item_id or product_id/shipping_code, actual_cartons, actual_cbm, actual_weight, optional pieces_per_carton, quantity, unit_price, total_amount, condition, notes.') ?>
+        </div>
+        <div class="row g-3 align-items-end mb-3">
+          <div class="col-12 col-md-8">
+            <label class="form-label"><?= clmsT('Excel file') ?></label>
+            <input type="file" class="form-control" id="receivingImportFile" accept=".xlsx,.xls">
+          </div>
+          <div class="col-12 col-md-4 d-flex gap-2">
+            <button type="button" class="btn btn-primary" id="receivingImportPreviewBtn" onclick="previewReceivingImport()"><?= clmsT('Preview') ?></button>
+            <button type="button" class="btn btn-success" id="receivingImportCommitBtn" onclick="commitReceivingImport()" disabled><?= clmsT('Import') ?></button>
+          </div>
+        </div>
+        <div id="receivingImportSummary" class="small text-muted mb-2"></div>
+        <div id="receivingImportErrors" class="alert alert-danger d-none"></div>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th><?= clmsT('Row') ?></th>
+                <th><?= clmsT('Order') ?></th>
+                <th><?= clmsT('Item') ?></th>
+                <th><?= clmsT('Cartons') ?></th>
+                <th><?= clmsT('CBM') ?></th>
+                <th><?= clmsT('Weight') ?></th>
+                <th><?= clmsT('Status') ?></th>
+              </tr>
+            </thead>
+            <tbody id="receivingImportPreviewBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"><?= clmsT('Close') ?></button>
+      </div>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
 <?php $pageScripts = [
   'frontend/js/photo_uploader.js?v=' . filemtime(__DIR__ . '/frontend/js/photo_uploader.js'),
   'frontend/js/autocomplete.js?v=' . filemtime(__DIR__ . '/frontend/js/autocomplete.js'),

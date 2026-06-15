@@ -3,12 +3,25 @@ let receiveOrderItems = [];
 let receiveItemPhotos = {};
 let warehouseQueueData = [];
 let warehouseQueueSourceData = [];
+let receivingImportPreviewToken = null;
 let calMonth = new Date().getMonth();
 let calYear = new Date().getFullYear();
 const RECEIVING_DEFAULT_STATUSES = ["Approved", "InTransitToWarehouse"];
 
 function receivingT(text, replacements = null) {
     return typeof t === "function" ? t(text, replacements) : text;
+}
+
+function receivingPageEl() {
+    return document.getElementById("receivingPage");
+}
+
+function canRecordReceiving() {
+    return receivingPageEl()?.dataset?.canRecordReceiving === "1";
+}
+
+function canImportReceiving() {
+    return receivingPageEl()?.dataset?.canImportReceiving === "1";
 }
 
 function fmtReceivingNumber(value, maxDecimals = 6) {
@@ -315,6 +328,12 @@ function setupReceiveOrderSearch() {
     const idEl = document.getElementById("receiveOrderId");
     const form = document.getElementById("receiveForm");
     if (!searchEl || !idEl) return;
+    if (!canRecordReceiving()) {
+        searchEl.disabled = true;
+        searchEl.placeholder = receivingT("Receiving action access required");
+        form?.classList.add("d-none");
+        return;
+    }
     if (typeof Autocomplete === "undefined") return;
     Autocomplete.init(searchEl, {
         resource: "receiving",
@@ -624,6 +643,145 @@ function exportReceivingCsv() {
     exportReceivingQueue("csv");
 }
 
+function setReceivingImportBusy(isBusy) {
+    const previewBtn = document.getElementById("receivingImportPreviewBtn");
+    const commitBtn = document.getElementById("receivingImportCommitBtn");
+    if (previewBtn) setLoading(previewBtn, isBusy);
+    if (commitBtn && (isBusy || !receivingImportPreviewToken)) {
+        commitBtn.disabled = true;
+    }
+}
+
+function renderReceivingImportPreview(data) {
+    const rows = data?.rows || [];
+    const tbody = document.getElementById("receivingImportPreviewBody");
+    const summary = document.getElementById("receivingImportSummary");
+    const errors = document.getElementById("receivingImportErrors");
+    const commitBtn = document.getElementById("receivingImportCommitBtn");
+
+    if (summary) {
+        summary.textContent = receivingT(
+            "{valid} valid row(s), {errors} row(s) with errors, {orders} order(s).",
+            {
+                valid: data?.valid_count || 0,
+                errors: data?.error_count || 0,
+                orders: data?.orders?.length || 0,
+            },
+        );
+    }
+    if (errors) {
+        const messages = data?.errors || [];
+        errors.classList.toggle("d-none", messages.length === 0);
+        errors.innerHTML = messages.map((msg) => `<div>${escapeHtml(msg)}</div>`).join("");
+    }
+    if (tbody) {
+        tbody.innerHTML =
+            rows
+                .map((row) => {
+                    const ok = !!row.valid;
+                    const rowErrors = (row.errors || []).join("; ");
+                    return `<tr class="${ok ? "" : "table-danger"}">
+                        <td>${escapeHtml(row.row || "")}</td>
+                        <td>#${escapeHtml(row.order_id || "")}</td>
+                        <td>${escapeHtml(row.item_label || row.shipping_code || "-")}</td>
+                        <td>${escapeHtml(fmtReceivingNumber(row.actual_cartons || 0, 4))}</td>
+                        <td>${escapeHtml(fmtReceivingNumber(row.actual_cbm || 0, 6))}</td>
+                        <td>${escapeHtml(fmtReceivingNumber(row.actual_weight || 0, 4))}</td>
+                        <td>${ok ? `<span class="badge bg-success">${escapeHtml(receivingT("Ready"))}</span>` : `<span class="badge bg-danger" title="${escapeHtml(rowErrors)}">${escapeHtml(receivingT("Error"))}</span><div class="small text-danger">${escapeHtml(rowErrors)}</div>`}</td>
+                    </tr>`;
+                })
+                .join("") ||
+            `<tr><td colspan="7" class="text-muted">${escapeHtml(receivingT("No rows previewed."))}</td></tr>`;
+    }
+    if (commitBtn) {
+        commitBtn.disabled = !data?.is_valid || !receivingImportPreviewToken;
+    }
+}
+
+async function parseReceivingImportError(response) {
+    const body = await response.json().catch(() => ({}));
+    const err = body.error === true ? body : body.error || body;
+    return err.message || body.message || response.statusText || receivingT("Import request failed");
+}
+
+async function previewReceivingImport() {
+    if (!canImportReceiving()) {
+        showToast(receivingT("You do not have permission to import receiving Excel files"), "danger");
+        return;
+    }
+    const file = document.getElementById("receivingImportFile")?.files?.[0];
+    if (!file) {
+        showToast(receivingT("Choose an Excel file first"), "warning");
+        return;
+    }
+    receivingImportPreviewToken = null;
+    const commitBtn = document.getElementById("receivingImportCommitBtn");
+    if (commitBtn) commitBtn.disabled = true;
+    const form = new FormData();
+    form.append("file", file);
+    try {
+        setReceivingImportBusy(true);
+        const response = await fetch(`${window.API_BASE || "/cargochina/api/v1"}/receiving/import/preview`, {
+            method: "POST",
+            credentials: "same-origin",
+            body: form,
+        });
+        if (!response.ok) {
+            throw new Error(await parseReceivingImportError(response));
+        }
+        const payload = await response.json();
+        const data = payload.data || {};
+        receivingImportPreviewToken = data.preview_token || null;
+        renderReceivingImportPreview(data);
+        showToast(data.is_valid ? receivingT("Preview ready") : receivingT("Preview has errors"), data.is_valid ? "success" : "warning");
+    } catch (error) {
+        renderReceivingImportPreview({ rows: [], errors: [error.message], is_valid: false });
+        showToast(error.message, "danger");
+    } finally {
+        setReceivingImportBusy(false);
+    }
+}
+
+async function commitReceivingImport() {
+    if (!canImportReceiving()) {
+        showToast(receivingT("You do not have permission to import receiving Excel files"), "danger");
+        return;
+    }
+    if (!receivingImportPreviewToken) {
+        showToast(receivingT("Preview a valid Excel file first"), "warning");
+        return;
+    }
+    try {
+        setReceivingImportBusy(true);
+        const res = await api("POST", "/receiving/import/commit", {
+            preview_token: receivingImportPreviewToken,
+        });
+        receivingImportPreviewToken = null;
+        document.getElementById("receivingImportCommitBtn").disabled = true;
+        showToast(receivingT("Receiving import completed"));
+        applyFilters();
+        loadReceivableOrders();
+        renderReceivingImportPreview({
+            rows: [],
+            errors: [],
+            orders: [],
+            valid_count: 0,
+            error_count: 0,
+            is_valid: false,
+        });
+        const summary = document.getElementById("receivingImportSummary");
+        if (summary) {
+            summary.textContent = receivingT("{orders} order(s) imported.", {
+                orders: res.data?.orders_imported || 0,
+            });
+        }
+    } catch (error) {
+        showToast(error.message, "danger");
+    } finally {
+        setReceivingImportBusy(false);
+    }
+}
+
 function renderWarehouseList() {
     const container = document.getElementById("warehouseList");
     if (!container) return;
@@ -673,9 +831,9 @@ function renderWarehouseList() {
                 <dt class="col-5">${escapeHtml(receivingT("CBM / Weight"))}</dt><dd class="col-7">${typeof formatDisplayCbm === "function" ? formatDisplayCbm(parseFloat(o.declared_cbm || 0), 6) : parseFloat(o.declared_cbm || 0).toFixed(6)} / ${typeof formatDisplayWeight === "function" ? formatDisplayWeight(parseFloat(o.declared_weight || 0), 2) : parseFloat(o.declared_weight || 0)} kg</dd>
               </dl>
               ${items.length ? `<div class="mt-2 pt-2 border-top"><small class="text-muted">${escapeHtml(receivingT("Items"))}:</small> ${items.map((it) => `<span class="badge bg-light text-dark me-1">${escapeHtml(it.shipping_code || "—")} ${it.cartons || 0}ctn ${it.qty_per_carton || ""}/ctn HS:${escapeHtml(it.hs_code || "-")}${it.product_high_alert_note || it.product_required_design ? ` ${escapeHtml(receivingT("ALERT"))}` : ""}</span>`).join("")}</div>` : ""}
-              <div class="mt-2 pt-2">
+              ${canRecordReceiving() ? `<div class="mt-2 pt-2">
                 <button type="button" class="btn btn-sm btn-primary js-receive-btn" data-order-id="${o.id}">${escapeHtml(receivingT("Receive"))}</button>
-              </div>
+              </div>` : ""}
             </div>
           </div>
         </div>`;
@@ -688,6 +846,10 @@ function renderReceiveDropdown() {
 }
 
 function receiveOrderById(orderId) {
+    if (!canRecordReceiving()) {
+        showToast(receivingT("You do not have permission to record receiving"), "warning");
+        return;
+    }
     const order = warehouseQueueData.find((o) => o.id == orderId);
     const searchEl = document.getElementById("receiveOrderSearch");
     const idEl = document.getElementById("receiveOrderId");
@@ -723,6 +885,10 @@ function receiveOrderById(orderId) {
 }
 
 function showReceiveForm() {
+    if (!canRecordReceiving()) {
+        showToast(receivingT("You do not have permission to record receiving"), "warning");
+        return;
+    }
     document.getElementById("receiveForm")?.classList.remove("d-none");
     refreshUnsavedBaseline?.(document.getElementById("receiveForm"));
 }
@@ -940,6 +1106,46 @@ function updateDeclaredSummary(order) {
     if (acbm)
         acbm.placeholder = cbm > 0 ? fmtReceivingNumber(cbm, 6) : receivingT("Direct or from L×W×H");
     if (aw) aw.placeholder = weight > 0 ? fmtReceivingNumber(weight, 4) : "";
+}
+
+function fillReceiveActualsFromDeclared() {
+    if (!canRecordReceiving()) {
+        showToast(receivingT("You do not have permission to record receiving"), "warning");
+        return;
+    }
+    if (!receiveOrderItems.length) {
+        showToast(receivingT("Select an order first"), "warning");
+        return;
+    }
+    const totals = receiveOrderItems.reduce(
+        (acc, item) => {
+            acc.cartons += parseFloat(item.cartons || 0) || 0;
+            acc.cbm += parseFloat(item.declared_cbm || 0) || 0;
+            acc.weight += parseFloat(item.declared_weight || 0) || 0;
+            return acc;
+        },
+        { cartons: 0, cbm: 0, weight: 0 },
+    );
+    const cartonsInput = document.getElementById("actualCartons");
+    const cbmInput = document.getElementById("actualCbm");
+    const weightInput = document.getElementById("actualWeight");
+    if (cartonsInput) cartonsInput.value = formatReceiveInputNumber(totals.cartons, 0);
+    if (cbmInput) cbmInput.value = formatReceiveInputNumber(totals.cbm, 6);
+    if (weightInput) weightInput.value = formatReceiveInputNumber(totals.weight, 4);
+
+    receiveOrderItems.forEach((item) => {
+        const row = document.querySelector(`tr[data-order-item-id="${item.id}"]`);
+        if (!row) return;
+        const cbm = row.querySelector(".item-actual-cbm");
+        const weight = row.querySelector(".item-actual-weight");
+        if (cbm) cbm.value = formatReceiveInputNumber(item.declared_cbm || 0, 6);
+        if (weight) weight.value = formatReceiveInputNumber(item.declared_weight || 0, 4);
+        row.dataset.itemDirty = "1";
+        updateReceiveItemSplitTotals(item.id);
+    });
+    updateReceiveOrderLevelTotals();
+    updateVariancePhotoAlert();
+    showToast(receivingT("Declared values copied into actual fields"));
 }
 
 function formatReceiveInputNumber(value, decimals = 4) {
@@ -1235,6 +1441,10 @@ function removeItemPhoto(orderItemId, index) {
 }
 
 async function submitReceive() {
+    if (!canRecordReceiving()) {
+        showToast(receivingT("You do not have permission to record receiving"), "danger");
+        return;
+    }
     const orderId = document.getElementById("receiveOrderId")?.value;
     if (!orderId) {
         showToast(receivingT("Select an order"), "danger");

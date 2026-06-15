@@ -11,6 +11,7 @@ if (!function_exists('clmsT')) {
     require_once dirname(__DIR__, 2) . '/includes/i18n.php';
 }
 require_once dirname(__DIR__, 2) . '/includes/session_roles.php';
+require_once dirname(__DIR__, 2) . '/includes/permission_overrides.php';
 
 function clmsFinalizeApiTiming(int $status): void
 {
@@ -265,6 +266,11 @@ function hasAnyRole(array $roles): bool
     return !empty(array_intersect($roles, getUserRoles()));
 }
 
+function hasPermission(string $permissionKey, array $defaultRoles = []): bool
+{
+    return clmsUserCan($permissionKey, $defaultRoles, null, getAuthUserId(), getUserRoles());
+}
+
 function requireAuth(): int
 {
     $userId = getAuthUserId();
@@ -277,6 +283,13 @@ function requireAuth(): int
 function requireRole(array $roles): void
 {
     if (!hasAnyRole($roles)) {
+        jsonError('Forbidden', 403);
+    }
+}
+
+function requirePermission(string $permissionKey, array $defaultRoles = []): void
+{
+    if (!hasPermission($permissionKey, $defaultRoles)) {
         jsonError('Forbidden', 403);
     }
 }

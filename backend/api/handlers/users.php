@@ -17,12 +17,132 @@ function normalizeUserPassword($value): string
     return (string) ($value ?? '');
 }
 
+function buildUserPermissionOverrideRegistry(PDO $pdo): array
+{
+    $registry = [];
+
+    foreach (clmsSidebarPageRegistry() as $pageId => $meta) {
+        if (!empty($meta['superadmin_only'])) {
+            continue;
+        }
+        $key = clmsNormalizePermissionKey('page:' . $pageId);
+        $registry[$key] = [
+            'key' => $key,
+            'label' => 'View ' . ($meta['title'] ?? $pageId) . ' page',
+            'description' => $meta['description'] ?? '',
+            'section' => 'Pages',
+            'default_roles' => !empty($meta['superadmin_only']) ? ['SuperAdmin'] : array_values(array_unique(array_merge($meta['default_roles'] ?? [], ['SuperAdmin']))),
+        ];
+    }
+
+    $rbac = require dirname(__DIR__, 2) . '/config/rbac.php';
+    foreach ($rbac as $resource => $definition) {
+        if ($resource === 'public') {
+            continue;
+        }
+        $isList = is_array($definition) && array_keys($definition) === range(0, count($definition) - 1);
+        if ($isList) {
+            continue;
+        }
+        if (!is_array($definition)) {
+            continue;
+        }
+        foreach ($definition as $action => $roles) {
+            if (!is_array($roles)) {
+                continue;
+            }
+            $key = clmsNormalizePermissionKey($resource . '.' . $action);
+            $registry[$key] = [
+                'key' => $key,
+                'label' => ucwords(str_replace('-', ' ', $resource)) . ' ' . ucwords(str_replace('_', ' ', $action)),
+                'description' => 'Override ' . $action . ' permission for ' . $resource . '.',
+                'section' => 'Actions',
+                'default_roles' => array_values(array_unique($roles)),
+            ];
+        }
+    }
+
+    $manual = [
+        'customers.create' => ['Add customer', 'Allow creating customers without changing the user role.', 'Customer', ['ChinaAdmin', 'SuperAdmin']],
+        'customers.import' => ['Import customers', 'Allow customer CSV import without changing the user role.', 'Customer', ['ChinaAdmin', 'SuperAdmin']],
+        'page:customers' => ['View customer page', 'Allow opening the Customers page and seeing it in the sidebar.', 'Customer', ['ChinaAdmin', 'SuperAdmin']],
+        'page:receiving' => ['View receiving page', 'Allow opening the Warehouse Receiving page and seeing it in the sidebar.', 'Receiving', ['WarehouseStaff', 'SuperAdmin']],
+        'orders.receive' => ['Receiving from warehouse', 'Allow recording warehouse receipts for approved or in-transit orders.', 'Receiving', ['WarehouseStaff', 'SuperAdmin']],
+        'receiving.import' => ['Import Excel receiving', 'Allow previewing and committing warehouse receiving Excel imports.', 'Receiving', ['WarehouseStaff', 'SuperAdmin']],
+    ];
+    foreach ($manual as $key => [$label, $description, $section, $defaultRoles]) {
+        $key = clmsNormalizePermissionKey($key);
+        if (!isset($registry[$key])) {
+            $registry[$key] = ['key' => $key, 'default_roles' => []];
+        }
+        $registry[$key]['label'] = $label;
+        $registry[$key]['description'] = $description;
+        $registry[$key]['section'] = $section;
+        $registry[$key]['default_roles'] = array_values(array_unique($defaultRoles));
+    }
+
+    uasort($registry, static function (array $a, array $b): int {
+        $sectionCmp = strcmp((string) ($a['section'] ?? ''), (string) ($b['section'] ?? ''));
+        if ($sectionCmp !== 0) {
+            return $sectionCmp;
+        }
+        return strcmp((string) ($a['label'] ?? $a['key']), (string) ($b['label'] ?? $b['key']));
+    });
+
+    return $registry;
+}
+
+function loadUserPermissionOverrides(PDO $pdo, ?int $userId = null): array
+{
+    if (!clmsPermissionOverridesTableExists($pdo)) {
+        return [];
+    }
+    $sql = "SELECT user_id, permission_key, is_allowed, notes, granted_by, created_at, updated_at FROM user_permission_overrides";
+    $params = [];
+    if ($userId !== null) {
+        $sql .= " WHERE user_id = ?";
+        $params[] = $userId;
+    }
+    $sql .= " ORDER BY user_id, permission_key";
+    $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
+    if ($params) {
+        $stmt->execute($params);
+    }
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $grouped = [];
+    foreach ($rows as $row) {
+        $uid = (int) $row['user_id'];
+        $row['permission_key'] = clmsNormalizePermissionKey((string) $row['permission_key']);
+        $row['is_allowed'] = (int) $row['is_allowed'];
+        $grouped[$uid][] = $row;
+    }
+    return $userId !== null ? ($grouped[$userId] ?? []) : $grouped;
+}
+
+function ensureUserPermissionOverrideTable(PDO $pdo): void
+{
+    if (!clmsPermissionOverridesTableExists($pdo)) {
+        jsonError('Permission override table is missing. Run database migrations first.', 500);
+    }
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     requireRole(['SuperAdmin']);
 
     $pdo = getDb();
 
     if ($method === 'GET') {
+        if ($id === 'permission-overrides' && $action === null) {
+            ensureUserPermissionOverrideTable($pdo);
+            $users = $pdo->query("SELECT id, email, full_name, is_active FROM users ORDER BY full_name, email")->fetchAll(PDO::FETCH_ASSOC);
+            jsonResponse([
+                'data' => [
+                    'registry' => buildUserPermissionOverrideRegistry($pdo),
+                    'overrides' => loadUserPermissionOverrides($pdo),
+                    'users' => $users,
+                ],
+            ]);
+        }
         if ($id === 'sidebar-access' && $action === null) {
             $roles = $pdo->query("SELECT id, code, name FROM roles ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
             $defaults = [];
@@ -207,6 +327,21 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
             jsonResponse(['data' => $items, 'has_more' => $hasMore]);
         }
+        if ($id && $action === 'permission-overrides') {
+            ensureUserPermissionOverrideTable($pdo);
+            $userId = (int) $id;
+            $chk = $pdo->prepare("SELECT id, email, full_name, is_active FROM users WHERE id = ?");
+            $chk->execute([$userId]);
+            $user = $chk->fetch(PDO::FETCH_ASSOC);
+            if (!$user) jsonError('User not found', 404);
+            jsonResponse([
+                'data' => [
+                    'user' => $user,
+                    'registry' => buildUserPermissionOverrideRegistry($pdo),
+                    'overrides' => loadUserPermissionOverrides($pdo, $userId),
+                ],
+            ]);
+        }
         $stmt = $pdo->prepare("SELECT id, email, full_name, is_active FROM users WHERE id = ?");
         $stmt->execute([$id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -323,6 +458,63 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     }
 
     if ($method === 'PUT' && $id) {
+        if ($action === 'permission-overrides') {
+            ensureUserPermissionOverrideTable($pdo);
+            $targetUserId = (int) $id;
+            $chk = $pdo->prepare("SELECT id FROM users WHERE id = ?");
+            $chk->execute([$targetUserId]);
+            if (!$chk->fetch()) jsonError('User not found', 404);
+
+            $permissions = $input['permissions'] ?? $input['permission_keys'] ?? [];
+            if (!is_array($permissions)) {
+                jsonError('permissions must be an array', 400);
+            }
+
+            $registry = buildUserPermissionOverrideRegistry($pdo);
+            $allowedKeys = array_keys($registry);
+            $selected = array_values(array_unique(array_filter(array_map(
+                static fn($key) => clmsNormalizePermissionKey((string) $key),
+                $permissions
+            ))));
+            $invalid = array_values(array_diff($selected, $allowedKeys));
+            if ($invalid) {
+                jsonError('Unknown permission override key', 400, ['permissions' => implode(', ', $invalid)]);
+            }
+
+            $old = loadUserPermissionOverrides($pdo, $targetUserId);
+            $adminUserId = getAuthUserId();
+            $pdo->beginTransaction();
+            try {
+                $pdo->prepare("DELETE FROM user_permission_overrides WHERE user_id = ?")->execute([$targetUserId]);
+                if ($selected) {
+                    $ins = $pdo->prepare("INSERT INTO user_permission_overrides (user_id, permission_key, is_allowed, granted_by) VALUES (?, ?, 1, ?)");
+                    foreach ($selected as $permissionKey) {
+                        $ins->execute([$targetUserId, $permissionKey, $adminUserId]);
+                    }
+                }
+                $new = loadUserPermissionOverrides($pdo, $targetUserId);
+                $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, old_value, new_value, user_id) VALUES ('user_permission_override', ?, 'update', ?, ?, ?)")
+                    ->execute([
+                        $targetUserId,
+                        json_encode(['permissions' => array_column($old, 'permission_key')], JSON_UNESCAPED_UNICODE),
+                        json_encode(['permissions' => $selected], JSON_UNESCAPED_UNICODE),
+                        $adminUserId,
+                    ]);
+                logClms('permission_overrides_update', [
+                    'target_user_id' => $targetUserId,
+                    'user_id' => $adminUserId,
+                    'permissions' => $selected,
+                ]);
+                $pdo->commit();
+                jsonResponse(['data' => ['user_id' => $targetUserId, 'overrides' => $new]]);
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+        }
+
         if ($id === 'sidebar-access') {
             $settings = $input['settings'] ?? null;
             if (!is_array($settings)) {

@@ -23,6 +23,10 @@ function canCreateCustomers() {
     return customerPageEl()?.dataset?.canCreateCustomers === "1";
 }
 
+function canImportCustomers() {
+    return customerPageEl()?.dataset?.canImportCustomers === "1";
+}
+
 function canGeneratePortalLinks() {
     return customerPageEl()?.dataset?.canGeneratePortal === "1";
 }
@@ -773,8 +777,8 @@ window.sendMessage = async function () {
 };
 
 window.openImportModal = function (entity) {
-    if (!canCreateCustomers()) {
-        showToast("Only Admin and Super Admin can import customers", "warning");
+    if (!canImportCustomers()) {
+        showToast("You do not have permission to import customers", "warning");
         return;
     }
     window._importEntity = entity || "customers";
@@ -791,8 +795,8 @@ window.openImportModal = function (entity) {
 };
 
 window.doImport = async function () {
-    if (!canCreateCustomers()) {
-        showToast("Only Admin and Super Admin can import customers", "danger");
+    if (!canImportCustomers()) {
+        showToast("You do not have permission to import customers", "danger");
         return;
     }
     const entity = window._importEntity || "customers";

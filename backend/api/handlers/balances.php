@@ -11,13 +11,13 @@ require_once dirname(__DIR__, 3) . '/includes/sidebar_permissions.php';
 function balancesCurrentUserCanAccess(): bool
 {
     $roles = getUserRoles();
-    return in_array('SuperAdmin', $roles, true) || clmsCanRolesAccessPage($roles, 'balances');
+    return in_array('SuperAdmin', $roles, true) || clmsCanRolesAccessPage($roles, 'balances', null, getAuthUserId());
 }
 
 function balancesCurrentUserCanUseOrderLinks(): bool
 {
     $roles = getUserRoles();
-    return in_array('SuperAdmin', $roles, true) || clmsCanRolesAccessPage($roles, 'orders');
+    return in_array('SuperAdmin', $roles, true) || clmsCanRolesAccessPage($roles, 'orders', null, getAuthUserId());
 }
 
 function balancesTableExists(PDO $pdo, string $table): bool

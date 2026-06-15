@@ -9,11 +9,19 @@ let sidebarAccessSettings = {};
 let sidebarAccessRoles = [];
 let sidebarAccessCollapseState = {};
 let sidebarAccessSectionCollapseState = {};
+let permissionOverrideRegistry = {};
+let permissionOverrideUsers = [];
+let permissionOverrideMap = {};
+let selectedPermissionOverrideUserId = null;
 
 document.addEventListener("DOMContentLoaded", async () => {
     setupResetPwToggle();
     await loadRolesAndDepartments();
-    await Promise.all([loadUsers(), loadSidebarAccessConfig()]);
+    await Promise.all([
+        loadUsers(),
+        loadSidebarAccessConfig(),
+        loadPermissionOverrideConfig(),
+    ]);
     const createBtn = document.getElementById("createUserBtn");
     if (createBtn) createBtn.addEventListener("click", openCreateUserModal);
     const saveSidebarBtn = document.getElementById("sidebarAccessSaveBtn");
@@ -23,6 +31,19 @@ document.addEventListener("DOMContentLoaded", async () => {
     const resetSidebarBtn = document.getElementById("sidebarAccessDefaultBtn");
     if (resetSidebarBtn) {
         resetSidebarBtn.addEventListener("click", resetAllSidebarAccessToDefault);
+    }
+    const overrideUserSelect = document.getElementById(
+        "permissionOverrideUserSelect",
+    );
+    if (overrideUserSelect) {
+        overrideUserSelect.addEventListener("change", () => {
+            selectedPermissionOverrideUserId = overrideUserSelect.value || null;
+            renderPermissionOverrideGrid();
+        });
+    }
+    const overrideSaveBtn = document.getElementById("permissionOverrideSaveBtn");
+    if (overrideSaveBtn) {
+        overrideSaveBtn.addEventListener("click", savePermissionOverrides);
     }
 });
 
@@ -344,6 +365,10 @@ function getActivityEntityLink(entityType, entityId) {
             return `Token #${id}`;
         case "design_attachment":
             return `Attachment #${id}`;
+        case "user_permission_override":
+            return `<a href="${base}/admin_users.php" onclick="event.stopPropagation()">User #${id}</a>`;
+        case "receiving_excel_import":
+            return `<a href="${base}/receiving.php" onclick="event.stopPropagation()">Import #${id}</a>`;
         default:
             return `${escapeHtml(entityType || "entity")} #${id}`;
     }
@@ -437,6 +462,134 @@ async function loadUserActivity(reset = true) {
 
 function loadMoreActivity() {
     loadUserActivity(false);
+}
+
+async function loadPermissionOverrideConfig() {
+    const loadingEl = document.getElementById("permissionOverrideLoading");
+    const gridEl = document.getElementById("permissionOverrideGrid");
+    try {
+        const res = await api("GET", "/users/permission-overrides");
+        const data = res.data || {};
+        permissionOverrideRegistry = data.registry || {};
+        permissionOverrideUsers = data.users || [];
+        permissionOverrideMap = data.overrides || {};
+        const select = document.getElementById("permissionOverrideUserSelect");
+        if (select) {
+            select.innerHTML =
+                '<option value="">Select user…</option>' +
+                permissionOverrideUsers
+                    .map(
+                        (u) =>
+                            `<option value="${u.id}">${escapeHtml(u.full_name || u.email || "User")} (#${u.id})</option>`,
+                    )
+                    .join("");
+        }
+        selectedPermissionOverrideUserId = select?.value || null;
+        renderPermissionOverrideGrid();
+        loadingEl?.classList.add("d-none");
+        gridEl?.classList.remove("d-none");
+    } catch (e) {
+        if (loadingEl) {
+            loadingEl.textContent = e.message || "Failed to load permission overrides.";
+            loadingEl.classList.remove("text-muted");
+            loadingEl.classList.add("text-danger");
+        }
+        gridEl?.classList.add("d-none");
+    }
+}
+
+function getSelectedOverrideKeysForUser(userId) {
+    return new Set(
+        (permissionOverrideMap[userId] || [])
+            .filter((row) => String(row.is_allowed) !== "0")
+            .map((row) => row.permission_key),
+    );
+}
+
+function renderPermissionOverrideGrid() {
+    const gridEl = document.getElementById("permissionOverrideGrid");
+    if (!gridEl) return;
+    if (!selectedPermissionOverrideUserId) {
+        gridEl.innerHTML =
+            '<div class="col-12"><div class="alert alert-light border mb-0">Select a user to manage special access overrides.</div></div>';
+        return;
+    }
+
+    const selectedKeys = getSelectedOverrideKeysForUser(selectedPermissionOverrideUserId);
+    const groups = {};
+    Object.values(permissionOverrideRegistry).forEach((perm) => {
+        const section = perm.section || "Other";
+        groups[section] = groups[section] || [];
+        groups[section].push(perm);
+    });
+
+    gridEl.innerHTML = Object.entries(groups)
+        .map(([section, permissions]) => {
+            const tiles = permissions
+                .map((perm) => {
+                    const checked = selectedKeys.has(perm.key) ? "checked" : "";
+                    const roleText = (perm.default_roles || []).join(", ") || "No default role";
+                    return `
+                        <label class="sidebar-page-tile ${checked ? "is-selected" : ""}">
+                            <input type="checkbox" class="form-check-input permission-override-toggle" value="${escapeHtml(perm.key)}" ${checked}>
+                            <div class="sidebar-page-tile-body">
+                                <div class="sidebar-page-copy">
+                                    <div class="sidebar-page-title-row">
+                                        <div class="sidebar-page-title">${escapeHtml(perm.label || perm.key)}</div>
+                                    </div>
+                                    <div class="sidebar-page-description">${escapeHtml(perm.description || perm.key)}</div>
+                                    <div class="small text-muted mt-1">Default: ${escapeHtml(roleText)}</div>
+                                </div>
+                            </div>
+                        </label>`;
+                })
+                .join("");
+            return `
+                <div class="col-12">
+                    <div class="sidebar-role-section">
+                        <div class="sidebar-role-section-header">
+                            <div class="sidebar-role-section-label">${escapeHtml(section)}</div>
+                        </div>
+                        <div class="sidebar-page-grid">${tiles}</div>
+                    </div>
+                </div>`;
+        })
+        .join("");
+
+    gridEl.querySelectorAll(".permission-override-toggle").forEach((checkbox) => {
+        checkbox.addEventListener("change", () => {
+            checkbox
+                .closest(".sidebar-page-tile")
+                ?.classList.toggle("is-selected", checkbox.checked);
+        });
+    });
+}
+
+async function savePermissionOverrides() {
+    if (!selectedPermissionOverrideUserId) {
+        showToast("Select a user first", "warning");
+        return;
+    }
+    const permissions = Array.from(
+        document.querySelectorAll(".permission-override-toggle:checked"),
+    ).map((checkbox) => checkbox.value);
+    const btn = document.getElementById("permissionOverrideSaveBtn");
+    try {
+        setLoading(btn, true);
+        const res = await api(
+            "PUT",
+            "/users/" + selectedPermissionOverrideUserId + "/permission-overrides",
+            { permissions },
+        );
+        permissionOverrideMap[selectedPermissionOverrideUserId] =
+            res.data?.overrides || [];
+        renderPermissionOverrideGrid();
+        showToast("Permission overrides saved");
+    } catch (e) {
+        showToast(e.message, "danger");
+    } finally {
+        setLoading(btn, false);
+    }
 }
 
 async function loadSidebarAccessConfig() {

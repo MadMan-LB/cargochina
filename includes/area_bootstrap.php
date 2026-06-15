@@ -25,6 +25,7 @@ if (empty($area) || !in_array($area, $validAreas, true)) {
 }
 
 $userRoles = $_SESSION['user_roles'] ?? [];
+$userId = isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null;
 
 $areaRoles = [
     'warehouse' => ['WarehouseStaff', 'SuperAdmin'],
@@ -52,11 +53,13 @@ if ($isAreaDashboard) {
     $registry = clmsSidebarPageRegistry();
     $pageMeta = $registry[$pageId] ?? null;
     if ($pageMeta !== null) {
-        if (!empty($pageMeta['superadmin_only']) && !in_array('SuperAdmin', $userRoles, true)) {
+        if (!empty($pageMeta['superadmin_only'])
+            && !in_array('SuperAdmin', $userRoles, true)
+            && !clmsUserHasPermissionOverride('page:' . $pageId, $userId)) {
             include __DIR__ . '/../403.php';
             exit;
         }
-        if (!clmsCanRolesAccessPage($userRoles, $pageId)) {
+        if (!clmsCanRolesAccessPage($userRoles, $pageId, null, $userId)) {
             include __DIR__ . '/../403.php';
             exit;
         }

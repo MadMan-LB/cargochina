@@ -67,24 +67,24 @@ if (!in_array($resource, $publicResources)) {
     $timingRequested = (string) ($_SERVER['HTTP_X_CLMS_DEBUG_TIMING'] ?? '') === '1'
         || (string) ($_GET['debug_timing'] ?? '') === '1';
     $GLOBALS['__clms_api_timing_debug'] = $timingRequested && hasAnyRole(['SuperAdmin']);
-    if ($resource === 'orders' && $action === 'approve' && !hasAnyRole($rbac['orders']['approve'] ?? [])) {
+    if ($resource === 'orders' && $action === 'approve' && !hasPermission('orders.approve', $rbac['orders']['approve'] ?? [])) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'orders' && $action === 'receive' && !hasAnyRole($rbac['orders']['receive'] ?? [])) {
+    if ($resource === 'orders' && $action === 'receive' && !hasPermission('orders.receive', $rbac['orders']['receive'] ?? [])) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'orders' && $action === 'confirm' && !hasAnyRole($rbac['orders']['confirm'] ?? [])) {
+    if ($resource === 'orders' && $action === 'confirm' && !hasPermission('orders.confirm', $rbac['orders']['confirm'] ?? [])) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
     if ($resource === 'balances') {
         $userRoles = getUserRoles();
-        if (!in_array('SuperAdmin', $userRoles, true) && !clmsCanRolesAccessPage($userRoles, 'balances')) {
+        if (!in_array('SuperAdmin', $userRoles, true) && !clmsCanRolesAccessPage($userRoles, 'balances', null, $userId)) {
             http_response_code(403);
             echo json_encode(['error' => true, 'message' => clmsT('You do not have permission')]);
             exit;
@@ -94,12 +94,13 @@ if (!in_array($resource, $publicResources)) {
     $resourcePermissions = $rbac[$resource] ?? null;
     $permissionKey = $method === 'GET' ? 'read' : 'write';
     $skipGenericPermission = ($resource === 'orders' && in_array($action, ['approve', 'receive', 'confirm'], true))
+        || ($resource === 'customers' && ($method === 'GET' || ($method === 'POST' && ($id === null || $id === 'import'))))
         || $resource === 'balances';
     if (
         !$skipGenericPermission &&
         is_array($resourcePermissions) &&
         array_key_exists($permissionKey, $resourcePermissions) &&
-        !hasAnyRole($resourcePermissions[$permissionKey] ?? [])
+        !hasPermission($resource . '.' . $permissionKey, $resourcePermissions[$permissionKey] ?? [])
     ) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
@@ -125,17 +126,25 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'config' && $id === 'receiving' && !hasAnyRole(['WarehouseStaff', 'SuperAdmin'])) {
+    if ($resource === 'config' && $id === 'receiving' && !hasPermission('page:receiving', ['WarehouseStaff', 'SuperAdmin'])) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'customers' && $method === 'POST' && $id === null && !hasAnyRole($rbac['customers']['create'] ?? ['ChinaAdmin', 'SuperAdmin'])) {
+    if ($resource === 'customers' && $method === 'GET') {
+        $userRoles = getUserRoles();
+        if (!hasPermission('customers.read', $rbac['customers']['read'] ?? []) && !clmsCanRolesAccessPage($userRoles, 'customers', null, $userId)) {
+            http_response_code(403);
+            echo json_encode(['error' => true, 'message' => 'Forbidden']);
+            exit;
+        }
+    }
+    if ($resource === 'customers' && $method === 'POST' && $id === null && !hasPermission('customers.create', $rbac['customers']['create'] ?? ['ChinaAdmin', 'SuperAdmin'])) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'customers' && $id === 'import' && !hasAnyRole($rbac['customers']['import'] ?? ['ChinaAdmin', 'SuperAdmin'])) {
+    if ($resource === 'customers' && $id === 'import' && !hasPermission('customers.import', $rbac['customers']['import'] ?? ['ChinaAdmin', 'SuperAdmin'])) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
@@ -170,7 +179,12 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'receiving' && !hasAnyRole(['WarehouseStaff', 'SuperAdmin'])) {
+    if ($resource === 'receiving' && $id === 'import' && !hasPermission('receiving.import', ['WarehouseStaff', 'SuperAdmin'])) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
+    if ($resource === 'receiving' && !hasPermission('page:receiving', ['WarehouseStaff', 'SuperAdmin'])) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;

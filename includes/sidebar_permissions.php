@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/../backend/config/database.php';
+require_once __DIR__ . '/permission_overrides.php';
 
 function clmsSidebarConfigKey(): string
 {
@@ -464,36 +465,47 @@ function clmsGetEffectivePageIdsForRole(string $roleCode, ?PDO $pdo = null): arr
     return clmsGetDefaultPageIdsForRole($roleCode);
 }
 
-function clmsGetEffectivePageIdsForRoles(array $roleCodes, ?PDO $pdo = null): array
+function clmsGetEffectivePageIdsForRoles(array $roleCodes, ?PDO $pdo = null, ?int $userId = null): array
 {
     if (in_array('SuperAdmin', $roleCodes, true)) {
         return array_keys(clmsSidebarPageRegistry());
     }
 
-    $orderedRegistryIds = array_keys(clmsSidebarPageRegistry());
+    $registry = clmsSidebarPageRegistry();
+    $orderedRegistryIds = array_keys($registry);
     $visible = [];
     foreach ($roleCodes as $roleCode) {
         foreach (clmsGetEffectivePageIdsForRole((string) $roleCode, $pdo) as $pageId) {
             $visible[$pageId] = true;
         }
     }
+    if ($userId !== null && $userId > 0) {
+        foreach (clmsGetUserAllowedPermissionKeys($userId, $pdo) as $permissionKey) {
+            if (str_starts_with($permissionKey, 'page:')) {
+                $pageId = substr($permissionKey, 5);
+                if (isset($registry[$pageId]) && empty($registry[$pageId]['superadmin_only'])) {
+                    $visible[$pageId] = true;
+                }
+            }
+        }
+    }
 
     return array_values(array_filter($orderedRegistryIds, static fn($pageId) => isset($visible[$pageId])));
 }
 
-function clmsCanRolesAccessPage(array $roleCodes, string $pageId, ?PDO $pdo = null): bool
+function clmsCanRolesAccessPage(array $roleCodes, string $pageId, ?PDO $pdo = null, ?int $userId = null): bool
 {
     if ($pageId === '') {
         return true;
     }
-    return in_array($pageId, clmsGetEffectivePageIdsForRoles($roleCodes, $pdo), true);
+    return in_array($pageId, clmsGetEffectivePageIdsForRoles($roleCodes, $pdo, $userId), true);
 }
 
-function clmsGetSidebarSectionsForRoles(array $roleCodes, ?PDO $pdo = null): array
+function clmsGetSidebarSectionsForRoles(array $roleCodes, ?PDO $pdo = null, ?int $userId = null): array
 {
     $registry = clmsSidebarPageRegistry();
     $labels = clmsSidebarSectionLabels();
-    $allowedIds = clmsGetEffectivePageIdsForRoles($roleCodes, $pdo);
+    $allowedIds = clmsGetEffectivePageIdsForRoles($roleCodes, $pdo, $userId);
 
     $sections = [];
     foreach ($labels as $sectionId => $label) {
@@ -515,10 +527,10 @@ function clmsGetSidebarSectionsForRoles(array $roleCodes, ?PDO $pdo = null): arr
     return $sections;
 }
 
-function clmsGetAccessibleHomeUrl(array $roleCodes, ?PDO $pdo = null): string
+function clmsGetAccessibleHomeUrl(array $roleCodes, ?PDO $pdo = null, ?int $userId = null): string
 {
     $registry = clmsSidebarPageRegistry();
-    $pageIds = clmsGetEffectivePageIdsForRoles($roleCodes, $pdo);
+    $pageIds = clmsGetEffectivePageIdsForRoles($roleCodes, $pdo, $userId);
     if (!empty($pageIds)) {
         $firstPageId = $pageIds[0];
         if (!empty($registry[$firstPageId]['href'])) {

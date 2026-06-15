@@ -4,6 +4,7 @@ require_once __DIR__ . '/sidebar_permissions.php';
 $currentPage = $currentPage ?? 'dashboard';
 $pageTitle = $pageTitle ?? 'CLMS Dashboard';
 $userRoles = $_SESSION['user_roles'] ?? [];
+$userId = isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null;
 $userName = $_SESSION['user_name'] ?? 'User';
 $isSuperAdmin = in_array('SuperAdmin', $userRoles);
 $hasContainersStaffRole = in_array('ContainersStaff', $userRoles, true);
@@ -27,8 +28,8 @@ $canViewDownloads = $isAdmin || $isBuyer || $isWarehouse || $hasContainersStaffR
 $basePath = '/cargochina';
 $breadcrumbs = $breadcrumbs ?? [];
 $layoutCssVersion = @filemtime(__DIR__ . '/../frontend/css/style.css') ?: time();
-$sidebarSections = clmsGetSidebarSectionsForRoles($userRoles);
-$visiblePageIds = clmsGetEffectivePageIdsForRoles($userRoles);
+$sidebarSections = clmsGetSidebarSectionsForRoles($userRoles, null, $userId);
+$visiblePageIds = clmsGetEffectivePageIdsForRoles($userRoles, null, $userId);
 $uiLocale = clmsGetUiLocale();
 $clientTranslations = clmsGetClientTranslationPayload();
 $roleDisplayNames = array_map(static fn($role) => clmsT((string) $role), $userRoles);

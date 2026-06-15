@@ -337,7 +337,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
         case 'POST':
             if ($id === 'import') {
-                requireRole(['ChinaAdmin', 'SuperAdmin']);
+                requirePermission('customers.import', ['ChinaAdmin', 'SuperAdmin']);
                 $csv = trim($input['csv'] ?? $input['data'] ?? '');
                 if (!$csv) jsonError('No CSV data provided', 400);
                 $lines = preg_split('/\r\n|\r|\n/', $csv);
@@ -438,7 +438,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt->execute([$newId]);
                 jsonResponse(['data' => $stmt->fetch(PDO::FETCH_ASSOC)], 201);
             }
-            requireRole(['ChinaAdmin', 'SuperAdmin']);
+            requirePermission('customers.create', ['ChinaAdmin', 'SuperAdmin']);
             $name = trim($input['name'] ?? '');
             if (!$name) {
                 jsonError('Missing required fields', 400, ['name' => 'Required']);
@@ -543,6 +543,24 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $newId = (int) $pdo->lastInsertId();
                 persistCountryShipping($pdo, $newId, $countryShipping);
                 persistCustomerPorValues($pdo, $newId, $porValues);
+                $actingUserId = getAuthUserId() ?? 1;
+                $usedSpecialAccess = !hasAnyRole(['ChinaAdmin', 'SuperAdmin'])
+                    && clmsUserHasPermissionOverride('customers.create', $actingUserId, $pdo);
+                $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('customer', ?, 'create', ?, ?)")
+                    ->execute([
+                        $newId,
+                        json_encode([
+                            'name' => $name,
+                            'code' => $code,
+                            'special_access' => $usedSpecialAccess,
+                        ], JSON_UNESCAPED_UNICODE),
+                        $actingUserId,
+                    ]);
+                logClms('customer_created', [
+                    'customer_id' => $newId,
+                    'user_id' => $actingUserId,
+                    'special_access' => $usedSpecialAccess,
+                ]);
                 $stmt = $pdo->prepare("SELECT * FROM customers WHERE id = ?");
                 $stmt->execute([$newId]);
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);

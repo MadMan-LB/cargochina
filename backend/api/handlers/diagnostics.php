@@ -184,8 +184,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
             jsonResponse(['data' => [
                 'current_user_roles' => $roles,
-                'current_user_can_access_balances' => clmsCanRolesAccessPage($roles, 'balances', $pdo),
-                'current_user_visible_pages' => clmsGetEffectivePageIdsForRoles($roles, $pdo),
+                'current_user_can_access_balances' => clmsCanRolesAccessPage($roles, 'balances', $pdo, getAuthUserId()),
+                'current_user_visible_pages' => clmsGetEffectivePageIdsForRoles($roles, $pdo, getAuthUserId()),
                 'registry_has_balances' => array_key_exists('balances', clmsSidebarPageRegistry()),
                 'script_map_has_balances' => (clmsSidebarScriptMap()['balances.php'] ?? null) === 'balances',
                 'role_balance_access' => $roleBalanceAccess,
