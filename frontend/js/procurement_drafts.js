@@ -15,6 +15,7 @@
     let draftOrderImportGuideModal = null;
     let draftOrderImportNeedsReplaceConfirm = false;
     let draftOrderImportReturnToBuilder = false;
+    let draftOrderImportInProgress = false;
     let draftOrderUnsavedGuard = null;
 
     function draftT(text, replacements = null) {
@@ -544,7 +545,9 @@
                             const parsed = parseStructuredItemNo(value);
                             if (
                                 parsed &&
-                                !manualSupplierSequenceByKey.has(supplierKey)
+                                (!manualSupplierSequenceByKey.has(supplierKey) ||
+                                    parsed.supplierSequence >
+                                        manualSupplierSequenceByKey.get(supplierKey))
                             ) {
                                 manualSupplierSequenceByKey.set(
                                     supplierKey,
@@ -570,7 +573,12 @@
                 }
                 if (card.dataset.manualItemNo) {
                     const parsed = parseStructuredItemNo(itemNoInput.value);
-                    if (parsed && !manualSupplierSequenceByKey.has(supplierKey)) {
+                    if (
+                        parsed &&
+                        (!manualSupplierSequenceByKey.has(supplierKey) ||
+                            parsed.supplierSequence >
+                                manualSupplierSequenceByKey.get(supplierKey))
+                    ) {
                         manualSupplierSequenceByKey.set(
                             supplierKey,
                             parsed.supplierSequence,
@@ -586,7 +594,9 @@
             });
         });
 
-        let nextSupplierSequence = 1;
+        let nextSupplierSequence = usedSupplierSequences.size
+            ? Math.max(...Array.from(usedSupplierSequences)) + 1
+            : 1;
         supplierOrder.forEach((supplierKey) => {
             if (manualSupplierSequenceByKey.has(supplierKey)) {
                 supplierSequenceByKey.set(
@@ -921,7 +931,9 @@
                 data.message ||
                 draftT("Import failed. Check the file and try again.");
             const ref = err.request_id || data.request_id;
-            throw new Error(message + (ref ? ` (ref: ${ref})` : ""));
+            const error = new Error(message + (ref ? ` (ref: ${ref})` : ""));
+            error.errors = err.errors || data.errors || {};
+            throw error;
         }
         return data;
     }
@@ -985,6 +997,192 @@
         builderModal.show();
     }
 
+    function draftOrderImportUi() {
+        return {
+            status: document.getElementById("draftOrderImportStatus"),
+            fileName: document.getElementById("draftOrderImportFileName"),
+            dropZone: document.getElementById("draftOrderImportDropZone"),
+            chooseBtn: document.getElementById("draftOrderImportChooseFileBtn"),
+            dropBtn: document.getElementById("draftOrderImportDropBtn"),
+            plusBtn: document.getElementById("draftOrderImportPlusBtn"),
+        };
+    }
+
+    function resetDraftOrderImportUi() {
+        const ui = draftOrderImportUi();
+        if (ui.fileName) ui.fileName.textContent = draftT("No file selected");
+        if (ui.status) {
+            ui.status.className = "draft-import-status mt-3 d-none";
+            ui.status.innerHTML = "";
+        }
+        ui.dropZone?.classList.remove("is-dragover", "is-importing");
+        [ui.chooseBtn, ui.dropBtn, ui.plusBtn].forEach((button) => {
+            if (button) button.disabled = false;
+        });
+    }
+
+    function setDraftOrderImportStatus(type, message, details = []) {
+        const status = document.getElementById("draftOrderImportStatus");
+        if (!status) return;
+        const alertClass =
+            type === "danger"
+                ? "alert-danger"
+                : type === "warning"
+                  ? "alert-warning"
+                  : type === "success"
+                    ? "alert-success"
+                    : "alert-info";
+        const list = Array.isArray(details)
+            ? details.filter(Boolean).slice(0, 6)
+            : [];
+        status.className = `draft-import-status mt-3 alert ${alertClass} py-2 mb-0`;
+        status.innerHTML = `
+            <div>${escapeHtml(draftT(message))}</div>
+            ${
+                list.length
+                    ? `<ul class="mb-0 mt-1 ps-3">${list
+                          .map((detail) => `<li>${escapeHtml(String(detail))}</li>`)
+                          .join("")}</ul>`
+                    : ""
+            }
+        `;
+    }
+
+    function setDraftOrderImportBusy(loading) {
+        const ui = draftOrderImportUi();
+        draftOrderImportInProgress = !!loading;
+        setLoading(ui.chooseBtn, loading);
+        setLoading(ui.dropBtn, loading);
+        ui.dropZone?.classList.toggle("is-importing", !!loading);
+        ui.dropZone?.setAttribute("aria-busy", loading ? "true" : "false");
+        if (ui.plusBtn) ui.plusBtn.disabled = !!loading;
+    }
+
+    function draftOrderImportFileAllowed(file) {
+        const name = String(file?.name || "");
+        const ext = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+        return ["xlsx", "xls", "csv", "cv"].includes(ext);
+    }
+
+    function draftOrderImportConfirmReplace() {
+        if (
+            (draftOrderImportNeedsReplaceConfirm ||
+                draftOrderBuilderHasImportableInput()) &&
+            !window.confirm(
+                draftT(
+                    "Importing will replace the current unsaved draft form. Continue?",
+                ),
+            )
+        ) {
+            return false;
+        }
+        draftOrderImportNeedsReplaceConfirm = false;
+        return true;
+    }
+
+    function draftOrderImportErrorDetails(error) {
+        const errors = error?.errors || {};
+        if (Array.isArray(errors)) {
+            return errors.map((item) => String(item));
+        }
+        if (typeof errors === "object" && errors !== null) {
+            return Object.values(errors)
+                .flat()
+                .map((item) => String(item));
+        }
+        return [];
+    }
+
+    function showDraftOrderImportResult(meta, fileName) {
+        const imported = meta.rows_imported || 0;
+        showToast(
+            draftT("Imported {count} rows from {file}.", {
+                count: imported,
+                file: fileName || meta.source_file || draftT("selected file"),
+            }),
+        );
+
+        const skippedRows = Array.isArray(meta.skipped_rows)
+            ? meta.skipped_rows
+            : [];
+        skippedRows.slice(0, 3).forEach((row) => {
+            showToast(
+                draftT("Row {row} skipped: {reason}", {
+                    row: row.row || "—",
+                    reason: row.reason || draftT("Could not read row."),
+                }),
+                "warning",
+            );
+        });
+        if ((meta.rows_skipped || skippedRows.length) > 3) {
+            showToast(
+                draftT("{count} row(s) were skipped. Fix the file and import again if those rows are needed.", {
+                    count: meta.rows_skipped || skippedRows.length,
+                }),
+                "warning",
+            );
+        }
+
+        (meta.warnings || []).slice(0, 3).forEach((warning) =>
+            showToast(warning, "warning"),
+        );
+        if ((meta.warnings || []).length > 3) {
+            showToast(
+                draftT("{count} import warning(s). Review the empty fields before saving.", {
+                    count: meta.warnings.length,
+                }),
+                "warning",
+            );
+        }
+    }
+
+    async function processDraftOrderImportFile(file) {
+        if (!file || draftOrderImportInProgress) return;
+        const ui = draftOrderImportUi();
+        if (ui.fileName) {
+            ui.fileName.textContent = draftT("Selected: {file}", {
+                file: file.name || draftT("selected file"),
+            });
+        }
+
+        if (!draftOrderImportFileAllowed(file)) {
+            const message = draftT("Unsupported import file. Use XLSX, XLS, or CSV.");
+            setDraftOrderImportStatus("danger", message);
+            showToast(message, "danger");
+            return;
+        }
+        if (!draftOrderImportConfirmReplace()) {
+            return;
+        }
+
+        try {
+            draftOrderImportReturnToBuilder = false;
+            setDraftOrderImportBusy(true);
+            setDraftOrderImportStatus("info", "Importing…");
+            const res = await uploadDraftOrderImportFile(file);
+            const imported = res.data || {};
+            const meta = imported.meta || {};
+            setDraftOrderImportStatus(
+                "success",
+                draftT("Imported {count} row(s) into the draft form.", {
+                    count: meta.rows_imported || 0,
+                }),
+            );
+            draftOrderImportGuideModal?.hide();
+            await applyImportedDraftOrder(imported);
+            showDraftOrderImportResult(meta, file.name || meta.source_file || "");
+        } catch (e) {
+            const message = e.message || draftT("Import failed.");
+            setDraftOrderImportStatus("danger", message, draftOrderImportErrorDetails(e));
+            showToast(message, "danger");
+        } finally {
+            setDraftOrderImportBusy(false);
+            draftOrderImportTrigger = null;
+            const input = document.getElementById("draftOrderImportFile");
+            if (input) input.value = "";
+        }
+    }
+
     function triggerDraftOrderImport(button = null) {
         draftOrderImportTrigger = button;
         const guideEl = document.getElementById("draftOrderImportGuideModal");
@@ -992,6 +1190,7 @@
             draftOrderImportGuideModal =
                 draftOrderImportGuideModal ||
                 bootstrap.Modal.getOrCreateInstance(guideEl);
+            resetDraftOrderImportUi();
             draftOrderImportNeedsReplaceConfirm =
                 draftOrderBuilderHasImportableInput();
             const builderEl = document.getElementById("draftOrderModal");
@@ -1018,19 +1217,9 @@
     }
 
     function chooseDraftOrderImportFile() {
-        if (
-            (draftOrderImportNeedsReplaceConfirm ||
-                draftOrderBuilderHasImportableInput()) &&
-            !window.confirm(
-                draftT(
-                    "Importing will replace the current unsaved draft form. Continue?",
-                ),
-            )
-        ) {
+        if (draftOrderImportInProgress || !draftOrderImportConfirmReplace()) {
             return;
         }
-        draftOrderImportNeedsReplaceConfirm = false;
-        draftOrderImportGuideModal?.hide();
         const input = document.getElementById("draftOrderImportFile");
         if (input) {
             input.value = "";
@@ -1042,37 +1231,7 @@
         const input = event.currentTarget;
         const file = input?.files?.[0];
         if (!file) return;
-
-        const btn = draftOrderImportTrigger;
-        try {
-            setLoading(btn, true);
-            const res = await uploadDraftOrderImportFile(file);
-            await applyImportedDraftOrder(res.data || {});
-            const meta = res.data?.meta || {};
-            const warnings = meta.warnings || [];
-            showToast(
-                draftT("Imported {count} row(s) into the draft form.", {
-                    count: meta.rows_imported || 0,
-                }),
-            );
-            warnings.slice(0, 3).forEach((warning) =>
-                showToast(warning, "warning"),
-            );
-            if (warnings.length > 3) {
-                showToast(
-                    draftT("{count} import warning(s). Review the empty fields before saving.", {
-                        count: warnings.length,
-                    }),
-                    "warning",
-                );
-            }
-        } catch (e) {
-            showToast(e.message || "Import failed.", "danger");
-        } finally {
-            setLoading(btn, false);
-            draftOrderImportTrigger = null;
-            if (input) input.value = "";
-        }
+        await processDraftOrderImportFile(file);
     }
 
     function bindDraftOrderImportControls() {
@@ -1089,6 +1248,47 @@
         document
             .getElementById("draftOrderImportChooseFileBtn")
             ?.addEventListener("click", chooseDraftOrderImportFile);
+        [
+            document.getElementById("draftOrderImportDropBtn"),
+            document.getElementById("draftOrderImportPlusBtn"),
+        ].forEach((button) => {
+            button?.addEventListener("click", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                chooseDraftOrderImportFile();
+            });
+        });
+        const dropZone = document.getElementById("draftOrderImportDropZone");
+        dropZone?.addEventListener("click", chooseDraftOrderImportFile);
+        dropZone?.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                chooseDraftOrderImportFile();
+            }
+        });
+        ["dragenter", "dragover"].forEach((eventName) => {
+            dropZone?.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (!draftOrderImportInProgress) {
+                    dropZone.classList.add("is-dragover");
+                }
+            });
+        });
+        ["dragleave", "dragend"].forEach((eventName) => {
+            dropZone?.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                dropZone.classList.remove("is-dragover");
+            });
+        });
+        dropZone?.addEventListener("drop", async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            dropZone.classList.remove("is-dragover");
+            const file = event.dataTransfer?.files?.[0];
+            await processDraftOrderImportFile(file);
+        });
         document
             .getElementById("draftOrderImportGuideModal")
             ?.addEventListener("hidden.bs.modal", () => {

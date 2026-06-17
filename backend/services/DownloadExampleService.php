@@ -2,6 +2,14 @@
 
 require_once dirname(__DIR__) . '/services/OrderExcelService.php';
 
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Border;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+
 class DownloadExampleService
 {
     private string $projectRoot;
@@ -24,6 +32,9 @@ class DownloadExampleService
                 return;
             case 'example-draft-order-export-xlsx':
                 $this->outputDraftExample();
+                return;
+            case 'example-procurement-template-xlsx':
+                $this->outputProcurementTemplateExample();
                 return;
             case 'example-orders-list-export-xlsx':
                 $this->outputOrdersListExample();
@@ -79,6 +90,102 @@ class DownloadExampleService
             $this->buildExampleReceivingRows(),
             'example_receiving_queue_export.xlsx'
         );
+    }
+
+    private function outputProcurementTemplateExample(): void
+    {
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Procurement Import');
+
+        $sheet->setCellValue('A1', 'Example Procurement Template');
+        $sheet->mergeCells('A1:S1');
+        $sheet->getStyle('A1:S1')->applyFromArray([
+            'font' => ['bold' => true, 'size' => 16, 'color' => ['rgb' => '1F4E79']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'EAF3FF']],
+            'alignment' => ['vertical' => Alignment::VERTICAL_CENTER],
+        ]);
+        $sheet->getRowDimension(1)->setRowHeight(28);
+
+        $metadata = [
+            ['Customer', 'Example Retail Group'],
+            ['Destination Country', 'Lebanon (LB)'],
+            ['Expected Ready', '2026-07-15'],
+            ['Currency', 'RMB'],
+        ];
+        $row = 3;
+        foreach ($metadata as $entry) {
+            $sheet->fromArray($entry, null, 'A' . $row);
+            $sheet->getStyle('A' . $row)->getFont()->setBold(true);
+            $row++;
+        }
+
+        $row++;
+        $headers = [
+            'Item No',
+            'English Item Name',
+            'Chinese Item Name',
+            'SKU / Item Code',
+            'Quantity',
+            'Unit',
+            'Pieces/Carton',
+            'Cartons',
+            'Factory Price',
+            'Customer Price',
+            'Total Amount',
+            'CBM/Unit',
+            'Total CBM',
+            'Weight/Unit',
+            'Total Weight',
+            'Supplier',
+            'HS Code',
+            'Notes / Description',
+            'Custom Design',
+        ];
+        $sheet->fromArray($headers, null, 'A' . $row);
+        $headerRow = $row;
+        $row++;
+
+        $sampleRows = [
+            ['EXAMPLE-1-1', 'Travel Mug', '旅行保温杯', 'SKU-MUG-001', 432, 'pieces', 24, 18, 12.50, 15.00, 6480, 0.0048, 2.0736, 0.31, 133.92, 'Jinhua Gift Creations', '9617.00', 'Stainless steel giftware; keep logo area blank.', 'No'],
+            ['EXAMPLE-1-2', 'Storage Jar Set', '玻璃储物罐套装', 'SKU-JAR-002', 160, 'pieces', 16, 10, 21.80, 25.00, 4000, 0.0090, 1.44, 0.52, 83.20, 'Jinhua Gift Creations', '7013.49', 'Packed as 3-piece kitchen set.', 'No'],
+            ['EXAMPLE-2-1', 'Pet Bowl', '宠物碗', 'SKU-PET-010', 420, 'pieces', 30, 14, 7.20, 9.50, 3990, 0.0039, 1.638, 0.22, 92.40, 'Qingdao Pet Utility', '3924.90', 'Blue and grey mixed colors.', 'No'],
+            ['EXAMPLE-2-2', 'Carrier Pad', '宠物运输垫', 'SKU-PAD-011', 168, 'pieces', 24, 7, 9.80, 12.00, 2016, 0.0068, 1.1424, 0.36, 60.48, 'Qingdao Pet Utility', '6307.90', 'Use waterproof fabric; verify carton label in Chinese and English.', 'Yes'],
+        ];
+        foreach ($sampleRows as $sample) {
+            $sheet->fromArray($sample, null, 'A' . $row);
+            $row++;
+        }
+
+        $lastRow = $row - 1;
+        $lastColumn = Coordinate::stringFromColumnIndex(count($headers));
+        $sheet->getStyle("A{$headerRow}:{$lastColumn}{$headerRow}")->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '2563EB']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER, 'wrapText' => true],
+        ]);
+        $sheet->getStyle("A{$headerRow}:{$lastColumn}{$lastRow}")->applyFromArray([
+            'borders' => [
+                'allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => 'D7E3F4']],
+            ],
+            'alignment' => ['vertical' => Alignment::VERTICAL_TOP, 'wrapText' => true],
+        ]);
+        $sheet->getStyle("A" . ($headerRow + 1) . ":D{$lastRow}")->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
+        $sheet->getStyle("P" . ($headerRow + 1) . ":Q{$lastRow}")->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
+        $sheet->freezePane('A' . ($headerRow + 1));
+        $sheet->setAutoFilter("A{$headerRow}:{$lastColumn}{$lastRow}");
+
+        $widths = [16, 24, 22, 18, 12, 10, 15, 10, 14, 14, 14, 12, 12, 13, 13, 24, 12, 36, 14];
+        foreach ($widths as $index => $width) {
+            $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($index + 1))->setWidth($width);
+        }
+
+        $writer = new Xlsx($spreadsheet);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="example_procurement_template.xlsx"');
+        header('Cache-Control: no-cache, no-store, must-revalidate');
+        $writer->save('php://output');
+        exit;
     }
 
     private function buildExampleSingleOrder(): array

@@ -225,7 +225,9 @@ function renumberOrderItemNumbers() {
         if (
             card.dataset.manualItemNo &&
             parsed &&
-            !manualSupplierSequenceByKey.has(supplierKey)
+            (!manualSupplierSequenceByKey.has(supplierKey) ||
+                parsed.supplierSequence >
+                    manualSupplierSequenceByKey.get(supplierKey))
         ) {
             manualSupplierSequenceByKey.set(
                 supplierKey,
@@ -235,7 +237,9 @@ function renumberOrderItemNumbers() {
         }
     });
 
-    let nextSupplierSequence = 1;
+    let nextSupplierSequence = usedSupplierSequences.size
+        ? Math.max(...Array.from(usedSupplierSequences)) + 1
+        : 1;
     supplierOrder.forEach((supplierKey) => {
         if (manualSupplierSequenceByKey.has(supplierKey)) {
             supplierSequenceByKey.set(

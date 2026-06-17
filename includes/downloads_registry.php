@@ -91,9 +91,18 @@ function clmsDownloadRegistry(): array
         ],
         [
             'key' => 'draft-orders',
-            'title' => 'Draft Order Exports',
-            'description' => 'Draft-order Excel exports, including a ready-made example workbook and the live draft export flow.',
+            'title' => 'Draft Order Templates & Exports',
+            'description' => 'Draft-order import templates and Excel exports, including ready-made example workbooks and the live draft export flow.',
             'entries' => [
+                [
+                    'slug' => 'example-procurement-template-xlsx',
+                    'mode' => 'generated',
+                    'title' => 'Example Procurement Template',
+                    'description' => 'Import-ready Excel template with English and Chinese item names, SKU/item code, quantity, unit, prices, supplier, HS code, and sample notes.',
+                    'file_type' => 'XLSX',
+                    'download_name' => 'example_procurement_template.xlsx',
+                    'roles' => ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'],
+                ],
                 [
                     'slug' => 'example-draft-order-export-xlsx',
                     'mode' => 'generated',

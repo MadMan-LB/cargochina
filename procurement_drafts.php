@@ -67,63 +67,43 @@ require 'includes/layout.php';
   </div>
 </div>
 
+<input type="file" class="d-none" id="draftOrderImportFile" accept=".xlsx,.xls,.csv,.cv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel">
+
 <div class="modal fade" id="draftOrderImportGuideModal" tabindex="-1">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header">
         <div>
           <h5 class="modal-title mb-1">Import Draft Order</h5>
-          <small class="text-muted">Use exported Draft an Order or Orders columns.</small>
+          <small class="text-muted">Excel and CSV files with English or Chinese item data are supported.</small>
         </div>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <p class="text-muted mb-3">Keep the column names below. Missing columns can stay blank; empty data will stay empty in the draft form.</p>
-
-        <div class="mb-3">
-          <div class="fw-semibold mb-2">Supplier section marker row</div>
-          <div class="border rounded p-2 bg-light small text-break">
-            Supplier:, Supplier Name
+        <div class="draft-import-dropzone" id="draftOrderImportDropZone" role="button" tabindex="0" aria-describedby="draftOrderImportHelp">
+          <button type="button" class="draft-import-plus" id="draftOrderImportPlusBtn" aria-label="Choose file">+</button>
+          <button type="button" class="btn btn-primary btn-lg draft-import-main-btn" id="draftOrderImportDropBtn">
+            Drop Excel or CSV file here
+          </button>
+          <div class="draft-import-help" id="draftOrderImportHelp">
+            Drag a file onto this area, or click the blue button / plus sign to choose one manually.
           </div>
-          <div class="form-text">All following item rows stay in that supplier section until the next Supplier: row. Item No values from the file are kept.</div>
+          <div class="draft-import-file-name text-muted small mt-2" id="draftOrderImportFileName">No file selected</div>
         </div>
 
-        <div class="mb-3">
-          <div class="fw-semibold mb-2">Draft CSV header row</div>
-          <div class="border rounded p-2 bg-light small text-break">
-            Item No, Product / Names, HS Code, Pieces/Carton, Cartons, Quantity, Factory Price, Customer Price, Total Amount, CBM/Unit, Total CBM, Weight/Unit, Total Weight, Custom Design
-          </div>
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-3">
+          <a class="btn btn-outline-primary btn-sm" href="<?= htmlspecialchars($basePath) ?>/download_template.php?slug=example-procurement-template-xlsx" download>
+            Download example template
+          </a>
+          <span class="text-muted small">Accepted: .xlsx, .xls, .csv</span>
         </div>
 
-        <div class="mb-3">
-          <div class="fw-semibold mb-2">Orders XLSX header row</div>
-          <div class="border rounded p-2 bg-light small text-break">
-            PHOTO, ITEM NO, SUPPLIER, DESCRIPTION, DESCRIPTION 2, TOTAL CTNS, QTY/CTN, TOTAL QTY, UNIT PRICE, TOTAL AMOUNT, CBM, TOTAL CBM, GWKG, TOTAL GW
-          </div>
-        </div>
+        <div class="draft-import-status mt-3 d-none" id="draftOrderImportStatus"></div>
 
-        <div class="table-responsive mb-3">
-          <table class="table table-sm table-bordered align-middle mb-0">
-            <thead>
-              <tr>
-                <th>Form field</th>
-                <th>Accepted column names</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td>Supplier section</td><td>Supplier: in the first cell, supplier name in the next cell</td></tr>
-              <tr><td>Item number</td><td>Item No, Item Number, ITEM NO</td></tr>
-              <tr><td>Description</td><td>Product / Names, Description, DESCRIPTION. Add as many description columns as needed.</td></tr>
-              <tr><td>Packaging</td><td>Pieces/Carton, Qty/Ctn, Cartons, Total CTNS, Quantity, Total Qty</td></tr>
-              <tr><td>Pricing</td><td>Factory Price, Customer Price, Unit Price, Total Amount</td></tr>
-              <tr><td>Volume and weight</td><td>CBM/Unit, CBM, Total CBM, Weight/Unit, GWKG, Total Weight, Total GW</td></tr>
-              <tr><td>Optional</td><td>HS Code, Custom Design</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="alert alert-info mb-0">
-          Optional metadata rows before the item headers: Customer, Destination Country, Expected Ready, Currency. Supplier sections start with Supplier: and the supplier name in the next cell. Embedded XLSX images are attached to item photos.
+        <div class="draft-import-guide small text-muted mt-3">
+          <div><strong>Required header:</strong> English Item Name, Chinese Item Name, Product / Names, or Description.</div>
+          <div><strong>Useful columns:</strong> SKU / item code, Quantity, Unit, Pieces/Carton, Cartons, Factory Price, Customer Price, CBM/Unit, Weight/Unit, Supplier, HS Code, Notes / Description.</div>
+          <div><strong>Optional metadata:</strong> Customer, Destination Country, Expected Ready, Currency. Supplier sections can also start with <code>Supplier:</code>.</div>
         </div>
       </div>
       <div class="modal-footer">
@@ -148,7 +128,6 @@ require 'includes/layout.php';
         <form id="draftOrderForm">
           <input type="hidden" id="draftOrderId">
           <input type="hidden" id="draftOrderEditable" value="1">
-          <input type="file" class="d-none" id="draftOrderImportFile" accept=".xlsx,.xls,.csv,.cv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel">
           <div class="card mb-4 draft-order-meta-card">
             <div class="card-body">
               <div class="row g-3">

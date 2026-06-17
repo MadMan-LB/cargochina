@@ -452,6 +452,84 @@ test('draft-orders handler allows create without expected_ready_date and auto-fi
     }
 });
 
+test('draft-order create continues item numbers from previous saved order', function () use ($pdo, $root) {
+    $customer = $pdo->query(
+        "SELECT c.id, ccs.country_id
+         FROM customers c
+         LEFT JOIN customer_country_shipping ccs
+           ON ccs.customer_id = c.id
+          AND TRIM(COALESCE(ccs.shipping_code, '')) <> ''
+         WHERE TRIM(COALESCE(c.default_shipping_code, '')) <> ''
+            OR ccs.country_id IS NOT NULL
+         ORDER BY c.id
+         LIMIT 1"
+    )->fetch(PDO::FETCH_ASSOC);
+    $supplierId = (int) $pdo->query("SELECT id FROM suppliers ORDER BY id LIMIT 1")->fetchColumn();
+    if (!$customer || $supplierId <= 0) {
+        return;
+    }
+
+    $created = [];
+    $makePayload = static function (string $label) use ($customer, $supplierId): array {
+        return [
+            'customer_id' => (int) $customer['id'],
+            'destination_country_id' => !empty($customer['country_id']) ? (int) $customer['country_id'] : null,
+            'expected_ready_date' => null,
+            'currency' => 'USD',
+            'supplier_sections' => [[
+                'supplier_id' => $supplierId,
+                'items' => [[
+                    'description_entries' => [[
+                        'description_text' => $label,
+                    ]],
+                    'pieces_per_carton' => 1,
+                    'cartons' => 1,
+                    'unit_price' => 1.5,
+                    'cbm_mode' => 'direct',
+                    'cbm' => 0.05,
+                    'weight' => 0.5,
+                    'photo_paths' => [],
+                    'custom_design_required' => 0,
+                    'custom_design_paths' => [],
+                    'dimensions_scope' => 'carton',
+                ]],
+            ]],
+        ];
+    };
+
+    try {
+        foreach ([1, 2] as $run) {
+            $label = 'Numbering continuation test ' . $run . ' ' . bin2hex(random_bytes(4));
+            $out = runHandlerScript($root, 'backend/api/handlers/draft-orders.php', 'POST', null, null, [], $makePayload($label));
+            $json = json_decode($out, true);
+            if (!is_array($json) || empty($json['data']['id'])) {
+                throw new Exception('Draft-order create failed: ' . substr($out, 0, 200));
+            }
+            $created[] = ['id' => (int) $json['data']['id'], 'label' => $label];
+        }
+
+        $itemNos = [];
+        foreach ($created as $row) {
+            $stmt = $pdo->prepare("SELECT item_no FROM order_items WHERE order_id = ? ORDER BY id LIMIT 1");
+            $stmt->execute([$row['id']]);
+            $itemNos[] = trim((string) $stmt->fetchColumn());
+        }
+
+        if (!preg_match('/^(.+)-(\d+)-(\d+)$/', $itemNos[0], $first)
+            || !preg_match('/^(.+)-(\d+)-(\d+)$/', $itemNos[1], $second)
+        ) {
+            throw new Exception('Expected structured item numbers, got: ' . implode(', ', $itemNos));
+        }
+        if ($second[1] !== $first[1] || (int) $second[2] !== (int) $first[2] || (int) $second[3] !== (int) $first[3] + 1) {
+            throw new Exception('Expected second draft item number to continue from first, got: ' . implode(', ', $itemNos));
+        }
+    } finally {
+        foreach (array_reverse($created) as $row) {
+            cleanupCreatedOrder($pdo, (int) $row['id'], $row['label']);
+        }
+    }
+});
+
 test('translations endpoint returns translated text for zh and en targets', function () use ($root) {
     $out = runHandlerScript($root, 'backend/api/handlers/translations.php', 'POST', null, null, [], [
         'text' => 'draft builder translation test',
