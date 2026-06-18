@@ -461,6 +461,7 @@ function closeActiveModalOrPanel(source) {
     const modalEl = source?.closest?.(".modal");
     if (modalEl && typeof bootstrap !== "undefined" && bootstrap.Modal) {
         bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+        window.setTimeout(cleanupStaleModalState, 450);
         return true;
     }
     const collapseToggle = source?.closest?.("[data-collapse-target]");
@@ -857,10 +858,7 @@ function registerUnsavedChangesGuard(target, opts = {}) {
                 return;
             }
             if (!hasUnsavedChanges(scope)) return;
-            if (window.confirm(entry.message)) {
-                entry.ignore = true;
-                return;
-            }
+            if (window.confirm(entry.message)) return;
             event.preventDefault();
         });
     }
@@ -888,6 +886,57 @@ if (typeof window !== "undefined") {
     window.registerUnsavedChangesGuard = registerUnsavedChangesGuard;
     window.refreshUnsavedBaseline = refreshUnsavedBaseline;
     window.hasUnsavedChanges = hasUnsavedChanges;
+    window.cleanupStaleModalState = cleanupStaleModalState;
+}
+
+function cleanupStaleModalState() {
+    if (typeof document === "undefined" || typeof window === "undefined") return;
+    const activeModals = Array.from(document.querySelectorAll(".modal.show")).filter(
+        (modal) => {
+            const style = window.getComputedStyle(modal);
+            return (
+                modal.getAttribute("aria-hidden") !== "true" &&
+                style.display !== "none" &&
+                style.visibility !== "hidden"
+            );
+        },
+    );
+
+    if (activeModals.length > 0) {
+        return;
+    }
+
+    document.querySelectorAll(".modal-backdrop").forEach((backdrop) => backdrop.remove());
+    document.body.classList.remove("modal-open");
+    document.body.style.removeProperty("overflow");
+    document.body.style.removeProperty("padding-right");
+}
+
+if (typeof document !== "undefined") {
+    document.addEventListener("hidden.bs.modal", () => {
+        window.setTimeout(cleanupStaleModalState, 80);
+    });
+    document.addEventListener("click", (event) => {
+        if (!event.target?.closest?.("[data-bs-dismiss='modal']")) return;
+        window.setTimeout(cleanupStaleModalState, 450);
+    });
+    window.addEventListener("focus", () => {
+        window.setTimeout(cleanupStaleModalState, 120);
+    });
+    document.addEventListener(
+        "cancel",
+        (event) => {
+            if (
+                typeof HTMLInputElement === "undefined" ||
+                !(event.target instanceof HTMLInputElement) ||
+                event.target.type !== "file"
+            ) {
+                return;
+            }
+            window.setTimeout(cleanupStaleModalState, 120);
+        },
+        true,
+    );
 }
 
 document.addEventListener("change", function (e) {

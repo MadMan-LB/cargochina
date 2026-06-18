@@ -424,7 +424,7 @@ class OrderExcelService
                 $sheet->setCellValue('D' . $row, $this->itemText($item, 'code'));
                 $sheet->setCellValue('F' . $row, (string) ($item['item_no'] ?? $item['shipping_code'] ?? ''));
                 $sheet->setCellValue('G' . $row, (string) ($item['supplier_name'] ?? $group['supplier_name'] ?? ''));
-                $sheet->setCellValue('H' . $row, (string) ($item['description_en'] ?? $item['description_cn'] ?? ''));
+                $sheet->setCellValue('H' . $row, $this->descriptionText($item));
                 $sheet->setCellValue('I' . $row, $cartons ?: '');
                 $sheet->setCellValue('J' . $row, $qtyPerCarton ?: '');
                 $sheet->setCellValue('K' . $row, $quantity ?: '');
@@ -616,7 +616,7 @@ class OrderExcelService
                 $sheet->setCellValue('G' . $row, (string) ($item['supplier_name'] ?? $group['supplier_name'] ?? $order['supplier_name'] ?? ''));
                 $sheet->setCellValue('H' . $row, $supplierPhone);
                 $sheet->setCellValue('I' . $row, $accountNumber !== '' ? $accountNumber : $group['supplier_info']);
-                $sheet->setCellValue('J' . $row, (string) ($item['description_en'] ?? $item['description_cn'] ?? ''));
+                $sheet->setCellValue('J' . $row, $this->descriptionText($item));
                 $sheet->setCellValue('K' . $row, $cartons ?: '');
                 $sheet->setCellValue('L' . $row, $qtyPerCarton ?: '');
                 $sheet->setCellValue('M' . $row, $quantity ?: '');
@@ -973,6 +973,16 @@ class OrderExcelService
     private function itemText(array $item, string $key): string
     {
         return trim((string) ($item[$key] ?? ''));
+    }
+
+    private function descriptionText(array $item): string
+    {
+        $description = trim((string) ($item['description_en'] ?? $item['description_cn'] ?? ''));
+        $notes = $this->itemText($item, 'notes');
+        if ($notes === '' || str_contains($description, $notes)) {
+            return $description;
+        }
+        return trim($description . ($description !== '' ? ' | ' : '') . $notes);
     }
 
     private function copyNormalGoodsText(array $item): string

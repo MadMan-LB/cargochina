@@ -1336,7 +1336,6 @@ return [
             'No downloads available' => '暂无可下载内容',
             'No verified downloadable templates or export entry points are available for your current role.' => '当前角色没有可用的已验证模板或导出入口。',
             'Verified file' => '已验证文件',
-            'Download-ready example' => '可下载示例',
             'Generated safely' => '已安全生成',
             'Generated from module' => '由模块生成',
             'Existing export flow' => '现有导出流程',

@@ -10,13 +10,13 @@ $pageTitle = 'Downloads';
 $userRoles = $_SESSION['user_roles'] ?? [];
 $downloadSections = clmsVisibleDownloadsCatalog($userRoles);
 $directFileCount = 0;
-$generatedExportCount = 0;
+$generatedTemplateCount = 0;
 foreach ($downloadSections as $section) {
     foreach ($section['entries'] as $entry) {
         if (($entry['mode'] ?? 'file') === 'file') {
             $directFileCount++;
-        } else {
-            $generatedExportCount++;
+        } elseif (($entry['mode'] ?? 'file') === 'generated') {
+            $generatedTemplateCount++;
         }
     }
 }
@@ -29,11 +29,11 @@ require 'includes/layout.php';
     <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-start gap-3">
       <div>
         <h1 class="mb-2">Downloads</h1>
-        <p class="text-muted mb-0">Find verified Excel files, ready-to-download example workbooks, and the existing module export entry points without hunting through different CLMS pages.</p>
+        <p class="text-muted mb-0">Find verified Excel templates and the existing module export entry points without hunting through different CLMS pages.</p>
       </div>
       <div class="downloads-hero-stats d-flex flex-wrap gap-2">
         <span class="badge text-bg-light border px-3 py-2"><?= $directFileCount ?> direct file<?= $directFileCount === 1 ? '' : 's' ?></span>
-        <span class="badge text-bg-light border px-3 py-2"><?= $generatedExportCount ?> generated export<?= $generatedExportCount === 1 ? '' : 's' ?></span>
+        <span class="badge text-bg-light border px-3 py-2"><?= $generatedTemplateCount ?> generated template<?= $generatedTemplateCount === 1 ? '' : 's' ?></span>
       </div>
     </div>
   </div>
@@ -83,8 +83,8 @@ require 'includes/layout.php';
                           <span class="badge text-bg-light border"><?= htmlspecialchars($entry['size_label'] ?? '—') ?></span>
                           <span class="badge text-bg-light border text-truncate" title="<?= htmlspecialchars($entry['relative_path'] ?? '') ?>"><?= htmlspecialchars($entry['relative_path'] ?? '') ?></span>
                         <?php elseif ($mode === 'generated'): ?>
-                          <span class="badge text-bg-light border">Download-ready example</span>
-                          <span class="badge text-bg-light border">Generated safely</span>
+                          <span class="badge text-bg-light border">Generated template</span>
+                          <span class="badge text-bg-light border">No demo data saved</span>
                         <?php else: ?>
                           <span class="badge text-bg-light border">Generated from module</span>
                           <span class="badge text-bg-light border">Existing export flow</span>

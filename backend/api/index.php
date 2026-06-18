@@ -5,12 +5,8 @@
  * Routes: /api/v1/{resource} -> backend/api/index.php
  */
 
-@ini_set('display_errors', '0');
-@ini_set('log_errors', '1');
-$logDir = dirname(__DIR__, 2) . '/logs';
-if (is_dir($logDir) || @mkdir($logDir, 0755, true)) {
-    @ini_set('error_log', $logDir . '/php_errors.log');
-}
+require_once dirname(__DIR__, 2) . '/backend/config/runtime.php';
+
 $GLOBALS['__clms_api_start'] = microtime(true);
 $GLOBALS['__clms_api_method'] = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $GLOBALS['__clms_api_path'] = '/' . trim((string) ($_GET['path'] ?? ''), '/');
@@ -209,7 +205,7 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'procurement-drafts' && !hasAnyRole($rbac['procurement-drafts'] ?? [])) {
+    if ($resource === 'procurement-drafts' && !hasPermission('page:procurement_drafts', $rbac['procurement-drafts'] ?? [])) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
@@ -229,7 +225,7 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'draft-orders' && !hasAnyRole($rbac['draft-orders'] ?? [])) {
+    if ($resource === 'draft-orders' && !hasPermission('page:procurement_drafts', $rbac['draft-orders'] ?? [])) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
@@ -246,8 +242,7 @@ try {
     if (is_dir($logDir)) {
         @error_log(date('Y-m-d H:i:s') . " [{$requestId}] " . $e->getMessage() . "\n" . $e->getTraceAsString() . "\n", 3, $logDir . '/php_errors.log');
     }
-    $isDev = (($_SERVER['SERVER_NAME'] ?? '') === 'localhost' || ($_ENV['APP_ENV'] ?? '') === 'development');
-    $message = $isDev
+    $message = clmsIsDebugEnabled()
         ? $e->getMessage() . ' (ref: ' . $requestId . ')'
         : clmsT('An error occurred. Please try again or contact support. (ref: {ref})', ['ref' => $requestId]);
     http_response_code(500);

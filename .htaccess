@@ -1,5 +1,28 @@
 RewriteEngine On
 RewriteBase /cargochina/
+Options -Indexes
+
+<FilesMatch "^\.">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+<FilesMatch "^(composer\.(json|lock)|package(-lock)?\.json|phpunit\.xml|README\.md|CLMS_README\.md|CODEX_.*|SYSTEM_.*|run-tests\.bat|run-migrations\.bat)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+RewriteRule ^(?:\.git|\.cursor|\.playwright|\.playwright-cli|node_modules|vendor|tests|scripts|artifacts|output|logs|tmp|includes|docs)(?:/|$) - [F,L,NC]
+RewriteRule ^backend/(?:config|migrations|services|cache|templates)(?:/|$) - [F,L,NC]
+RewriteRule ^tmp_.*\.php$ - [F,L,NC]
 
 <IfModule mod_expires.c>
     ExpiresActive On

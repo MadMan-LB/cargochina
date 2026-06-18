@@ -29,6 +29,10 @@ foreach ($files as $file) {
         echo "Skip (already applied): $name\n";
         continue;
     }
+    if ($name === '031_seed_dummy_data.sql' && !clmsEnvFlag('ALLOW_DEMO_SEED', false)) {
+        echo "Skip (demo seed disabled): $name. Set ALLOW_DEMO_SEED=1 to apply it intentionally.\n";
+        continue;
+    }
     $sql = file_get_contents($file);
     // Remove comment lines before splitting (prevents semicolons in comments from creating fake statements)
     $sql = preg_replace('/^\s*--.*$/m', '', $sql);

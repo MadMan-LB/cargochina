@@ -92,8 +92,8 @@ require 'includes/layout.php';
         </div>
 
         <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-3">
-          <a class="btn btn-outline-primary btn-sm" href="<?= htmlspecialchars($basePath) ?>/download_template.php?slug=example-procurement-template-xlsx" download>
-            Download example template
+          <a class="btn btn-outline-primary btn-sm" href="<?= htmlspecialchars($basePath) ?>/download_template.php?slug=procurement-import-template-xlsx" download>
+            Download import template
           </a>
           <span class="text-muted small">Accepted: .xlsx, .xls, .csv</span>
         </div>

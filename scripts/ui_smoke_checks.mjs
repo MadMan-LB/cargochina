@@ -69,7 +69,7 @@ async function login(page) {
     const currentUrl = page.url();
     assert.match(
         currentUrl,
-        /\/(superadmin|warehouse|buyers|admin)\//,
+        /\/(index\.php|superadmin\/|warehouse\/|buyers\/|admin\/)/,
         `Unexpected post-login URL: ${currentUrl}`,
     );
     log("PASS login");
@@ -479,21 +479,26 @@ async function checkConfirmations(page) {
     await openPage(page, "/confirmations.php");
     await expectVisible(
         page,
-        "#confirmQueueCount",
-        "Confirmations overview metric missing",
+        "text=This page is now retired from the live workflow",
+        "Confirmations retirement notice missing",
     );
     await expectVisible(
         page,
-        "#confirmFilterSummary",
-        "Confirmations filter summary missing",
+        'a[href="/cargochina/orders.php?customer_feedback=pending"]',
+        "Customer feedback pending replacement link missing",
     );
     await expectVisible(
         page,
-        "#confirmSelectionHint",
-        "Confirmations selection guidance missing",
+        'a[href="/cargochina/receiving.php"]',
+        "Receiving replacement link missing",
     );
-    await expectVisible(page, "#confirmationsTable", "Confirmations table missing");
     log("PASS confirmations");
+}
+
+async function checkPageLoads(page, path, selector, label) {
+    await openPage(page, path);
+    await expectVisible(page, selector, `${label} page did not load`);
+    log(`PASS ${label}`);
 }
 
 const browser = await chromium.launch({ headless: !headed });
@@ -516,6 +521,13 @@ try {
     await checkHsCodeTax(page);
     await checkReceiving(page);
     await checkConfirmations(page);
+    await checkPageLoads(page, "/admin/index.php", "text=Admin Dashboard", "admin_dashboard");
+    await checkPageLoads(page, "/admin_users.php", "text=User Management", "admin_users");
+    await checkPageLoads(page, "/admin_tracking_push.php", "text=Tracking Push Log", "tracking_push_log");
+    await checkPageLoads(page, "/buyers/index.php", "text=Buyers Dashboard", "buyers_dashboard");
+    await checkPageLoads(page, "/warehouse/index.php", "text=Warehouse Dashboard", "warehouse_dashboard");
+    await checkPageLoads(page, "/balances.php", "text=Balances", "balances_accounting");
+    await checkPageLoads(page, "/customer_portal.php", "text=Customer Portal", "public_customer_portal");
     log("PASS ui smoke");
 } catch (error) {
     try {

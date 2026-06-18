@@ -5,6 +5,8 @@
  * PDO connection for MySQL
  */
 
+require_once __DIR__ . '/runtime.php';
+
 function loadEnv(string $path): void
 {
     if (!file_exists($path)) {

@@ -2216,15 +2216,19 @@
                         <div class="draft-item-subgrid-block">
                           <div class="draft-item-subgrid-title">Packaging</div>
                           <div class="row g-2">
-                            <div class="col-4">
+                            <div class="col-6 col-md-3">
                               <label class="form-label draft-item-label">Total Cartons</label>
                               <input type="number" step="1" min="0" class="form-control form-control-sm draft-item-cartons" placeholder="0">
                             </div>
-                            <div class="col-4">
+                            <div class="col-6 col-md-3">
                               <label class="form-label draft-item-label">Pieces / Carton</label>
                               <input type="number" step="0.0001" min="0" class="form-control form-control-sm draft-item-pieces-per-carton" placeholder="0">
                             </div>
-                            <div class="col-4">
+                            <div class="col-6 col-md-3">
+                              <label class="form-label draft-item-label">Unit</label>
+                              <input type="text" maxlength="20" class="form-control form-control-sm draft-item-unit" placeholder="pieces">
+                            </div>
+                            <div class="col-6 col-md-3">
                               <label class="form-label draft-item-label">Total Qty</label>
                               <div class="draft-item-computed draft-item-total-qty-inline">0</div>
                             </div>
@@ -2294,6 +2298,8 @@
                           <input type="file" class="d-none draft-item-design-upload" accept="image/*,application/pdf,.pdf" multiple>
                           <div class="draft-item-design-files d-flex flex-wrap gap-2 mt-3"></div>
                         </div>
+                        <label class="form-label form-label-sm mt-3">Item notes</label>
+                        <textarea class="form-control form-control-sm draft-item-notes" rows="2" placeholder="Optional item notes..."></textarea>
                       </div>
                     </div>
                   </div>
@@ -2757,6 +2763,7 @@
         card.querySelector(".draft-item-cartons").value = initial.cartons ?? "";
         card.querySelector(".draft-item-pieces-per-carton").value =
             initial.pieces_per_carton ?? "";
+        card.querySelector(".draft-item-unit").value = initial.unit || "pieces";
         card.querySelector(".draft-item-unit-price").value =
             initial.unit_price ?? "";
         card.querySelector(".draft-item-customer-price").value =
@@ -2791,6 +2798,7 @@
             !!initial.custom_design_required;
         card.querySelector(".draft-item-custom-design-note").value =
             initial.custom_design_note || "";
+        card.querySelector(".draft-item-notes").value = initial.notes || "";
         toggleCustomDesignFields(card);
         renderDraftPhotoThumbs(
             card.querySelector(".draft-item-photos"),
@@ -3859,6 +3867,9 @@
                         cartons:
                             card.querySelector(".draft-item-cartons")?.value ||
                             null,
+                        unit:
+                            card.querySelector(".draft-item-unit")?.value?.trim() ||
+                            "pieces",
                         unit_price:
                             card.querySelector(".draft-item-unit-price")?.value ||
                             null,
@@ -3900,6 +3911,9 @@
                             card
                                 .querySelector(".draft-item-custom-design-note")
                                 ?.value?.trim() || null,
+                        notes:
+                            card.querySelector(".draft-item-notes")?.value?.trim() ||
+                            null,
                         custom_design_paths: (card._designPaths || []).slice(),
                         dimensions_scope:
                             (

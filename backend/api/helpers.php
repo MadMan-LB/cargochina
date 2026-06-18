@@ -387,11 +387,19 @@ function normalizeStoredUploadPath(string $filePath, bool $mustExist = true): st
 {
     try {
         $meta = clmsResolveStoredUploadPathMeta($filePath, $mustExist);
+
+        if (!isset($meta['normalized']) || !is_string($meta['normalized'])) {
+            jsonError('Invalid stored upload path metadata.', 500);
+            exit;
+        }
+
         return $meta['normalized'];
     } catch (InvalidArgumentException $e) {
         jsonError($e->getMessage(), 400);
+        exit;
     } catch (RuntimeException $e) {
         jsonError($e->getMessage(), 500);
+        exit;
     }
 }
 
