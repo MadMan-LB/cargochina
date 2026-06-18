@@ -945,7 +945,7 @@ function draftOrderFlattenSections(PDO $pdo, array $sections): array
     return $normalized;
 }
 
-function draftOrderAssignCanonicalItemNumbers(PDO $pdo, int $customerId, array $items, ?int $defaultSupplierId = null, ?int $destinationCountryId = null): array
+function draftOrderAssignCanonicalItemNumbers(PDO $pdo, int $customerId, array $items, ?int $defaultSupplierId = null, ?int $destinationCountryId = null, ?int $excludeOrderId = null): array
 {
     $shippingCode = OrderCountryService::resolveShippingCode($pdo, $customerId, $destinationCountryId);
     $numberingTargets = [];
@@ -981,7 +981,8 @@ function draftOrderAssignCanonicalItemNumbers(PDO $pdo, int $customerId, array $
         return $items;
     }
 
-    $assigned = OrderItemNumberingService::assignItemNumbers($numberingTargets, $shippingCode, $defaultSupplierId);
+    $history = OrderItemNumberingService::fetchNumberingHistory($pdo, $customerId, $excludeOrderId);
+    $assigned = OrderItemNumberingService::assignItemNumbers($numberingTargets, $shippingCode, $defaultSupplierId, $history);
     foreach ($assigned as $index => $numbered) {
         [$itemIndex, $contentIndex] = $numberingMap[$index];
         if ($contentIndex === null) {
@@ -1767,6 +1768,45 @@ function draftOrderImportFieldList(array $row, array $map, string $field): array
     return $values;
 }
 
+function draftOrderImportRowHasMappedItemData(array $row, array $map): bool
+{
+    $fields = [
+        'item_no',
+        'description',
+        'description_en',
+        'description_cn',
+        'what_brand',
+        'copy_normal_goods',
+        'code',
+        'express_number',
+        'size',
+        'quantity',
+        'cartons',
+        'pieces_per_carton',
+        'factory_price',
+        'customer_price',
+        'unit_price',
+        'total_amount',
+        'cbm',
+        'total_cbm',
+        'weight',
+        'total_weight',
+        'hs_code',
+        'notes',
+        'custom_design_required',
+    ];
+
+    foreach ($fields as $field) {
+        foreach (draftOrderImportFieldList($row, $map, $field) as $value) {
+            if (draftOrderImportCellString($value) !== '') {
+                return true;
+            }
+        }
+    }
+
+    return !empty(draftOrderImportRowPhotoPaths($row));
+}
+
 function draftOrderImportRowPhotoPaths(array $row): array
 {
     $paths = draftOrderImportRowMeta($row, '__photo_paths', []);
@@ -2513,11 +2553,14 @@ function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename): 
     $currentHeader = null;
     $pendingShared = null;
     $importedRows = 0;
+    $sawImportHeader = false;
+    $sawMappedItemData = false;
 
     foreach ($rows as $row) {
         if (draftOrderImportLooksLikeHeader($row)) {
             draftOrderImportFinalizeShared($sections, $pendingShared);
             $currentHeader = draftOrderImportHeaderMap($row);
+            $sawImportHeader = true;
             continue;
         }
 
@@ -2553,6 +2596,9 @@ function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename): 
         }
         if (!$currentHeader) {
             continue;
+        }
+        if (draftOrderImportRowHasMappedItemData($row, $currentHeader)) {
+            $sawMappedItemData = true;
         }
 
         $rowSupplierName = draftOrderImportField($row, $currentHeader, 'supplier_name');
@@ -2603,6 +2649,18 @@ function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename): 
     draftOrderImportFinalizeShared($sections, $pendingShared);
 
     if (!$importedRows || !$sections) {
+        if ($sawImportHeader && !$sawMappedItemData) {
+            jsonError(
+                'The import template was recognized, but no item rows were filled in. Add at least one product row below the header, then import again.',
+                400
+            );
+        }
+        if ($sawImportHeader) {
+            jsonError(
+                'The import header was recognized, but no filled item rows could be imported. Each item row needs an item name or description, item number, quantity, price, CBM, or weight.',
+                400
+            );
+        }
         jsonError('No draft-order item rows matched the import column names. Use headers like "Item No", "English Item Name", "Chinese Item Name", "Product / Names", or "Description".', 400);
     }
 
@@ -2917,7 +2975,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $items
         ))));
         $defaultSupplierId = count($supplierIds) === 1 ? $supplierIds[0] : null;
-        $items = draftOrderAssignCanonicalItemNumbers($pdo, $customerId, $items, $defaultSupplierId, $destinationCountryId);
+        $items = draftOrderAssignCanonicalItemNumbers($pdo, $customerId, $items, $defaultSupplierId, $destinationCountryId, $orderId);
         $dupWarn = draftOrderEnforceDuplicateShippingCodePolicy($pdo, $customerId, $orderId, $items);
 
         $pdo->beginTransaction();

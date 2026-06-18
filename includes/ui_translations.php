@@ -1929,6 +1929,8 @@ return [
             'Could not read the Excel file. Export it again or save it as CSV and retry.' => '无法读取 Excel 文件。请重新导出，或另存为 CSV 后重试。',
             'Could not find a valid import header row. Add columns like "English Item Name", "Chinese Item Name", "Quantity", and "Supplier".' => '找不到有效的导入表头行。请添加类似 "English Item Name"、"Chinese Item Name"、"Quantity" 和 "Supplier" 的列。',
             'Import header is missing required column(s): Missing an item-name column. Add "English Item Name", "Chinese Item Name", "Product / Names", or "Description".' => '导入表头缺少必需列：缺少商品名称列。请添加 "English Item Name"、"Chinese Item Name"、"Product / Names" 或 "Description"。',
+            'The import template was recognized, but no item rows were filled in. Add at least one product row below the header, then import again.' => '已识别导入模板，但没有填写商品行。请在表头下方至少添加一行商品后再导入。',
+            'The import header was recognized, but no filled item rows could be imported. Each item row needs an item name or description, item number, quantity, price, CBM, or weight.' => '已识别导入表头，但没有可导入的商品行。每个商品行需要商品名称或描述、商品编号、数量、价格、CBM 或重量。',
             'No draft-order item rows could be imported. Check that each item row has an item name/description and readable quantity or pricing data.' => '没有可导入的订单草稿商品行。请确认每个商品行都有商品名称/描述，以及可读取的数量或价格数据。',
             'Multiple ({names})' => '多个（{names}）',
             'Orders: {orders}' => '订单：{orders}',

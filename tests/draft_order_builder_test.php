@@ -102,6 +102,60 @@ function cleanupCreatedOrder(PDO $pdo, int $orderId, ?string $createdProductDesc
     }
 }
 
+function createProcurementImportTemplateFixture(?array $itemRow = null, array $metadata = []): string
+{
+    $path = tempnam(sys_get_temp_dir(), 'procurement_template_');
+    $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+    $sheet = $spreadsheet->getActiveSheet();
+    $sheet->setTitle('Procurement Import');
+    $sheet->setCellValue('A1', 'Procurement Import Template');
+    $sheet->mergeCells('A1:S1');
+
+    $metadataRows = [
+        ['Customer', $metadata['customer'] ?? ''],
+        ['Destination Country', $metadata['destination_country'] ?? ''],
+        ['Expected Ready', $metadata['expected_ready'] ?? ''],
+        ['Currency', $metadata['currency'] ?? ''],
+    ];
+    $row = 3;
+    foreach ($metadataRows as $entry) {
+        $sheet->fromArray($entry, null, 'A' . $row);
+        $row++;
+    }
+
+    $row++;
+    $headers = [
+        'Item No',
+        'English Item Name',
+        'Chinese Item Name',
+        'SKU / Item Code',
+        'Quantity',
+        'Unit',
+        'Pieces/Carton',
+        'Cartons',
+        'Factory Price',
+        'Customer Price',
+        'Total Amount',
+        'CBM/Unit',
+        'Total CBM',
+        'Weight/Unit',
+        'Total Weight',
+        'Supplier',
+        'HS Code',
+        'Notes / Description',
+        'Custom Design',
+    ];
+    $sheet->fromArray($headers, null, 'A' . $row);
+    if ($itemRow !== null) {
+        $sheet->fromArray($itemRow, null, 'A' . ($row + 1));
+    }
+
+    (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet))->save($path);
+    $spreadsheet->disconnectWorksheets();
+
+    return $path;
+}
+
 test('order_items draft builder columns exist', function () use ($pdo) {
     $cols = $pdo->query("SHOW COLUMNS FROM order_items WHERE Field IN ('hs_code','custom_design_required','custom_design_note')")->fetchAll(PDO::FETCH_COLUMN);
     if (count($cols) !== 3) {
@@ -254,6 +308,107 @@ test('draft-orders import endpoint previews exported XLSX unit price as customer
     } finally {
         @unlink($xlsxPath);
         @unlink($pngPath);
+    }
+});
+
+test('draft-orders import endpoint explains blank official template', function () use ($root) {
+    $xlsxPath = createProcurementImportTemplateFixture();
+
+    try {
+        $out = runHandlerScriptWithUploadedFile(
+            $root,
+            'backend/api/handlers/draft-orders.php',
+            'POST',
+            'import',
+            null,
+            $xlsxPath,
+            'procurement_import_template.xlsx'
+        );
+        $json = json_decode($out, true);
+        if (!is_array($json) || empty($json['error'])) {
+            throw new Exception('Expected blank template import to return a clear error, got: ' . substr($out, 0, 300));
+        }
+        if (strpos((string) ($json['message'] ?? ''), 'no item rows were filled in') === false) {
+            throw new Exception('Expected blank template guidance, got: ' . substr($out, 0, 300));
+        }
+    } finally {
+        @unlink($xlsxPath);
+    }
+});
+
+test('draft-orders import endpoint previews filled official template', function () use ($pdo, $root) {
+    $customer = $pdo->query("SELECT id, name FROM customers ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    $supplier = $pdo->query("SELECT id, name FROM suppliers ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    if (!$customer || !$supplier) {
+        throw new Exception('Missing customer or supplier seed data');
+    }
+
+    $ordersBefore = (int) $pdo->query("SELECT COUNT(*) FROM orders")->fetchColumn();
+    $xlsxPath = createProcurementImportTemplateFixture(
+        [
+            'TPL-1',
+            'Template English item',
+            '模板中文商品',
+            'SKU-TPL-1',
+            24,
+            'pieces',
+            12,
+            2,
+            3.5,
+            4.25,
+            102,
+            0.05,
+            0.1,
+            1.2,
+            2.4,
+            $supplier['name'],
+            '9503.00',
+            'Template row note',
+            'No',
+        ],
+        [
+            'customer' => $customer['name'],
+            'expected_ready' => '2026-05-01',
+            'currency' => 'RMB',
+        ]
+    );
+
+    try {
+        $out = runHandlerScriptWithUploadedFile(
+            $root,
+            'backend/api/handlers/draft-orders.php',
+            'POST',
+            'import',
+            null,
+            $xlsxPath,
+            'procurement_import_template.xlsx'
+        );
+        $json = json_decode($out, true);
+        $item = $json['data']['supplier_sections'][0]['items'][0] ?? null;
+        if (!$item) {
+            throw new Exception('Expected filled template item, got: ' . substr($out, 0, 300));
+        }
+        if ((int) ($json['data']['customer']['id'] ?? 0) !== (int) $customer['id']) {
+            throw new Exception('Customer metadata was not resolved from the official template layout');
+        }
+        if ((int) ($json['data']['supplier_sections'][0]['supplier_id'] ?? 0) !== (int) $supplier['id']) {
+            throw new Exception('Supplier column was not resolved from the official template layout');
+        }
+        if (($item['item_no'] ?? '') !== 'TPL-1' || ($item['quantity'] ?? '') !== '24' || ($item['cartons'] ?? '') !== '2') {
+            throw new Exception('Official template item values were not imported correctly');
+        }
+        if (($item['unit_price'] ?? '') !== '3.5' || ($item['sell_price'] ?? '') !== '4.25') {
+            throw new Exception('Official template prices were not imported correctly');
+        }
+        if (count($item['description_entries'] ?? []) < 1) {
+            throw new Exception('Official template descriptions were not imported');
+        }
+        $ordersAfter = (int) $pdo->query("SELECT COUNT(*) FROM orders")->fetchColumn();
+        if ($ordersAfter !== $ordersBefore) {
+            throw new Exception('Official template preview created an order unexpectedly');
+        }
+    } finally {
+        @unlink($xlsxPath);
     }
 });
 

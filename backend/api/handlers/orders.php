@@ -351,10 +351,11 @@ function validateOrderItemSupplierIds(PDO $pdo, array $items): void
     }
 }
 
-function normalizeOrderItemsForPersistence(PDO $pdo, int $customerId, ?int $destinationCountryId, ?int $defaultSupplierId, array $items, ?string $currentStatus = 'Draft'): array
+function normalizeOrderItemsForPersistence(PDO $pdo, int $customerId, ?int $destinationCountryId, ?int $defaultSupplierId, array $items, ?string $currentStatus = 'Draft', ?int $excludeOrderId = null): array
 {
     $shippingCode = OrderCountryService::resolveShippingCode($pdo, $customerId, $destinationCountryId);
-    return OrderItemNumberingService::prepareItemsForPersistence($items, $currentStatus, $shippingCode, $defaultSupplierId);
+    $history = OrderItemNumberingService::fetchNumberingHistory($pdo, $customerId, $excludeOrderId);
+    return OrderItemNumberingService::prepareItemsForPersistence($items, $currentStatus, $shippingCode, $defaultSupplierId, $history);
 }
 
 function orderHandleLifecycleTransition(string $action, string $currentStatus, string $targetStatus): void
@@ -1449,7 +1450,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $destinationCountryId = orderTableHasColumn($pdo, 'orders', 'destination_country_id')
                 ? normalizeOrderDestinationCountryId($pdo, $customerId, $requestedDestinationCountryId)
                 : $requestedDestinationCountryId;
-            $items = normalizeOrderItemsForPersistence($pdo, $customerId, $destinationCountryId, $supplierId ? (int) $supplierId : null, $input['items'] ?? [], (string) ($order['status'] ?? 'Draft'));
+            $items = normalizeOrderItemsForPersistence($pdo, $customerId, $destinationCountryId, $supplierId ? (int) $supplierId : null, $input['items'] ?? [], (string) ($order['status'] ?? 'Draft'), (int) $id);
             validateOrderItemSupplierIds($pdo, $items);
             $dupWarn = enforceDuplicateShippingCodePolicy($pdo, $customerId, (int) $id, $items);
             $pdo->beginTransaction();
