@@ -26,6 +26,11 @@ function customerTableHas(PDO $pdo, string $table, string $column): bool
     return $cache[$key];
 }
 
+function customerUtf8LikeExpr(string $expr): string
+{
+    return "CONVERT($expr USING utf8mb4) COLLATE utf8mb4_unicode_ci";
+}
+
 function normalizeCustomerPriority(array $input): array
 {
     $priorityLevel = trim((string) ($input['priority_level'] ?? 'normal'));
@@ -241,16 +246,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if ($hasEmail) $cols[] = 'email';
                 if ($hasPaymentLinks) $cols[] = 'payment_links';
                 $sel = implode(', ', $cols);
-                $coll = 'COLLATE utf8mb4_unicode_ci';
-                $where = "(name $coll LIKE ?) OR (code $coll LIKE ?) OR (default_shipping_code $coll LIKE ?)";
+                $where = '(' . customerUtf8LikeExpr('name') . ' LIKE ?) OR (' . customerUtf8LikeExpr('code') . ' LIKE ?) OR (' . customerUtf8LikeExpr('default_shipping_code') . ' LIKE ?)';
                 $params = [$like, $like, $like];
                 if (customerHasPorTable($pdo)) {
-                    $where .= " OR EXISTS (SELECT 1 FROM customer_pors cp WHERE cp.customer_id = customers.id AND cp.por_value $coll LIKE ?)";
+                    $where .= " OR EXISTS (SELECT 1 FROM customer_pors cp WHERE cp.customer_id = customers.id AND " . customerUtf8LikeExpr('cp.por_value') . " LIKE ?)";
                     $params[] = $like;
                 }
-                if ($hasPhone) { $where .= " OR (phone $coll LIKE ?)"; $params[] = $like; }
-                if ($hasEmail) { $where .= " OR (email $coll LIKE ?)"; $params[] = $like; }
-                if ($hasPaymentLinks) { $where .= " OR (payment_links IS NOT NULL AND CONVERT(payment_links USING utf8mb4) $coll LIKE ?)"; $params[] = $like; }
+                if ($hasPhone) { $where .= " OR (" . customerUtf8LikeExpr('phone') . " LIKE ?)"; $params[] = $like; }
+                if ($hasEmail) { $where .= " OR (" . customerUtf8LikeExpr('email') . " LIKE ?)"; $params[] = $like; }
+                if ($hasPaymentLinks) { $where .= " OR (payment_links IS NOT NULL AND " . customerUtf8LikeExpr('payment_links') . " LIKE ?)"; $params[] = $like; }
                 $scope = clmsCustomerVisibilityClause($pdo, 'customers');
                 $stmt = $pdo->prepare("SELECT $sel FROM customers WHERE ($where) AND {$scope['sql']} ORDER BY name LIMIT 20");
                 $stmt->execute(array_merge($params, $scope['params']));
@@ -285,14 +289,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         }
                     } catch (Throwable $e) {
                     }
-                    $coll = 'COLLATE utf8mb4_unicode_ci';
-                    $sql .= " WHERE ((name $coll LIKE ?) OR (code $coll LIKE ?)";
+                    $sql .= " WHERE ((" . customerUtf8LikeExpr('name') . " LIKE ?) OR (" . customerUtf8LikeExpr('code') . " LIKE ?)";
                     $params = [$like, $like];
-                    if ($hasPhone) { $sql .= " OR (phone $coll LIKE ?)"; $params[] = $like; }
-                    if ($hasEmail) { $sql .= " OR (email $coll LIKE ?)"; $params[] = $like; }
-                    if ($hasDefaultShippingCode) { $sql .= " OR (default_shipping_code $coll LIKE ?)"; $params[] = $like; }
+                    if ($hasPhone) { $sql .= " OR (" . customerUtf8LikeExpr('phone') . " LIKE ?)"; $params[] = $like; }
+                    if ($hasEmail) { $sql .= " OR (" . customerUtf8LikeExpr('email') . " LIKE ?)"; $params[] = $like; }
+                    if ($hasDefaultShippingCode) { $sql .= " OR (" . customerUtf8LikeExpr('default_shipping_code') . " LIKE ?)"; $params[] = $like; }
                     if (customerHasPorTable($pdo)) {
-                        $sql .= " OR EXISTS (SELECT 1 FROM customer_pors cp WHERE cp.customer_id = customers.id AND cp.por_value $coll LIKE ?)";
+                        $sql .= " OR EXISTS (SELECT 1 FROM customer_pors cp WHERE cp.customer_id = customers.id AND " . customerUtf8LikeExpr('cp.por_value') . " LIKE ?)";
                         $params[] = $like;
                     }
                     $sql .= ") AND {$scope['sql']}";

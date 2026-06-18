@@ -66,10 +66,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             jsonResponse(['error' => ['message' => 'File type not allowed. Allowed: ' . implode(', ', $allowed), 'code' => 'UPLOAD_FAILED', 'allowed_types' => $allowed, 'request_id' => $requestId]], 400);
         }
         if (!empty($allowedMimeMap[$ext])) {
-            $finfo = finfo_open(FILEINFO_MIME_TYPE);
-            $mime = $finfo ? finfo_file($finfo, $file['tmp_name']) : null;
-            if ($finfo) {
-                finfo_close($finfo);
+            $mime = null;
+            if (function_exists('finfo_open')) {
+                $finfo = finfo_open(FILEINFO_MIME_TYPE);
+                $mime = $finfo ? finfo_file($finfo, $file['tmp_name']) : null;
+                if ($finfo) {
+                    finfo_close($finfo);
+                }
+            } elseif (function_exists('mime_content_type')) {
+                $mime = mime_content_type($file['tmp_name']) ?: null;
             }
             if ($mime && !in_array($mime, $allowedMimeMap[$ext], true)) {
                 jsonResponse(['error' => ['message' => 'Uploaded file content does not match the file extension', 'code' => 'UPLOAD_FAILED', 'request_id' => $requestId]], 400);

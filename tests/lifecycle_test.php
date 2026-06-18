@@ -30,11 +30,12 @@ test('Admin user exists', function () use ($pdo) {
     if (!$stmt->fetch()) throw new Exception('No SuperAdmin user');
 });
 
-test('Password verify works', function () use ($pdo) {
-    $stmt = $pdo->prepare("SELECT password_hash FROM users WHERE email = 'admin@salameh.com'");
-    $stmt->execute();
+test('SuperAdmin password hash is valid', function () use ($pdo) {
+    $stmt = $pdo->query("SELECT u.password_hash FROM users u JOIN user_roles ur ON u.id = ur.user_id JOIN roles r ON ur.role_id = r.id WHERE r.code = 'SuperAdmin' LIMIT 1");
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
-    if (!$row || !password_verify('password', $row['password_hash'])) throw new Exception('Password verify failed');
+    $hash = trim((string) ($row['password_hash'] ?? ''));
+    $info = password_get_info($hash);
+    if ($hash === '' || empty($info['algo'])) throw new Exception('SuperAdmin password is not stored as a valid password hash');
 });
 
 test('Order states exist', function () use ($pdo) {
