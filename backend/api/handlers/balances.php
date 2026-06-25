@@ -271,11 +271,6 @@ function balancesFetchParties(PDO $pdo, string $partyType, string $q): array
 
     $params = [];
     $sql = 'SELECT ' . implode(', ', $cols) . " FROM $table $alias WHERE 1=1";
-    if ($partyType === 'customer') {
-        $scope = clmsCustomerVisibilityClause($pdo, $alias);
-        $sql .= " AND {$scope['sql']}";
-        $params = array_merge($params, $scope['params']);
-    }
     $sql .= balancesPartySearchClause($pdo, $alias, $table, $searchCols, $q, $params);
     $sql .= " ORDER BY $alias.name";
     $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
@@ -330,9 +325,6 @@ function balancesNormalizePaymentAccounts(string $partyType, array $links): arra
 function balancesFetchPartyPaymentAccounts(PDO $pdo, string $partyType, int $partyId): array
 {
     $table = $partyType === 'customer' ? 'customers' : 'suppliers';
-    if ($partyType === 'customer') {
-        clmsRequireCustomerAccess($pdo, $partyId);
-    }
     if (!balancesTableHasColumn($pdo, $table, 'payment_links')) {
         return [];
     }
@@ -352,9 +344,6 @@ function balancesAppendPaymentAccountIfMissing(PDO $pdo, string $partyType, int 
         return false;
     }
     $table = $partyType === 'customer' ? 'customers' : 'suppliers';
-    if ($partyType === 'customer') {
-        clmsRequireCustomerAccess($pdo, $partyId);
-    }
     if (!balancesTableHasColumn($pdo, $table, 'payment_links')) {
         return false;
     }
@@ -618,14 +607,12 @@ function balancesPaymentsTodaySummary(PDO $pdo): array
     ];
 
     if (balancesTableExists($pdo, 'balance_transactions')) {
-        $customerScope = clmsCustomerIdVisibilityClause($pdo, 'party_id', 'cvbtsum');
         $stmt = $pdo->prepare("SELECT party_type, transaction_type, currency, SUM(amount) as total
             FROM balance_transactions
             WHERE transaction_date = ?
               AND transaction_type IN ('payment_received', 'payment_sent', 'deposit')
-              AND (party_type <> 'customer' OR {$customerScope['sql']})
             GROUP BY party_type, transaction_type, currency");
-        $stmt->execute(array_merge([$today], $customerScope['params']));
+        $stmt->execute([$today]);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $currency = balancesNormalizeCurrency($row['currency'] ?? 'RMB');
             if (($row['transaction_type'] ?? '') === 'payment_received'
@@ -642,9 +629,8 @@ function balancesPaymentsTodaySummary(PDO $pdo): array
         $notLinked = balancesTableExists($pdo, 'balance_transactions')
             ? "AND NOT EXISTS (SELECT 1 FROM balance_transactions bt WHERE bt.source_table = 'customer_deposits' AND bt.source_id = cd.id)"
             : '';
-        $customerScope = clmsCustomerIdVisibilityClause($pdo, 'cd.customer_id', 'cvcdsum');
-        $stmt = $pdo->prepare("SELECT currency, SUM(amount) as total FROM customer_deposits cd WHERE DATE(cd.created_at) = ? AND {$customerScope['sql']} $notLinked GROUP BY currency");
-        $stmt->execute(array_merge([$today], $customerScope['params']));
+        $stmt = $pdo->prepare("SELECT currency, SUM(amount) as total FROM customer_deposits cd WHERE DATE(cd.created_at) = ? $notLinked GROUP BY currency");
+        $stmt->execute([$today]);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $currency = balancesNormalizeCurrency($row['currency'] ?? 'RMB');
             $summary['payments_received_today'][$currency] += (float) $row['total'];
@@ -850,9 +836,6 @@ function balancesListTransactions(PDO $pdo, array $filters): array
 
     $params = [];
     $sql = "SELECT * FROM ($union) tx WHERE 1=1";
-    $customerScope = clmsCustomerIdVisibilityClause($pdo, 'tx.party_id', 'cvtx');
-    $sql .= " AND (tx.party_type <> 'customer' OR {$customerScope['sql']})";
-    $params = array_merge($params, $customerScope['params']);
     $partyType = balancesNormalizePartyType($filters['party_type'] ?? null);
     if ($partyType) {
         $sql .= ' AND tx.party_type = ?';
@@ -928,9 +911,6 @@ function balancesListTransactions(PDO $pdo, array $filters): array
 function balancesValidateParty(PDO $pdo, string $partyType, int $partyId): array
 {
     $table = $partyType === 'customer' ? 'customers' : 'suppliers';
-    if ($partyType === 'customer') {
-        clmsRequireCustomerAccess($pdo, $partyId);
-    }
     $stmt = $pdo->prepare("SELECT id, name, code FROM $table WHERE id = ?");
     $stmt->execute([$partyId]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -955,18 +935,16 @@ function balancesFetchOrderContext(PDO $pdo, int $orderId): array
         jsonError('You do not have permission', 403);
     }
 
-    $scope = clmsCustomerVisibilityClause($pdo, 'c');
     $stmt = $pdo->prepare("SELECT o.id, o.customer_id, o.supplier_id, o.currency, o.status, c.name as customer_name, s.name as supplier_name
         FROM orders o
         JOIN customers c ON o.customer_id = c.id
         LEFT JOIN suppliers s ON o.supplier_id = s.id
-        WHERE o.id = ? AND {$scope['sql']}");
-    $stmt->execute(array_merge([$orderId], $scope['params']));
+        WHERE o.id = ?");
+    $stmt->execute([$orderId]);
     $order = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$order) {
         jsonError('Invalid order', 404, ['order_id' => 'Invalid order']);
     }
-    clmsRequireCustomerAccess($pdo, (int) $order['customer_id']);
 
     return [
         'order_id' => (int) $order['id'],
@@ -996,7 +974,6 @@ function balancesValidateOrderLink(PDO $pdo, ?int $orderId, string $partyType, i
     if (!$order) {
         jsonError('Invalid order', 404, ['order_id' => 'Invalid order']);
     }
-    clmsRequireCustomerAccess($pdo, (int) $order['customer_id']);
     $expectedPartyId = $partyType === 'customer' ? (int) $order['customer_id'] : (int) ($order['supplier_id'] ?? 0);
     if ($expectedPartyId <= 0 || $expectedPartyId !== $partyId) {
         jsonError('Selected party does not match the linked order', 400, ['party_id' => 'Selected party does not match the linked order']);

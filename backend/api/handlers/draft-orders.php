@@ -78,6 +78,36 @@ function draftOrderNormalizeItemText($value, int $maxLength = 150): ?string
     return substr($value, 0, $maxLength);
 }
 
+function draftOrderFirstFilledValue(array $input, array $keys)
+{
+    foreach ($keys as $key) {
+        if (array_key_exists($key, $input) && trim((string) ($input[$key] ?? '')) !== '') {
+            return $input[$key];
+        }
+    }
+
+    return null;
+}
+
+function draftOrderNormalizeOptionalDecimal($value, string $label): ?float
+{
+    if ($value === null || trim((string) $value) === '') {
+        return null;
+    }
+
+    $normalized = str_replace(',', '', trim((string) $value));
+    if (!is_numeric($normalized)) {
+        jsonError($label . ' must be a number.', 400, ['items.' . strtolower($label) => $label . ' must be numeric.']);
+    }
+
+    $number = round((float) $normalized, 4);
+    if ($number < 0) {
+        jsonError($label . ' cannot be negative.', 400, ['items.' . strtolower($label) => $label . ' cannot be negative.']);
+    }
+
+    return $number;
+}
+
 function draftOrderNormalizeUnit($value): string
 {
     $unit = draftOrderNormalizeItemText($value, 20);
@@ -315,9 +345,9 @@ function draftOrderPerUnitCbm(array $item): float
 {
     $cbmMode = trim((string) ($item['cbm_mode'] ?? 'direct'));
     if ($cbmMode === 'dimensions') {
-        $l = (float) ($item['item_length'] ?? 0);
-        $w = (float) ($item['item_width'] ?? 0);
-        $h = (float) ($item['item_height'] ?? 0);
+        $l = (float) ($item['item_length'] ?? $item['length'] ?? 0);
+        $w = (float) ($item['item_width'] ?? $item['width'] ?? 0);
+        $h = (float) ($item['item_height'] ?? $item['height'] ?? 0);
         return ($l > 0 && $w > 0 && $h > 0) ? round(($l * $w * $h) / 1000000, 6) : 0.0;
     }
 
@@ -326,9 +356,9 @@ function draftOrderPerUnitCbm(array $item): float
         return round($direct, 6);
     }
 
-    $l = (float) ($item['item_length'] ?? 0);
-    $w = (float) ($item['item_width'] ?? 0);
-    $h = (float) ($item['item_height'] ?? 0);
+    $l = (float) ($item['item_length'] ?? $item['length'] ?? 0);
+    $w = (float) ($item['item_width'] ?? $item['width'] ?? 0);
+    $h = (float) ($item['item_height'] ?? $item['height'] ?? 0);
     return ($l > 0 && $w > 0 && $h > 0) ? round(($l * $w * $h) / 1000000, 6) : 0.0;
 }
 
@@ -414,6 +444,11 @@ function draftOrderNormalizeSharedCartonContents(PDO $pdo, array $rawContents, i
             : null;
         $totalQuantity = round($quantityPerCarton * $cartons, 4);
         $priceForTotal = $sellPrice ?? $unitPrice;
+        $brand = draftOrderNormalizeItemText($rawContent['brand'] ?? null, 150);
+        $whatBrand = draftOrderNormalizeItemText($rawContent['what_brand'] ?? $brand, 150);
+        if ($brand === null && $whatBrand !== null) {
+            $brand = $whatBrand;
+        }
 
         $normalized[] = [
             'product_id' => !empty($rawContent['product_id']) ? (int) $rawContent['product_id'] : null,
@@ -421,11 +456,16 @@ function draftOrderNormalizeSharedCartonContents(PDO $pdo, array $rawContents, i
             'item_no' => trim((string) ($rawContent['item_no'] ?? '')) ?: null,
             'item_no_manual' => !empty($rawContent['item_no_manual']) ? 1 : 0,
             'shipping_code' => trim((string) ($rawContent['shipping_code'] ?? '')) ?: null,
-            'what_brand' => draftOrderNormalizeItemText($rawContent['what_brand'] ?? null, 150),
+            'what_brand' => $whatBrand,
+            'brand' => $brand,
+            'materials' => draftOrderNormalizeItemText($rawContent['materials'] ?? $rawContent['material'] ?? null, 1000),
             'copy_normal_goods' => draftOrderNormalizeCopyNormalGoods($rawContent['copy_normal_goods'] ?? null),
             'code' => draftOrderNormalizeItemText($rawContent['code'] ?? null, 100),
             'express_number' => draftOrderNormalizeItemText($rawContent['express_number'] ?? null, 150),
             'size' => draftOrderNormalizeItemText($rawContent['size'] ?? null, 150),
+            'length' => draftOrderNormalizeOptionalDecimal($rawContent['length'] ?? $rawContent['item_length'] ?? null, 'Length'),
+            'width' => draftOrderNormalizeOptionalDecimal($rawContent['width'] ?? $rawContent['item_width'] ?? null, 'Width'),
+            'height' => draftOrderNormalizeOptionalDecimal($rawContent['height'] ?? $rawContent['item_height'] ?? null, 'Height'),
             'quantity_per_carton' => $quantityPerCarton,
             'quantity' => $totalQuantity,
             'unit_price' => $unitPrice,
@@ -520,11 +560,16 @@ function draftOrderDecodeSharedCartonContents(PDO $pdo, array $item): array
         $linePrice = $content['sell_price'] ?? $content['unit_price'];
         $content['total_amount'] = $linePrice !== null ? round($content['quantity'] * $linePrice, 4) : null;
         $content['hs_code'] = draftOrderNormalizeHsCode($content['hs_code'] ?? null);
-        $content['what_brand'] = draftOrderNormalizeItemText($content['what_brand'] ?? null, 150);
+        $content['brand'] = draftOrderNormalizeItemText($content['brand'] ?? $content['what_brand'] ?? null, 150);
+        $content['what_brand'] = draftOrderNormalizeItemText($content['what_brand'] ?? $content['brand'] ?? null, 150);
+        $content['materials'] = draftOrderNormalizeItemText($content['materials'] ?? null, 1000);
         $content['copy_normal_goods'] = draftOrderNormalizeCopyNormalGoods($content['copy_normal_goods'] ?? null);
         $content['code'] = draftOrderNormalizeItemText($content['code'] ?? null, 100);
         $content['express_number'] = draftOrderNormalizeItemText($content['express_number'] ?? null, 150);
         $content['size'] = draftOrderNormalizeItemText($content['size'] ?? null, 150);
+        $content['length'] = draftOrderNormalizeOptionalDecimal($content['length'] ?? $content['item_length'] ?? null, 'Length');
+        $content['width'] = draftOrderNormalizeOptionalDecimal($content['width'] ?? $content['item_width'] ?? null, 'Width');
+        $content['height'] = draftOrderNormalizeOptionalDecimal($content['height'] ?? $content['item_height'] ?? null, 'Height');
         $content['description_entries'] = draftOrderSplitDescriptionEntries(
             $content['description_cn'] ?? null,
             $content['description_en'] ?? null
@@ -792,6 +837,22 @@ function draftOrderNormalizeItem(PDO $pdo, array $rawItem, int $supplierId, ?arr
         $dimensionsScope = 'carton';
     }
 
+    $length = draftOrderNormalizeOptionalDecimal(draftOrderFirstFilledValue($rawItem, ['length', 'item_length']), 'Length');
+    $width = draftOrderNormalizeOptionalDecimal(draftOrderFirstFilledValue($rawItem, ['width', 'item_width']), 'Width');
+    $height = draftOrderNormalizeOptionalDecimal(draftOrderFirstFilledValue($rawItem, ['height', 'item_height']), 'Height');
+    if ($length !== null) {
+        $rawItem['item_length'] = $length;
+        $rawItem['length'] = $length;
+    }
+    if ($width !== null) {
+        $rawItem['item_width'] = $width;
+        $rawItem['width'] = $width;
+    }
+    if ($height !== null) {
+        $rawItem['item_height'] = $height;
+        $rawItem['height'] = $height;
+    }
+
     $cartons = (int) ($rawItem['cartons'] ?? 0);
     $piecesPerCarton = (float) ($rawItem['pieces_per_carton'] ?? $rawItem['qty_per_carton'] ?? 0);
     if ($cartons <= 0 || $piecesPerCarton <= 0) {
@@ -875,13 +936,21 @@ function draftOrderNormalizeItem(PDO $pdo, array $rawItem, int $supplierId, ?arr
         }
     }
 
+    $brand = draftOrderNormalizeItemText($rawItem['brand'] ?? null, 150);
+    $whatBrand = draftOrderNormalizeItemText($rawItem['what_brand'] ?? $brand, 150);
+    if ($brand === null && $whatBrand !== null) {
+        $brand = $whatBrand;
+    }
+
     return [
         'product_id' => $sharedCartonEnabled ? null : (!empty($rawItem['product_id']) ? (int) $rawItem['product_id'] : null),
         'supplier_id' => $supplierId,
         'item_no' => $sharedCartonEnabled ? null : (trim((string) ($rawItem['item_no'] ?? '')) ?: null),
         'item_no_manual' => $sharedCartonEnabled ? 0 : (!empty($rawItem['item_no_manual']) ? 1 : 0),
         'shipping_code' => trim((string) ($rawItem['shipping_code'] ?? '')) ?: null,
-        'what_brand' => draftOrderNormalizeItemText($rawItem['what_brand'] ?? null, 150),
+        'what_brand' => $whatBrand,
+        'brand' => $brand,
+        'materials' => draftOrderNormalizeItemText($rawItem['materials'] ?? $rawItem['material'] ?? null, 1000),
         'copy_normal_goods' => draftOrderNormalizeCopyNormalGoods($rawItem['copy_normal_goods'] ?? null),
         'code' => draftOrderNormalizeItemText($rawItem['code'] ?? null, 100),
         'express_number' => draftOrderNormalizeItemText($rawItem['express_number'] ?? null, 150),
@@ -899,9 +968,12 @@ function draftOrderNormalizeItem(PDO $pdo, array $rawItem, int $supplierId, ?arr
         'weight_per_unit' => $weightPerUnit,
         'declared_cbm' => $declaredCbm,
         'declared_weight' => $declaredWeight,
-        'item_length' => isset($rawItem['item_length']) && $rawItem['item_length'] !== '' ? round((float) $rawItem['item_length'], 4) : null,
-        'item_width' => isset($rawItem['item_width']) && $rawItem['item_width'] !== '' ? round((float) $rawItem['item_width'], 4) : null,
-        'item_height' => isset($rawItem['item_height']) && $rawItem['item_height'] !== '' ? round((float) $rawItem['item_height'], 4) : null,
+        'item_length' => $length,
+        'item_width' => $width,
+        'item_height' => $height,
+        'length' => $length,
+        'width' => $width,
+        'height' => $height,
         'hs_code' => draftOrderNormalizeHsCode($rawItem['hs_code'] ?? ($product['hs_code'] ?? null)),
         'description_entries' => $description['entries'],
         'description_cn' => $description['description_cn'],
@@ -1029,7 +1101,7 @@ function draftOrderInsertItems(PDO $pdo, int $orderId, ?int $defaultSupplierId, 
     $hasSharedCartonCode = draftOrderTableHasColumn($pdo, 'order_items', 'shared_carton_code');
     $hasSharedCartonContents = draftOrderTableHasColumn($pdo, 'order_items', 'shared_carton_contents');
     $metadataColumns = [];
-    foreach (['what_brand', 'copy_normal_goods', 'code', 'express_number', 'size'] as $column) {
+    foreach (['what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
         if (draftOrderTableHasColumn($pdo, 'order_items', $column)) {
             $metadataColumns[] = $column;
         }
@@ -1218,6 +1290,18 @@ function draftOrderFetchOrderItemRows(PDO $pdo, int $orderId): array
         $item['cbm_per_unit'] = $multiplier > 0 ? round(((float) ($item['declared_cbm'] ?? 0)) / $multiplier, 6) : 0.0;
         $item['weight_per_unit'] = $multiplier > 0 ? round(((float) ($item['declared_weight'] ?? 0)) / $multiplier, 4) : 0.0;
         $item['hs_code'] = $item['hs_code'] ?? $item['product_hs_code'] ?? null;
+        $item['brand'] = draftOrderNormalizeItemText($item['brand'] ?? $item['what_brand'] ?? null, 150);
+        $item['what_brand'] = draftOrderNormalizeItemText($item['what_brand'] ?? $item['brand'] ?? null, 150);
+        $item['materials'] = draftOrderNormalizeItemText($item['materials'] ?? null, 1000);
+        $item['length'] = isset($item['length']) && $item['length'] !== null && $item['length'] !== ''
+            ? round((float) $item['length'], 4)
+            : (isset($item['item_length']) && $item['item_length'] !== null && $item['item_length'] !== '' ? round((float) $item['item_length'], 4) : null);
+        $item['width'] = isset($item['width']) && $item['width'] !== null && $item['width'] !== ''
+            ? round((float) $item['width'], 4)
+            : (isset($item['item_width']) && $item['item_width'] !== null && $item['item_width'] !== '' ? round((float) $item['item_width'], 4) : null);
+        $item['height'] = isset($item['height']) && $item['height'] !== null && $item['height'] !== ''
+            ? round((float) $item['height'], 4)
+            : (isset($item['item_height']) && $item['item_height'] !== null && $item['item_height'] !== '' ? round((float) $item['item_height'], 4) : null);
         $item['custom_design_required'] = !empty($item['custom_design_required']) || !empty($design['paths']) ? 1 : 0;
         $item['custom_design_note'] = $item['custom_design_note'] ?: $design['note'];
         $item['custom_design_paths'] = $design['paths'];
@@ -1252,6 +1336,8 @@ function draftOrderBuildSupplierSections(array $items): array
             'item_no' => !empty($item['shared_carton_enabled']) ? null : ($item['item_no'] ?: null),
             'shipping_code' => $item['shipping_code'] ?: null,
             'what_brand' => $item['what_brand'] ?? null,
+            'brand' => $item['brand'] ?? $item['what_brand'] ?? null,
+            'materials' => $item['materials'] ?? null,
             'copy_normal_goods' => $item['copy_normal_goods'] ?? null,
             'code' => $item['code'] ?? null,
             'express_number' => $item['express_number'] ?? null,
@@ -1268,6 +1354,9 @@ function draftOrderBuildSupplierSections(array $items): array
             'item_length' => $item['item_length'] !== null ? (float) $item['item_length'] : null,
             'item_width' => $item['item_width'] !== null ? (float) $item['item_width'] : null,
             'item_height' => $item['item_height'] !== null ? (float) $item['item_height'] : null,
+            'length' => isset($item['length']) && $item['length'] !== null ? (float) $item['length'] : ($item['item_length'] !== null ? (float) $item['item_length'] : null),
+            'width' => isset($item['width']) && $item['width'] !== null ? (float) $item['width'] : ($item['item_width'] !== null ? (float) $item['item_width'] : null),
+            'height' => isset($item['height']) && $item['height'] !== null ? (float) $item['height'] : ($item['item_height'] !== null ? (float) $item['item_height'] : null),
             'weight' => $item['weight_per_unit'],
             'dimensions_scope' => $item['dimensions_scope'],
             'hs_code' => draftOrderNormalizeHsCode($item['hs_code'] ?? null),
@@ -1304,7 +1393,6 @@ function draftOrderFetchOrderPayload(PDO $pdo, int $orderId): array
     $destJoin = draftOrderTableHasColumn($pdo, 'orders', 'destination_country_id')
         ? " LEFT JOIN countries co ON co.id = o.destination_country_id"
         : "";
-    $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
     $stmt = $pdo->prepare(
         "SELECT o.*, c.name as customer_name, c.default_shipping_code, s.name as supplier_name$destCols
          FROM orders o
@@ -1312,10 +1400,9 @@ function draftOrderFetchOrderPayload(PDO $pdo, int $orderId): array
          LEFT JOIN suppliers s ON o.supplier_id = s.id
          $destJoin
          WHERE o.id = ?
-           AND o.order_type = 'draft_procurement'
-           AND {$customerScope['sql']}"
+           AND o.order_type = 'draft_procurement'"
     );
-    $stmt->execute(array_merge([$orderId], $customerScope['params']));
+    $stmt->execute([$orderId]);
     $order = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$order) {
         jsonError('Draft order not found', 404);
@@ -1398,13 +1485,19 @@ function draftOrderBuildExportRows(array $sections): array
             if (!empty($item['shared_carton_enabled']) && !empty($item['shared_carton_contents'])) {
                 $rows[] = [
                     'row_type' => 'shared_carton_summary',
+                    'supplier_id' => $section['supplier_id'] ?? null,
                     'supplier_name' => $section['supplier_name'] ?? '',
                     'item_no' => $item['shared_carton_code'] ?: $item['shipping_code'] ?: '',
                     'what_brand' => $item['what_brand'] ?? '',
+                    'brand' => $item['brand'] ?? $item['what_brand'] ?? '',
+                    'materials' => $item['materials'] ?? '',
                     'copy_normal_goods' => $item['copy_normal_goods'] ?? '',
                     'code' => $item['code'] ?? '',
                     'express_number' => $item['express_number'] ?? '',
                     'size' => $item['size'] ?? '',
+                    'length' => $item['length'] ?? $item['item_length'] ?? '',
+                    'width' => $item['width'] ?? $item['item_width'] ?? '',
+                    'height' => $item['height'] ?? $item['item_height'] ?? '',
                     'description' => 'Shared carton / multiple items',
                     'hs_code' => '',
                     'pieces_per_carton' => $item['pieces_per_carton'] ?? '',
@@ -1434,13 +1527,19 @@ function draftOrderBuildExportRows(array $sections): array
                         : (isset($content['unit_price']) && $content['unit_price'] !== null ? (float) $content['unit_price'] : null);
                     $rows[] = [
                         'row_type' => 'shared_carton_content',
+                        'supplier_id' => $content['supplier_id'] ?? ($section['supplier_id'] ?? null),
                         'supplier_name' => $content['supplier_name'] ?? ($section['supplier_name'] ?? ''),
                         'item_no' => $content['item_no'] ? ('↳ ' . $content['item_no']) : '↳',
                         'what_brand' => $content['what_brand'] ?? '',
+                        'brand' => $content['brand'] ?? $content['what_brand'] ?? '',
+                        'materials' => $content['materials'] ?? '',
                         'copy_normal_goods' => $content['copy_normal_goods'] ?? '',
                         'code' => $content['code'] ?? '',
                         'express_number' => $content['express_number'] ?? '',
                         'size' => $content['size'] ?? '',
+                        'length' => $content['length'] ?? $content['item_length'] ?? '',
+                        'width' => $content['width'] ?? $content['item_width'] ?? '',
+                        'height' => $content['height'] ?? $content['item_height'] ?? '',
                         'description' => trim(($item['shared_carton_code'] ? ('[' . $item['shared_carton_code'] . '] ') : '') . $description),
                         'hs_code' => $content['hs_code'] ?? '',
                         'pieces_per_carton' => $content['quantity_per_carton'] ?? '',
@@ -1475,13 +1574,19 @@ function draftOrderBuildExportRows(array $sections): array
                 : (isset($item['unit_price']) && $item['unit_price'] !== null ? (float) $item['unit_price'] : null);
             $rows[] = [
                 'row_type' => 'item',
+                'supplier_id' => $section['supplier_id'] ?? null,
                 'supplier_name' => $section['supplier_name'] ?? '',
                 'item_no' => $item['item_no'] ?: '',
                 'what_brand' => $item['what_brand'] ?? '',
+                'brand' => $item['brand'] ?? $item['what_brand'] ?? '',
+                'materials' => $item['materials'] ?? '',
                 'copy_normal_goods' => $item['copy_normal_goods'] ?? '',
                 'code' => $item['code'] ?? '',
                 'express_number' => $item['express_number'] ?? '',
                 'size' => $item['size'] ?? '',
+                'length' => $item['length'] ?? $item['item_length'] ?? '',
+                'width' => $item['width'] ?? $item['item_width'] ?? '',
+                'height' => $item['height'] ?? $item['item_height'] ?? '',
                 'description' => $desc,
                 'hs_code' => $item['hs_code'] ?: '',
                 'pieces_per_carton' => $item['pieces_per_carton'] ?? '',
@@ -1508,16 +1613,12 @@ function draftOrderBuildExportRows(array $sections): array
 
 function draftOrderListRows(PDO $pdo): array
 {
-    $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
-    $stmt = $pdo->prepare(
+    $stmt = $pdo->query(
         "SELECT o.id
          FROM orders o
-         JOIN customers c ON o.customer_id = c.id
          WHERE o.order_type = 'draft_procurement'
-           AND {$customerScope['sql']}
          ORDER BY o.created_at DESC, o.id DESC"
     );
-    $stmt->execute($customerScope['params']);
 
     $list = [];
     foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $orderId) {
@@ -1543,29 +1644,36 @@ function draftOrderExportCsv(PDO $pdo, int $orderId): void
     header('Cache-Control: no-cache, no-store, must-revalidate');
 
     $out = fopen('php://output', 'w');
-    fputcsv($out, [clmsT('Draft Order'), '#' . $order['id']]);
+    fputcsv($out, [clmsT('Draft Order') . ':', '#' . $order['id']]);
     $customerItems = [];
     foreach (($order['supplier_sections'] ?? []) as $section) {
         foreach (($section['items'] ?? []) as $item) {
             $customerItems[] = $item;
         }
     }
-    fputcsv($out, [clmsT('Customer'), OrderExcelService::formatCustomerDisplay($order, $customerItems)]);
-    fputcsv($out, [clmsT('Destination Country'), !empty($order['destination_country_name']) ? clmsCountryDisplayLabel($order['destination_country_name'] ?? '', $order['destination_country_code'] ?? '') : '—']);
-    fputcsv($out, [clmsT('Expected Ready'), $order['expected_ready_date']]);
-    fputcsv($out, [clmsT('Currency'), $order['currency']]);
-    fputcsv($out, [clmsT('Status'), clmsStatusLabel((string) $order['status'])]);
+    fputcsv($out, [clmsT('Customer') . ':', OrderExcelService::formatCustomerDisplay($order, $customerItems)]);
+    fputcsv($out, [clmsT('Destination Country') . ':', !empty($order['destination_country_name']) ? clmsCountryDisplayLabel($order['destination_country_name'] ?? '', $order['destination_country_code'] ?? '') : '—']);
+    fputcsv($out, [clmsT('Expected Ready') . ':', $order['expected_ready_date']]);
+    fputcsv($out, [clmsT('Currency') . ':', $order['currency']]);
+    fputcsv($out, [clmsT('Status') . ':', clmsStatusLabel((string) $order['status'])]);
     fputcsv($out, ['']);
 
     foreach ($order['supplier_sections'] as $section) {
-        fputcsv($out, [clmsT('Supplier'), $section['supplier_name']]);
-        fputcsv($out, array_map('clmsT', ['What Brand', 'Copy / Normal Goods', 'Code', 'Item No', 'Product / Names', 'Notes', 'HS Code', 'Pieces/Carton', 'Cartons', 'Quantity', 'Unit', 'Factory Price', 'Customer Price', 'Total Amount', 'CBM/Unit', 'Total CBM', 'Weight/Unit', 'Total Weight', 'Custom Design', 'Express Number', 'Size']));
+        fputcsv($out, [clmsT('Supplier') . ':', $section['supplier_name']]);
+        fputcsv($out, array_map('clmsT', ['Supplier', 'Supplier Name', 'Brand', 'Materials', 'Height', 'Width', 'Length', 'What Brand', 'Copy / Normal Goods', 'Code', 'Item No', 'Product / Names', 'Notes', 'HS Code', 'Pieces/Carton', 'Cartons', 'Quantity', 'Unit', 'Factory Price', 'Customer Price', 'Total Amount', 'CBM/Unit', 'Total CBM', 'Weight/Unit', 'Total Weight', 'Custom Design', 'Express Number', 'Size']));
         foreach (draftOrderBuildExportRows([$section]) as $item) {
             $customDesignValue = strtolower(trim((string) ($item['custom_design_required'] ?? '')));
             $customDesignLabel = $customDesignValue === ''
                 ? ''
                 : (in_array($customDesignValue, ['1', 'yes', 'true'], true) ? clmsT('Yes') : clmsT('No'));
             fputcsv($out, [
+                $item['supplier_id'] ?? '',
+                $item['supplier_name'] ?? $section['supplier_name'] ?? '',
+                $item['brand'] ?? '',
+                $item['materials'] ?? '',
+                $item['height'] ?? '',
+                $item['width'] ?? '',
+                $item['length'] ?? '',
                 $item['what_brand'] ?? '',
                 draftOrderCopyNormalGoodsDisplay($item['copy_normal_goods'] ?? ''),
                 $item['code'] ?? '',
@@ -1609,10 +1717,18 @@ function draftOrderExportXlsx(PDO $pdo, int $orderId): void
             'item_no' => $row['item_no'] ?? '',
             'shipping_code' => '',
             'what_brand' => $row['what_brand'] ?? '',
+            'brand' => $row['brand'] ?? ($row['what_brand'] ?? ''),
+            'materials' => $row['materials'] ?? '',
             'copy_normal_goods' => $row['copy_normal_goods'] ?? '',
             'code' => $row['code'] ?? '',
             'express_number' => $row['express_number'] ?? '',
             'size' => $row['size'] ?? '',
+            'length' => is_numeric($row['length'] ?? null) ? (float) $row['length'] : null,
+            'width' => is_numeric($row['width'] ?? null) ? (float) $row['width'] : null,
+            'height' => is_numeric($row['height'] ?? null) ? (float) $row['height'] : null,
+            'item_length' => is_numeric($row['length'] ?? null) ? (float) $row['length'] : null,
+            'item_width' => is_numeric($row['width'] ?? null) ? (float) $row['width'] : null,
+            'item_height' => is_numeric($row['height'] ?? null) ? (float) $row['height'] : null,
             'description_en' => $row['description'] ?? '',
             'description_cn' => $row['description'] ?? '',
             'notes' => $row['notes'] ?? '',
@@ -1624,6 +1740,7 @@ function draftOrderExportXlsx(PDO $pdo, int $orderId): void
             'declared_weight' => is_numeric($row['total_weight'] ?? null) ? (float) $row['total_weight'] : 0.0,
             'unit_price' => is_numeric($row['unit_price'] ?? null) ? (float) $row['unit_price'] : null,
             'sell_price' => is_numeric($row['sell_price'] ?? null) ? (float) $row['sell_price'] : null,
+            'supplier_id' => $row['supplier_id'] ?? null,
             'supplier_name' => $row['supplier_name'] ?? '',
             'image_paths' => $row['image_paths'] ?? [],
             'dimensions_scope' => $isSummary ? 'carton' : 'piece',
@@ -1668,13 +1785,20 @@ function draftOrderImportColumnAliases(): array
 {
     return [
         'photo_count' => ['photocount', 'photo'],
-        'what_brand' => ['whatbrand', 'whatebrand', 'brand'],
+        'brand' => ['brand', 'brandname'],
+        'what_brand' => ['whatbrand', 'whatebrand'],
+        'materials' => ['material', 'materials'],
         'copy_normal_goods' => ['copynormalgoods', 'copynormal', 'copygoods', 'normalgoods', 'copyornormalgoods'],
         'code' => ['code', 'serialcode', 'serialno', 'serialnumber', 'sku', 'itemcode', 'skucode', 'skuitemcode'],
-        'express_number' => ['expressnumber', 'expressno', 'express', 'trackingnumber', 'trackingno'],
+        'express_number' => ['expressnumber', 'expressno', 'express', 'trackingnumber', 'trackingno', 'couriernumber'],
         'size' => ['size', 'outsidecartonsize', 'cartonsize', 'outercartonsize'],
+        'length' => ['length', 'lenght', 'l'],
+        'width' => ['width', 'w'],
+        'height' => ['height', 'h'],
         'item_no' => ['itemno', 'itemnumber', 'line'],
-        'supplier_name' => ['supplier', 'suppliername'],
+        'supplier_name' => ['supplier', 'suppliername', 'factoryname'],
+        'supplier_code' => ['suppliercode'],
+        'supplier_id' => ['supplierid'],
         'description' => ['description', 'productnames', 'productname', 'productnamesdescription', 'productdescription', 'names', 'itemname'],
         'description_en' => ['englishitemname', 'englishname', 'englishdescription', 'descriptionen', 'endescription'],
         'description_cn' => ['chineseitemname', 'chinesename', 'chinesedescription', 'descriptioncn', 'cndescription'],
@@ -1776,10 +1900,15 @@ function draftOrderImportRowHasMappedItemData(array $row, array $map): bool
         'description_en',
         'description_cn',
         'what_brand',
+        'brand',
+        'materials',
         'copy_normal_goods',
         'code',
         'express_number',
         'size',
+        'length',
+        'width',
+        'height',
         'quantity',
         'cartons',
         'pieces_per_carton',
@@ -2375,6 +2504,32 @@ function draftOrderImportResolveSupplier(PDO $pdo, string $value): array
     return $cache[$cacheKey] = ['id' => null, 'name' => $value];
 }
 
+function draftOrderImportResolveSupplierFromFields(PDO $pdo, string $name = '', string $code = '', string $id = ''): array
+{
+    $id = trim($id);
+    if ($id !== '' && ctype_digit($id)) {
+        try {
+            $stmt = $pdo->prepare("SELECT id, name FROM suppliers WHERE id = ? LIMIT 1");
+            $stmt->execute([(int) $id]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row) {
+                return ['id' => (int) $row['id'], 'name' => (string) $row['name']];
+            }
+        } catch (Throwable $e) {
+        }
+    }
+
+    $code = trim($code);
+    if ($code !== '') {
+        $resolved = draftOrderImportResolveSupplier($pdo, $code);
+        if (!empty($resolved['id'])) {
+            return $resolved;
+        }
+    }
+
+    return draftOrderImportResolveSupplier($pdo, $name !== '' ? $name : $code);
+}
+
 function draftOrderImportResolveCustomer(PDO $pdo, string $value): array
 {
     $value = trim($value);
@@ -2401,9 +2556,8 @@ function draftOrderImportResolveCustomer(PDO $pdo, string $value): array
             $columns[] = 'default_shipping_code';
         }
         $conditions = implode(' OR ', array_map(static fn(string $col): string => "`$col` = ?", $columns));
-        $customerScope = clmsCustomerVisibilityClause($pdo, 'customers');
-        $stmt = $pdo->prepare("SELECT $select FROM customers WHERE ($conditions) AND {$customerScope['sql']} ORDER BY id LIMIT 1");
-        $stmt->execute(array_merge(array_fill(0, count($columns), $candidate), $customerScope['params']));
+        $stmt = $pdo->prepare("SELECT $select FROM customers WHERE ($conditions) ORDER BY id LIMIT 1");
+        $stmt->execute(array_fill(0, count($columns), $candidate));
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row) {
             return [
@@ -2545,11 +2699,22 @@ function draftOrderImportSupplierMarkerName(array $row): string
 function draftOrderImportBuildItem(array $row, array $map): ?array
 {
     $itemNo = draftOrderImportField($row, $map, 'item_no');
+    $brand = draftOrderNormalizeItemText(draftOrderImportField($row, $map, 'brand'), 150);
     $whatBrand = draftOrderNormalizeItemText(draftOrderImportField($row, $map, 'what_brand'), 150);
+    if ($whatBrand === null && $brand !== null) {
+        $whatBrand = $brand;
+    }
+    if ($brand === null && $whatBrand !== null) {
+        $brand = $whatBrand;
+    }
+    $materials = draftOrderNormalizeItemText(draftOrderImportField($row, $map, 'materials'), 1000);
     $copyNormalGoods = draftOrderNormalizeCopyNormalGoods(draftOrderImportField($row, $map, 'copy_normal_goods'));
     $code = draftOrderNormalizeItemText(draftOrderImportField($row, $map, 'code'), 100);
     $expressNumber = draftOrderNormalizeItemText(draftOrderImportField($row, $map, 'express_number'), 150);
     $size = draftOrderNormalizeItemText(draftOrderImportField($row, $map, 'size'), 150);
+    $length = draftOrderImportFieldNumber($row, $map, 'length');
+    $width = draftOrderImportFieldNumber($row, $map, 'width');
+    $height = draftOrderImportFieldNumber($row, $map, 'height');
     $descriptionEntries = draftOrderImportDescriptionEntries($row, $map);
     $description = '';
     foreach ($descriptionEntries as $entry) {
@@ -2624,6 +2789,8 @@ function draftOrderImportBuildItem(array $row, array $map): ?array
         'item_no_manual' => $itemNo !== '' ? 1 : 0,
         'shipping_code' => null,
         'what_brand' => $whatBrand,
+        'brand' => $brand,
+        'materials' => $materials,
         'copy_normal_goods' => $copyNormalGoods,
         'code' => $code,
         'express_number' => $expressNumber,
@@ -2636,11 +2803,14 @@ function draftOrderImportBuildItem(array $row, array $map): ?array
         'unit_price' => draftOrderImportNumberForForm($unitPrice, 4),
         'sell_price' => draftOrderImportNumberForForm($sellPrice, 4),
         'total_amount' => draftOrderImportNumberForForm($totalAmount, 4),
-        'cbm_mode' => 'direct',
+        'cbm_mode' => ($cbm['value'] === null && $length !== null && $width !== null && $height !== null) ? 'dimensions' : 'direct',
         'cbm' => draftOrderImportNumberForForm($cbm['value'], 6),
-        'item_length' => '',
-        'item_width' => '',
-        'item_height' => '',
+        'item_length' => draftOrderImportNumberForForm($length, 4),
+        'item_width' => draftOrderImportNumberForForm($width, 4),
+        'item_height' => draftOrderImportNumberForForm($height, 4),
+        'length' => draftOrderImportNumberForForm($length, 4),
+        'width' => draftOrderImportNumberForForm($width, 4),
+        'height' => draftOrderImportNumberForForm($height, 4),
         'weight' => draftOrderImportNumberForForm($weight['value'], 4),
         'dimensions_scope' => $scope,
         'hs_code' => draftOrderNormalizeHsCode($hsCode) ?: '',
@@ -2662,7 +2832,11 @@ function draftOrderImportBuildSharedContent(PDO $pdo, array $row, array $map, ar
         return null;
     }
     $supplierName = draftOrderImportField($row, $map, 'supplier_name');
-    $supplier = draftOrderImportResolveSupplier($pdo, $supplierName !== '' ? $supplierName : (string) ($fallbackSupplier['name'] ?? ''));
+    $supplierCode = draftOrderImportField($row, $map, 'supplier_code');
+    $supplierId = draftOrderImportField($row, $map, 'supplier_id');
+    $supplier = ($supplierName !== '' || $supplierCode !== '' || $supplierId !== '')
+        ? draftOrderImportResolveSupplierFromFields($pdo, $supplierName, $supplierCode, $supplierId)
+        : draftOrderImportResolveSupplier($pdo, (string) ($fallbackSupplier['name'] ?? ''));
 
     return [
         'supplier_id' => $supplier['id'],
@@ -2674,6 +2848,16 @@ function draftOrderImportBuildSharedContent(PDO $pdo, array $row, array $map, ar
         'quantity_per_carton' => $item['pieces_per_carton'],
         'unit_price' => $item['unit_price'],
         'sell_price' => $item['sell_price'],
+        'what_brand' => $item['what_brand'],
+        'brand' => $item['brand'],
+        'materials' => $item['materials'],
+        'copy_normal_goods' => $item['copy_normal_goods'],
+        'code' => $item['code'],
+        'express_number' => $item['express_number'],
+        'size' => $item['size'],
+        'length' => $item['length'],
+        'width' => $item['width'],
+        'height' => $item['height'],
         'hs_code' => $item['hs_code'],
         'description_entries' => $item['description_entries'],
         'description_cn' => '',
@@ -2783,8 +2967,10 @@ function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename, a
         }
 
         $rowSupplierName = draftOrderImportField($row, $currentHeader, 'supplier_name');
-        $rowSupplier = $rowSupplierName !== ''
-            ? draftOrderImportResolveSupplier($pdo, $rowSupplierName)
+        $rowSupplierCode = draftOrderImportField($row, $currentHeader, 'supplier_code');
+        $rowSupplierId = draftOrderImportField($row, $currentHeader, 'supplier_id');
+        $rowSupplier = ($rowSupplierName !== '' || $rowSupplierCode !== '' || $rowSupplierId !== '')
+            ? draftOrderImportResolveSupplierFromFields($pdo, $rowSupplierName, $rowSupplierCode, $rowSupplierId)
             : $currentSupplier;
         $itemNo = draftOrderImportField($row, $currentHeader, 'item_no');
         $description = draftOrderImportField($row, $currentHeader, 'description');
@@ -2924,7 +3110,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if ($customerId <= 0) {
             jsonError('customer_id is required for legacy migration.', 400, ['customer_id' => 'Customer is required.']);
         }
-        clmsRequireCustomerAccess($pdo, $customerId);
         if (!in_array($currency, ['USD', 'RMB'], true)) {
             $currency = 'USD';
         }
@@ -3078,7 +3263,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if ($customerId <= 0) {
             jsonError('customer_id is required.', 400, ['customer_id' => 'Customer is required.']);
         }
-        clmsRequireCustomerAccess($pdo, $customerId);
         if (!in_array($currency, ['USD', 'RMB'], true)) {
             jsonError('Currency must be USD or RMB', 400, ['currency' => 'Currency must be USD or RMB.']);
         }
@@ -3130,7 +3314,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if (!$order) {
             jsonError('Draft order not found', 404);
         }
-        clmsRequireCustomerAccess($pdo, (int) $order['customer_id']);
         if (($order['status'] ?? '') !== 'Draft') {
             jsonError('Only draft-status draft orders can be edited in the builder.', 400);
         }
@@ -3144,7 +3327,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if ($customerId <= 0) {
             jsonError('customer_id is required.', 400, ['customer_id' => 'Customer is required.']);
         }
-        clmsRequireCustomerAccess($pdo, $customerId);
         if (!in_array($currency, ['USD', 'RMB'], true)) {
             jsonError('Currency must be USD or RMB', 400, ['currency' => 'Currency must be USD or RMB.']);
         }

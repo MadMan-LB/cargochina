@@ -104,7 +104,7 @@ require 'includes/layout.php';
           <div><strong>Required header:</strong> English Item Name, Chinese Item Name, Product / Names, or Description.</div>
           <div><strong>After downloading:</strong> fill at least one product row below the blue header before importing.</div>
           <div><strong>Photo column:</strong> insert or paste the product image into the Photo cell on the same row.</div>
-          <div><strong>Useful columns:</strong> SKU / item code, Quantity, Unit, Pieces/Carton, Cartons, Factory Price, Customer Price, CBM/Unit, Weight/Unit, Supplier, HS Code, Notes / Description.</div>
+          <div><strong>Useful columns:</strong> SKU / item code, Brand, Materials, Height, Width, Length, Express Number, Quantity, Unit, Pieces/Carton, Cartons, Factory Price, Customer Price, CBM/Unit, Weight/Unit, Supplier, Supplier Name, HS Code, Notes / Description.</div>
           <div><strong>Optional metadata:</strong> Customer, Destination Country, Expected Ready, Currency. Supplier sections can also start with <code>Supplier:</code>.</div>
         </div>
       </div>

@@ -96,6 +96,34 @@ function loadCountryShipping(PDO $pdo, int $customerId): array
     }
 }
 
+function customerLookupRoles(): array
+{
+    return ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'];
+}
+
+function customerLookupSelectColumns(PDO $pdo): string
+{
+    $cols = ['id', 'code', 'name'];
+    if (customerTableHas($pdo, 'customers', 'default_shipping_code')) {
+        $cols[] = 'default_shipping_code';
+    }
+
+    return implode(', ', $cols);
+}
+
+function customerLookupRow(PDO $pdo, int $customerId): ?array
+{
+    $stmt = $pdo->prepare("SELECT " . customerLookupSelectColumns($pdo) . " FROM customers WHERE id = ? LIMIT 1");
+    $stmt->execute([$customerId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return null;
+    }
+
+    $row['country_shipping'] = loadCountryShipping($pdo, $customerId);
+    return $row;
+}
+
 function customerHasPorTable(PDO $pdo): bool
 {
     static $hasTable = null;
@@ -221,6 +249,30 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
     switch ($method) {
         case 'GET':
+            if ($id === 'lookup') {
+                requirePermission('customers.lookup', customerLookupRoles());
+                $q = trim($_GET['q'] ?? '');
+                if (strlen($q) < 1) {
+                    jsonResponse(['data' => []]);
+                }
+
+                $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+                $where = '(' . customerUtf8LikeExpr('name') . ' LIKE ?) OR (' . customerUtf8LikeExpr('code') . ' LIKE ?)';
+                $params = [$like, $like];
+                if (customerTableHas($pdo, 'customers', 'default_shipping_code')) {
+                    $where .= ' OR (' . customerUtf8LikeExpr('default_shipping_code') . ' LIKE ?)';
+                    $params[] = $like;
+                }
+                if (customerHasPorTable($pdo)) {
+                    $where .= " OR EXISTS (SELECT 1 FROM customer_pors cp WHERE cp.customer_id = customers.id AND " . customerUtf8LikeExpr('cp.por_value') . " LIKE ?)";
+                    $params[] = $like;
+                }
+
+                $limit = isset($_GET['limit']) ? max(1, min(50, (int) $_GET['limit'])) : 20;
+                $stmt = $pdo->prepare("SELECT " . customerLookupSelectColumns($pdo) . " FROM customers WHERE ($where) ORDER BY name LIMIT " . $limit);
+                $stmt->execute($params);
+                jsonResponse(['data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
+            }
             if ($id === 'search') {
                 $q = trim($_GET['q'] ?? '');
                 if (strlen($q) < 1) {
@@ -316,6 +368,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $r['por'] = loadCustomerPorValues($pdo, (int) $r['id']);
                 }
                 jsonResponse(['data' => $rows]);
+            }
+            if ($action === 'lookup') {
+                requirePermission('customers.lookup', customerLookupRoles());
+                $row = customerLookupRow($pdo, (int) $id);
+                if (!$row) {
+                    jsonError('Customer not found', 404);
+                }
+                jsonResponse(['data' => $row]);
             }
             clmsRequireCustomerAccess($pdo, (int) $id);
             $stmt = $pdo->prepare("SELECT * FROM customers WHERE id = ?");

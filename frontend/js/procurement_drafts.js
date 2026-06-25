@@ -400,7 +400,7 @@
         }
 
         try {
-            const res = await api("GET", `/customers/${customerId}`);
+            const res = await api("GET", `/customers/${customerId}/lookup`);
             const customer = res.data || {};
             draftOrderCustomerCountryShipping = customer.country_shipping || [];
             const defaultShip =
@@ -1660,6 +1660,30 @@
                   <label class="form-label draft-item-label">Notes</label>
                   <input type="text" class="form-control form-control-sm draft-shared-content-notes" placeholder="${escapeHtml(draftT("Optional note"))}">
                 </div>
+                <div class="col-12 col-sm-6 col-xl-2">
+                  <label class="form-label draft-item-label">Brand</label>
+                  <input type="text" class="form-control form-control-sm draft-shared-content-brand" placeholder="${escapeHtml(draftT("Brand"))}">
+                </div>
+                <div class="col-12 col-sm-6 col-xl-2">
+                  <label class="form-label draft-item-label">Materials</label>
+                  <input type="text" class="form-control form-control-sm draft-shared-content-materials" placeholder="${escapeHtml(draftT("Materials"))}">
+                </div>
+                <div class="col-12 col-sm-6 col-xl-2">
+                  <label class="form-label draft-item-label">Express No.</label>
+                  <input type="text" class="form-control form-control-sm draft-shared-content-express-number" placeholder="${escapeHtml(draftT("Express no."))}">
+                </div>
+                <div class="col-4 col-xl-1">
+                  <label class="form-label draft-item-label">H</label>
+                  <input type="number" step="0.01" min="0" class="form-control form-control-sm draft-shared-content-height" placeholder="H">
+                </div>
+                <div class="col-4 col-xl-1">
+                  <label class="form-label draft-item-label">W</label>
+                  <input type="number" step="0.01" min="0" class="form-control form-control-sm draft-shared-content-width" placeholder="W">
+                </div>
+                <div class="col-4 col-xl-1">
+                  <label class="form-label draft-item-label">L</label>
+                  <input type="number" step="0.01" min="0" class="form-control form-control-sm draft-shared-content-length" placeholder="L">
+                </div>
                 <div class="col-12 col-xl-1 d-flex align-items-end">
                   <button type="button" class="btn btn-outline-danger btn-sm w-100 draft-item-action draft-shared-content-remove">${escapeHtml(draftT("Remove"))}</button>
                 </div>
@@ -1871,6 +1895,18 @@
             initial.hs_code || "";
         row.querySelector(".draft-shared-content-notes").value =
             initial.notes || "";
+        row.querySelector(".draft-shared-content-brand").value =
+            initial.brand || initial.what_brand || "";
+        row.querySelector(".draft-shared-content-materials").value =
+            initial.materials || "";
+        row.querySelector(".draft-shared-content-express-number").value =
+            initial.express_number || "";
+        row.querySelector(".draft-shared-content-height").value =
+            initial.height ?? initial.item_height ?? "";
+        row.querySelector(".draft-shared-content-width").value =
+            initial.width ?? initial.item_width ?? "";
+        row.querySelector(".draft-shared-content-length").value =
+            initial.length ?? initial.item_length ?? "";
 
         if (initial.description_entries?.length) {
             setDraftSharedCartonDescription(row, initial.description_entries[0]);
@@ -1901,6 +1937,12 @@
             ".draft-shared-content-sell-price",
             ".draft-shared-content-hs-code",
             ".draft-shared-content-notes",
+            ".draft-shared-content-brand",
+            ".draft-shared-content-materials",
+            ".draft-shared-content-express-number",
+            ".draft-shared-content-height",
+            ".draft-shared-content-width",
+            ".draft-shared-content-length",
         ].forEach((selector) => {
             row.querySelector(selector)?.addEventListener("input", () =>
                 updateDraftItemTotals(card),
@@ -2187,7 +2229,15 @@
                         <div class="draft-item-subgrid-block">
                           <div class="draft-item-subgrid-title">${escapeHtml(draftT("Shipment Details"))}</div>
                           <div class="row g-2">
+                            <div class="col-12 col-sm-6 col-xl-2">
+                              <label class="form-label draft-item-label">${escapeHtml(draftT("Brand"))}</label>
+                              <input type="text" class="form-control form-control-sm draft-item-brand" placeholder="${escapeHtml(draftT("Brand"))}">
+                            </div>
                             <div class="col-12 col-sm-6 col-xl-3">
+                              <label class="form-label draft-item-label">${escapeHtml(draftT("Materials"))}</label>
+                              <input type="text" class="form-control form-control-sm draft-item-materials" placeholder="${escapeHtml(draftT("Material / composition"))}">
+                            </div>
+                            <div class="col-12 col-sm-6 col-xl-2">
                               <label class="form-label draft-item-label">${escapeHtml(draftT("What Brand"))}</label>
                               <input type="text" class="form-control form-control-sm draft-item-what-brand" placeholder="${escapeHtml(draftT("Brand marker"))}">
                             </div>
@@ -2203,11 +2253,11 @@
                               <label class="form-label draft-item-label">${escapeHtml(draftT("Code"))}</label>
                               <input type="text" class="form-control form-control-sm draft-item-code" placeholder="${escapeHtml(draftT("Code"))}">
                             </div>
-                            <div class="col-12 col-sm-6 col-xl-3">
+                            <div class="col-12 col-sm-6 col-xl-2">
                               <label class="form-label draft-item-label">${escapeHtml(draftT("Express Number"))}</label>
                               <input type="text" class="form-control form-control-sm draft-item-express-number" placeholder="${escapeHtml(draftT("Express no."))}">
                             </div>
-                            <div class="col-12 col-sm-6 col-xl-2">
+                            <div class="col-12 col-sm-6 col-xl-1">
                               <label class="form-label draft-item-label">${escapeHtml(draftT("Size"))}</label>
                               <input type="text" class="form-control form-control-sm draft-item-size" placeholder="${escapeHtml(draftT("L x W x H"))}">
                             </div>
@@ -2778,6 +2828,10 @@
         card.querySelector(".draft-item-hs-code").value = initial.hs_code || "";
         card.querySelector(".draft-item-shipping-code").value =
             initial.shipping_code || "";
+        card.querySelector(".draft-item-brand").value =
+            initial.brand || initial.what_brand || "";
+        card.querySelector(".draft-item-materials").value =
+            initial.materials || "";
         card.querySelector(".draft-item-what-brand").value =
             initial.what_brand || "";
         card.querySelector(".draft-item-copy-normal-goods").value =
@@ -3237,6 +3291,23 @@
             hs_code:
                 row.querySelector(".draft-shared-content-hs-code")?.value?.trim() ||
                 null,
+            brand:
+                row.querySelector(".draft-shared-content-brand")?.value?.trim() ||
+                null,
+            materials:
+                row
+                    .querySelector(".draft-shared-content-materials")
+                    ?.value?.trim() || null,
+            express_number:
+                row
+                    .querySelector(".draft-shared-content-express-number")
+                    ?.value?.trim() || null,
+            height:
+                row.querySelector(".draft-shared-content-height")?.value || null,
+            width:
+                row.querySelector(".draft-shared-content-width")?.value || null,
+            length:
+                row.querySelector(".draft-shared-content-length")?.value || null,
             description_entries: collectDraftSharedCartonDescription(row),
             notes:
                 row.querySelector(".draft-shared-content-notes")?.value?.trim() ||
@@ -3842,6 +3913,14 @@
                             card
                                 .querySelector(".draft-item-what-brand")
                                 ?.value?.trim() || null,
+                        brand:
+                            card
+                                .querySelector(".draft-item-brand")
+                                ?.value?.trim() || null,
+                        materials:
+                            card
+                                .querySelector(".draft-item-materials")
+                                ?.value?.trim() || null,
                         copy_normal_goods:
                             card
                                 .querySelector(".draft-item-copy-normal-goods")
@@ -3891,6 +3970,15 @@
                             card.querySelector(".draft-item-width")?.value ||
                             null,
                         item_height:
+                            card.querySelector(".draft-item-height")?.value ||
+                            null,
+                        length:
+                            card.querySelector(".draft-item-length")?.value ||
+                            null,
+                        width:
+                            card.querySelector(".draft-item-width")?.value ||
+                            null,
+                        height:
                             card.querySelector(".draft-item-height")?.value ||
                             null,
                         weight:
@@ -4078,6 +4166,7 @@
             document.getElementById("draftOrderCustomer"),
             {
                 resource: "customers",
+                searchPath: "/lookup",
                 placeholder: draftT("Type to search customer..."),
                 onSelect: async (item) => {
                     clearDraftInvalidTarget(
@@ -4167,6 +4256,7 @@
             document.getElementById("legacyMigrationCustomer"),
             {
                 resource: "customers",
+                searchPath: "/lookup",
                 placeholder: draftT("Type to search customer..."),
             },
         );

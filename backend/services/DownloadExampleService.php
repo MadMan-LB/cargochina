@@ -30,35 +30,18 @@ class DownloadExampleService
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Procurement Import');
 
-        $sheet->setCellValue('A1', 'Procurement Import Template');
-        $sheet->mergeCells('A1:T1');
-        $sheet->getStyle('A1:T1')->applyFromArray([
-            'font' => ['bold' => true, 'size' => 16, 'color' => ['rgb' => '1F4E79']],
-            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'EAF3FF']],
-            'alignment' => ['vertical' => Alignment::VERTICAL_CENTER],
-        ]);
-        $sheet->getRowDimension(1)->setRowHeight(28);
-
-        $metadata = [
-            ['Customer', ''],
-            ['Destination Country', ''],
-            ['Expected Ready', ''],
-            ['Currency', ''],
-        ];
-        $row = 3;
-        foreach ($metadata as $entry) {
-            $sheet->fromArray($entry, null, 'A' . $row);
-            $sheet->getStyle('A' . $row)->getFont()->setBold(true);
-            $row++;
-        }
-
-        $row++;
         $headers = [
             'Photo',
             'Item No',
             'English Item Name',
             'Chinese Item Name',
             'SKU / Item Code',
+            'Brand',
+            'Materials',
+            'Height',
+            'Width',
+            'Length',
+            'Express Number',
             'Quantity',
             'Unit',
             'Pieces/Carton',
@@ -71,13 +54,38 @@ class DownloadExampleService
             'Weight/Unit',
             'Total Weight',
             'Supplier',
+            'Supplier Name',
             'HS Code',
             'Notes / Description',
             'Custom Design',
         ];
+        $lastColumn = Coordinate::stringFromColumnIndex(count($headers));
+
+        $sheet->setCellValue('A1', 'Procurement Import Template');
+        $sheet->mergeCells('A1:' . $lastColumn . '1');
+        $sheet->getStyle('A1:' . $lastColumn . '1')->applyFromArray([
+            'font' => ['bold' => true, 'size' => 16, 'color' => ['rgb' => '1F4E79']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'EAF3FF']],
+            'alignment' => ['vertical' => Alignment::VERTICAL_CENTER],
+        ]);
+        $sheet->getRowDimension(1)->setRowHeight(28);
+
+        $metadata = [
+            ['Customer:', ''],
+            ['Destination Country:', ''],
+            ['Expected Ready:', ''],
+            ['Currency:', ''],
+        ];
+        $row = 3;
+        foreach ($metadata as $entry) {
+            $sheet->fromArray($entry, null, 'A' . $row);
+            $sheet->getStyle('A' . $row)->getFont()->setBold(true);
+            $row++;
+        }
+
+        $row++;
         $sheet->fromArray($headers, null, 'A' . $row);
         $headerRow = $row;
-        $lastColumn = Coordinate::stringFromColumnIndex(count($headers));
 
         $sheet->getStyle("A{$headerRow}:{$lastColumn}{$headerRow}")->applyFromArray([
             'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
@@ -90,8 +98,9 @@ class DownloadExampleService
             ],
             'alignment' => ['vertical' => Alignment::VERTICAL_TOP, 'wrapText' => true],
         ]);
-        $sheet->getStyle("B" . ($headerRow + 1) . ":E" . ($headerRow + 50))->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
-        $sheet->getStyle("Q" . ($headerRow + 1) . ":R" . ($headerRow + 50))->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
+        $sheet->getStyle("B" . ($headerRow + 1) . ":G" . ($headerRow + 50))->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
+        $sheet->getStyle("K" . ($headerRow + 1) . ":K" . ($headerRow + 50))->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
+        $sheet->getStyle("W" . ($headerRow + 1) . ":Y" . ($headerRow + 50))->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
         $sheet->freezePane('A' . ($headerRow + 1));
         $sheet->setAutoFilter("A{$headerRow}:{$lastColumn}{$headerRow}");
 
@@ -99,7 +108,7 @@ class DownloadExampleService
             $sheet->getRowDimension($bodyRow)->setRowHeight(72);
         }
 
-        $widths = [18, 16, 24, 22, 18, 12, 10, 15, 10, 14, 14, 14, 12, 12, 13, 13, 24, 12, 36, 14];
+        $widths = [18, 16, 24, 22, 18, 16, 24, 10, 10, 10, 18, 12, 10, 15, 10, 14, 14, 14, 12, 12, 13, 13, 24, 24, 12, 36, 14];
         foreach ($widths as $index => $width) {
             $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($index + 1))->setWidth($width);
         }

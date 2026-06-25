@@ -181,6 +181,12 @@ Container events drive operational control and customer notifications.
 - **Lebanon Admin:** oversee consolidation readiness and integration
 - **Super Admin:** configuration, thresholds, user management, audits
 
+### 9.1 Customer visibility boundary
+- Full customer management (`customers.php` and full customer CRUD/detail/search/deposit/customer-management API actions) follows the customer visibility rules and exceptions configured by admins.
+- Operational workflows do **not** use customer owner/creator visibility filtering. If a user has access to Orders, Draft an Order, Receiving, Warehouse Stock, Consolidation, Containers, Expenses, Financials, or Balances, that workflow should show the full operational dataset for that module.
+- Operational customer search/select fields use the safe lookup endpoints (`/api/v1/customers/lookup` and `/api/v1/customers/{id}/lookup`) and return only minimal selector data such as id, code, name, default shipping code, and country shipping mappings.
+- Do not use the full customer search/detail endpoints for operational selectors, because those endpoints may expose customer-management data and intentionally remain restricted.
+
 ---
 
 ## 10) KPIs / Success metrics

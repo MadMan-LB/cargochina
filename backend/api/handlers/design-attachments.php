@@ -25,17 +25,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if ($entityType === 'customer') {
                 clmsRequireCustomerAccess($pdo, $entityId);
             } elseif ($entityType === 'order_item') {
-                $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
                 $chk = $pdo->prepare(
                     "SELECT 1
                      FROM order_items oi
-                     JOIN orders o ON oi.order_id = o.id
-                     JOIN customers c ON o.customer_id = c.id
                      WHERE oi.id = ?
-                       AND {$customerScope['sql']}
                      LIMIT 1"
                 );
-                $chk->execute(array_merge([$entityId], $customerScope['params']));
+                $chk->execute([$entityId]);
                 if (!$chk->fetchColumn()) jsonError('Order item not found', 404);
             }
             $stmt = $pdo->prepare("SELECT id, entity_type, entity_id, file_path, file_type, internal_note, uploaded_at FROM design_attachments WHERE entity_type = ? AND entity_id = ? ORDER BY uploaded_at DESC");
@@ -72,17 +68,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $chk->execute([$entityId]);
                 if (!$chk->fetch()) jsonError('Supplier not found', 404);
             } else {
-                $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
                 $chk = $pdo->prepare(
                     "SELECT 1
                      FROM order_items oi
-                     JOIN orders o ON oi.order_id = o.id
-                     JOIN customers c ON o.customer_id = c.id
                      WHERE oi.id = ?
-                       AND {$customerScope['sql']}
                      LIMIT 1"
                 );
-                $chk->execute(array_merge([$entityId], $customerScope['params']));
+                $chk->execute([$entityId]);
                 if (!$chk->fetchColumn()) jsonError('Order item not found', 404);
             }
             $stmt = $pdo->prepare("INSERT INTO design_attachments (entity_type, entity_id, file_path, file_type, uploaded_by, internal_note) VALUES (?,?,?,?,?,?)");

@@ -213,6 +213,7 @@ function setupFilterAutocomplete() {
     if (custInput) {
         Autocomplete.init(custInput, {
             resource: "customers",
+            searchPath: "/lookup",
             placeholder: receivingIndexT("Type to search customer..."),
             renderItem: (c) =>
                 `${c.name || ""} — ${c.code || ""}`

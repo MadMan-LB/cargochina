@@ -43,9 +43,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $varianceOrderIds = array_values(array_unique(array_filter($varianceOrderIds)));
             if ($varianceOrderIds) {
                 $placeholders = implode(',', array_fill(0, count($varianceOrderIds), '?'));
-                $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
-                $phoneStmt = $pdo->prepare("SELECT o.id, c.phone FROM orders o JOIN customers c ON o.customer_id = c.id WHERE o.id IN ($placeholders) AND {$customerScope['sql']}");
-                $phoneStmt->execute(array_merge($varianceOrderIds, $customerScope['params']));
+                $phoneStmt = $pdo->prepare("SELECT o.id, c.phone FROM orders o JOIN customers c ON o.customer_id = c.id WHERE o.id IN ($placeholders)");
+                $phoneStmt->execute($varianceOrderIds);
                 foreach ($phoneStmt->fetchAll(PDO::FETCH_ASSOC) as $phoneRow) {
                     $orderPhones[(int) $phoneRow['id']] = $phoneRow['phone'] ? preg_replace('/\D/', '', (string) $phoneRow['phone']) : null;
                 }

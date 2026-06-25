@@ -78,7 +78,7 @@ function selectRecentCustomer(id, name, shipCode) {
     applyCustomerDefaultShippingCode(shipCode);
     (async () => {
         try {
-            const res = await api("GET", "/customers/" + id);
+            const res = await api("GET", "/customers/" + id + "/lookup");
             const cust = res.data || {};
             orderCustomerCountryShipping = cust.country_shipping || [];
             if (orderCustomerCountryShipping.length === 1) {
@@ -162,6 +162,8 @@ function setOrderItemMetadata(card, item = {}) {
         const el = card.querySelector(selector);
         if (el) el.value = value ?? "";
     };
+    set(".item-brand", item.brand || item.what_brand);
+    set(".item-materials", item.materials);
     set(".item-what-brand", item.what_brand);
     set(".item-copy-normal-goods", item.copy_normal_goods);
     set(".item-code", item.code);
@@ -655,11 +657,12 @@ document.addEventListener("DOMContentLoaded", () => {
         document.getElementById("orderCustomer"),
         {
             resource: "customers",
+            searchPath: "/lookup",
             placeholder: orderT("Type customer name or code..."),
             onSelect: async (item) => {
                 saveRecent(RECENT_KEY_CUSTOMERS, item);
                 try {
-                    const res = await api("GET", "/customers/" + item.id);
+                    const res = await api("GET", "/customers/" + item.id + "/lookup");
                     const cust = res.data || {};
                     orderCustomerCountryShipping = cust.country_shipping || [];
                     const defShip = cust.default_shipping_code || item.default_shipping_code || "";
@@ -1073,6 +1076,10 @@ function collectItemsForTemplate() {
                     what_brand:
                         tr.querySelector(".item-what-brand")?.value?.trim() ||
                         null,
+                    brand:
+                        tr.querySelector(".item-brand")?.value?.trim() || null,
+                    materials:
+                        tr.querySelector(".item-materials")?.value?.trim() || null,
                     copy_normal_goods:
                         tr
                             .querySelector(".item-copy-normal-goods")
@@ -1092,6 +1099,9 @@ function collectItemsForTemplate() {
                     item_length: l > 0 ? l : null,
                     item_width: w > 0 ? w : null,
                     item_height: h > 0 ? h : null,
+                    length: l > 0 ? l : null,
+                    width: w > 0 ? w : null,
+                    height: h > 0 ? h : null,
                     unit_price: parseFloat(row.querySelector(".item-unit-price")?.value || 0) || null,
                     total_amount: qty > 0 && totalAmount ? totalAmount : null,
                     description_cn: desc || null,
@@ -1126,6 +1136,16 @@ async function saveOrderAsTemplate() {
         item_length: it.item_length,
         item_width: it.item_width,
         item_height: it.item_height,
+        length: it.length,
+        width: it.width,
+        height: it.height,
+        brand: it.brand,
+        materials: it.materials,
+        what_brand: it.what_brand,
+        copy_normal_goods: it.copy_normal_goods,
+        code: it.code,
+        express_number: it.express_number,
+        size: it.size,
         unit_price: it.unit_price,
         total_amount: it.total_amount,
     }));
@@ -1162,11 +1182,16 @@ const ORDER_CSV_ALIASES = {
     unit_price: ["unitprice", "factoryprice", "price"],
     weight: ["weight", "gwkg", "gw", "weightunit", "unitweight"],
     cbm: ["cbm", "cbmunit", "cbmperunit"],
-    what_brand: ["whatbrand", "whatebrand", "brand"],
+    brand: ["brand", "brandname"],
+    what_brand: ["whatbrand", "whatebrand"],
+    materials: ["material", "materials"],
     copy_normal_goods: ["copynormalgoods", "copynormal", "copyornormalgoods"],
     code: ["code", "serialcode", "serialno", "serialnumber"],
-    express_number: ["expressnumber", "expressno", "trackingnumber", "trackingno"],
+    express_number: ["expressnumber", "expressno", "trackingnumber", "trackingno", "couriernumber"],
     size: ["size", "cartonsize", "outercartonsize", "outsidecartonsize"],
+    length: ["length", "lenght", "l"],
+    width: ["width", "w"],
+    height: ["height", "h"],
 };
 
 function orderCsvHeaderKey(value) {
@@ -1233,6 +1258,8 @@ function importOrderItemsFromCsv() {
                 if (el && v !== "") el.value = v;
             };
             set(".item-desc", desc);
+            set(".item-brand", idx(row, "brand"));
+            set(".item-materials", idx(row, "materials"));
             set(".item-what-brand", idx(row, "what_brand"));
             set(".item-copy-normal-goods", idx(row, "copy_normal_goods"));
             set(".item-code", idx(row, "code"));
@@ -1245,6 +1272,9 @@ function importOrderItemsFromCsv() {
             set(".item-unit-price", idx(row, "unit_price"));
             set(".item-weight", idx(row, "weight"));
             set(".item-cbm", idx(row, "cbm"));
+            set(".item-l", idx(row, "length"));
+            set(".item-w", idx(row, "width"));
+            set(".item-h", idx(row, "height"));
             imported++;
         }
     }
@@ -1292,6 +1322,8 @@ function parseOrderItemsCsv() {
         items.push({
             description_cn: desc,
             description_en: desc,
+            brand: idx(row, "brand") || idx(row, "what_brand") || null,
+            materials: idx(row, "materials") || null,
             what_brand: idx(row, "what_brand") || null,
             copy_normal_goods: idx(row, "copy_normal_goods") || null,
             code: idx(row, "code") || null,
@@ -1304,6 +1336,12 @@ function parseOrderItemsCsv() {
             unit: "cartons",
             declared_cbm: parseFloat(idx(row, "cbm")) || null,
             declared_weight: parseFloat(idx(row, "weight")) || null,
+            item_length: parseFloat(idx(row, "length")) || null,
+            item_width: parseFloat(idx(row, "width")) || null,
+            item_height: parseFloat(idx(row, "height")) || null,
+            length: parseFloat(idx(row, "length")) || null,
+            width: parseFloat(idx(row, "width")) || null,
+            height: parseFloat(idx(row, "height")) || null,
             unit_price: parseFloat(idx(row, "unit_price")) || null,
             total_amount:
                 qty > 0 && parseFloat(idx(row, "unit_price"))
@@ -1396,7 +1434,15 @@ function addOrderItem() {
                 <div class="order-item-subgrid-block">
                   <div class="order-item-subgrid-title">${escapeHtml(orderT("Shipment Details"))}</div>
                   <div class="row g-2">
+                    <div class="col-12 col-sm-6 col-xl-2">
+                      <label class="form-label order-item-label">${escapeHtml(orderT("Brand"))}</label>
+                      <input type="text" class="form-control form-control-sm item-brand" placeholder="${escapeHtml(orderT("Brand"))}" data-idx="${idx}">
+                    </div>
                     <div class="col-12 col-sm-6 col-xl-3">
+                      <label class="form-label order-item-label">${escapeHtml(orderT("Materials"))}</label>
+                      <input type="text" class="form-control form-control-sm item-materials" placeholder="${escapeHtml(orderT("Material / composition"))}" data-idx="${idx}">
+                    </div>
+                    <div class="col-12 col-sm-6 col-xl-2">
                       <label class="form-label order-item-label">${escapeHtml(orderT("What Brand"))}</label>
                       <input type="text" class="form-control form-control-sm item-what-brand" placeholder="${escapeHtml(orderT("Brand marker"))}" data-idx="${idx}">
                     </div>
@@ -1412,11 +1458,11 @@ function addOrderItem() {
                       <label class="form-label order-item-label">${escapeHtml(orderT("Code"))}</label>
                       <input type="text" class="form-control form-control-sm item-code" placeholder="${escapeHtml(orderT("Code"))}" data-idx="${idx}">
                     </div>
-                    <div class="col-12 col-sm-6 col-xl-3">
+                    <div class="col-12 col-sm-6 col-xl-2">
                       <label class="form-label order-item-label">${escapeHtml(orderT("Express Number"))}</label>
                       <input type="text" class="form-control form-control-sm item-express-number" placeholder="${escapeHtml(orderT("Express no."))}" data-idx="${idx}">
                     </div>
-                    <div class="col-12 col-sm-6 col-xl-2">
+                    <div class="col-12 col-sm-6 col-xl-1">
                       <label class="form-label order-item-label">${escapeHtml(orderT("Size"))}</label>
                       <input type="text" class="form-control form-control-sm item-size" placeholder="${escapeHtml(orderT("L x W x H"))}" data-idx="${idx}">
                     </div>
@@ -2020,7 +2066,7 @@ async function copyOrder(id) {
         }
         let custRes;
         try {
-            custRes = await api("GET", "/customers/" + o.customer_id);
+            custRes = await api("GET", "/customers/" + o.customer_id + "/lookup");
             orderCustomerCountryShipping = custRes.data?.country_shipping || [];
             if (orderCustomerCountryShipping.length > 1) {
                 renderOrderDestinationSelect();
@@ -2161,7 +2207,7 @@ async function editOrder(id) {
         }
         let custRes;
         try {
-            custRes = await api("GET", "/customers/" + o.customer_id);
+            custRes = await api("GET", "/customers/" + o.customer_id + "/lookup");
             orderCustomerCountryShipping = custRes.data?.country_shipping || [];
             if (orderCustomerCountryShipping.length > 1) {
                 renderOrderDestinationSelect();
@@ -2325,6 +2371,10 @@ function collectOrderItems() {
                     what_brand:
                         tr.querySelector(".item-what-brand")?.value?.trim() ||
                         null,
+                    brand:
+                        tr.querySelector(".item-brand")?.value?.trim() || null,
+                    materials:
+                        tr.querySelector(".item-materials")?.value?.trim() || null,
                     copy_normal_goods:
                         tr
                             .querySelector(".item-copy-normal-goods")
@@ -2344,6 +2394,9 @@ function collectOrderItems() {
                     item_length: l > 0 ? l : null,
                     item_width: w > 0 ? w : null,
                     item_height: h > 0 ? h : null,
+                    length: l > 0 ? l : null,
+                    width: w > 0 ? w : null,
+                    height: h > 0 ? h : null,
                     unit_price: unitPrice || null,
                     sell_price: sellPrice,
                     total_amount: totalAmountPayload,

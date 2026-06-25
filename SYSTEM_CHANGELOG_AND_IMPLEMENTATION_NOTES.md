@@ -5,6 +5,22 @@
 
 ---
 
+## 2026-06-25 Procurement Item Fields and Safe Customer Lookup
+
+- Added migration `069_order_item_procurement_fields.sql` for nullable procurement item fields on `order_items`, `order_template_items`, and legacy `procurement_draft_items`: `materials`, `height`, `width`, `length`, and `brand`. Existing `express_number` support remains idempotent.
+- Draft Order/procurement builder now captures and reloads Brand, Materials, Express Number, and dimensions on normal items and shared-carton contained items while preserving the legacy `what_brand` and `item_length/item_width/item_height` fields used by existing calculations.
+- Draft Order Excel/CSV import now maps by normalized header names instead of fixed column positions, including reordered columns and aliases such as `factory name`, `material(s)`, `h/w/l`, `lenght`, `brand name`, `express no`, `tracking number`, and `courier number`.
+- Procurement import template now includes Photo, Brand, Materials, Height, Width, Length, Express Number, Supplier, and Supplier Name headers, with metadata labels using colon suffixes.
+- Draft Order/customer Excel export now places Supplier in column A and Supplier Name in column B, adds Brand, Materials, Height, Width, Length, and Express Number, keeps images, and continues to use customer-visible sell pricing rather than internal buy/margin fields.
+- Added `customers.lookup` RBAC and safe customer lookup responses for operational workflows. `/customers/lookup` and `/customers/{id}/lookup` return only minimal selection data (`id`, `code`, `name`, `default_shipping_code`, and country shipping mappings) while full `customers.php` management data remains protected by existing customer-management visibility checks.
+- Updated Draft Orders, Orders, Receiving, and warehouse receiving customer autocomplete calls to use the safe lookup route instead of full customer records.
+- Corrected customer visibility boundary after downstream testing: customer creator/exception filtering now applies only to full customer-management surfaces, while operational modules use their own page/module RBAC and show all operational records they are allowed to manage.
+- Removed customer-owner scoping from Dashboard, Orders, Draft Orders, legacy Procurement Draft conversion, Receiving, Warehouse Stock, Shipment Drafts, Containers, Notifications, Expenses, Financials, and Balances.
+- Updated receiving detail UI to load minimal customer shipping context through `/customers/{id}/lookup` instead of loading full customer contacts, addresses, or payment terms.
+- Verification added for WarehouseStaff: dashboard pending receiving count and receiving queue rows now match the full operational queue, and safe lookup exposes no private customer fields.
+
+---
+
 ## 2026-03-18 Draft an Order Builder
 
 - Replaced the old single-supplier procurement-draft workflow with a real **Draft an Order** builder at `procurement_drafts.php`, while keeping the route itself for compatibility.

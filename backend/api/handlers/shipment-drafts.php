@@ -11,29 +11,24 @@ require_once dirname(__DIR__, 2) . '/services/OrderCountryService.php';
 
 function shipmentDraftVisibleOrderIds(PDO $pdo, int $draftId): array
 {
-    $scope = clmsCustomerVisibilityClause($pdo, 'c');
     $stmt = $pdo->prepare(
         "SELECT sdo.order_id
          FROM shipment_draft_orders sdo
-         JOIN orders o ON sdo.order_id = o.id
-         JOIN customers c ON o.customer_id = c.id
-         WHERE sdo.shipment_draft_id = ? AND {$scope['sql']}
+         WHERE sdo.shipment_draft_id = ?
          ORDER BY sdo.order_id"
     );
-    $stmt->execute(array_merge([$draftId], $scope['params']));
+    $stmt->execute([$draftId]);
     return array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'order_id');
 }
 
 function shipmentDraftFetchVisibleOrder(PDO $pdo, int $orderId): array
 {
-    $scope = clmsCustomerVisibilityClause($pdo, 'c');
     $stmt = $pdo->prepare(
         "SELECT o.id, o.status, o.destination_country_id, o.confirmation_token
          FROM orders o
-         JOIN customers c ON o.customer_id = c.id
-         WHERE o.id = ? AND {$scope['sql']}"
+         WHERE o.id = ?"
     );
-    $stmt->execute(array_merge([$orderId], $scope['params']));
+    $stmt->execute([$orderId]);
     $order = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$order) {
         jsonError("Order $orderId not found", 404);

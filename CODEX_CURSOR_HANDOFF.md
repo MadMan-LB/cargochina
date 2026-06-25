@@ -156,6 +156,15 @@ This file was initially written by Codex as a shared collaboration and continuit
 > - Alibaba: [How it Works](https://buyer.alibaba.com/page/HowItWorks/Page.html), [Trade Assurance](https://tradeassurance.alibaba.com/ta/shippingandlogistics.htm), Verified Supplier program documentation (2025)
 > - CLMS repo: `CODEX_CURSOR_HANDOFF.md`, `CLMS_README.md`, `docs/STAGED_PLAN.md`, `docs/VISION_REFERENCE_SYSTEMS.md`, `docs/API.md`
 
+## 13.1 2026-06-25 Permission Boundary Update — Operational Customer Visibility
+
+- Customer visibility exceptions and creator-based customer filtering are now scoped to the full customer management surface only: `customers.php`, full customer list/search/detail/update/delete/import/deposit actions, customer entity attachments, portal-token management, and internal customer messages.
+- Operational modules must not filter orders, queues, stock, containers, expenses, financials, balances, dashboards, or exports by `customers.created_by`. Their visibility is controlled by normal page/module RBAC.
+- Safe operational customer selection is handled by `/api/v1/customers/lookup` and `/api/v1/customers/{id}/lookup`. These endpoints return minimal selector data only and are available to the normal CLMS role set, including `FieldStaff`.
+- Updated operational handlers to remove customer-owner scoping: `dashboard`, `orders`, `draft-orders`, `procurement-drafts`, `receiving`, `warehouse-stock`, `shipment-drafts`, `containers`, `notifications`, `expenses`, `financials`, and `balances`.
+- Updated `frontend/js/receiving_receive.js` to use safe customer lookup instead of full customer details when loading the receiving detail screen.
+- Verification: PHP lint passed for touched handlers/services/pages, JS syntax checks passed for touched frontend scripts, the full PHP test suite passed, and a WarehouseStaff smoke check returned `dashboard_pending_receiving = 2`, `receiving_queue_rows = 2`, with safe lookup exposing no private customer fields.
+
 ---
 
 ### Executive Framing

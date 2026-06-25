@@ -79,6 +79,12 @@ See `.env.example` for:
 - `CONFIRMATION_REQUIRED` — variance-only | always-on-arrival
 - `CUSTOMER_PHOTO_VISIBILITY` — internal-only | customer-visible
 
+## Operational Customer Visibility
+
+Customer owner/creator visibility rules are intentionally limited to the full customer management surface (`customers.php` and full customer-management API actions). Operational workflows such as Orders, Draft an Order, Receiving, Warehouse Stock, Consolidation, Containers, Expenses, Financials, and Balances should show the full operational data allowed by the user's page/module permission.
+
+Customer selectors in operational workflows use the safe lookup API (`/api/v1/customers/lookup` and `/api/v1/customers/{id}/lookup`), which returns only minimal selection fields and must not expose full customer profiles, balances, private notes, contacts, addresses, or payment links.
+
 ## Full Specification
 
 See [CLMS_README.md](CLMS_README.md) for the complete specification, state machine, RBAC, and DB_CHANGELOG.

@@ -508,6 +508,7 @@ function setupFilterAutocomplete() {
     });
     Autocomplete.init(custInput, {
         resource: "customers",
+        searchPath: "/lookup",
         placeholder: receivingT("Type to search customer..."),
         renderItem: (c) =>
             `${c.name || ""} — ${c.code || ""}`

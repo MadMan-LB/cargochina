@@ -60,6 +60,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $hasSupplier = $chk && $chk->rowCount() > 0;
             $insCols = "template_id, sort_order, item_no, shipping_code, product_id, description_cn, description_en, cartons, qty_per_carton, quantity, unit, declared_cbm, declared_weight, item_length, item_width, item_height, unit_price, total_amount, notes";
             $insVals = "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?";
+            $metadataColumns = [];
+            foreach (['what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
+                $colChk = @$pdo->query("SHOW COLUMNS FROM order_template_items LIKE " . $pdo->quote($column));
+                if ($colChk && $colChk->rowCount() > 0) {
+                    $metadataColumns[] = $column;
+                    $insCols .= ", $column";
+                    $insVals .= ",?";
+                }
+            }
             if ($hasSupplier) {
                 $insCols .= ", supplier_id";
                 $insVals .= ",?";
@@ -89,13 +98,24 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $unit,
                     isset($it['declared_cbm']) ? (float) $it['declared_cbm'] : null,
                     isset($it['declared_weight']) ? (float) $it['declared_weight'] : null,
-                    isset($it['item_length']) ? (float) $it['item_length'] : null,
-                    isset($it['item_width']) ? (float) $it['item_width'] : null,
-                    isset($it['item_height']) ? (float) $it['item_height'] : null,
+                    isset($it['item_length']) ? (float) $it['item_length'] : (isset($it['length']) ? (float) $it['length'] : null),
+                    isset($it['item_width']) ? (float) $it['item_width'] : (isset($it['width']) ? (float) $it['width'] : null),
+                    isset($it['item_height']) ? (float) $it['item_height'] : (isset($it['height']) ? (float) $it['height'] : null),
                     isset($it['unit_price']) ? (float) $it['unit_price'] : null,
                     isset($it['total_amount']) ? (float) $it['total_amount'] : null,
                     $it['notes'] ?? null,
                 ];
+                foreach ($metadataColumns as $column) {
+                    if (in_array($column, ['length', 'width', 'height'], true)) {
+                        $params[] = isset($it[$column]) ? (float) $it[$column] : (isset($it['item_' . $column]) ? (float) $it['item_' . $column] : null);
+                    } elseif ($column === 'brand') {
+                        $params[] = $it['brand'] ?? $it['what_brand'] ?? null;
+                    } elseif ($column === 'what_brand') {
+                        $params[] = $it['what_brand'] ?? $it['brand'] ?? null;
+                    } else {
+                        $params[] = $it[$column] ?? null;
+                    }
+                }
                 if ($hasSupplier) {
                     $params[] = $supplierId;
                 }

@@ -17,6 +17,7 @@ return [
     ],
     'customers' => [
         'read' => ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'SuperAdmin'],
+        'lookup' => ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'],
         'write' => ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'],
         'create' => ['ChinaAdmin', 'SuperAdmin'],
         'import' => ['ChinaAdmin', 'SuperAdmin'],

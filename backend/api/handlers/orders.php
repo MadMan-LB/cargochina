@@ -246,6 +246,51 @@ function orderNormalizeItemText($value, int $maxLength = 150): ?string
     return substr($value, 0, $maxLength);
 }
 
+function orderNormalizeOptionalDecimal($value, string $label): ?float
+{
+    if ($value === null || trim((string) $value) === '') {
+        return null;
+    }
+
+    $normalized = str_replace(',', '', trim((string) $value));
+    if (!is_numeric($normalized)) {
+        jsonError($label . ' must be a number.', 400, ['items.' . strtolower($label) => $label . ' must be numeric.']);
+    }
+    $number = round((float) $normalized, 4);
+    if ($number < 0) {
+        jsonError($label . ' cannot be negative.', 400, ['items.' . strtolower($label) => $label . ' cannot be negative.']);
+    }
+
+    return $number;
+}
+
+function orderNormalizeItemMetadataValue(string $column, array $item)
+{
+    if (in_array($column, ['length', 'width', 'height'], true)) {
+        $legacy = 'item_' . $column;
+        return orderNormalizeOptionalDecimal($item[$column] ?? $item[$legacy] ?? null, ucfirst($column));
+    }
+
+    if ($column === 'copy_normal_goods') {
+        return orderNormalizeCopyNormalGoods($item[$column] ?? null);
+    }
+
+    if ($column === 'materials') {
+        return orderNormalizeItemText($item[$column] ?? null, 1000);
+    }
+
+    if ($column === 'brand') {
+        return orderNormalizeItemText($item['brand'] ?? $item['what_brand'] ?? null, 150);
+    }
+
+    if ($column === 'what_brand') {
+        return orderNormalizeItemText($item['what_brand'] ?? $item['brand'] ?? null, 150);
+    }
+
+    $limit = $column === 'code' ? 100 : 150;
+    return orderNormalizeItemText($item[$column] ?? null, $limit);
+}
+
 function orderCopyNormalGoodsDisplay($value): string
 {
     $raw = trim((string) ($value ?? ''));
@@ -411,6 +456,8 @@ function buildOrderSearchSql(PDO $pdo, string $query, array &$params, string $or
     $hasItemCode = orderTableHasColumn($pdo, 'order_items', 'code');
     $hasExpressNumber = orderTableHasColumn($pdo, 'order_items', 'express_number');
     $hasWhatBrand = orderTableHasColumn($pdo, 'order_items', 'what_brand');
+    $hasBrand = orderTableHasColumn($pdo, 'order_items', 'brand');
+    $hasMaterials = orderTableHasColumn($pdo, 'order_items', 'materials');
     $hasCopyNormalGoods = orderTableHasColumn($pdo, 'order_items', 'copy_normal_goods');
     $hasItemSize = orderTableHasColumn($pdo, 'order_items', 'size');
 
@@ -464,6 +511,14 @@ function buildOrderSearchSql(PDO $pdo, string $query, array &$params, string $or
         }
         if ($hasWhatBrand) {
             $itemClauses[] = "COALESCE(oi.what_brand, '') $coll LIKE ?";
+            $params[] = $like;
+        }
+        if ($hasBrand) {
+            $itemClauses[] = "COALESCE(oi.brand, '') $coll LIKE ?";
+            $params[] = $like;
+        }
+        if ($hasMaterials) {
+            $itemClauses[] = "COALESCE(oi.materials, '') $coll LIKE ?";
             $params[] = $like;
         }
         if ($hasCopyNormalGoods) {
@@ -689,9 +744,6 @@ function fetchOrdersListRowsForRequest(PDO $pdo): array
         FROM orders o
         JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id$destJoin WHERE 1=1";
     $params = [];
-    $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
-    $sql .= " AND {$customerScope['sql']}";
-    $params = array_merge($params, $customerScope['params']);
     if (!empty($statuses)) {
         $placeholders = implode(',', array_fill(0, count($statuses), '?'));
         $sql .= $statusMode === 'exclude'
@@ -1261,9 +1313,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 $params = [];
                 $where = strlen($q) >= 1 ? buildOrderSearchSql($pdo, $q, $params, 'o', 'c', 's') : '1=1';
-                $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
-                $where .= " AND {$customerScope['sql']}";
-                $params = array_merge($params, $customerScope['params']);
                 if ($customerId) {
                     $where .= ' AND o.customer_id = ?';
                     $params[] = $customerId;
@@ -1334,9 +1383,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if ($chk && $chk->rowCount() > 0) $suppCols .= ', s.address as supplier_address';
                 $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'fax'");
                 if ($chk && $chk->rowCount() > 0) $suppCols .= ', s.fax as supplier_fax';
-                $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
-                $stmt = $pdo->prepare("SELECT o.*, c.name as customer_name, $suppCols FROM orders o JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id WHERE o.id = ? AND {$customerScope['sql']}");
-                $stmt->execute(array_merge([(int) $id], $customerScope['params']));
+                $stmt = $pdo->prepare("SELECT o.*, c.name as customer_name, $suppCols FROM orders o JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id WHERE o.id = ?");
+                $stmt->execute([(int) $id]);
                 $order = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$order) jsonError('Order not found', 404);
                 $items = normalizeOrderItems($pdo, fetchOrderItems($pdo, (int) $id));
@@ -1359,9 +1407,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $destJoin = orderTableHasColumn($pdo, 'orders', 'destination_country_id')
                 ? ' LEFT JOIN countries co ON o.destination_country_id = co.id'
                 : '';
-            $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
-            $stmt = $pdo->prepare("SELECT o.*, $custCols, s.name as supplier_name$destCols FROM orders o JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id$destJoin WHERE o.id = ? AND {$customerScope['sql']}");
-            $stmt->execute(array_merge([(int) $id], $customerScope['params']));
+            $stmt = $pdo->prepare("SELECT o.*, $custCols, s.name as supplier_name$destCols FROM orders o JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id$destJoin WHERE o.id = ?");
+            $stmt->execute([(int) $id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$row) jsonError('Order not found', 404);
             $row['items'] = normalizeOrderItems($pdo, fetchOrderItems($pdo, (int) $id));
@@ -1379,7 +1426,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $rip->execute([$receipt['id']]);
                 $row['receipt']['photos'] = $rip->fetchAll(PDO::FETCH_ASSOC);
                 $receiptItemCols = "oi.description_cn, oi.description_en, oi.item_no, oi.shipping_code, oi.cartons, oi.qty_per_carton, oi.quantity, oi.unit_price as declared_unit_price, oi.total_amount as declared_total_amount";
-                foreach (['what_brand', 'copy_normal_goods', 'code', 'express_number', 'size'] as $column) {
+                foreach (['what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
                     if (orderTableHasColumn($pdo, 'order_items', $column)) {
                         $receiptItemCols .= ", oi.$column";
                     }
@@ -1438,9 +1485,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $stmt->execute([$id]);
             $order = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$order) jsonError('Order not found', 404);
-            clmsRequireCustomerAccess($pdo, (int) $order['customer_id']);
             $customerId = (int) ($input['customer_id'] ?? $order['customer_id']);
-            clmsRequireCustomerAccess($pdo, $customerId);
             $supplierId = isset($input['supplier_id'])
                 ? normalizeExistingSupplierId($pdo, $input['supplier_id'], 'supplier_id')
                 : normalizeExistingSupplierId($pdo, $order['supplier_id'] ?? null, 'supplier_id');
@@ -1472,7 +1517,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $hasCustomDesignRequired = orderTableHasColumn($pdo, 'order_items', 'custom_design_required');
                 $hasCustomDesignNote = orderTableHasColumn($pdo, 'order_items', 'custom_design_note');
                 $metadataColumns = [];
-                foreach (['what_brand', 'copy_normal_goods', 'code', 'express_number', 'size'] as $column) {
+                foreach (['what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
                     if (orderTableHasColumn($pdo, 'order_items', $column)) {
                         $metadataColumns[] = $column;
                     }
@@ -1519,9 +1564,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     if ($cartons !== null && $qtyPerCtn !== null && $qtyPerCtn > 0) {
                         $qty = $cartons * $qtyPerCtn;
                     }
-                    $l = isset($it['item_length']) ? (float) $it['item_length'] : null;
-                    $w = isset($it['item_width']) ? (float) $it['item_width'] : null;
-                    $h = isset($it['item_height']) ? (float) $it['item_height'] : null;
+                    $l = orderNormalizeOptionalDecimal($it['item_length'] ?? $it['length'] ?? null, 'Length');
+                    $w = orderNormalizeOptionalDecimal($it['item_width'] ?? $it['width'] ?? null, 'Width');
+                    $h = orderNormalizeOptionalDecimal($it['item_height'] ?? $it['height'] ?? null, 'Height');
                     $unitPrice = isset($it['unit_price']) ? (float) $it['unit_price'] : null;
                     $sellPrice = isset($it['sell_price']) ? (float) $it['sell_price'] : null;
                     $totalAmount = isset($it['total_amount']) ? (float) $it['total_amount'] : ($unitPrice !== null && $qty > 0 ? $unitPrice * $qty : null);
@@ -1549,10 +1594,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         $it['description_en'] ?? null
                     ];
                     foreach ($metadataColumns as $column) {
-                        $limit = $column === 'copy_normal_goods' ? 60 : ($column === 'code' ? 100 : 150);
-                        $params[] = $column === 'copy_normal_goods'
-                            ? orderNormalizeCopyNormalGoods($it[$column] ?? null)
-                            : orderNormalizeItemText($it[$column] ?? null, $limit);
+                        $params[] = orderNormalizeItemMetadataValue($column, $it);
                     }
                     if ($hasItemSupplier) {
                         $params[] = $itemSupplierId ?: null;
@@ -1606,7 +1648,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if (!$customerId) {
                     jsonError('Missing required: customer_id', 400);
                 }
-                clmsRequireCustomerAccess($pdo, $customerId);
                 if (!in_array($currency, ['USD', 'RMB'], true)) {
                     jsonError('Currency must be USD or RMB', 400);
                 }
@@ -1653,7 +1694,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $hasCustomDesignRequired = orderTableHasColumn($pdo, 'order_items', 'custom_design_required');
                     $hasCustomDesignNote = orderTableHasColumn($pdo, 'order_items', 'custom_design_note');
                     $metadataColumns = [];
-                    foreach (['what_brand', 'copy_normal_goods', 'code', 'express_number', 'size'] as $column) {
+                    foreach (['what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
                         if (orderTableHasColumn($pdo, 'order_items', $column)) {
                             $metadataColumns[] = $column;
                         }
@@ -1716,9 +1757,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                             $it['unit'] ?? 'pieces',
                             (float) ($it['declared_cbm'] ?? 0),
                             (float) ($it['declared_weight'] ?? 0),
-                            isset($it['item_length']) ? (float) $it['item_length'] : null,
-                            isset($it['item_width']) ? (float) $it['item_width'] : null,
-                            isset($it['item_height']) ? (float) $it['item_height'] : null,
+                            orderNormalizeOptionalDecimal($it['item_length'] ?? $it['length'] ?? null, 'Length'),
+                            orderNormalizeOptionalDecimal($it['item_width'] ?? $it['width'] ?? null, 'Width'),
+                            orderNormalizeOptionalDecimal($it['item_height'] ?? $it['height'] ?? null, 'Height'),
                             $unitPrice,
                             $totalAmount,
                             $it['notes'] ?? null,
@@ -1727,10 +1768,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                             $it['description_en'] ?? null
                         ];
                         foreach ($metadataColumns as $column) {
-                            $limit = $column === 'copy_normal_goods' ? 60 : ($column === 'code' ? 100 : 150);
-                            $params[] = $column === 'copy_normal_goods'
-                                ? orderNormalizeCopyNormalGoods($it[$column] ?? null)
-                                : orderNormalizeItemText($it[$column] ?? null, $limit);
+                            $params[] = orderNormalizeItemMetadataValue($column, $it);
                         }
                         if ($hasItemSupplier) {
                             $params[] = $itemSupplierId ?: null;
@@ -1780,7 +1818,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt->execute([(int) $id]);
                 $customerId = (int) ($stmt->fetchColumn() ?: 0);
                 if ($customerId <= 0) jsonError('Order not found', 404);
-                clmsRequireCustomerAccess($pdo, $customerId);
                 try {
                     $result = (new OrderReceivingService())->receive($pdo, (int) $id, $input, $userId);
                     jsonResponse(['data' => $result]);
@@ -2058,7 +2095,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if ($token && !hash_equals((string)($order['confirmation_token'] ?? ''), $token)) {
                     jsonError('Invalid or expired customer follow-up token', 403);
                 } elseif (!$token) {
-                    clmsRequireCustomerAccess($pdo, (int) $order['customer_id']);
+                    requireAuth();
                 }
                 OrderReceiptWorkflowService::acceptAutoConfirmedOrder($pdo, (int) $id, $userId, 'confirm');
                 jsonResponse(['data' => ['status' => 'ReadyForConsolidation']]);
@@ -2073,7 +2110,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt->execute([$id]);
                 $order = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$order) jsonError('Order not found', 404);
-                clmsRequireCustomerAccess($pdo, (int) $order['customer_id']);
                 if ($action === 'submit') {
                     orderHandleLifecycleTransition('submit', (string) ($order['status'] ?? ''), 'Submitted');
                     $si = $pdo->prepare("SELECT COUNT(*) FROM order_items WHERE order_id = ?");

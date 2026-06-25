@@ -209,9 +209,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $hasDeposits = $chkDep && $chkDep->rowCount() > 0;
         $chkSell = @$pdo->query("SHOW COLUMNS FROM order_items LIKE 'sell_price'");
         $hasSell = $chkSell && $chkSell->rowCount() > 0;
-        $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
-        $custSql = "SELECT c.id, c.name, c.code FROM customers c WHERE {$customerScope['sql']}";
-        $custParams = $customerScope['params'];
+        $custSql = "SELECT c.id, c.name, c.code FROM customers c WHERE 1=1";
+        $custParams = [];
         if ($customerId) {
             $custSql .= " AND c.id = ?";
             $custParams[] = $customerId;
@@ -222,12 +221,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         }
         $depositMap = [];
         if ($hasDeposits) {
-            $depScope = clmsCustomerVisibilityClause($pdo, 'cdep');
             $depSql = "SELECT cd.customer_id, cd.currency, SUM(cd.amount) as total
                 FROM customer_deposits cd
-                JOIN customers cdep ON cd.customer_id = cdep.id
-                WHERE {$depScope['sql']}";
-            $depParams = $depScope['params'];
+                WHERE 1=1";
+            $depParams = [];
             if ($customerId) {
                 $depSql .= " AND cd.customer_id = ?";
                 $depParams[] = $customerId;
@@ -246,12 +243,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             : "SUM(COALESCE(oi.total_amount, oi.quantity * COALESCE(oi.unit_price, 0)))";
         $receivableSql = "SELECT o.customer_id, o.currency, COALESCE($receivableExpr, 0) as total
             FROM orders o
-            JOIN customers crec ON o.customer_id = crec.id
             JOIN order_items oi ON oi.order_id = o.id
             WHERE o.status NOT IN ('Draft','CustomerDeclined','CustomerDeclinedAfterAutoConfirm')";
-        $receivableScope = clmsCustomerVisibilityClause($pdo, 'crec');
-        $receivableSql .= " AND {$receivableScope['sql']}";
-        $receivableParams = $receivableScope['params'];
+        $receivableParams = [];
         if ($customerId) {
             $receivableSql .= " AND o.customer_id = ?";
             $receivableParams[] = $customerId;
@@ -397,9 +391,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             LEFT JOIN suppliers s ON o.supplier_id = s.id
             WHERE 1=1";
         $params = [];
-        $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
-        $sql .= " AND {$customerScope['sql']}";
-        $params = array_merge($params, $customerScope['params']);
         if ($statuses) {
             if ($statusMode === 'exclude') {
                 $excludedStatuses = array_values(array_unique(array_merge($defaultExcludedStatuses, $statuses)));

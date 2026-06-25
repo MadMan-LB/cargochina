@@ -303,42 +303,20 @@ async function loadOrder() {
     );
     let custInfoHtml = "";
     try {
-        const custRes = await api("GET", "/customers/" + o.customer_id);
+        const custRes = await api("GET", "/customers/" + o.customer_id + "/lookup");
         const c = custRes.data;
-        const contacts = c.contacts || [];
-        const addresses = c.addresses || [];
-        if (contacts.length) {
-            custInfoHtml +=
-                '<p class="mb-1 small text-muted"><strong>' + escapeHtml(receiveT("Contacts:")) + "</strong> " +
-                contacts
-                    .map((ct) =>
-                        escapeHtml(
-                            (ct.name || "") +
-                                (ct.phone ? " " + ct.phone : "") +
-                                (ct.email ? " " + ct.email : ""),
-                        ),
-                    )
-                    .join(", ") +
-                "</p>";
+        const shippingCodes = [];
+        if (c.default_shipping_code) {
+            shippingCodes.push(c.default_shipping_code);
         }
-        if (addresses.length) {
+        (c.country_shipping || []).forEach((row) => {
+            if (row.shipping_code) shippingCodes.push(row.shipping_code);
+        });
+        const uniqueShippingCodes = [...new Set(shippingCodes.filter(Boolean))];
+        if (uniqueShippingCodes.length) {
             custInfoHtml +=
-                '<p class="mb-1 small text-muted"><strong>' + escapeHtml(receiveT("Addresses:")) + "</strong> " +
-                addresses
-                    .map((a) =>
-                        escapeHtml(
-                            typeof a === "string"
-                                ? a
-                                : a.address || a.city || JSON.stringify(a),
-                        ),
-                    )
-                    .join("; ") +
-                "</p>";
-        }
-        if (c.payment_terms) {
-            custInfoHtml +=
-                '<p class="mb-1 small text-muted"><strong>' + escapeHtml(receiveT("Payment terms:")) + "</strong> " +
-                escapeHtml(c.payment_terms) +
+                '<p class="mb-1 small text-muted"><strong>' + escapeHtml(receiveT("Shipping codes:")) + "</strong> " +
+                escapeHtml(uniqueShippingCodes.join(", ")) +
                 "</p>";
         }
     } catch (e) {}

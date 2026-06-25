@@ -41,9 +41,6 @@ function receivingFetchQueueRowsForRequest(PDO $pdo): array
         LEFT JOIN suppliers s ON o.supplier_id = s.id
         WHERE o.status IN ($placeholders)";
     $params = $statuses;
-    $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
-    $sql .= " AND {$customerScope['sql']}";
-    $params = array_merge($params, $customerScope['params']);
     if ($customerId) {
         $sql .= " AND o.customer_id = ?";
         $params[] = $customerId;
@@ -386,12 +383,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 OR (s.phone IS NOT NULL AND s.phone $coll LIKE ?)
                 OR EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND ((oi.shipping_code $coll LIKE ?) OR (oi.item_no $coll LIKE ?) OR (oi.description_cn $coll LIKE ?) OR (oi.description_en $coll LIKE ?)$extraItemSearchSql))
             )";
-        $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
-        $sql .= " AND {$customerScope['sql']}
+        $sql .= "
             ORDER BY o.expected_ready_date IS NULL ASC, o.expected_ready_date ASC, o.id ASC
             LIMIT 30";
         $oid = ctype_digit($q) ? (int) $q : 0;
-        $params = array_merge($statuses, [$oid, $like, $like, $like, $like, $like, $like, $like, $like, $like, $like], $extraItemSearchParams, $customerScope['params']);
+        $params = array_merge($statuses, [$oid, $like, $like, $like, $like, $like, $like, $like, $like, $like, $like], $extraItemSearchParams);
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -440,9 +436,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 LEFT JOIN suppliers s ON o.supplier_id = s.id
                 LEFT JOIN users u ON wr.received_by = u.id
                 WHERE wr.id = ?";
-            $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
-            $stmt = $pdo->prepare($detailSql . " AND {$customerScope['sql']}");
-            $stmt->execute(array_merge([$receiptId], $customerScope['params']));
+            $stmt = $pdo->prepare($detailSql);
+            $stmt->execute([$receiptId]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$row) jsonError('Receipt not found', 404);
             $rip = $pdo->prepare("SELECT * FROM warehouse_receipt_photos WHERE receipt_id = ?");
@@ -511,9 +506,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             LEFT JOIN suppliers s ON o.supplier_id = s.id
             WHERE 1=1";
         $params = [];
-        $customerScope = clmsCustomerVisibilityClause($pdo, 'c');
-        $sql .= " AND {$customerScope['sql']}";
-        $params = array_merge($params, $customerScope['params']);
         if ($orderId) {
             $sql .= " AND wr.order_id = ?";
             $params[] = $orderId;

@@ -129,7 +129,11 @@ if (!in_array($resource, $publicResources)) {
     }
     if ($resource === 'customers' && $method === 'GET') {
         $userRoles = getUserRoles();
-        if (!hasPermission('customers.read', $rbac['customers']['read'] ?? []) && !clmsCanRolesAccessPage($userRoles, 'customers', null, $userId)) {
+        $isLookup = $id === 'lookup' || $action === 'lookup';
+        $allowed = $isLookup
+            ? hasPermission('customers.lookup', $rbac['customers']['lookup'] ?? [])
+            : (hasPermission('customers.read', $rbac['customers']['read'] ?? []) || clmsCanRolesAccessPage($userRoles, 'customers', null, $userId));
+        if (!$allowed) {
             http_response_code(403);
             echo json_encode(['error' => true, 'message' => 'Forbidden']);
             exit;
