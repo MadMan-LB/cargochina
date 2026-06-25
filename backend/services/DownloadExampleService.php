@@ -31,8 +31,8 @@ class DownloadExampleService
         $sheet->setTitle('Procurement Import');
 
         $sheet->setCellValue('A1', 'Procurement Import Template');
-        $sheet->mergeCells('A1:S1');
-        $sheet->getStyle('A1:S1')->applyFromArray([
+        $sheet->mergeCells('A1:T1');
+        $sheet->getStyle('A1:T1')->applyFromArray([
             'font' => ['bold' => true, 'size' => 16, 'color' => ['rgb' => '1F4E79']],
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'EAF3FF']],
             'alignment' => ['vertical' => Alignment::VERTICAL_CENTER],
@@ -54,6 +54,7 @@ class DownloadExampleService
 
         $row++;
         $headers = [
+            'Photo',
             'Item No',
             'English Item Name',
             'Chinese Item Name',
@@ -89,12 +90,16 @@ class DownloadExampleService
             ],
             'alignment' => ['vertical' => Alignment::VERTICAL_TOP, 'wrapText' => true],
         ]);
-        $sheet->getStyle("A" . ($headerRow + 1) . ":D" . ($headerRow + 50))->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
-        $sheet->getStyle("P" . ($headerRow + 1) . ":Q" . ($headerRow + 50))->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
+        $sheet->getStyle("B" . ($headerRow + 1) . ":E" . ($headerRow + 50))->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
+        $sheet->getStyle("Q" . ($headerRow + 1) . ":R" . ($headerRow + 50))->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
         $sheet->freezePane('A' . ($headerRow + 1));
         $sheet->setAutoFilter("A{$headerRow}:{$lastColumn}{$headerRow}");
 
-        $widths = [16, 24, 22, 18, 12, 10, 15, 10, 14, 14, 14, 12, 12, 13, 13, 24, 12, 36, 14];
+        for ($bodyRow = $headerRow + 1; $bodyRow <= $headerRow + 50; $bodyRow++) {
+            $sheet->getRowDimension($bodyRow)->setRowHeight(72);
+        }
+
+        $widths = [18, 16, 24, 22, 18, 12, 10, 15, 10, 14, 14, 14, 12, 12, 13, 13, 24, 12, 36, 14];
         foreach ($widths as $index => $width) {
             $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($index + 1))->setWidth($width);
         }

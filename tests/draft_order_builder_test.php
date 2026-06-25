@@ -102,7 +102,7 @@ function cleanupCreatedOrder(PDO $pdo, int $orderId, ?string $createdProductDesc
     }
 }
 
-function createProcurementImportTemplateFixture(?array $itemRow = null, array $metadata = []): string
+function createProcurementImportTemplateFixture(?array $itemRow = null, array $metadata = [], ?string $photoPath = null): string
 {
     $path = tempnam(sys_get_temp_dir(), 'procurement_template_');
     $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
@@ -125,6 +125,7 @@ function createProcurementImportTemplateFixture(?array $itemRow = null, array $m
 
     $row++;
     $headers = [
+        'Photo',
         'Item No',
         'English Item Name',
         'Chinese Item Name',
@@ -148,6 +149,16 @@ function createProcurementImportTemplateFixture(?array $itemRow = null, array $m
     $sheet->fromArray($headers, null, 'A' . $row);
     if ($itemRow !== null) {
         $sheet->fromArray($itemRow, null, 'A' . ($row + 1));
+        $sheet->getRowDimension($row + 1)->setRowHeight(72);
+    }
+    if ($photoPath !== null && is_file($photoPath)) {
+        $drawing = new \PhpOffice\PhpSpreadsheet\Worksheet\Drawing();
+        $drawing->setPath($photoPath);
+        $drawing->setCoordinates('A' . ($row + 1));
+        $drawing->setResizeProportional(false);
+        $drawing->setWidth(90);
+        $drawing->setHeight(90);
+        $drawing->setWorksheet($sheet);
     }
 
     (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet))->save($path);
@@ -344,8 +355,11 @@ test('draft-orders import endpoint previews filled official template', function 
     }
 
     $ordersBefore = (int) $pdo->query("SELECT COUNT(*) FROM orders")->fetchColumn();
+    $pngPath = tempnam(sys_get_temp_dir(), 'official_template_photo_') . '.png';
+    file_put_contents($pngPath, base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII='));
     $xlsxPath = createProcurementImportTemplateFixture(
         [
+            '',
             'TPL-1',
             'Template English item',
             '模板中文商品',
@@ -370,7 +384,8 @@ test('draft-orders import endpoint previews filled official template', function 
             'customer' => $customer['name'],
             'expected_ready' => '2026-05-01',
             'currency' => 'RMB',
-        ]
+        ],
+        $pngPath
     );
 
     try {
@@ -403,12 +418,18 @@ test('draft-orders import endpoint previews filled official template', function 
         if (count($item['description_entries'] ?? []) < 1) {
             throw new Exception('Official template descriptions were not imported');
         }
+        $photoPaths = $item['photo_paths'] ?? [];
+        if (count($photoPaths) !== 1 || !is_file($root . '/backend/' . $photoPaths[0])) {
+            throw new Exception('Official template embedded photo was not imported into item photo paths');
+        }
+        @unlink($root . '/backend/' . $photoPaths[0]);
         $ordersAfter = (int) $pdo->query("SELECT COUNT(*) FROM orders")->fetchColumn();
         if ($ordersAfter !== $ordersBefore) {
             throw new Exception('Official template preview created an order unexpectedly');
         }
     } finally {
         @unlink($xlsxPath);
+        @unlink($pngPath);
     }
 });
 
