@@ -304,12 +304,16 @@ require 'includes/layout.php';
 </div>
 
 <?php
+$baseAssetPath = $basePath ?? '/cargochina';
 $pageScripts = [
-  'frontend/js/autocomplete.js?v=' . @filemtime(__DIR__ . '/frontend/js/autocomplete.js'),
-  'frontend/js/photo_uploader.js?v=' . @filemtime(__DIR__ . '/frontend/js/photo_uploader.js'),
-  'frontend/js/lib/jsQR.js?v=' . @filemtime(__DIR__ . '/frontend/js/lib/jsQR.js'),
-  'frontend/js/wechat_qr_scanner.js?v=' . @filemtime(__DIR__ . '/frontend/js/wechat_qr_scanner.js'),
+  $baseAssetPath . '/frontend/js/autocomplete.js?v=' . @filemtime(__DIR__ . '/frontend/js/autocomplete.js'),
+  $baseAssetPath . '/frontend/js/photo_uploader.js?v=' . @filemtime(__DIR__ . '/frontend/js/photo_uploader.js'),
 ];
-$pageScript = 'frontend/js/procurement_drafts.js?v=' . @filemtime(__DIR__ . '/frontend/js/procurement_drafts.js');
+$jsQrPath = __DIR__ . '/frontend/js/lib/jsQR.js';
+if (is_file($jsQrPath)) {
+  $pageScripts[] = $baseAssetPath . '/frontend/js/lib/jsQR.js?v=' . @filemtime($jsQrPath);
+}
+$pageScripts[] = $baseAssetPath . '/frontend/js/wechat_qr_scanner.js?v=' . @filemtime(__DIR__ . '/frontend/js/wechat_qr_scanner.js');
+$pageScript = $baseAssetPath . '/frontend/js/procurement_drafts.js?v=' . @filemtime(__DIR__ . '/frontend/js/procurement_drafts.js');
 require 'includes/footer.php';
 ?>

@@ -1973,6 +1973,149 @@ function draftOrderImportLooksLikeHeader(array $row): bool
         );
 }
 
+function draftOrderImportExcelEnvironmentMessage(string $ext): ?string
+{
+    if (!class_exists(IOFactory::class)) {
+        return 'Excel import is not available because the spreadsheet library is missing on this server.';
+    }
+
+    if ($ext === 'xlsx') {
+        if (!class_exists('ZipArchive')) {
+            return 'XLSX import is not available because the PHP zip extension is disabled on this server. Enable ZipArchive / php-zip, or import the file as CSV.';
+        }
+        if (!class_exists('XMLReader') || !class_exists('DOMDocument') || !function_exists('simplexml_load_string')) {
+            return 'XLSX import is not available because required PHP XML extensions are disabled on this server. Enable xml, xmlreader, dom, and simplexml, or import the file as CSV.';
+        }
+    }
+
+    return null;
+}
+
+function draftOrderImportExcelEnvironmentContext(string $ext): array
+{
+    return [
+        'extension' => $ext,
+        'php_version' => PHP_VERSION,
+        'ziparchive' => class_exists('ZipArchive'),
+        'xmlreader' => class_exists('XMLReader'),
+        'domdocument' => class_exists('DOMDocument'),
+        'simplexml' => function_exists('simplexml_load_string'),
+        'zlib' => extension_loaded('zlib'),
+        'spreadsheet_iofactory' => class_exists(IOFactory::class),
+    ];
+}
+
+function draftOrderImportCreateExcelReader(string $ext, bool $includeImages)
+{
+    $readerType = $ext === 'xls' ? 'Xls' : 'Xlsx';
+    $reader = IOFactory::createReader($readerType);
+    if (method_exists($reader, 'setReadDataOnly')) {
+        $reader->setReadDataOnly(!$includeImages);
+    }
+    return $reader;
+}
+
+function draftOrderImportCopyUploadForReader(string $tmpName, string $ext): array
+{
+    $candidates = [
+        dirname(__DIR__, 2) . '/cache/imports',
+        rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR),
+    ];
+
+    foreach ($candidates as $dir) {
+        if ($dir === '') {
+            continue;
+        }
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
+            continue;
+        }
+        if (!is_writable($dir)) {
+            continue;
+        }
+
+        $path = rtrim($dir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR
+            . 'draft_import_' . bin2hex(random_bytes(8)) . '.' . $ext;
+        if (@copy($tmpName, $path)) {
+            return [$path, true];
+        }
+    }
+
+    return [$tmpName, false];
+}
+
+function draftOrderImportExcelSignatureMessage(string $path, string $ext): ?string
+{
+    $bytes = @file_get_contents($path, false, null, 0, 12);
+    if (!is_string($bytes) || $bytes === '') {
+        return 'Could not read the uploaded Excel file from the server temporary folder. Upload it again.';
+    }
+
+    $hex = strtoupper(bin2hex($bytes));
+    if ($ext === 'xlsx' && strncmp($hex, '504B', 4) !== 0) {
+        if (strncmp($hex, '3C21444F4354595045', 18) === 0 || strncmp($hex, '3C68746D6C', 10) === 0) {
+            return 'The uploaded .xlsx file is an HTML page, not an Excel workbook. Download the template again and make sure the download page did not save an error page.';
+        }
+        return 'The uploaded .xlsx file does not look like a valid Excel workbook. Download the template again or save it as CSV.';
+    }
+
+    return null;
+}
+
+function draftOrderImportReadRowsFromSpreadsheet($spreadsheet, int $maxRows, bool $includeImages): array
+{
+    try {
+        $sheet = $spreadsheet->getActiveSheet();
+        $highestRow = min($sheet->getHighestDataRow(), $maxRows);
+        $highestColumn = $sheet->getHighestDataColumn();
+        $highestColumnIndex = min(60, SpreadsheetCoordinate::columnIndexFromString($highestColumn));
+
+        $rows = [];
+        for ($rowNumber = 1; $rowNumber <= $highestRow; $rowNumber++) {
+            $row = [];
+            for ($col = 1; $col <= $highestColumnIndex; $col++) {
+                $row[] = draftOrderImportCellString(
+                    $sheet->getCellByColumnAndRow($col, $rowNumber)->getFormattedValue()
+                );
+            }
+            $row['__row_number'] = $rowNumber;
+            $rows[] = $row;
+        }
+
+        if ($includeImages) {
+            draftOrderImportAttachWorksheetImages($rows, draftOrderImportWorksheetImages($sheet));
+        }
+
+        return $rows;
+    } finally {
+        if (is_object($spreadsheet) && method_exists($spreadsheet, 'disconnectWorksheets')) {
+            $spreadsheet->disconnectWorksheets();
+        }
+    }
+}
+
+function draftOrderImportLogExcelReadFailure(
+    string $requestId,
+    string $name,
+    array $file,
+    string $tmpName,
+    string $ext,
+    bool $includeImages,
+    Throwable $e
+): void {
+    logClms('draft_order_import_excel_read_failed', array_merge(
+        [
+            'request_id' => $requestId,
+            'filename' => $name,
+            'size' => (int) ($file['size'] ?? 0),
+            'tmp_readable' => is_readable($tmpName),
+            'include_images' => $includeImages,
+            'exception' => get_class($e),
+            'message' => $e->getMessage(),
+        ],
+        draftOrderImportExcelEnvironmentContext($ext)
+    ));
+}
+
 function draftOrderImportReadRowsFromUpload(): array
 {
     if (empty($_FILES['file']) || !is_array($_FILES['file'])) {
@@ -1993,6 +2136,22 @@ function draftOrderImportReadRowsFromUpload(): array
         jsonError('Unsupported import file. Use XLSX, XLS, or CSV.', 415);
     }
 
+    if (in_array($ext, ['xlsx', 'xls'], true)) {
+        $environmentMessage = draftOrderImportExcelEnvironmentMessage($ext);
+        if ($environmentMessage !== null) {
+            $requestId = bin2hex(random_bytes(8));
+            logClms('draft_order_import_excel_environment_missing', array_merge(
+                [
+                    'request_id' => $requestId,
+                    'filename' => $name,
+                    'size' => (int) ($file['size'] ?? 0),
+                ],
+                draftOrderImportExcelEnvironmentContext($ext)
+            ));
+            jsonError($environmentMessage, 500, [], $requestId);
+        }
+    }
+
     $config = require dirname(__DIR__, 2) . '/config/config.php';
     $maxSize = max((int) ($config['upload_max_size'] ?? 0), 25 * 1024 * 1024);
     if (!empty($file['size']) && (int) $file['size'] > $maxSize) {
@@ -2001,6 +2160,7 @@ function draftOrderImportReadRowsFromUpload(): array
 
     $rows = [];
     $maxRows = 3000;
+    $readWarnings = [];
     if (in_array($ext, ['csv', 'cv'], true)) {
         $handle = fopen($tmpName, 'r');
         if (!$handle) {
@@ -2019,31 +2179,52 @@ function draftOrderImportReadRowsFromUpload(): array
         }
         fclose($handle);
     } else {
-        try {
-            $reader = IOFactory::createReaderForFile($tmpName);
-            if (method_exists($reader, 'setReadDataOnly')) {
-                $reader->setReadDataOnly(false);
-            }
-            $spreadsheet = $reader->load($tmpName);
-            $sheet = $spreadsheet->getActiveSheet();
-            $highestRow = min($sheet->getHighestDataRow(), $maxRows);
-            $highestColumn = $sheet->getHighestDataColumn();
-            $highestColumnIndex = min(60, SpreadsheetCoordinate::columnIndexFromString($highestColumn));
+        $signatureMessage = draftOrderImportExcelSignatureMessage($tmpName, $ext);
+        if ($signatureMessage !== null) {
+            $requestId = bin2hex(random_bytes(8));
+            logClms('draft_order_import_excel_invalid_signature', [
+                'request_id' => $requestId,
+                'filename' => $name,
+                'size' => (int) ($file['size'] ?? 0),
+                'extension' => $ext,
+            ]);
+            jsonError($signatureMessage, 400, [], $requestId);
+        }
 
-            for ($rowNumber = 1; $rowNumber <= $highestRow; $rowNumber++) {
-                $row = [];
-                for ($col = 1; $col <= $highestColumnIndex; $col++) {
-                    $row[] = draftOrderImportCellString(
-                        $sheet->getCellByColumnAndRow($col, $rowNumber)->getFormattedValue()
-                    );
-                }
-                $row['__row_number'] = $rowNumber;
-                $rows[] = $row;
-            }
-            draftOrderImportAttachWorksheetImages($rows, draftOrderImportWorksheetImages($sheet));
-            $spreadsheet->disconnectWorksheets();
+        [$readerPath, $deleteReaderPath] = draftOrderImportCopyUploadForReader($tmpName, $ext);
+        try {
+            $reader = draftOrderImportCreateExcelReader($ext, true);
+            $spreadsheet = $reader->load($readerPath);
+            $rows = draftOrderImportReadRowsFromSpreadsheet($spreadsheet, $maxRows, true);
         } catch (Throwable $e) {
-            jsonError('Could not read the Excel file. Export it again or save it as CSV and retry.', 400);
+            $requestId = bin2hex(random_bytes(8));
+            draftOrderImportLogExcelReadFailure($requestId, $name, $file, $tmpName, $ext, true, $e);
+
+            try {
+                $reader = draftOrderImportCreateExcelReader($ext, false);
+                $spreadsheet = $reader->load($readerPath);
+                $rows = draftOrderImportReadRowsFromSpreadsheet($spreadsheet, $maxRows, false);
+                $readWarnings[] = 'The Excel rows were imported, but embedded photos could not be read on this server. Upload item photos manually after preview if needed.';
+                logClms('draft_order_import_excel_read_without_images', [
+                    'request_id' => $requestId,
+                    'filename' => $name,
+                    'size' => (int) ($file['size'] ?? 0),
+                    'extension' => $ext,
+                ]);
+            } catch (Throwable $fallbackException) {
+                draftOrderImportLogExcelReadFailure($requestId, $name, $file, $tmpName, $ext, false, $fallbackException);
+
+                $message = draftOrderImportExcelEnvironmentMessage($ext)
+                    ?? 'Could not read the Excel file. Export it again or save it as CSV and retry.';
+                if (function_exists('clmsIsDebugEnabled') && clmsIsDebugEnabled()) {
+                    $message .= ' Details: ' . $fallbackException->getMessage();
+                }
+                jsonError($message, 400, [], $requestId);
+            }
+        } finally {
+            if (!empty($deleteReaderPath) && $readerPath !== $tmpName && is_file($readerPath)) {
+                @unlink($readerPath);
+            }
         }
     }
 
@@ -2052,7 +2233,7 @@ function draftOrderImportReadRowsFromUpload(): array
         jsonError('Import file has no readable rows.', 400);
     }
 
-    return [$rows, $name];
+    return [$rows, $name, $readWarnings];
 }
 
 function draftOrderImportNumeric($value): ?float
@@ -2539,9 +2720,9 @@ function draftOrderImportFinalizeShared(array &$sections, ?array &$pendingShared
     $pendingShared = null;
 }
 
-function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename): array
+function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename, array $readWarnings = []): array
 {
-    $warnings = [];
+    $warnings = $readWarnings;
     $meta = [
         'customer_name' => '',
         'destination_country_name' => '',
@@ -2721,8 +2902,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     clmsRequirePermission('page:procurement_drafts', ['ChinaAdmin', 'ChinaEmployee'], $pdo, $userId);
 
     if ($method === 'POST' && $id === 'import' && $action === null) {
-        [$rows, $filename] = draftOrderImportReadRowsFromUpload();
-        jsonResponse(['data' => draftOrderImportBuildPayload($pdo, $rows, $filename)]);
+        [$rows, $filename, $readWarnings] = draftOrderImportReadRowsFromUpload();
+        jsonResponse(['data' => draftOrderImportBuildPayload($pdo, $rows, $filename, $readWarnings)]);
     }
 
     if ($method === 'POST' && $id === 'legacy' && $action && preg_match('/^(\d+)\/migrate$/', $action, $matches)) {

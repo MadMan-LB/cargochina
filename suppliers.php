@@ -273,9 +273,13 @@ require 'includes/layout.php';
   </div>
 </div>
 <?php
+$baseAssetPath = $basePath ?? '/cargochina';
 $pageScripts = [
-  'frontend/js/lib/jsQR.js?v=' . @filemtime(__DIR__ . '/frontend/js/lib/jsQR.js'),
-  'frontend/js/wechat_qr_scanner.js?v=' . @filemtime(__DIR__ . '/frontend/js/wechat_qr_scanner.js'),
 ];
-$pageScript = 'frontend/js/suppliers.js?v=' . filemtime(__DIR__ . '/frontend/js/suppliers.js');
+$jsQrPath = __DIR__ . '/frontend/js/lib/jsQR.js';
+if (is_file($jsQrPath)) {
+  $pageScripts[] = $baseAssetPath . '/frontend/js/lib/jsQR.js?v=' . @filemtime($jsQrPath);
+}
+$pageScripts[] = $baseAssetPath . '/frontend/js/wechat_qr_scanner.js?v=' . @filemtime(__DIR__ . '/frontend/js/wechat_qr_scanner.js');
+$pageScript = $baseAssetPath . '/frontend/js/suppliers.js?v=' . filemtime(__DIR__ . '/frontend/js/suppliers.js');
 require 'includes/footer.php'; ?>

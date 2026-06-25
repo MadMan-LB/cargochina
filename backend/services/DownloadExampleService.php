@@ -105,6 +105,14 @@ class DownloadExampleService
         }
 
         $writer = new Xlsx($spreadsheet);
+        if (headers_sent($file, $line)) {
+            throw new RuntimeException('Cannot output Excel template because headers were already sent at ' . $file . ':' . $line);
+        }
+        while (ob_get_level() > 0) {
+            if (!@ob_end_clean()) {
+                break;
+            }
+        }
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment; filename="procurement_import_template.xlsx"');
         header('Cache-Control: no-cache, no-store, must-revalidate');
