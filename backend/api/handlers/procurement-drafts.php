@@ -2,7 +2,7 @@
 
 /**
  * Procurement Drafts API - draft order lists for suppliers
- * Roles: ChinaAdmin, ChinaEmployee, SuperAdmin
+ * Roles: authenticated operational users
  */
 
 require_once __DIR__ . '/../helpers.php';
@@ -61,7 +61,7 @@ function procurementDraftOutputCsv(array $draft, array $items, string $filename)
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
     if (!getAuthUserId()) jsonError('Unauthorized', 401);
-    if (!hasAnyRole(['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'])) jsonError('Forbidden', 403);
+    requirePermission('page:procurement_drafts', ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin']);
 
     if ($action === 'convert' && $method === 'POST' && $id) {
         $stmt = $pdo->prepare("SELECT * FROM procurement_drafts WHERE id = ?");

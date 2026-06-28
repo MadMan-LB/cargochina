@@ -761,3 +761,20 @@ This ledger should be maintained over time so both Codex and Cursor can see exec
 - Stale-tab / repeated-click behavior
 - Lifecycle toasts and translation coverage
 - RBAC unchanged; this fix only hardens lifecycle responses and operator feedback
+
+## 2026-06-28 Operational Access + Training Reset Handoff
+
+### What changed
+- Operational pages/actions were opened to all operational staff roles through backend RBAC and page guards: Orders, Receiving, Draft an Order, confirmations, safe customer lookup/search, product read/search, and country read.
+- Full customer management remains separate: `customers.php` and full customer CRUD/list/detail APIs still enforce the customer visibility rules. Operational customer selectors return only minimal safe fields.
+- Receiving large-order performance was improved with batched item loading and chunked frontend rendering so big receive screens do not lock the browser.
+- `admin_config.php` now has a SuperAdmin-only Training Data Reset section. It calls `/api/v1/config/training-reset`, requires the agreed reset password, deletes only selected groups, protects current/SuperAdmin/admin users, and logs an audit row after completion.
+
+### Migration status
+- No new database migration was required for the training reset or operational access changes.
+- Existing migration `069_order_item_procurement_fields.sql` remains the latest schema migration from the draft-procurement item-field work.
+
+### Guardrails
+- Do not move the reset endpoint out from SuperAdmin-only config protection.
+- Do not expose full customer private data through operational lookup endpoints.
+- If reset groups are expanded later, update `backend/services/TrainingDataResetService.php`, `README.md`, and `SYSTEM_CHANGELOG_AND_IMPLEMENTATION_NOTES.md` together.

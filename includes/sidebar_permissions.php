@@ -56,7 +56,7 @@ function clmsSidebarPageRegistry(): array
             'href' => '/cargochina/index.php',
             'section' => 'main',
             'icon_svg' => '<svg class="sidebar-icon" viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z" /></svg>',
-            'default_roles' => ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'FieldStaff'],
+            'default_roles' => ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff'],
         ],
         'orders' => [
             'title' => 'Orders',
@@ -64,7 +64,7 @@ function clmsSidebarPageRegistry(): array
             'href' => '/cargochina/orders.php',
             'section' => 'main',
             'icon_svg' => '<svg class="sidebar-icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm4 18H6V4h7v5h5v11z" /></svg>',
-            'default_roles' => ['ChinaAdmin', 'ChinaEmployee'],
+            'default_roles' => ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff'],
         ],
         'receiving' => [
             'title' => 'Receiving',
@@ -72,7 +72,7 @@ function clmsSidebarPageRegistry(): array
             'href' => '/cargochina/receiving.php',
             'section' => 'main',
             'icon_svg' => '<svg class="sidebar-icon" viewBox="0 0 24 24"><path d="M20 6h-4V4c0-1.1-.9-2-2-2h-4c-1.1 0-2 .9-2 2v2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-8-2h4v2h-4V4zm8 16H4V8h16v12z" /></svg>',
-            'default_roles' => ['WarehouseStaff'],
+            'default_roles' => ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff'],
         ],
         'pipeline' => [
             'title' => 'Pipeline',
@@ -160,7 +160,7 @@ function clmsSidebarPageRegistry(): array
             'href' => '/cargochina/procurement_drafts.php',
             'section' => 'main',
             'icon_svg' => '<svg class="sidebar-icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm4 18H6V4h7v5h5v11z" /></svg>',
-            'default_roles' => ['ChinaAdmin', 'ChinaEmployee'],
+            'default_roles' => ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff'],
         ],
         'downloads' => [
             'title' => 'Downloads',
@@ -279,6 +279,11 @@ function clmsSidebarSectionLabels(): array
         'notifications' => 'Notifications',
         'administration' => 'Administration',
     ];
+}
+
+function clmsAlwaysOperationalPageIds(): array
+{
+    return ['orders', 'receiving', 'procurement_drafts'];
 }
 
 function clmsSidebarScriptMap(): array
@@ -487,6 +492,11 @@ function clmsGetEffectivePageIdsForRoles(array $roleCodes, ?PDO $pdo = null, ?in
                     $visible[$pageId] = true;
                 }
             }
+        }
+    }
+    foreach (clmsAlwaysOperationalPageIds() as $pageId) {
+        if (isset($registry[$pageId]) && empty($registry[$pageId]['superadmin_only'])) {
+            $visible[$pageId] = true;
         }
     }
 

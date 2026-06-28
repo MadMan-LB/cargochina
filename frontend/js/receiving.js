@@ -1,12 +1,16 @@
 let receivePhotoPaths = [];
 let receiveOrderItems = [];
 let receiveItemPhotos = {};
+let receiveItemRenderLimit = 80;
+let receiveCurrentOrderId = null;
 let warehouseQueueData = [];
 let warehouseQueueSourceData = [];
 let receivingImportPreviewToken = null;
 let calMonth = new Date().getMonth();
 let calYear = new Date().getFullYear();
 const RECEIVING_DEFAULT_STATUSES = ["Approved", "InTransitToWarehouse"];
+const RECEIVING_ITEM_RENDER_CHUNK = 80;
+const RECEIVING_CARD_ITEM_BADGE_LIMIT = 8;
 
 function receivingT(text, replacements = null) {
     return typeof t === "function" ? t(text, replacements) : text;
@@ -365,6 +369,7 @@ function setupReceiveOrderSearch() {
             form.classList.add("d-none");
             receiveOrderItems = [];
             receiveItemPhotos = {};
+            receiveCurrentOrderId = null;
             updateDeclaredSummary(null);
         }
     });
@@ -807,6 +812,8 @@ function renderWarehouseList() {
                 (s, i) => s + (parseInt(i.cartons) || 0),
                 0,
             );
+            const badgeItems = items.slice(0, RECEIVING_CARD_ITEM_BADGE_LIMIT);
+            const hiddenItemCount = Math.max(0, items.length - badgeItems.length);
             return `
         <div class="col-12 col-md-6 col-lg-4">
           <div class="card warehouse-record-card h-100">
@@ -831,7 +838,7 @@ function renderWarehouseList() {
                 <dt class="col-5">${escapeHtml(receivingT("Cartons"))}</dt><dd class="col-7">${totalCartons}</dd>
                 <dt class="col-5">${escapeHtml(receivingT("CBM / Weight"))}</dt><dd class="col-7">${typeof formatDisplayCbm === "function" ? formatDisplayCbm(parseFloat(o.declared_cbm || 0), 6) : parseFloat(o.declared_cbm || 0).toFixed(6)} / ${typeof formatDisplayWeight === "function" ? formatDisplayWeight(parseFloat(o.declared_weight || 0), 2) : parseFloat(o.declared_weight || 0)} kg</dd>
               </dl>
-              ${items.length ? `<div class="mt-2 pt-2 border-top"><small class="text-muted">${escapeHtml(receivingT("Items"))}:</small> ${items.map((it) => `<span class="badge bg-light text-dark me-1">${escapeHtml(it.shipping_code || "—")} ${it.cartons || 0}ctn ${it.qty_per_carton || ""}/ctn HS:${escapeHtml(it.hs_code || "-")}${it.product_high_alert_note || it.product_required_design ? ` ${escapeHtml(receivingT("ALERT"))}` : ""}</span>`).join("")}</div>` : ""}
+              ${items.length ? `<div class="mt-2 pt-2 border-top"><small class="text-muted">${escapeHtml(receivingT("Items"))}:</small> ${badgeItems.map((it) => `<span class="badge bg-light text-dark me-1">${escapeHtml(it.shipping_code || "—")} ${it.cartons || 0}ctn ${it.qty_per_carton || ""}/ctn HS:${escapeHtml(it.hs_code || "-")}${it.product_high_alert_note || it.product_required_design ? ` ${escapeHtml(receivingT("ALERT"))}` : ""}</span>`).join("")}${hiddenItemCount ? `<span class="badge bg-secondary-subtle text-secondary border">+${hiddenItemCount} ${escapeHtml(receivingT("more"))}</span>` : ""}</div>` : ""}
               ${canRecordReceiving() ? `<div class="mt-2 pt-2">
                 <button type="button" class="btn btn-sm btn-primary js-receive-btn" data-order-id="${o.id}">${escapeHtml(receivingT("Receive"))}</button>
               </div>` : ""}
@@ -1086,17 +1093,22 @@ function updateDeclaredSummary(order) {
         (s, i) => s + (parseFloat(i.declared_weight) || 0),
         0,
     );
-    const itemsStr = items
+    const summaryItems = items.slice(0, 12);
+    const itemsStr = summaryItems
         .map(
             (i) =>
                 `${i.shipping_code || "-"} ${i.cartons || 0}ctn ${i.qty_per_carton || ""}/ctn`,
         )
         .join("; ");
+    const remainingText =
+        items.length > summaryItems.length
+            ? `; +${items.length - summaryItems.length} ${receivingT("more items")}`
+            : "";
     el.textContent = receivingT("{cartons} cartons, {cbm} CBM, {weight} kg. Items: {items}", {
         cartons: fmtReceivingNumber(cartons, 4),
         cbm: fmtReceivingNumber(cbm, 6),
         weight: fmtReceivingNumber(weight, 4),
-        items: itemsStr || "—",
+        items: (itemsStr || "—") + remainingText,
     });
 
     // Set declared values as placeholders on Actual inputs so user can verify before entering
@@ -1366,11 +1378,18 @@ async function loadOrderForReceive(orderId) {
         const res = await api("GET", "/orders/" + orderId);
         const order = res.data;
         receiveOrderItems = order?.items || [];
-        receiveItemPhotos = {};
+        const isNewReceiveOrder = String(receiveCurrentOrderId || "") !== String(orderId);
+        if (isNewReceiveOrder) {
+            receiveItemPhotos = {};
+            receiveItemRenderLimit = RECEIVING_ITEM_RENDER_CHUNK;
+            receiveCurrentOrderId = orderId;
+        }
         updateDeclaredSummary(order);
         const tbody = document.getElementById("itemLevelBody");
         if (!tbody) return;
-        tbody.innerHTML = receiveOrderItems
+        const visibleItems = receiveOrderItems.slice(0, receiveItemRenderLimit);
+        const hiddenItemCount = Math.max(0, receiveOrderItems.length - visibleItems.length);
+        tbody.innerHTML = visibleItems
             .map(
                 (it, i) => {
                     const metaText = getReceivingItemMetaText(it);
@@ -1390,7 +1409,15 @@ async function loadOrderForReceive(orderId) {
           </tr>`;
                 },
             )
-            .join("");
+            .join("") +
+            (hiddenItemCount
+                ? `<tr class="receive-show-more-row"><td colspan="11" class="text-center py-3">
+                    <button type="button" class="btn btn-outline-primary btn-sm receive-show-more-items">
+                      ${escapeHtml(receivingT("Show more items"))} (${visibleItems.length}/${receiveOrderItems.length})
+                    </button>
+                    <div class="small text-muted mt-1">${escapeHtml(receivingT("Large order: items are loaded in batches to keep this page responsive."))}</div>
+                  </td></tr>`
+                : "");
         tbody.querySelectorAll("tr[data-order-item-id]").forEach((row) => {
             bindReceiveItemCalculation(row);
         });
@@ -1413,6 +1440,16 @@ async function loadOrderForReceive(orderId) {
                 e.target.value = "";
             };
             btn.onclick = () => input.click();
+        });
+        Object.keys(receiveItemPhotos || {}).forEach((orderItemId) => {
+            renderItemPhotoPreview(orderItemId);
+        });
+        tbody.querySelector(".receive-show-more-items")?.addEventListener("click", () => {
+            receiveItemRenderLimit = Math.min(
+                receiveOrderItems.length,
+                receiveItemRenderLimit + RECEIVING_ITEM_RENDER_CHUNK,
+            );
+            loadOrderForReceive(orderId);
         });
     } catch (e) {
         showToast(e.message, "danger");
@@ -1594,7 +1631,9 @@ async function submitReceive() {
         document.getElementById("receiveOrderSearch").value = "";
         document.getElementById("receiveOrderId").value = "";
         receivePhotoPaths = [];
+        receiveOrderItems = [];
         receiveItemPhotos = {};
+        receiveCurrentOrderId = null;
         renderReceivePhotoPreview();
         refreshUnsavedBaseline?.(document.getElementById("receiveForm"));
     } catch (e) {

@@ -13,6 +13,33 @@ require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
 require_once dirname(__DIR__, 2) . '/services/ReceivingExcelImportService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderReceivingService.php';
 
+function receivingOperationalRoles(): array
+{
+    return ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'];
+}
+
+function receivingTableHasColumn(PDO $pdo, string $table, string $column): bool
+{
+    static $cache = [];
+    $key = $table . '.' . $column;
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+    try {
+        $stmt = $pdo->prepare("SHOW COLUMNS FROM `$table` LIKE ?");
+        $stmt->execute([$column]);
+        $cache[$key] = (bool) $stmt->rowCount();
+    } catch (Throwable $e) {
+        $cache[$key] = false;
+    }
+    return $cache[$key];
+}
+
+function receivingUtf8LikeExpr(string $expr): string
+{
+    return "CONVERT($expr USING utf8mb4) COLLATE utf8mb4_unicode_ci";
+}
+
 function receivingFetchQueueRowsForRequest(PDO $pdo): array
 {
     $statuses = $_GET['status'] ?? null;
@@ -62,12 +89,11 @@ function receivingFetchQueueRowsForRequest(PDO $pdo): array
         $params[] = $dateTo;
     }
     if ($shippingCode !== '') {
-        $queueItemClauses = ["(oi.shipping_code COLLATE utf8mb4_unicode_ci) LIKE ?"];
+        $queueItemClauses = [receivingUtf8LikeExpr('oi.shipping_code') . " LIKE ?"];
         $queueItemParams = ['%' . $shippingCode . '%'];
         foreach (['what_brand', 'copy_normal_goods', 'code', 'express_number', 'size'] as $column) {
-            $chkQueueMeta = @$pdo->query("SHOW COLUMNS FROM order_items LIKE " . $pdo->quote($column));
-            if ($chkQueueMeta && $chkQueueMeta->rowCount() > 0) {
-                $queueItemClauses[] = "(oi.$column COLLATE utf8mb4_unicode_ci) LIKE ?";
+            if (receivingTableHasColumn($pdo, 'order_items', $column)) {
+                $queueItemClauses[] = receivingUtf8LikeExpr("oi.$column") . " LIKE ?";
                 $queueItemParams[] = '%' . $shippingCode . '%';
             }
         }
@@ -79,6 +105,9 @@ function receivingFetchQueueRowsForRequest(PDO $pdo): array
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    if (!$rows) {
+        return [];
+    }
     $chkProductAlert = @$pdo->query("SHOW COLUMNS FROM products LIKE 'high_alert_note'");
     $chkRequiredDesign = @$pdo->query("SHOW COLUMNS FROM products LIKE 'required_design'");
     $chkItemHs = @$pdo->query("SHOW COLUMNS FROM order_items LIKE 'hs_code'");
@@ -91,15 +120,25 @@ function receivingFetchQueueRowsForRequest(PDO $pdo): array
         : ", p.hs_code as hs_code";
     $itemMetaCols = '';
     foreach (['what_brand', 'copy_normal_goods', 'code', 'express_number', 'size'] as $column) {
-        $chkMeta = @$pdo->query("SHOW COLUMNS FROM order_items LIKE " . $pdo->quote($column));
-        if ($chkMeta && $chkMeta->rowCount() > 0) {
+        if (receivingTableHasColumn($pdo, 'order_items', $column)) {
             $itemMetaCols .= ", oi.$column";
         }
     }
+    $orderIds = array_values(array_unique(array_map(static fn($row) => (int) ($row['id'] ?? 0), $rows)));
+    $orderIds = array_values(array_filter($orderIds, static fn($id) => $id > 0));
+    $itemsByOrder = [];
+    if ($orderIds) {
+        $itemPlaceholders = implode(',', array_fill(0, count($orderIds), '?'));
+        $items = $pdo->prepare("SELECT oi.order_id, oi.id, oi.shipping_code$itemMetaCols, oi.cartons, oi.qty_per_carton, oi.quantity, oi.unit_price, oi.total_amount, oi.declared_cbm, oi.declared_weight, oi.item_length, oi.item_width, oi.item_height, oi.description_cn, oi.description_en$itemHsCol$itemAlertCol FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id IN ($itemPlaceholders) ORDER BY oi.order_id ASC, oi.id ASC");
+        $items->execute($orderIds);
+        foreach ($items->fetchAll(PDO::FETCH_ASSOC) as $item) {
+            $oid = (int) ($item['order_id'] ?? 0);
+            unset($item['order_id']);
+            $itemsByOrder[$oid][] = $item;
+        }
+    }
     foreach ($rows as &$row) {
-        $items = $pdo->prepare("SELECT oi.id, oi.shipping_code$itemMetaCols, oi.cartons, oi.qty_per_carton, oi.quantity, oi.unit_price, oi.total_amount, oi.declared_cbm, oi.declared_weight, oi.item_length, oi.item_width, oi.item_height, oi.description_cn, oi.description_en$itemHsCol$itemAlertCol FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?");
-        $items->execute([$row['id']]);
-        $row['items'] = $items->fetchAll(PDO::FETCH_ASSOC);
+        $row['items'] = $itemsByOrder[(int) ($row['id'] ?? 0)] ?? [];
         $row['declared_cbm'] = array_sum(array_column($row['items'], 'declared_cbm'));
         $row['declared_weight'] = array_sum(array_column($row['items'], 'declared_weight'));
     }
@@ -240,12 +279,13 @@ function receivingLoadExcelImportPreview(PDO $pdo, string $token, int $userId): 
 }
 
 return function (string $method, ?string $id, ?string $action, array $input) {
-    requirePermission('page:receiving', ['WarehouseStaff', 'SuperAdmin']);
+    $operationalRoles = receivingOperationalRoles();
+    requirePermission('page:receiving', $operationalRoles);
     $pdo = getDb();
     $userId = getAuthUserId() ?? 1;
 
     if ($id === 'import' && $action === 'preview') {
-        requirePermission('receiving.import', ['WarehouseStaff', 'SuperAdmin']);
+        requirePermission('receiving.import', $operationalRoles);
         if ($method !== 'POST') {
             jsonError('Method not allowed', 405);
         }
@@ -268,7 +308,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     }
 
     if ($id === 'import' && $action === 'commit') {
-        requirePermission('receiving.import', ['WarehouseStaff', 'SuperAdmin']);
+        requirePermission('receiving.import', $operationalRoles);
         if ($method !== 'POST') {
             jsonError('Method not allowed', 405);
         }
@@ -353,41 +393,67 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $statuses = ['Approved', 'InTransitToWarehouse'];
         $placeholders = implode(',', array_fill(0, count($statuses), '?'));
         $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
-        $custCols = 'c.name as customer_name, c.phone as customer_phone, c.code as customer_code';
+        $hasCustomerPhone = receivingTableHasColumn($pdo, 'customers', 'phone');
+        $hasCustomerCode = receivingTableHasColumn($pdo, 'customers', 'code');
+        $hasSupplierPhone = receivingTableHasColumn($pdo, 'suppliers', 'phone');
+        $hasSupplierCode = receivingTableHasColumn($pdo, 'suppliers', 'code');
+        $custCols = 'c.name as customer_name';
+        $custCols .= $hasCustomerPhone ? ', c.phone as customer_phone' : ', NULL as customer_phone';
+        $custCols .= $hasCustomerCode ? ', c.code as customer_code' : ', NULL as customer_code';
+        $supplierCols = 's.name as supplier_name';
+        $supplierCols .= $hasSupplierPhone ? ', s.phone as supplier_phone' : ', NULL as supplier_phone';
         $chkPrio = @$pdo->query("SHOW COLUMNS FROM customers LIKE 'priority_level'");
         if ($chkPrio && $chkPrio->rowCount() > 0) $custCols .= ', c.priority_level as customer_priority_level, c.priority_note as customer_priority_note';
-        $coll = 'COLLATE utf8mb4_unicode_ci';
-        $extraItemSearchSql = '';
-        $extraItemSearchParams = [];
-        foreach (['what_brand', 'copy_normal_goods', 'code', 'express_number', 'size'] as $column) {
-            $chkItemSearch = @$pdo->query("SHOW COLUMNS FROM order_items LIKE " . $pdo->quote($column));
-            if ($chkItemSearch && $chkItemSearch->rowCount() > 0) {
-                $extraItemSearchSql .= " OR (oi.$column $coll LIKE ?)";
-                $extraItemSearchParams[] = $like;
+
+        $searchClauses = ['o.id = ?'];
+        $searchParams = [ctype_digit($q) ? (int) $q : 0];
+        foreach ([receivingUtf8LikeExpr('c.name')] as $expr) {
+            $searchClauses[] = "$expr LIKE ?";
+            $searchParams[] = $like;
+        }
+        if ($hasCustomerCode) {
+            $searchClauses[] = receivingUtf8LikeExpr('c.code') . " LIKE ?";
+            $searchParams[] = $like;
+        }
+        if ($hasCustomerPhone) {
+            $searchClauses[] = receivingUtf8LikeExpr('c.phone') . " LIKE ?";
+            $searchParams[] = $like;
+        }
+        $searchClauses[] = receivingUtf8LikeExpr('s.name') . " LIKE ?";
+        $searchParams[] = $like;
+        if ($hasSupplierCode) {
+            $searchClauses[] = receivingUtf8LikeExpr('s.code') . " LIKE ?";
+            $searchParams[] = $like;
+        }
+        if ($hasSupplierPhone) {
+            $searchClauses[] = receivingUtf8LikeExpr('s.phone') . " LIKE ?";
+            $searchParams[] = $like;
+        }
+
+        $itemSearchClauses = [];
+        $itemSearchParams = [];
+        foreach (['shipping_code', 'item_no', 'description_cn', 'description_en', 'what_brand', 'copy_normal_goods', 'code', 'express_number', 'size'] as $column) {
+            if (receivingTableHasColumn($pdo, 'order_items', $column)) {
+                $itemSearchClauses[] = receivingUtf8LikeExpr("oi.$column") . " LIKE ?";
+                $itemSearchParams[] = $like;
             }
+        }
+        if ($itemSearchClauses) {
+            $searchClauses[] = "EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND (" . implode(' OR ', $itemSearchClauses) . "))";
+            array_push($searchParams, ...$itemSearchParams);
         }
         $sql = "SELECT o.id, o.customer_id, o.supplier_id, o.expected_ready_date, o.status, o.high_alert_notes,
             $custCols,
-            s.name as supplier_name, s.phone as supplier_phone
+            $supplierCols
             FROM orders o
             JOIN customers c ON o.customer_id = c.id
             LEFT JOIN suppliers s ON o.supplier_id = s.id
             WHERE o.status IN ($placeholders)
-            AND (
-                o.id = ?
-                OR (c.name $coll LIKE ?)
-                OR (c.code $coll LIKE ?)
-                OR (c.phone IS NOT NULL AND c.phone $coll LIKE ?)
-                OR (s.name $coll LIKE ?)
-                OR (s.code $coll LIKE ?)
-                OR (s.phone IS NOT NULL AND s.phone $coll LIKE ?)
-                OR EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND ((oi.shipping_code $coll LIKE ?) OR (oi.item_no $coll LIKE ?) OR (oi.description_cn $coll LIKE ?) OR (oi.description_en $coll LIKE ?)$extraItemSearchSql))
-            )";
+            AND (" . implode(' OR ', $searchClauses) . ")";
         $sql .= "
             ORDER BY o.expected_ready_date IS NULL ASC, o.expected_ready_date ASC, o.id ASC
             LIMIT 30";
-        $oid = ctype_digit($q) ? (int) $q : 0;
-        $params = array_merge($statuses, [$oid, $like, $like, $like, $like, $like, $like, $like, $like, $like, $like], $extraItemSearchParams);
+        $params = array_merge($statuses, $searchParams);
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -395,10 +461,21 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $chkRequiredDesign = @$pdo->query("SHOW COLUMNS FROM products LIKE 'required_design'");
         $itemAlertCol = ($chkProductAlert && $chkProductAlert->rowCount() > 0) ? ", p.high_alert_note as product_high_alert_note" : "";
         if ($chkRequiredDesign && $chkRequiredDesign->rowCount() > 0) $itemAlertCol .= ", p.required_design as product_required_design";
+        $itemsByOrder = [];
+        $orderIds = array_values(array_unique(array_map(static fn($row) => (int) ($row['id'] ?? 0), $rows)));
+        $orderIds = array_values(array_filter($orderIds, static fn($id) => $id > 0));
+        if ($orderIds) {
+            $itemPlaceholders = implode(',', array_fill(0, count($orderIds), '?'));
+            $items = $pdo->prepare("SELECT oi.order_id, oi.id, oi.shipping_code, oi.cartons, oi.declared_cbm, oi.declared_weight$itemAlertCol FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id IN ($itemPlaceholders) ORDER BY oi.order_id ASC, oi.id ASC");
+            $items->execute($orderIds);
+            foreach ($items->fetchAll(PDO::FETCH_ASSOC) as $item) {
+                $oid = (int) ($item['order_id'] ?? 0);
+                unset($item['order_id']);
+                $itemsByOrder[$oid][] = $item;
+            }
+        }
         foreach ($rows as &$r) {
-            $items = $pdo->prepare("SELECT oi.id, oi.shipping_code, oi.cartons, oi.declared_cbm, oi.declared_weight$itemAlertCol FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?");
-            $items->execute([$r['id']]);
-            $r['items'] = $items->fetchAll(PDO::FETCH_ASSOC);
+            $r['items'] = $itemsByOrder[(int) ($r['id'] ?? 0)] ?? [];
             $r['declared_cbm'] = array_sum(array_column($r['items'], 'declared_cbm'));
             $r['declared_weight'] = array_sum(array_column($r['items'], 'declared_weight'));
         }

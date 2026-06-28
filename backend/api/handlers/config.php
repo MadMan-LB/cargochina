@@ -5,6 +5,7 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
+require_once dirname(__DIR__, 2) . '/services/TrainingDataResetService.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
@@ -14,6 +15,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
     switch ($method) {
         case 'GET':
+            if ($id === 'training-reset') {
+                requireRole(['SuperAdmin']);
+                $service = new TrainingDataResetService($pdo);
+                jsonResponse(['data' => ['groups' => $service->preview(getAuthUserId() ?? 0)]]);
+                return;
+            }
             if ($id === 'upload') {
                 $fileConfig = require dirname(__DIR__, 2) . '/config/config.php';
                 $stmt = @$pdo->query("SELECT key_name, key_value FROM system_config WHERE key_name IN ('UPLOAD_MAX_MB','UPLOAD_ALLOWED_TYPES')");
@@ -148,6 +155,29 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $fileConfig['whatsapp_twilio_auth_token_set'] = false;
             }
             jsonResponse(['data' => $fileConfig]);
+            break;
+
+        case 'POST':
+            if ($id === 'training-reset') {
+                requireRole(['SuperAdmin']);
+                $password = trim((string) ($input['password'] ?? ''));
+                $resetPasswordHash = '$2y$10$6OSW8wVwxgejK0X7Hzy8OO5746OBTYv1ZNLxE6skzOMNBuxEB7NF.';
+                if (!password_verify($password, $resetPasswordHash)) {
+                    jsonError('Reset password is incorrect.', 403);
+                }
+                $groups = $input['groups'] ?? [];
+                if (!is_array($groups)) {
+                    jsonError('Invalid reset groups.', 400);
+                }
+                try {
+                    $service = new TrainingDataResetService($pdo);
+                    $summary = $service->reset($groups, getAuthUserId() ?? 0);
+                } catch (InvalidArgumentException $e) {
+                    jsonError($e->getMessage(), 400);
+                }
+                jsonResponse(['data' => $summary]);
+                return;
+            }
             break;
 
         case 'PUT':

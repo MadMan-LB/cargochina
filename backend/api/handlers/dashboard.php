@@ -86,9 +86,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $stats['unread_notifications'] = 0;
     }
 
-    // My tasks — role-scoped actionable counts
+    // My tasks follow operational page access; sensitive customer management still stays scoped on customers.php.
     $stats['my_tasks'] = [];
-    if ((in_array('ChinaAdmin', $userRoles) || in_array('ChinaEmployee', $userRoles) || in_array('SuperAdmin', $userRoles)) && $canSeePage('orders')) {
+    if ($canSeePage('orders')) {
         $submitted = (int) ($stats['submitted'] ?? 0);
         if ($submitted > 0) {
             $stats['my_tasks'][] = ['label' => 'Orders to approve', 'count' => $submitted, 'url' => '/cargochina/orders.php?status=Submitted'];
@@ -98,13 +98,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $stats['my_tasks'][] = ['label' => 'Customer feedback pending', 'count' => $feedbackPending, 'url' => '/cargochina/orders.php?customer_feedback=pending'];
         }
     }
-    if ((in_array('WarehouseStaff', $userRoles) || in_array('SuperAdmin', $userRoles)) && $canSeePage('receiving')) {
+    if ($canSeePage('receiving')) {
         $toReceive = (int) ($stats['pending_receiving'] ?? 0);
         if ($toReceive > 0) {
             $stats['my_tasks'][] = ['label' => 'To receive', 'count' => $toReceive, 'url' => '/cargochina/receiving.php'];
         }
     }
-    if ((in_array('ChinaAdmin', $userRoles) || in_array('LebanonAdmin', $userRoles) || in_array('SuperAdmin', $userRoles)) && $canSeePage('consolidation')) {
+    if ($canSeePage('consolidation')) {
         $ready = (int) ($stats['ready_for_consolidation'] ?? 0);
         if ($ready > 0) {
             $stats['my_tasks'][] = ['label' => 'Ready to consolidate', 'count' => $ready, 'url' => '/cargochina/consolidation.php'];
@@ -114,7 +114,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $stats['my_tasks'][] = ['label' => 'Shipment drafts', 'count' => $drafts, 'url' => '/cargochina/consolidation.php'];
         }
     }
-    if ((in_array('ChinaAdmin', $userRoles) || in_array('ChinaEmployee', $userRoles) || in_array('LebanonAdmin', $userRoles) || in_array('SuperAdmin', $userRoles)) && $canSeePage('orders')) {
+    if ($canSeePage('orders')) {
         $declinedAfter = (int) ($stats['declined_after_auto_confirm'] ?? 0);
         if ($declinedAfter > 0) {
             $stats['my_tasks'][] = ['label' => 'Declined after auto-confirm', 'count' => $declinedAfter, 'url' => '/cargochina/orders.php?customer_feedback=declined_after_auto_confirm'];

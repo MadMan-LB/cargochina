@@ -62,13 +62,14 @@ function buildUserPermissionOverrideRegistry(PDO $pdo): array
         }
     }
 
+    $operationalRoles = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'];
     $manual = [
         'customers.create' => ['Add customer', 'Allow creating customers without changing the user role.', 'Customer', ['SuperAdmin']],
         'customers.import' => ['Import customers', 'Allow customer CSV import without changing the user role.', 'Customer', ['ChinaAdmin', 'SuperAdmin']],
         'page:customers' => ['View customer page', 'Allow opening the Customers page and seeing it in the sidebar.', 'Customer', ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin']],
-        'page:receiving' => ['View receiving page', 'Allow opening the Warehouse Receiving page and seeing it in the sidebar.', 'Receiving', ['WarehouseStaff', 'SuperAdmin']],
-        'orders.receive' => ['Receiving from warehouse', 'Allow recording warehouse receipts for approved or in-transit orders.', 'Receiving', ['WarehouseStaff', 'SuperAdmin']],
-        'receiving.import' => ['Import Excel receiving', 'Allow previewing and committing warehouse receiving Excel imports.', 'Receiving', ['WarehouseStaff', 'SuperAdmin']],
+        'page:receiving' => ['View receiving page', 'Allow opening the Warehouse Receiving page and seeing it in the sidebar.', 'Receiving', $operationalRoles],
+        'orders.receive' => ['Receiving from warehouse', 'Allow recording warehouse receipts for approved or in-transit orders.', 'Receiving', $operationalRoles],
+        'receiving.import' => ['Import Excel receiving', 'Allow previewing and committing warehouse receiving Excel imports.', 'Receiving', $operationalRoles],
     ];
     foreach ($manual as $key => [$label, $description, $section, $defaultRoles]) {
         $key = clmsNormalizePermissionKey($key);

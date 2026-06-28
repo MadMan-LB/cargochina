@@ -181,9 +181,9 @@ test('orders.expected_ready_date is nullable', function () use ($pdo) {
     }
 });
 
-test('draft-orders RBAC is buyer-only', function () {
+test('draft-orders RBAC is operational', function () {
     $rbac = require dirname(__DIR__) . '/backend/config/rbac.php';
-    $expected = ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'];
+    $expected = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'];
     if (($rbac['draft-orders'] ?? null) !== $expected) {
         throw new Exception('Unexpected draft-orders RBAC mapping');
     }

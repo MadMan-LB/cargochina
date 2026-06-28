@@ -159,6 +159,27 @@ require 'includes/layout.php';
                 </div>
         </div>
         <div id="hsCatalogImportStatus" class="small text-muted"></div>
+        <hr>
+        <h5 class="mb-3 text-danger">Training Data Reset</h5>
+        <div class="alert alert-warning small">
+                SuperAdmin only. Select exactly what should be removed from training data, enter the reset password, then confirm.
+                Schema, migrations, roles, configuration, departments, countries, and SuperAdmin/admin users are kept.
+        </div>
+        <div class="row g-3 mb-3" id="trainingResetGroups">
+                <div class="col-12 text-muted small">Loading reset options...</div>
+        </div>
+        <div class="row g-3 align-items-end mb-3">
+                <div class="col-md-5">
+                        <label class="form-label">Reset Password</label>
+                        <input type="password" class="form-control" id="trainingResetPassword" autocomplete="new-password"
+                                placeholder="Required before deleting selected data">
+                </div>
+                <div class="col-md-7 d-flex flex-wrap gap-2">
+                        <button type="button" class="btn btn-outline-secondary" id="trainingResetRefreshBtn">Refresh Counts</button>
+                        <button type="button" class="btn btn-outline-danger" id="trainingResetBtn">Delete Selected Training Data</button>
+                </div>
+        </div>
+        <div id="trainingResetStatus" class="small text-muted mb-3"></div>
         <button type="button" class="btn btn-primary" onclick="saveConfig()">Save</button>
 </form>
         </div>

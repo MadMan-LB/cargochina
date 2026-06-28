@@ -121,6 +121,11 @@ function orderTableHasColumn(PDO $pdo, string $table, string $column): bool
     return $cache[$key];
 }
 
+function orderUtf8LikeExpr(string $expr): string
+{
+    return "CONVERT($expr USING utf8mb4) COLLATE utf8mb4_unicode_ci";
+}
+
 function orderTableExists(PDO $pdo, string $table): bool
 {
     static $cache = [];
@@ -461,98 +466,97 @@ function buildOrderSearchSql(PDO $pdo, string $query, array &$params, string $or
     $hasCopyNormalGoods = orderTableHasColumn($pdo, 'order_items', 'copy_normal_goods');
     $hasItemSize = orderTableHasColumn($pdo, 'order_items', 'size');
 
-    $coll = 'COLLATE utf8mb4_unicode_ci';
     $clauses = [];
     foreach ($terms as $term) {
         $like = '%' . $term . '%';
         $termClauses = [
-            "CAST($orderAlias.id AS CHAR) $coll LIKE ?",
-            "$customerAlias.name $coll LIKE ?",
-            "COALESCE($supplierAlias.name, '') $coll LIKE ?",
+            "CAST($orderAlias.id AS CHAR) COLLATE utf8mb4_unicode_ci LIKE ?",
+            orderUtf8LikeExpr("$customerAlias.name") . " LIKE ?",
+            orderUtf8LikeExpr("COALESCE($supplierAlias.name, '')") . " LIKE ?",
         ];
         array_push($params, $like, $like, $like);
 
         if ($hasCustomerCode) {
-            $termClauses[] = "COALESCE($customerAlias.code, '') $coll LIKE ?";
+            $termClauses[] = orderUtf8LikeExpr("COALESCE($customerAlias.code, '')") . " LIKE ?";
             $params[] = $like;
         }
         if ($hasCustomerPhone) {
-            $termClauses[] = "COALESCE($customerAlias.phone, '') $coll LIKE ?";
+            $termClauses[] = orderUtf8LikeExpr("COALESCE($customerAlias.phone, '')") . " LIKE ?";
             $params[] = $like;
         }
         if ($hasSupplierCode) {
-            $termClauses[] = "COALESCE($supplierAlias.code, '') $coll LIKE ?";
+            $termClauses[] = orderUtf8LikeExpr("COALESCE($supplierAlias.code, '')") . " LIKE ?";
             $params[] = $like;
         } elseif ($hasSupplierStoreId) {
-            $termClauses[] = "COALESCE($supplierAlias.store_id, '') $coll LIKE ?";
+            $termClauses[] = orderUtf8LikeExpr("COALESCE($supplierAlias.store_id, '')") . " LIKE ?";
             $params[] = $like;
         }
         if ($hasSupplierPhone) {
-            $termClauses[] = "COALESCE($supplierAlias.phone, '') $coll LIKE ?";
+            $termClauses[] = orderUtf8LikeExpr("COALESCE($supplierAlias.phone, '')") . " LIKE ?";
             $params[] = $like;
         }
 
         $itemClauses = [];
         if ($hasShippingCode) {
-            $itemClauses[] = "COALESCE(oi.shipping_code, '') $coll LIKE ?";
+            $itemClauses[] = orderUtf8LikeExpr("COALESCE(oi.shipping_code, '')") . " LIKE ?";
             $params[] = $like;
         }
         if ($hasItemNo) {
-            $itemClauses[] = "COALESCE(oi.item_no, '') $coll LIKE ?";
+            $itemClauses[] = orderUtf8LikeExpr("COALESCE(oi.item_no, '')") . " LIKE ?";
             $params[] = $like;
         }
         if ($hasItemCode) {
-            $itemClauses[] = "COALESCE(oi.code, '') $coll LIKE ?";
+            $itemClauses[] = orderUtf8LikeExpr("COALESCE(oi.code, '')") . " LIKE ?";
             $params[] = $like;
         }
         if ($hasExpressNumber) {
-            $itemClauses[] = "COALESCE(oi.express_number, '') $coll LIKE ?";
+            $itemClauses[] = orderUtf8LikeExpr("COALESCE(oi.express_number, '')") . " LIKE ?";
             $params[] = $like;
         }
         if ($hasWhatBrand) {
-            $itemClauses[] = "COALESCE(oi.what_brand, '') $coll LIKE ?";
+            $itemClauses[] = orderUtf8LikeExpr("COALESCE(oi.what_brand, '')") . " LIKE ?";
             $params[] = $like;
         }
         if ($hasBrand) {
-            $itemClauses[] = "COALESCE(oi.brand, '') $coll LIKE ?";
+            $itemClauses[] = orderUtf8LikeExpr("COALESCE(oi.brand, '')") . " LIKE ?";
             $params[] = $like;
         }
         if ($hasMaterials) {
-            $itemClauses[] = "COALESCE(oi.materials, '') $coll LIKE ?";
+            $itemClauses[] = orderUtf8LikeExpr("COALESCE(oi.materials, '')") . " LIKE ?";
             $params[] = $like;
         }
         if ($hasCopyNormalGoods) {
-            $itemClauses[] = "COALESCE(oi.copy_normal_goods, '') $coll LIKE ?";
+            $itemClauses[] = orderUtf8LikeExpr("COALESCE(oi.copy_normal_goods, '')") . " LIKE ?";
             $params[] = $like;
         }
         if ($hasItemSize) {
-            $itemClauses[] = "COALESCE(oi.size, '') $coll LIKE ?";
+            $itemClauses[] = orderUtf8LikeExpr("COALESCE(oi.size, '')") . " LIKE ?";
             $params[] = $like;
         }
         if ($hasDescriptionCn) {
-            $itemClauses[] = "COALESCE(oi.description_cn, '') $coll LIKE ?";
+            $itemClauses[] = orderUtf8LikeExpr("COALESCE(oi.description_cn, '')") . " LIKE ?";
             $params[] = $like;
         }
         if ($hasDescriptionEn) {
-            $itemClauses[] = "COALESCE(oi.description_en, '') $coll LIKE ?";
+            $itemClauses[] = orderUtf8LikeExpr("COALESCE(oi.description_en, '')") . " LIKE ?";
             $params[] = $like;
         }
         if ($hasItemHsCode) {
-            $itemClauses[] = "COALESCE(oi.hs_code, op.hs_code, '') $coll LIKE ?";
+            $itemClauses[] = orderUtf8LikeExpr("COALESCE(oi.hs_code, op.hs_code, '')") . " LIKE ?";
             $params[] = $like;
         }
         if ($hasOrderItemSupplier) {
-            $itemClauses[] = "COALESCE(sis.name, '') $coll LIKE ?";
+            $itemClauses[] = orderUtf8LikeExpr("COALESCE(sis.name, '')") . " LIKE ?";
             $params[] = $like;
             if ($hasSupplierCode) {
-                $itemClauses[] = "COALESCE(sis.code, '') $coll LIKE ?";
+                $itemClauses[] = orderUtf8LikeExpr("COALESCE(sis.code, '')") . " LIKE ?";
                 $params[] = $like;
             } elseif ($hasSupplierStoreId) {
-                $itemClauses[] = "COALESCE(sis.store_id, '') $coll LIKE ?";
+                $itemClauses[] = orderUtf8LikeExpr("COALESCE(sis.store_id, '')") . " LIKE ?";
                 $params[] = $like;
             }
             if ($hasSupplierPhone) {
-                $itemClauses[] = "COALESCE(sis.phone, '') $coll LIKE ?";
+                $itemClauses[] = orderUtf8LikeExpr("COALESCE(sis.phone, '')") . " LIKE ?";
                 $params[] = $like;
             }
         }
@@ -783,7 +787,7 @@ function fetchOrdersListRowsForRequest(PDO $pdo): array
         $params[] = (int) $orderId;
     }
     if ($shippingCode !== '') {
-        $sql .= " AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND (oi.shipping_code COLLATE utf8mb4_unicode_ci) LIKE ?)";
+        $sql .= " AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND " . orderUtf8LikeExpr('oi.shipping_code') . " LIKE ?)";
         $params[] = '%' . $shippingCode . '%';
     }
     if ($q !== '') {
@@ -2101,7 +2105,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 jsonResponse(['data' => ['status' => 'ReadyForConsolidation']]);
             }
             if ($id && $action === 'reset-after-decline') {
-                requireRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin']);
                 OrderReceiptWorkflowService::resetDeclinedOrder($pdo, (int) $id, $userId, trim((string) ($input['reason'] ?? '')) ?: null);
                 jsonResponse(['data' => ['status' => 'Submitted']]);
             }

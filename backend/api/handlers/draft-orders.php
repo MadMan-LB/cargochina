@@ -2021,14 +2021,43 @@ function draftOrderImportImageExtensionFromPath(string $path): string
         : 'png';
 }
 
+function draftOrderImportStoreImageBytes(string $bytes, string $preferredExt = 'png'): ?string
+{
+    if ($bytes === '') {
+        return null;
+    }
+
+    $imageInfo = @getimagesizefromstring($bytes);
+    if (!is_array($imageInfo)) {
+        return null;
+    }
+
+    $mime = (string) ($imageInfo['mime'] ?? '');
+    $ext = $mime !== '' ? draftOrderImportImageExtensionFromMime($mime) : strtolower($preferredExt);
+    $allowed = function_exists('clmsUploadAllowedImageExtensions')
+        ? clmsUploadAllowedImageExtensions()
+        : ['jpg', 'jpeg', 'png', 'webp', 'jfif', 'gif', 'bmp'];
+    if (!in_array($ext, $allowed, true)) {
+        return null;
+    }
+
+    $uploadDir = dirname(__DIR__, 2) . '/uploads/';
+    if (!is_dir($uploadDir) && !@mkdir($uploadDir, 0755, true)) {
+        return null;
+    }
+
+    $filename = date('Ymd_His') . '_draft_import_' . bin2hex(random_bytes(4)) . '.' . $ext;
+    $path = $uploadDir . $filename;
+    if (@file_put_contents($path, $bytes) === false) {
+        return null;
+    }
+
+    return 'uploads/' . $filename;
+}
+
 function draftOrderImportStoreWorksheetDrawing($drawing): ?string
 {
     try {
-        $uploadDir = dirname(__DIR__, 2) . '/uploads/';
-        if (!is_dir($uploadDir)) {
-            mkdir($uploadDir, 0755, true);
-        }
-
         $bytes = null;
         $ext = 'png';
         if ($drawing instanceof SpreadsheetMemoryDrawing) {
@@ -2053,28 +2082,7 @@ function draftOrderImportStoreWorksheetDrawing($drawing): ?string
         if (!is_string($bytes) || $bytes === '') {
             return null;
         }
-        $imageInfo = @getimagesizefromstring($bytes);
-        if (!is_array($imageInfo)) {
-            return null;
-        }
-        $mime = (string) ($imageInfo['mime'] ?? '');
-        if ($mime !== '') {
-            $ext = draftOrderImportImageExtensionFromMime($mime);
-        }
-        $allowed = function_exists('clmsUploadAllowedImageExtensions')
-            ? clmsUploadAllowedImageExtensions()
-            : ['jpg', 'jpeg', 'png', 'webp', 'jfif', 'gif', 'bmp'];
-        if (!in_array($ext, $allowed, true)) {
-            return null;
-        }
-
-        $filename = date('Ymd_His') . '_draft_import_' . bin2hex(random_bytes(4)) . '.' . $ext;
-        $path = $uploadDir . $filename;
-        if (@file_put_contents($path, $bytes) === false) {
-            return null;
-        }
-
-        return 'uploads/' . $filename;
+        return draftOrderImportStoreImageBytes($bytes, $ext);
     } catch (Throwable $e) {
         return null;
     }
@@ -2305,6 +2313,422 @@ function draftOrderImportExcelSignatureMessage(string $path, string $ext): ?stri
     return null;
 }
 
+function draftOrderImportZipGet(ZipArchive $zip, string $path): ?string
+{
+    $path = ltrim(str_replace('\\', '/', $path), '/');
+    $index = $zip->locateName($path);
+    if ($index === false && defined('ZipArchive::FL_NOCASE')) {
+        $index = $zip->locateName($path, ZipArchive::FL_NOCASE);
+    }
+    if ($index === false) {
+        return null;
+    }
+    $content = $zip->getFromIndex($index);
+    return is_string($content) ? $content : null;
+}
+
+function draftOrderImportZipHas(ZipArchive $zip, string $path): bool
+{
+    $path = ltrim(str_replace('\\', '/', $path), '/');
+    if ($zip->locateName($path) !== false) {
+        return true;
+    }
+    return defined('ZipArchive::FL_NOCASE') && $zip->locateName($path, ZipArchive::FL_NOCASE) !== false;
+}
+
+function draftOrderImportNormalizeZipTarget(string $baseDir, string $target): string
+{
+    $target = str_replace('\\', '/', trim($target));
+    if ($target === '') {
+        return '';
+    }
+    if ($target[0] === '/') {
+        $path = ltrim($target, '/');
+    } elseif (strpos($target, 'xl/') === 0) {
+        $path = $target;
+    } else {
+        $path = trim($baseDir, '/') . '/' . $target;
+    }
+
+    $parts = [];
+    foreach (explode('/', $path) as $part) {
+        if ($part === '' || $part === '.') {
+            continue;
+        }
+        if ($part === '..') {
+            array_pop($parts);
+            continue;
+        }
+        $parts[] = $part;
+    }
+
+    return implode('/', $parts);
+}
+
+function draftOrderImportXml(string $xml): ?SimpleXMLElement
+{
+    $flags = LIBXML_NONET;
+    if (defined('LIBXML_COMPACT')) {
+        $flags |= LIBXML_COMPACT;
+    }
+    $parsed = @simplexml_load_string($xml, SimpleXMLElement::class, $flags);
+    return $parsed instanceof SimpleXMLElement ? $parsed : null;
+}
+
+function draftOrderImportXmlTexts(SimpleXMLElement $xml, string $localName): array
+{
+    $nodes = $xml->xpath('.//*[local-name()="' . $localName . '"]');
+    if (!is_array($nodes)) {
+        return [];
+    }
+
+    return array_map(static fn($node): string => (string) $node, $nodes);
+}
+
+function draftOrderImportXlsxSharedStrings(ZipArchive $zip): array
+{
+    $xml = draftOrderImportZipGet($zip, 'xl/sharedStrings.xml');
+    if ($xml === null || $xml === '') {
+        return [];
+    }
+
+    $strings = [];
+    $reader = new XMLReader();
+    if (!@$reader->XML($xml, null, LIBXML_NONET)) {
+        return [];
+    }
+
+    while ($reader->read()) {
+        if ($reader->nodeType !== XMLReader::ELEMENT || $reader->localName !== 'si') {
+            continue;
+        }
+        $outer = $reader->readOuterXML();
+        if (!is_string($outer) || $outer === '') {
+            $strings[] = '';
+            continue;
+        }
+        $si = draftOrderImportXml($outer);
+        if (!$si) {
+            $strings[] = '';
+            continue;
+        }
+        $strings[] = implode('', draftOrderImportXmlTexts($si, 't'));
+    }
+    $reader->close();
+
+    return $strings;
+}
+
+function draftOrderImportXlsxRelationships(ZipArchive $zip, string $relsPath): array
+{
+    $xml = draftOrderImportZipGet($zip, $relsPath);
+    if ($xml === null || $xml === '') {
+        return [];
+    }
+
+    $rels = draftOrderImportXml($xml);
+    if (!$rels) {
+        return [];
+    }
+
+    $baseDir = str_replace('\\', '/', preg_replace('#/_rels/[^/]+\.rels$#', '', $relsPath) ?? $relsPath);
+
+    $items = [];
+    foreach ($rels->children() as $rel) {
+        $id = (string) ($rel['Id'] ?? '');
+        if ($id === '') {
+            continue;
+        }
+        $target = (string) ($rel['Target'] ?? '');
+        $items[$id] = [
+            'type' => (string) ($rel['Type'] ?? ''),
+            'target' => draftOrderImportNormalizeZipTarget($baseDir, $target),
+        ];
+    }
+
+    return $items;
+}
+
+function draftOrderImportXlsxFirstWorksheetPath(ZipArchive $zip): ?string
+{
+    if (draftOrderImportZipHas($zip, 'xl/worksheets/sheet1.xml')) {
+        return 'xl/worksheets/sheet1.xml';
+    }
+
+    $workbookXml = draftOrderImportZipGet($zip, 'xl/workbook.xml');
+    if ($workbookXml === null) {
+        return null;
+    }
+    $workbook = draftOrderImportXml($workbookXml);
+    if (!$workbook) {
+        return null;
+    }
+
+    $sheetNodes = $workbook->xpath('//*[local-name()="sheet"]');
+    if (!is_array($sheetNodes) || !$sheetNodes) {
+        return null;
+    }
+    $sheet = $sheetNodes[0];
+    $attrs = $sheet->attributes('http://schemas.openxmlformats.org/officeDocument/2006/relationships');
+    $relId = (string) ($attrs['id'] ?? '');
+    $rels = draftOrderImportXlsxRelationships($zip, 'xl/_rels/workbook.xml.rels');
+    if ($relId !== '' && !empty($rels[$relId]['target'])) {
+        return $rels[$relId]['target'];
+    }
+
+    foreach ($rels as $rel) {
+        if (strpos((string) ($rel['type'] ?? ''), '/worksheet') !== false && !empty($rel['target'])) {
+            return $rel['target'];
+        }
+    }
+
+    return null;
+}
+
+function draftOrderImportColumnIndexFromRef(string $ref): int
+{
+    if (!preg_match('/^([A-Z]+)/i', $ref, $matches)) {
+        return 0;
+    }
+
+    $letters = strtoupper($matches[1]);
+    $index = 0;
+    for ($i = 0, $len = strlen($letters); $i < $len; $i++) {
+        $index = ($index * 26) + (ord($letters[$i]) - 64);
+    }
+
+    return $index;
+}
+
+function draftOrderImportXlsxCellValue(SimpleXMLElement $cell, array $sharedStrings): string
+{
+    $type = (string) ($cell['t'] ?? '');
+    $texts = draftOrderImportXmlTexts($cell, 't');
+    $values = draftOrderImportXmlTexts($cell, 'v');
+    $raw = $values[0] ?? '';
+
+    if ($type === 's') {
+        $index = is_numeric($raw) ? (int) $raw : -1;
+        return $sharedStrings[$index] ?? '';
+    }
+    if ($type === 'inlineStr') {
+        return implode('', $texts);
+    }
+    if ($type === 'b') {
+        return $raw === '1' ? 'TRUE' : 'FALSE';
+    }
+
+    return $raw !== '' ? $raw : implode('', $texts);
+}
+
+function draftOrderImportXlsxReadSheetRows(ZipArchive $zip, string $sheetPath, int $maxRows, array $sharedStrings, array &$readMeta): array
+{
+    $xml = draftOrderImportZipGet($zip, $sheetPath);
+    if ($xml === null || $xml === '') {
+        throw new RuntimeException('Worksheet XML was not found.');
+    }
+
+    $rows = [];
+    $maxColumnIndex = 0;
+    $reader = new XMLReader();
+    if (!@$reader->XML($xml, null, LIBXML_NONET)) {
+        throw new RuntimeException('Worksheet XML could not be opened.');
+    }
+
+    while ($reader->read()) {
+        if ($reader->nodeType !== XMLReader::ELEMENT || $reader->localName !== 'row') {
+            continue;
+        }
+        $rowNumber = (int) $reader->getAttribute('r');
+        $outer = $reader->readOuterXML();
+        if (!is_string($outer) || $outer === '') {
+            continue;
+        }
+        $rowXml = draftOrderImportXml($outer);
+        if (!$rowXml) {
+            continue;
+        }
+
+        $row = [];
+        $nextColumn = 1;
+        $cells = $rowXml->xpath('./*[local-name()="c"]');
+        if (is_array($cells)) {
+            foreach ($cells as $cell) {
+                $ref = (string) ($cell['r'] ?? '');
+                $columnIndex = draftOrderImportColumnIndexFromRef($ref);
+                if ($columnIndex <= 0) {
+                    $columnIndex = $nextColumn;
+                }
+                $nextColumn = $columnIndex + 1;
+                $maxColumnIndex = max($maxColumnIndex, $columnIndex);
+                if ($columnIndex > 60) {
+                    continue;
+                }
+                $row[$columnIndex - 1] = draftOrderImportCellString(draftOrderImportXlsxCellValue($cell, $sharedStrings));
+            }
+        }
+
+        $row['__row_number'] = $rowNumber > 0 ? $rowNumber : (count($rows) + 1);
+        $rows[] = $row;
+        if (count($rows) > $maxRows) {
+            $reader->close();
+            jsonError('Import file has too many rows. Keep it under ' . $maxRows . ' rows.', 400);
+        }
+    }
+    $reader->close();
+
+    $readMeta['sheet_rows_seen'] = count($rows);
+    $readMeta['sheet_columns_seen'] = min(60, $maxColumnIndex);
+
+    return $rows;
+}
+
+function draftOrderImportXlsxWorksheetDrawingPaths(ZipArchive $zip, string $sheetPath): array
+{
+    $sheetDir = dirname($sheetPath);
+    $relsPath = $sheetDir . '/_rels/' . basename($sheetPath) . '.rels';
+    $rels = draftOrderImportXlsxRelationships($zip, $relsPath);
+    $paths = [];
+    foreach ($rels as $rel) {
+        if (strpos((string) ($rel['type'] ?? ''), '/drawing') !== false && !empty($rel['target'])) {
+            $paths[] = $rel['target'];
+        }
+    }
+
+    return array_values(array_unique($paths));
+}
+
+function draftOrderImportXlsxDrawingImageRels(ZipArchive $zip, string $drawingPath): array
+{
+    $drawingDir = dirname($drawingPath);
+    $relsPath = $drawingDir . '/_rels/' . basename($drawingPath) . '.rels';
+    $rels = draftOrderImportXlsxRelationships($zip, $relsPath);
+    $images = [];
+    foreach ($rels as $id => $rel) {
+        $type = (string) ($rel['type'] ?? '');
+        if ((strpos($type, '/image') !== false || preg_match('/\.(png|jpe?g|jfif|gif|webp|bmp)$/i', (string) ($rel['target'] ?? ''))) && !empty($rel['target'])) {
+            $images[$id] = $rel['target'];
+        }
+    }
+
+    return $images;
+}
+
+function draftOrderImportXlsxAnchorNodeText(SimpleXMLElement $anchor, string $parent, string $child): ?int
+{
+    $nodes = $anchor->xpath('./*[local-name()="' . $parent . '"]/*[local-name()="' . $child . '"]');
+    if (!is_array($nodes) || !$nodes) {
+        return null;
+    }
+    $value = (string) $nodes[0];
+    return is_numeric($value) ? (int) $value : null;
+}
+
+function draftOrderImportXlsxDrawingImages(ZipArchive $zip, string $drawingPath, array &$warnings): array
+{
+    $xml = draftOrderImportZipGet($zip, $drawingPath);
+    if ($xml === null || $xml === '') {
+        return [];
+    }
+
+    $imageRels = draftOrderImportXlsxDrawingImageRels($zip, $drawingPath);
+    if (!$imageRels) {
+        return [];
+    }
+
+    $anchors = [];
+    if (preg_match_all('/<[^>]*(?:twoCellAnchor|oneCellAnchor|absoluteAnchor)\b[\s\S]*?<\/[^>]*(?:twoCellAnchor|oneCellAnchor|absoluteAnchor)>/i', $xml, $matches)) {
+        $anchors = $matches[0];
+    }
+
+    $images = [];
+    foreach ($anchors as $anchor) {
+        if (!preg_match('/\b(?:r:)?embed="([^"]+)"/i', $anchor, $relMatch)
+            && !preg_match('/\b(?:r:)?link="([^"]+)"/i', $anchor, $relMatch)) {
+            continue;
+        }
+        $relId = (string) ($relMatch[1] ?? '');
+        if ($relId === '' || empty($imageRels[$relId])) {
+            continue;
+        }
+
+        $mediaPath = $imageRels[$relId];
+        $bytes = draftOrderImportZipGet($zip, $mediaPath);
+        if ($bytes === null || $bytes === '') {
+            $warnings[] = 'Embedded image "' . basename($mediaPath) . '" could not be read from the workbook.';
+            continue;
+        }
+
+        $storedPath = draftOrderImportStoreImageBytes($bytes, draftOrderImportImageExtensionFromPath($mediaPath));
+        if (!$storedPath) {
+            $warnings[] = 'Embedded image "' . basename($mediaPath) . '" could not be imported.';
+            continue;
+        }
+
+        $startCol = 1;
+        $startRow = 1;
+        $endCol = 1;
+        $endRow = 1;
+        if (preg_match('/<[^>]*from\b[^>]*>[\s\S]*?<[^>]*col\b[^>]*>(\d+)<\/[^>]*col>[\s\S]*?<[^>]*row\b[^>]*>(\d+)<\/[^>]*row>/i', $anchor, $fromMatch)) {
+            $startCol = ((int) $fromMatch[1]) + 1;
+            $startRow = ((int) $fromMatch[2]) + 1;
+        }
+        if (preg_match('/<[^>]*to\b[^>]*>[\s\S]*?<[^>]*col\b[^>]*>(\d+)<\/[^>]*col>[\s\S]*?<[^>]*row\b[^>]*>(\d+)<\/[^>]*row>/i', $anchor, $toMatch)) {
+            $endCol = ((int) $toMatch[1]) + 1;
+            $endRow = ((int) $toMatch[2]) + 1;
+        } else {
+            $endCol = $startCol;
+            $endRow = $startRow;
+        }
+        $images[] = [
+            'start_row' => max(1, $startRow),
+            'end_row' => max($startRow, $endRow),
+            'start_col' => max(1, $startCol),
+            'end_col' => max($startCol, $endCol),
+            'coordinate' => 'R' . max(1, $startRow) . 'C' . max(1, $startCol),
+            'path' => $storedPath,
+        ];
+    }
+
+    return $images;
+}
+
+function draftOrderImportReadRowsFromXlsxFast(string $path, int $maxRows, array &$readWarnings, array &$readMeta): ?array
+{
+    $zip = new ZipArchive();
+    if ($zip->open($path) !== true) {
+        return null;
+    }
+
+    try {
+        $sheetPath = draftOrderImportXlsxFirstWorksheetPath($zip);
+        if (!$sheetPath) {
+            return null;
+        }
+
+        $sharedStrings = draftOrderImportXlsxSharedStrings($zip);
+        $rows = draftOrderImportXlsxReadSheetRows($zip, $sheetPath, $maxRows, $sharedStrings, $readMeta);
+
+        $drawingPaths = draftOrderImportXlsxWorksheetDrawingPaths($zip, $sheetPath);
+        $readMeta['images_found'] = 0;
+        $readMeta['images_imported'] = 0;
+        if ($drawingPaths) {
+            $images = [];
+            foreach ($drawingPaths as $drawingPath) {
+                $images = array_merge($images, draftOrderImportXlsxDrawingImages($zip, $drawingPath, $readWarnings));
+            }
+            $readMeta['images_found'] = count($images);
+            $readMeta['images_imported'] = count($images);
+            draftOrderImportAttachWorksheetImages($rows, $images);
+        }
+
+        $readMeta['reader_mode'] = 'fast_xlsx_xml';
+        return $rows;
+    } finally {
+        $zip->close();
+    }
+}
+
 function draftOrderImportReadRowsFromSpreadsheet($spreadsheet, int $maxRows, bool $includeImages, array &$readWarnings = [], array &$readMeta = []): array
 {
     try {
@@ -2367,6 +2791,10 @@ function draftOrderImportLogExcelReadFailure(
 
 function draftOrderImportReadRowsFromUpload(): array
 {
+    if (function_exists('set_time_limit')) {
+        @set_time_limit(300);
+    }
+
     $startedAt = microtime(true);
     if (empty($_FILES['file']) || !is_array($_FILES['file'])) {
         jsonError('Choose an Excel or CSV file to import.', 400);
@@ -2450,39 +2878,65 @@ function draftOrderImportReadRowsFromUpload(): array
             jsonError($signatureMessage, 400, [], $requestId);
         }
 
-        [$readerPath, $deleteReaderPath] = draftOrderImportCopyUploadForReader($tmpName, $ext);
-        try {
-            $reader = draftOrderImportCreateExcelReader($ext, true);
-            $spreadsheet = $reader->load($readerPath);
-            $rows = draftOrderImportReadRowsFromSpreadsheet($spreadsheet, $maxRows, true, $readWarnings, $readMeta);
-        } catch (Throwable $e) {
-            $requestId = bin2hex(random_bytes(8));
-            draftOrderImportLogExcelReadFailure($requestId, $name, $file, $tmpName, $ext, true, $e);
-
+        $usedFastReader = false;
+        if ($ext === 'xlsx') {
+            $fastStarted = microtime(true);
             try {
-                $reader = draftOrderImportCreateExcelReader($ext, false);
-                $spreadsheet = $reader->load($readerPath);
-                $rows = draftOrderImportReadRowsFromSpreadsheet($spreadsheet, $maxRows, false, $readWarnings, $readMeta);
-                $readWarnings[] = 'The Excel rows were imported, but embedded photos could not be read on this server. Upload item photos manually after preview if needed.';
-                logClms('draft_order_import_excel_read_without_images', [
-                    'request_id' => $requestId,
+                $fastRows = draftOrderImportReadRowsFromXlsxFast($tmpName, $maxRows, $readWarnings, $readMeta);
+                if (is_array($fastRows)) {
+                    $rows = $fastRows;
+                    $usedFastReader = true;
+                    $readMeta['fast_reader_seconds'] = round(microtime(true) - $fastStarted, 3);
+                }
+            } catch (Throwable $e) {
+                $readMeta['fast_reader_failed'] = get_class($e);
+                logClms('draft_order_import_fast_xlsx_failed', [
                     'filename' => $name,
                     'size' => (int) ($file['size'] ?? 0),
                     'extension' => $ext,
+                    'exception' => get_class($e),
+                    'message' => $e->getMessage(),
                 ]);
-            } catch (Throwable $fallbackException) {
-                draftOrderImportLogExcelReadFailure($requestId, $name, $file, $tmpName, $ext, false, $fallbackException);
-
-                $message = draftOrderImportExcelEnvironmentMessage($ext)
-                    ?? 'Could not read the Excel file. Export it again or save it as CSV and retry.';
-                if (function_exists('clmsIsDebugEnabled') && clmsIsDebugEnabled()) {
-                    $message .= ' Details: ' . $fallbackException->getMessage();
-                }
-                jsonError($message, 400, [], $requestId);
             }
-        } finally {
-            if (!empty($deleteReaderPath) && $readerPath !== $tmpName && is_file($readerPath)) {
-                @unlink($readerPath);
+        }
+
+        if (!$usedFastReader) {
+            [$readerPath, $deleteReaderPath] = draftOrderImportCopyUploadForReader($tmpName, $ext);
+            try {
+                $reader = draftOrderImportCreateExcelReader($ext, true);
+                $spreadsheet = $reader->load($readerPath);
+                $rows = draftOrderImportReadRowsFromSpreadsheet($spreadsheet, $maxRows, true, $readWarnings, $readMeta);
+                $readMeta['reader_mode'] = 'phpspreadsheet_with_images';
+            } catch (Throwable $e) {
+                $requestId = bin2hex(random_bytes(8));
+                draftOrderImportLogExcelReadFailure($requestId, $name, $file, $tmpName, $ext, true, $e);
+
+                try {
+                    $reader = draftOrderImportCreateExcelReader($ext, false);
+                    $spreadsheet = $reader->load($readerPath);
+                    $rows = draftOrderImportReadRowsFromSpreadsheet($spreadsheet, $maxRows, false, $readWarnings, $readMeta);
+                    $readMeta['reader_mode'] = 'phpspreadsheet_data_only';
+                    $readWarnings[] = 'The Excel rows were imported, but embedded photos could not be read on this server. Upload item photos manually after preview if needed.';
+                    logClms('draft_order_import_excel_read_without_images', [
+                        'request_id' => $requestId,
+                        'filename' => $name,
+                        'size' => (int) ($file['size'] ?? 0),
+                        'extension' => $ext,
+                    ]);
+                } catch (Throwable $fallbackException) {
+                    draftOrderImportLogExcelReadFailure($requestId, $name, $file, $tmpName, $ext, false, $fallbackException);
+
+                    $message = draftOrderImportExcelEnvironmentMessage($ext)
+                        ?? 'Could not read the Excel file. Export it again or save it as CSV and retry.';
+                    if (function_exists('clmsIsDebugEnabled') && clmsIsDebugEnabled()) {
+                        $message .= ' Details: ' . $fallbackException->getMessage();
+                    }
+                    jsonError($message, 400, [], $requestId);
+                }
+            } finally {
+                if (!empty($deleteReaderPath) && $readerPath !== $tmpName && is_file($readerPath)) {
+                    @unlink($readerPath);
+                }
             }
         }
     }
@@ -2748,6 +3202,13 @@ function draftOrderImportNormalizeDate(string $value, array &$warnings): ?string
     $value = draftOrderImportCellString($value);
     if ($value === '' || $value === '-' || $value === '—') {
         return null;
+    }
+    if (is_numeric($value)) {
+        $serial = (float) $value;
+        if ($serial > 20000 && $serial < 80000) {
+            $timestamp = (int) round(($serial - 25569) * 86400);
+            return gmdate('Y-m-d', $timestamp);
+        }
     }
     $ts = strtotime($value);
     if ($ts === false) {
@@ -3345,6 +3806,8 @@ function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename, a
             'missing_optional_columns' => $missingOptionalColumns,
             'images_found' => (int) ($readMeta['images_found'] ?? 0),
             'images_imported' => (int) ($readMeta['images_imported'] ?? 0),
+            'reader_mode' => (string) ($readMeta['reader_mode'] ?? ''),
+            'fast_reader_seconds' => isset($readMeta['fast_reader_seconds']) ? (float) $readMeta['fast_reader_seconds'] : null,
             'read_seconds' => (float) ($readMeta['read_seconds'] ?? 0),
             'import_seconds' => round(microtime(true) - $buildStartedAt, 3),
             'total_seconds' => round((float) ($readMeta['read_seconds'] ?? 0) + (microtime(true) - $buildStartedAt), 3),
@@ -3373,7 +3836,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     if (!$userId) {
         jsonError('Unauthorized', 401);
     }
-    clmsRequirePermission('page:procurement_drafts', ['ChinaAdmin', 'ChinaEmployee'], $pdo, $userId);
+    clmsRequirePermission('page:procurement_drafts', ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'], $pdo, $userId);
 
     if ($method === 'POST' && $id === 'import' && $action === null) {
         [$rows, $filename, $readWarnings, $readMeta] = draftOrderImportReadRowsFromUpload();

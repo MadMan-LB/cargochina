@@ -89,6 +89,10 @@ Customer selectors in operational workflows use the safe lookup API (`/api/v1/cu
 
 `procurement_drafts.php` uses `/api/v1/draft-orders/import` as a preview import. The importer reads normalized header names rather than fixed column positions, tolerates missing optional fields, ignores exported subtotal/grand-total rows, reports skipped rows and warnings, and extracts embedded XLSX photos from the detected Photo column when the server supports workbook drawings. The import fills the draft form for review; it does not save the order until the user saves the draft.
 
+## SuperAdmin Training Reset
+
+`admin_config.php` includes a SuperAdmin-only Training Data Reset section. It can delete selected training data groups such as draft orders, orders/receiving, containers, customers, suppliers, products, financial rows, expenses, notifications, non-SuperAdmin users, and logs. The reset requires the configured reset password, runs server-side through `/api/v1/config/training-reset`, keeps schema/config/roles/countries/departments intact, always protects SuperAdmin/admin users, and writes an audit row after completion.
+
 ## Full Specification
 
 See [CLMS_README.md](CLMS_README.md) for the complete specification, state machine, RBAC, and DB_CHANGELOG.

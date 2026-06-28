@@ -22,11 +22,11 @@
     let draftOrderImportProgressState = null;
     let draftOrderUnsavedGuard = null;
     const DRAFT_ORDER_IMPORT_STEPS = [
-        { key: "uploading", label: "Uploading", target: 25 },
-        { key: "reading", label: "Reading Excel", target: 45 },
-        { key: "rows", label: "Importing rows", target: 68 },
-        { key: "images", label: "Processing images", target: 88 },
-        { key: "saving", label: "Saving draft", target: 96 },
+        { key: "uploading", label: "Uploading", target: 40 },
+        { key: "reading", label: "Reading Excel", target: 62 },
+        { key: "rows", label: "Importing rows", target: 82 },
+        { key: "images", label: "Processing images", target: 94 },
+        { key: "preview", label: "Preparing preview", target: 98 },
         { key: "done", label: "Done", target: 100 },
     ];
 
@@ -1055,19 +1055,25 @@
             const state = draftOrderImportProgressState;
             let step = state.step || "reading";
             let percent = Number(state.percent || 0);
-            if (step === "uploading" && percent >= 24) {
-                step = "reading";
-            } else if (step === "reading" && percent >= 44) {
+            if (step === "uploading") {
+                setDraftOrderImportProgress({
+                    step: "uploading",
+                    percent: Math.min(39, percent),
+                    message: state.message || "Uploading file...",
+                });
+                return;
+            }
+            if (step === "reading" && percent >= 61) {
                 step = "rows";
-            } else if (step === "rows" && percent >= 67) {
+            } else if (step === "rows" && percent >= 81) {
                 step = "images";
-            } else if (step === "images" && percent >= 87) {
-                step = "saving";
+            } else if (step === "images" && percent >= 93) {
+                step = "preview";
             }
             const target =
                 DRAFT_ORDER_IMPORT_STEPS.find((item) => item.key === step)
                     ?.target || 95;
-            const increment = step === "images" ? 0.45 : step === "saving" ? 0.25 : 0.8;
+            const increment = step === "images" ? 0.35 : step === "preview" ? 0.2 : 0.7;
             percent = Math.min(target - 1, percent + increment);
             setDraftOrderImportProgress({
                 step,
@@ -1079,19 +1085,20 @@
                           ? "Importing rows..."
                           : step === "reading"
                             ? "Reading Excel..."
-                            : step === "saving"
-                              ? "Saving draft..."
+                            : step === "preview"
+                              ? "Preparing preview..."
                               : state.message,
             });
         }, 650);
         draftOrderImportLongTimer = setTimeout(() => {
             if (!draftOrderImportInProgress) return;
+            const currentStep = draftOrderImportProgressState?.step || "uploading";
             setDraftOrderImportProgress({
-                longMessage: "Still processing images, please wait...",
-                step:
-                    draftOrderImportProgressState?.step === "uploading"
-                        ? "reading"
-                        : draftOrderImportProgressState?.step || "images",
+                longMessage:
+                    currentStep === "uploading"
+                        ? "Still uploading. This depends on your internet upload speed and the workbook/image size..."
+                        : "Still processing on the server, please wait...",
+                step: currentStep,
             });
         }, 15000);
     }
@@ -1104,7 +1111,7 @@
             const xhr = new XMLHttpRequest();
             xhr.open("POST", API + "/draft-orders/import");
             xhr.withCredentials = true;
-            xhr.timeout = 180000;
+            xhr.timeout = 600000;
 
             xhr.upload.onprogress = (event) => {
                 if (!event.lengthComputable) return;
@@ -1116,7 +1123,7 @@
                 reject(
                     new Error(
                         draftT(
-                            "Could not reach the server. Check your connection and try again.",
+                            "The import connection was interrupted. If upload progress was still moving slowly, the workbook/images are taking too long to upload to the server. Try again, or compress the photos / save as CSV without embedded photos.",
                         ),
                     ),
                 );
@@ -1124,10 +1131,12 @@
                 reject(
                     new Error(
                         draftT(
-                            "Import is taking too long. Try a smaller file or convert the workbook to CSV.",
+                            "Import timed out before the server replied. Try a smaller/compressed workbook, save as CSV, or increase Nginx/PHP request timeouts on the server.",
                         ),
                     ),
                 );
+            xhr.onabort = () =>
+                reject(new Error(draftT("Import was cancelled before it finished.")));
             xhr.onload = () => {
                 let data = {};
                 try {
@@ -1347,6 +1356,13 @@
         if (Number(meta.images_found || 0) || Number(meta.images_imported || 0)) {
             details.push(draftOrderImportImagesText(meta));
         }
+        if (meta.reader_mode) {
+            details.push(
+                draftT("Reader: {mode}", {
+                    mode: String(meta.reader_mode).replace(/_/g, " "),
+                }),
+            );
+        }
         if (Array.isArray(meta.missing_optional_columns) && meta.missing_optional_columns.length) {
             details.push(
                 draftT("Missing optional columns: {columns}", {
@@ -1456,7 +1472,7 @@
                 onUploadProgress: (percent) => {
                     setDraftOrderImportProgress({
                         step: "uploading",
-                        percent: Math.max(1, Math.min(25, percent * 0.25)),
+                        percent: Math.max(1, Math.min(40, percent * 0.4)),
                         message: draftT("Uploading {percent}%...", { percent }),
                     });
                 },
@@ -1464,19 +1480,20 @@
                     setDraftOrderImportProgress({
                         step: "reading",
                         percent: Math.max(
-                            26,
+                            41,
                             Number(draftOrderImportProgressState?.percent || 0),
                         ),
                         message: "Reading Excel...",
+                        longMessage: "",
                     });
                 },
             });
             const imported = res.data || {};
             const meta = imported.meta || {};
             setDraftOrderImportProgress({
-                step: "saving",
-                percent: 96,
-                message: "Saving draft...",
+                step: "preview",
+                percent: 98,
+                message: "Preparing preview...",
                 rowsText: draftOrderImportRowsText(meta),
                 imageText: draftOrderImportImagesText(meta),
                 details: draftOrderImportSummaryDetails(meta),

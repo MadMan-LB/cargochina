@@ -1,7 +1,7 @@
 <?php
 require_once 'includes/auth_check.php';
 require_once 'includes/page_guard.php';
-requireRoleForPage(['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin']);
+requireRoleForPage(['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin']);
 $currentPage = 'orders';
 $pageTitle = 'Orders';
 require 'includes/layout.php';

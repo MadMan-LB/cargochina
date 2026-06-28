@@ -250,7 +250,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     switch ($method) {
         case 'GET':
             if ($id === 'lookup') {
-                requirePermission('customers.lookup', customerLookupRoles());
                 $q = trim($_GET['q'] ?? '');
                 if (strlen($q) < 1) {
                     jsonResponse(['data' => []]);
@@ -279,43 +278,42 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     jsonResponse(['data' => []]);
                 }
                 $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
-                $cols = ['id', 'code', 'name', 'default_shipping_code'];
+                $cols = ['id', 'code', 'name'];
+                $hasDefaultShippingCode = customerTableHas($pdo, 'customers', 'default_shipping_code');
+                if ($hasDefaultShippingCode) {
+                    $cols[] = 'default_shipping_code';
+                }
                 $hasPhone = false;
                 $hasEmail = false;
-                $hasPaymentLinks = false;
                 try {
-                    $chk = $pdo->query("SHOW COLUMNS FROM customers WHERE Field IN ('phone','email','payment_links')");
+                    $chk = $pdo->query("SHOW COLUMNS FROM customers WHERE Field IN ('phone','email')");
                     if ($chk) {
                         while ($r = $chk->fetch(PDO::FETCH_ASSOC)) {
                             if ($r['Field'] === 'phone') $hasPhone = true;
                             if ($r['Field'] === 'email') $hasEmail = true;
-                            if ($r['Field'] === 'payment_links') $hasPaymentLinks = true;
                         }
                     }
                 } catch (Throwable $e) {
                 }
-                if ($hasPhone) $cols[] = 'phone';
-                if ($hasEmail) $cols[] = 'email';
-                if ($hasPaymentLinks) $cols[] = 'payment_links';
                 $sel = implode(', ', $cols);
-                $where = '(' . customerUtf8LikeExpr('name') . ' LIKE ?) OR (' . customerUtf8LikeExpr('code') . ' LIKE ?) OR (' . customerUtf8LikeExpr('default_shipping_code') . ' LIKE ?)';
-                $params = [$like, $like, $like];
+                $where = '(' . customerUtf8LikeExpr('name') . ' LIKE ?) OR (' . customerUtf8LikeExpr('code') . ' LIKE ?)';
+                $params = [$like, $like];
+                if ($hasDefaultShippingCode) {
+                    $where .= ' OR (' . customerUtf8LikeExpr('default_shipping_code') . ' LIKE ?)';
+                    $params[] = $like;
+                }
                 if (customerHasPorTable($pdo)) {
                     $where .= " OR EXISTS (SELECT 1 FROM customer_pors cp WHERE cp.customer_id = customers.id AND " . customerUtf8LikeExpr('cp.por_value') . " LIKE ?)";
                     $params[] = $like;
                 }
                 if ($hasPhone) { $where .= " OR (" . customerUtf8LikeExpr('phone') . " LIKE ?)"; $params[] = $like; }
                 if ($hasEmail) { $where .= " OR (" . customerUtf8LikeExpr('email') . " LIKE ?)"; $params[] = $like; }
-                if ($hasPaymentLinks) { $where .= " OR (payment_links IS NOT NULL AND " . customerUtf8LikeExpr('payment_links') . " LIKE ?)"; $params[] = $like; }
-                $scope = clmsCustomerVisibilityClause($pdo, 'customers');
-                $stmt = $pdo->prepare("SELECT $sel FROM customers WHERE ($where) AND {$scope['sql']} ORDER BY name LIMIT 20");
-                $stmt->execute(array_merge($params, $scope['params']));
+                $limit = isset($_GET['limit']) ? max(1, min(50, (int) $_GET['limit'])) : 20;
+                $stmt = $pdo->prepare("SELECT $sel FROM customers WHERE ($where) ORDER BY name LIMIT " . $limit);
+                $stmt->execute($params);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 foreach ($rows as &$row) {
                     $row['por'] = loadCustomerPorValues($pdo, (int) ($row['id'] ?? 0));
-                    if ($hasPaymentLinks) {
-                        $row['payment_links'] = isset($row['payment_links']) && $row['payment_links'] ? json_decode($row['payment_links'], true) : [];
-                    }
                 }
                 unset($row);
                 jsonResponse(['data' => $rows]);
@@ -370,7 +368,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 jsonResponse(['data' => $rows]);
             }
             if ($action === 'lookup') {
-                requirePermission('customers.lookup', customerLookupRoles());
                 $row = customerLookupRow($pdo, (int) $id);
                 if (!$row) {
                     jsonError('Customer not found', 404);

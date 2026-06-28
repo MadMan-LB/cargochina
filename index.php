@@ -1,7 +1,7 @@
 <?php
 require_once 'includes/auth_check.php';
 require_once 'includes/page_guard.php';
-requireRoleForPage(['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'FieldStaff', 'SuperAdmin']);
+requireRoleForPage(['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin']);
 $currentPage = 'dashboard';
 $pageTitle = 'Dashboard';
 require 'includes/layout.php';
@@ -81,7 +81,7 @@ require 'includes/layout.php';
 
 <!-- Quick navigation -->
 <div class="row g-3 mb-4">
-  <?php if ($isBuyer && in_array('orders', $visiblePageIds ?? [], true)): ?>
+  <?php if (in_array('orders', $visiblePageIds ?? [], true)): ?>
     <div class="col-6 col-md-3">
       <a href="orders.php" class="card text-decoration-none h-100 border-0 shadow-sm" style="background:#fff;">
         <div class="card-body py-3 d-flex align-items-center gap-3">
@@ -133,7 +133,7 @@ require 'includes/layout.php';
     </div>
     <?php endif; ?>
   <?php endif; ?>
-  <?php if ($isWarehouse && in_array('receiving', $visiblePageIds ?? [], true)): ?>
+  <?php if (in_array('receiving', $visiblePageIds ?? [], true)): ?>
     <div class="col-6 col-md-3">
       <a href="receiving.php" class="card text-decoration-none h-100 border-0 shadow-sm" style="background:#fff;">
         <div class="card-body py-3 d-flex align-items-center gap-3">
@@ -146,7 +146,7 @@ require 'includes/layout.php';
       </a>
     </div>
   <?php endif; ?>
-  <?php if ($isAdmin && in_array('consolidation', $visiblePageIds ?? [], true)): ?>
+  <?php if (in_array('consolidation', $visiblePageIds ?? [], true)): ?>
     <div class="col-6 col-md-3">
       <a href="consolidation.php" class="card text-decoration-none h-100 border-0 shadow-sm" style="background:#fff;">
         <div class="card-body py-3 d-flex align-items-center gap-3">
@@ -159,7 +159,7 @@ require 'includes/layout.php';
       </a>
     </div>
   <?php endif; ?>
-  <?php if ($isAdmin && in_array('pipeline', $visiblePageIds ?? [], true)): ?>
+  <?php if (in_array('pipeline', $visiblePageIds ?? [], true)): ?>
     <div class="col-6 col-md-3">
       <a href="pipeline.php" class="card text-decoration-none h-100 border-0 shadow-sm" style="background:#fff;">
         <div class="card-body py-3 d-flex align-items-center gap-3">

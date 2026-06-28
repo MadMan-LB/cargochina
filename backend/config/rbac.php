@@ -6,24 +6,26 @@
  * Resource read/write permissions are enforced in backend/api/index.php.
  */
 
+$operationalRoles = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'];
+
 return [
     'public' => ['auth', 'confirm'],
     'orders' => [
-        'read' => ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'SuperAdmin'],
-        'write' => ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'],
-        'approve' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'],
-        'receive' => ['WarehouseStaff', 'SuperAdmin'],
-        'confirm' => ['ChinaAdmin', 'LebanonAdmin', 'WarehouseStaff', 'SuperAdmin'],
+        'read' => $operationalRoles,
+        'write' => $operationalRoles,
+        'approve' => $operationalRoles,
+        'receive' => $operationalRoles,
+        'confirm' => $operationalRoles,
     ],
     'customers' => [
         'read' => ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'SuperAdmin'],
-        'lookup' => ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'],
+        'lookup' => $operationalRoles,
         'write' => ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'],
         'create' => ['ChinaAdmin', 'SuperAdmin'],
         'import' => ['ChinaAdmin', 'SuperAdmin'],
     ],
     'products' => [
-        'read' => ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'],
+        'read' => $operationalRoles,
         'write' => ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'],
     ],
     'hs-code-tax' => [
@@ -39,7 +41,7 @@ return [
         'write' => ['ChinaAdmin', 'LebanonAdmin', 'ContainersStaff', 'SuperAdmin'],
     ],
     'countries' => [
-        'read' => ['ChinaAdmin', 'LebanonAdmin', 'ContainersStaff', 'SuperAdmin'],
+        'read' => $operationalRoles,
     ],
     'shipment-drafts' => [
         'create' => ['ChinaAdmin', 'LebanonAdmin', 'ContainersStaff', 'SuperAdmin'],
@@ -56,8 +58,8 @@ return [
     ],
     'internal-messages' => ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'SuperAdmin', 'WarehouseStaff'],
     'warehouse-stock' => ['WarehouseStaff', 'ChinaAdmin', 'LebanonAdmin', 'ContainersStaff', 'SuperAdmin'],
-    'procurement-drafts' => ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'],
-    'draft-orders' => ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'],
+    'procurement-drafts' => $operationalRoles,
+    'draft-orders' => $operationalRoles,
     'business-settings' => ['SuperAdmin'],
     'customer-portal-tokens' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'],
     'design-attachments' => ['ChinaAdmin', 'ChinaEmployee', 'WarehouseStaff', 'SuperAdmin'],

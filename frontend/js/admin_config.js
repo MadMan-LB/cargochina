@@ -1,9 +1,16 @@
 document.addEventListener("DOMContentLoaded", () => {
     loadConfig();
     loadHsCatalogFiles();
+    loadTrainingResetSummary();
     document
         .getElementById("hsCatalogImportBtn")
         ?.addEventListener("click", runHsCatalogImport);
+    document
+        .getElementById("trainingResetRefreshBtn")
+        ?.addEventListener("click", loadTrainingResetSummary);
+    document
+        .getElementById("trainingResetBtn")
+        ?.addEventListener("click", runTrainingDataReset);
 });
 
 function toggleWhatsAppSections() {
@@ -142,6 +149,109 @@ async function runHsCatalogImport() {
         showToast(e.message, "danger");
     } finally {
         btn.disabled = false;
+    }
+}
+
+async function loadTrainingResetSummary() {
+    const wrap = document.getElementById("trainingResetGroups");
+    const status = document.getElementById("trainingResetStatus");
+    if (!wrap) return;
+    wrap.innerHTML = `<div class="col-12 text-muted small">${escapeHtml(t("Loading reset options..."))}</div>`;
+    if (status) status.textContent = "";
+    try {
+        const res = await api("GET", "/config/training-reset");
+        const groups = res.data?.groups || [];
+        if (!groups.length) {
+            wrap.innerHTML = `<div class="col-12 text-muted small">${escapeHtml(t("No reset options available."))}</div>`;
+            return;
+        }
+        wrap.innerHTML = groups
+            .map((group) => {
+                const key = escapeHtml(group.key || "");
+                const label = escapeHtml(t(group.label || group.key || ""));
+                const description = escapeHtml(t(group.description || ""));
+                const count = Number(group.count || 0).toLocaleString();
+                return `
+                    <div class="col-md-6 col-xl-4">
+                        <label class="border rounded-2 p-3 h-100 d-block bg-white">
+                            <div class="d-flex align-items-start gap-2">
+                                <input type="checkbox" class="form-check-input mt-1 training-reset-group" value="${key}">
+                                <span class="flex-grow-1">
+                                    <span class="fw-semibold d-block">${label}</span>
+                                    <span class="small text-muted d-block">${description}</span>
+                                    <span class="badge text-bg-light border mt-2">${escapeHtml(count)} ${escapeHtml(t("row(s)"))}</span>
+                                </span>
+                            </div>
+                        </label>
+                    </div>`;
+            })
+            .join("");
+    } catch (e) {
+        wrap.innerHTML = `<div class="col-12 text-danger small">${escapeHtml(e.message || t("Failed to load reset options."))}</div>`;
+    }
+}
+
+async function runTrainingDataReset() {
+    const btn = document.getElementById("trainingResetBtn");
+    const passwordInput = document.getElementById("trainingResetPassword");
+    const status = document.getElementById("trainingResetStatus");
+    const groups = Array.from(
+        document.querySelectorAll(".training-reset-group:checked"),
+    ).map((input) => input.value);
+    const password = passwordInput?.value || "";
+
+    if (!groups.length) {
+        showToast("Select at least one reset group.", "warning");
+        return;
+    }
+    if (!password.trim()) {
+        showToast("Enter the reset password first.", "warning");
+        passwordInput?.focus();
+        return;
+    }
+
+    const groupLabels = groups
+        .map((key) => {
+            const input = Array.from(
+                document.querySelectorAll(".training-reset-group"),
+            ).find((groupInput) => groupInput.value === key);
+            return input?.closest("label")?.querySelector(".fw-semibold")?.textContent?.trim() || key;
+        })
+        .join(", ");
+    const ok = window.confirm(
+        `This will permanently delete selected training data:\n\n${groupLabels}\n\nThis cannot be undone. Continue?`,
+    );
+    if (!ok) return;
+
+    setLoading(btn, true);
+    if (status) status.textContent = t("Deleting selected training data...");
+    try {
+        const started = performance.now();
+        const res = await api("POST", "/config/training-reset", {
+            password,
+            groups,
+        });
+        const elapsed = ((performance.now() - started) / 1000).toFixed(1);
+        const data = res.data || {};
+        const deleted = data.deleted || {};
+        const deletedLines = Object.entries(deleted)
+            .map(([key, count]) => `${key}: ${Number(count || 0).toLocaleString()}`)
+            .join("; ");
+        const total = Number(data.total_deleted || 0).toLocaleString();
+        if (status) {
+            status.textContent =
+                deletedLines || total !== "0"
+                    ? `Deleted ${total} row(s) in ${elapsed}s. ${deletedLines}`
+                    : `No matching rows were deleted. Finished in ${elapsed}s.`;
+        }
+        if (passwordInput) passwordInput.value = "";
+        showToast(`Training reset complete. Deleted ${total} row(s).`);
+        await loadTrainingResetSummary();
+    } catch (e) {
+        if (status) status.textContent = e.message || t("Training reset failed.");
+        showToast(e.message || "Training reset failed.", "danger");
+    } finally {
+        setLoading(btn, false);
     }
 }
 

@@ -52,6 +52,7 @@ if (in_array($method, ['POST', 'PUT', 'PATCH'])) {
 
 // RBAC: public resources skip auth
 $rbac = require dirname(__DIR__, 2) . '/backend/config/rbac.php';
+$operationalRoles = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'];
 $publicResources = $rbac['public'] ?? [];
 if (!in_array($resource, $publicResources)) {
     $userId = getAuthUserId();
@@ -122,16 +123,16 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'config' && $id === 'receiving' && !hasPermission('page:receiving', ['WarehouseStaff', 'SuperAdmin'])) {
+    if ($resource === 'config' && $id === 'receiving' && !hasPermission('page:receiving', $operationalRoles)) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
     if ($resource === 'customers' && $method === 'GET') {
         $userRoles = getUserRoles();
-        $isLookup = $id === 'lookup' || $action === 'lookup';
+        $isLookup = $id === 'lookup' || $action === 'lookup' || $id === 'search';
         $allowed = $isLookup
-            ? hasPermission('customers.lookup', $rbac['customers']['lookup'] ?? [])
+            ? true
             : (hasPermission('customers.read', $rbac['customers']['read'] ?? []) || clmsCanRolesAccessPage($userRoles, 'customers', null, $userId));
         if (!$allowed) {
             http_response_code(403);
@@ -179,12 +180,12 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'receiving' && $id === 'import' && !hasPermission('receiving.import', ['WarehouseStaff', 'SuperAdmin'])) {
+    if ($resource === 'receiving' && $id === 'import' && !hasPermission('receiving.import', $operationalRoles)) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'receiving' && !hasPermission('page:receiving', ['WarehouseStaff', 'SuperAdmin'])) {
+    if ($resource === 'receiving' && !hasPermission('page:receiving', $operationalRoles)) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;

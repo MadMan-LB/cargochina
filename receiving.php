@@ -1,13 +1,14 @@
 <?php
 require_once 'includes/auth_check.php';
 require_once 'includes/page_guard.php';
-requireRoleForPage(['WarehouseStaff', 'SuperAdmin']);
+requireRoleForPage(['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin']);
 $currentPage = 'receiving';
 $pageTitle = clmsT('Warehouse Receiving');
 $roles = $_SESSION['user_roles'] ?? [];
 $userId = isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null;
-$canRecordReceiving = clmsUserCan('orders.receive', ['WarehouseStaff', 'SuperAdmin'], null, $userId, $roles);
-$canImportReceiving = clmsUserCan('receiving.import', ['WarehouseStaff', 'SuperAdmin'], null, $userId, $roles);
+$operationalRoles = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'];
+$canRecordReceiving = clmsUserCan('orders.receive', $operationalRoles, null, $userId, $roles);
+$canImportReceiving = clmsUserCan('receiving.import', $operationalRoles, null, $userId, $roles);
 require 'includes/layout.php';
 ?>
 <div id="receivingPage"
