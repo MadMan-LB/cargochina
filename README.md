@@ -85,6 +85,10 @@ Customer owner/creator visibility rules are intentionally limited to the full cu
 
 Customer selectors in operational workflows use the safe lookup API (`/api/v1/customers/lookup` and `/api/v1/customers/{id}/lookup`), which returns only minimal selection fields and must not expose full customer profiles, balances, private notes, contacts, addresses, or payment links.
 
+## Draft Order Excel Import
+
+`procurement_drafts.php` uses `/api/v1/draft-orders/import` as a preview import. The importer reads normalized header names rather than fixed column positions, tolerates missing optional fields, ignores exported subtotal/grand-total rows, reports skipped rows and warnings, and extracts embedded XLSX photos from the detected Photo column when the server supports workbook drawings. The import fills the draft form for review; it does not save the order until the user saves the draft.
+
 ## Full Specification
 
 See [CLMS_README.md](CLMS_README.md) for the complete specification, state machine, RBAC, and DB_CHANGELOG.

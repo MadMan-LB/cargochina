@@ -1778,45 +1778,70 @@ function draftOrderImportRowIsBlank(array $row): bool
 function draftOrderImportHeaderKey($value): string
 {
     $value = strtolower(draftOrderImportCellString($value));
+    $value = str_replace(['&', '+'], ' and ', $value);
+    $value = preg_replace('/[\s_\-\/\\\\]+/u', ' ', $value) ?? $value;
     return preg_replace('/[^a-z0-9]+/', '', $value) ?? '';
 }
 
 function draftOrderImportColumnAliases(): array
 {
     return [
-        'photo_count' => ['photocount', 'photo'],
+        'photo' => ['photo', 'image', 'picture', 'itemphoto', 'productimage', 'productphoto'],
+        'photo_count' => ['photocount'],
         'brand' => ['brand', 'brandname'],
         'what_brand' => ['whatbrand', 'whatebrand'],
         'materials' => ['material', 'materials'],
         'copy_normal_goods' => ['copynormalgoods', 'copynormal', 'copygoods', 'normalgoods', 'copyornormalgoods'],
         'code' => ['code', 'serialcode', 'serialno', 'serialnumber', 'sku', 'itemcode', 'skucode', 'skuitemcode'],
-        'express_number' => ['expressnumber', 'expressno', 'express', 'trackingnumber', 'trackingno', 'couriernumber'],
+        'express_number' => ['expressnumber', 'expressno', 'express', 'trackingnumber', 'trackingno', 'couriernumber', 'waybill', 'waybillnumber'],
         'size' => ['size', 'outsidecartonsize', 'cartonsize', 'outercartonsize'],
         'length' => ['length', 'lenght', 'l'],
         'width' => ['width', 'w'],
         'height' => ['height', 'h'],
-        'item_no' => ['itemno', 'itemnumber', 'line'],
-        'supplier_name' => ['supplier', 'suppliername', 'factoryname'],
-        'supplier_code' => ['suppliercode'],
+        'item_no' => ['itemno', 'itemnumber', 'no', 'lineno', 'line'],
+        'supplier_name' => ['supplier', 'suppliername', 'factoryname', 'factory', 'vendorname'],
+        'supplier_code' => ['suppliercode', 'supplierno'],
         'supplier_id' => ['supplierid'],
         'description' => ['description', 'productnames', 'productname', 'productnamesdescription', 'productdescription', 'names', 'itemname'],
         'description_en' => ['englishitemname', 'englishname', 'englishdescription', 'descriptionen', 'endescription'],
         'description_cn' => ['chineseitemname', 'chinesename', 'chinesedescription', 'descriptioncn', 'cndescription'],
         'notes' => ['notesdescription', 'notes', 'note', 'remarks', 'remark'],
-        'hs_code' => ['hscode', 'optionalhscode'],
+        'hs_code' => ['hscode', 'optionalhscode', 'hs'],
         'unit' => ['unit', 'units', 'uom'],
-        'pieces_per_carton' => ['piecescarton', 'piecespercarton', 'qtyctn', 'qtyperctn', 'qtycarton', 'quantitypercarton'],
-        'cartons' => ['cartons', 'totalctns', 'totalcartons', 'ctns'],
+        'pieces_per_carton' => ['piecescarton', 'piecespercarton', 'pcscarton', 'pcspercarton', 'qtyctn', 'qtyperctn', 'qtycarton', 'qtypercarton', 'quantitypercarton'],
+        'cartons' => ['cartons', 'carton', 'totalctns', 'totalcartons', 'ctn', 'ctns'],
         'quantity' => ['quantity', 'totalqty', 'qty', 'totalquantity'],
-        'factory_price' => ['factoryprice', 'factory'],
-        'customer_price' => ['customerprice', 'customer', 'sellprice'],
+        'factory_price' => ['factoryprice', 'buyprice', 'cost', 'supplierprice'],
+        'customer_price' => ['customerprice', 'customer', 'sellprice', 'sellingprice'],
         'unit_price' => ['unitprice', 'price'],
-        'total_amount' => ['totalamount', 'amounttotal'],
-        'cbm' => ['cbm', 'cbmunit', 'cbmperunit'],
+        'total_amount' => ['totalamount', 'amounttotal', 'total', 'amount'],
+        'cbm' => ['cbm', 'cbmunit', 'cbmperunit', 'm3', 'volume'],
         'total_cbm' => ['totalcbm', 'cbmtotal', 'declaredcbm'],
-        'weight' => ['weightunit', 'gwkg', 'gw', 'weightkg', 'unitweight'],
+        'weight' => ['weight', 'kg', 'grossweight', 'weightunit', 'gwkg', 'gw', 'weightkg', 'unitweight'],
         'total_weight' => ['totalweight', 'totalgw', 'weighttotal', 'declaredweight'],
         'custom_design_required' => ['customdesign', 'design'],
+        'custom_design_note' => ['customdesignnote', 'designnote'],
+    ];
+}
+
+function draftOrderImportOptionalColumnLabels(): array
+{
+    return [
+        'photo' => 'Photo',
+        'brand' => 'Brand',
+        'materials' => 'Materials',
+        'height' => 'Height',
+        'width' => 'Width',
+        'length' => 'Length',
+        'express_number' => 'Express Number',
+        'hs_code' => 'HS Code',
+        'factory_price' => 'Factory Price',
+        'customer_price' => 'Customer Price',
+        'total_amount' => 'Total Amount',
+        'cbm' => 'CBM',
+        'weight' => 'Weight',
+        'custom_design_required' => 'Custom Design',
+        'custom_design_note' => 'Custom Design Note',
     ];
 }
 
@@ -1895,6 +1920,7 @@ function draftOrderImportFieldList(array $row, array $map, string $field): array
 function draftOrderImportRowHasMappedItemData(array $row, array $map): bool
 {
     $fields = [
+        'photo',
         'item_no',
         'description',
         'description_en',
@@ -1923,6 +1949,7 @@ function draftOrderImportRowHasMappedItemData(array $row, array $map): bool
         'hs_code',
         'notes',
         'custom_design_required',
+        'custom_design_note',
     ];
 
     foreach ($fields as $field) {
@@ -1933,17 +1960,43 @@ function draftOrderImportRowHasMappedItemData(array $row, array $map): bool
         }
     }
 
-    return !empty(draftOrderImportRowPhotoPaths($row));
+    return !empty(draftOrderImportRowPhotoPaths($row, $map));
 }
 
-function draftOrderImportRowPhotoPaths(array $row): array
+function draftOrderImportRowPhotoPaths(array $row, array $map = []): array
 {
-    $paths = draftOrderImportRowMeta($row, '__photo_paths', []);
-    if (!is_array($paths)) {
-        return [];
+    $paths = [];
+    $worksheetImages = draftOrderImportRowMeta($row, '__worksheet_images', []);
+    if (is_array($worksheetImages) && $worksheetImages) {
+        $photoColumn = isset($map['photo']) && is_int($map['photo']) ? $map['photo'] + 1 : null;
+        $matched = [];
+        if ($photoColumn !== null) {
+            foreach ($worksheetImages as $image) {
+                if (!is_array($image)) {
+                    continue;
+                }
+                $startCol = (int) ($image['start_col'] ?? 0);
+                $endCol = (int) ($image['end_col'] ?? $startCol);
+                if ($startCol <= $photoColumn && $photoColumn <= max($startCol, $endCol)) {
+                    $matched[] = $image;
+                }
+            }
+        }
+        foreach ($matched ?: $worksheetImages as $image) {
+            if (is_array($image) && !empty($image['path'])) {
+                $paths[] = (string) $image['path'];
+            }
+        }
     }
 
-    return array_values(array_filter(array_map('strval', $paths), static fn(string $path): bool => trim($path) !== ''));
+    $legacyPaths = draftOrderImportRowMeta($row, '__photo_paths', []);
+    if (is_array($legacyPaths)) {
+        foreach ($legacyPaths as $path) {
+            $paths[] = (string) $path;
+        }
+    }
+
+    return array_values(array_unique(array_filter(array_map('strval', $paths), static fn(string $path): bool => trim($path) !== '')));
 }
 
 function draftOrderImportImageExtensionFromMime(string $mime): string
@@ -1954,14 +2007,18 @@ function draftOrderImportImageExtensionFromMime(string $mime): string
         'image/png' => 'png',
         'image/gif' => 'gif',
         'image/webp' => 'webp',
-        'image/bmp' => 'png',
+        'image/bmp' => 'bmp',
+        'image/x-ms-bmp' => 'bmp',
+        'image/x-bmp' => 'bmp',
     ][strtolower($mime)] ?? 'png';
 }
 
 function draftOrderImportImageExtensionFromPath(string $path): string
 {
     $ext = strtolower(pathinfo(parse_url($path, PHP_URL_PATH) ?: $path, PATHINFO_EXTENSION));
-    return in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'], true) ? ($ext === 'jpeg' ? 'jpg' : $ext) : 'png';
+    return in_array($ext, ['jpg', 'jpeg', 'jfif', 'png', 'gif', 'webp', 'bmp'], true)
+        ? ($ext === 'jpeg' ? 'jpg' : $ext)
+        : 'png';
 }
 
 function draftOrderImportStoreWorksheetDrawing($drawing): ?string
@@ -1996,6 +2053,20 @@ function draftOrderImportStoreWorksheetDrawing($drawing): ?string
         if (!is_string($bytes) || $bytes === '') {
             return null;
         }
+        $imageInfo = @getimagesizefromstring($bytes);
+        if (!is_array($imageInfo)) {
+            return null;
+        }
+        $mime = (string) ($imageInfo['mime'] ?? '');
+        if ($mime !== '') {
+            $ext = draftOrderImportImageExtensionFromMime($mime);
+        }
+        $allowed = function_exists('clmsUploadAllowedImageExtensions')
+            ? clmsUploadAllowedImageExtensions()
+            : ['jpg', 'jpeg', 'png', 'webp', 'jfif', 'gif', 'bmp'];
+        if (!in_array($ext, $allowed, true)) {
+            return null;
+        }
 
         $filename = date('Ymd_His') . '_draft_import_' . bin2hex(random_bytes(4)) . '.' . $ext;
         $path = $uploadDir . $filename;
@@ -2009,24 +2080,35 @@ function draftOrderImportStoreWorksheetDrawing($drawing): ?string
     }
 }
 
-function draftOrderImportDrawingRowRange($drawing): array
+function draftOrderImportDrawingRange($drawing): array
 {
     $startRow = 0;
     $endRow = 0;
+    $startCol = 0;
+    $endCol = 0;
+    $coordinate = '';
     try {
-        [, $startRow] = SpreadsheetCoordinate::coordinateFromString((string) $drawing->getCoordinates());
+        $coordinate = (string) $drawing->getCoordinates();
+        [$column, $startRow] = SpreadsheetCoordinate::coordinateFromString($coordinate);
+        $startCol = SpreadsheetCoordinate::columnIndexFromString($column);
         $endCoordinate = method_exists($drawing, 'getCoordinates2') ? (string) $drawing->getCoordinates2() : '';
         if ($endCoordinate !== '') {
-            [, $endRow] = SpreadsheetCoordinate::coordinateFromString($endCoordinate);
+            [$endColumn, $endRow] = SpreadsheetCoordinate::coordinateFromString($endCoordinate);
+            $endCol = SpreadsheetCoordinate::columnIndexFromString($endColumn);
         }
     } catch (Throwable $e) {
-        return [0, 0];
+        return [0, 0, 0, 0, ''];
     }
 
     $startRow = (int) $startRow;
     $endRow = (int) $endRow;
+    $startCol = (int) $startCol;
+    $endCol = (int) $endCol;
     if ($endRow < $startRow) {
         $endRow = $startRow;
+    }
+    if ($endCol < $startCol) {
+        $endCol = $startCol;
     }
 
     if ($endRow === $startRow && method_exists($drawing, 'getHeight')) {
@@ -2036,23 +2118,38 @@ function draftOrderImportDrawingRowRange($drawing): array
             $endRow = $startRow + $estimatedRows - 1;
         }
     }
+    if ($endCol === $startCol && method_exists($drawing, 'getWidth')) {
+        $width = max(0, (int) $drawing->getWidth());
+        if ($width > 0) {
+            $estimatedColumns = max(1, (int) ceil($width / 90));
+            $endCol = $startCol + $estimatedColumns - 1;
+        }
+    }
 
-    return [$startRow, $endRow];
+    return [$startRow, $endRow, $startCol, $endCol, $coordinate];
 }
 
-function draftOrderImportWorksheetImages($sheet): array
+function draftOrderImportWorksheetImages($sheet, array &$warnings = []): array
 {
     $images = [];
     foreach ($sheet->getDrawingCollection() as $drawing) {
-        [$startRow, $endRow] = draftOrderImportDrawingRowRange($drawing);
+        [$startRow, $endRow, $startCol, $endCol, $coordinate] = draftOrderImportDrawingRange($drawing);
         if ($startRow <= 0) {
             continue;
         }
         $path = draftOrderImportStoreWorksheetDrawing($drawing);
         if (!$path) {
+            $warnings[] = 'Image anchored at ' . ($coordinate ?: ('row ' . $startRow)) . ' could not be imported.';
             continue;
         }
-        $images[] = ['start_row' => $startRow, 'end_row' => max($startRow, $endRow), 'path' => $path];
+        $images[] = [
+            'start_row' => $startRow,
+            'end_row' => max($startRow, $endRow),
+            'start_col' => $startCol,
+            'end_col' => max($startCol, $endCol),
+            'coordinate' => $coordinate,
+            'path' => $path,
+        ];
     }
 
     return $images;
@@ -2082,6 +2179,10 @@ function draftOrderImportAttachWorksheetImages(array &$rows, array $images): voi
         if ($targetIndex === null) {
             continue;
         }
+        $rows[$targetIndex]['__worksheet_images'] = array_values(array_merge(
+            $rows[$targetIndex]['__worksheet_images'] ?? [],
+            [$image]
+        ));
         $rows[$targetIndex]['__photo_paths'] = array_values(array_unique(array_merge(
             $rows[$targetIndex]['__photo_paths'] ?? [],
             [$image['path']]
@@ -2092,13 +2193,27 @@ function draftOrderImportAttachWorksheetImages(array &$rows, array $images): voi
 function draftOrderImportLooksLikeHeader(array $row): bool
 {
     $map = draftOrderImportHeaderMap($row);
-    return isset($map['description'])
+    $fieldCount = count(array_filter(
+        array_keys($map),
+        static fn(string $key): bool => $key !== '_description_indexes'
+    ));
+    $hasItemIdentity = isset($map['description'])
+        || isset($map['description_en'])
+        || isset($map['description_cn'])
+        || isset($map['code'])
+        || isset($map['item_no']);
+
+    return $fieldCount >= 2
+        && $hasItemIdentity
         && (
             isset($map['item_no'])
             || isset($map['cartons'])
             || isset($map['pieces_per_carton'])
             || isset($map['quantity'])
             || isset($map['supplier_name'])
+            || isset($map['supplier_code'])
+            || isset($map['photo'])
+            || isset($map['code'])
         );
 }
 
@@ -2190,13 +2305,15 @@ function draftOrderImportExcelSignatureMessage(string $path, string $ext): ?stri
     return null;
 }
 
-function draftOrderImportReadRowsFromSpreadsheet($spreadsheet, int $maxRows, bool $includeImages): array
+function draftOrderImportReadRowsFromSpreadsheet($spreadsheet, int $maxRows, bool $includeImages, array &$readWarnings = [], array &$readMeta = []): array
 {
     try {
         $sheet = $spreadsheet->getActiveSheet();
         $highestRow = min($sheet->getHighestDataRow(), $maxRows);
         $highestColumn = $sheet->getHighestDataColumn();
         $highestColumnIndex = min(60, SpreadsheetCoordinate::columnIndexFromString($highestColumn));
+        $readMeta['sheet_rows_seen'] = $highestRow;
+        $readMeta['sheet_columns_seen'] = $highestColumnIndex;
 
         $rows = [];
         for ($rowNumber = 1; $rowNumber <= $highestRow; $rowNumber++) {
@@ -2211,7 +2328,10 @@ function draftOrderImportReadRowsFromSpreadsheet($spreadsheet, int $maxRows, boo
         }
 
         if ($includeImages) {
-            draftOrderImportAttachWorksheetImages($rows, draftOrderImportWorksheetImages($sheet));
+            $images = draftOrderImportWorksheetImages($sheet, $readWarnings);
+            $readMeta['images_found'] = count($images);
+            $readMeta['images_imported'] = count($images);
+            draftOrderImportAttachWorksheetImages($rows, $images);
         }
 
         return $rows;
@@ -2247,6 +2367,7 @@ function draftOrderImportLogExcelReadFailure(
 
 function draftOrderImportReadRowsFromUpload(): array
 {
+    $startedAt = microtime(true);
     if (empty($_FILES['file']) || !is_array($_FILES['file'])) {
         jsonError('Choose an Excel or CSV file to import.', 400);
     }
@@ -2290,6 +2411,15 @@ function draftOrderImportReadRowsFromUpload(): array
     $rows = [];
     $maxRows = 3000;
     $readWarnings = [];
+    $readMeta = [
+        'source_extension' => $ext,
+        'source_size_bytes' => (int) ($file['size'] ?? 0),
+        'rows_read' => 0,
+        'blank_rows_skipped' => 0,
+        'images_found' => 0,
+        'images_imported' => 0,
+        'read_seconds' => 0.0,
+    ];
     if (in_array($ext, ['csv', 'cv'], true)) {
         $handle = fopen($tmpName, 'r');
         if (!$handle) {
@@ -2324,7 +2454,7 @@ function draftOrderImportReadRowsFromUpload(): array
         try {
             $reader = draftOrderImportCreateExcelReader($ext, true);
             $spreadsheet = $reader->load($readerPath);
-            $rows = draftOrderImportReadRowsFromSpreadsheet($spreadsheet, $maxRows, true);
+            $rows = draftOrderImportReadRowsFromSpreadsheet($spreadsheet, $maxRows, true, $readWarnings, $readMeta);
         } catch (Throwable $e) {
             $requestId = bin2hex(random_bytes(8));
             draftOrderImportLogExcelReadFailure($requestId, $name, $file, $tmpName, $ext, true, $e);
@@ -2332,7 +2462,7 @@ function draftOrderImportReadRowsFromUpload(): array
             try {
                 $reader = draftOrderImportCreateExcelReader($ext, false);
                 $spreadsheet = $reader->load($readerPath);
-                $rows = draftOrderImportReadRowsFromSpreadsheet($spreadsheet, $maxRows, false);
+                $rows = draftOrderImportReadRowsFromSpreadsheet($spreadsheet, $maxRows, false, $readWarnings, $readMeta);
                 $readWarnings[] = 'The Excel rows were imported, but embedded photos could not be read on this server. Upload item photos manually after preview if needed.';
                 logClms('draft_order_import_excel_read_without_images', [
                     'request_id' => $requestId,
@@ -2357,12 +2487,15 @@ function draftOrderImportReadRowsFromUpload(): array
         }
     }
 
+    $readMeta['rows_read'] = count($rows);
     $rows = array_values(array_filter($rows, static fn(array $row): bool => !draftOrderImportRowIsBlank($row)));
+    $readMeta['blank_rows_skipped'] = max(0, (int) $readMeta['rows_read'] - count($rows));
+    $readMeta['read_seconds'] = round(microtime(true) - $startedAt, 3);
     if (!$rows) {
         jsonError('Import file has no readable rows.', 400);
     }
 
-    return [$rows, $name, $readWarnings];
+    return [$rows, $name, $readWarnings, $readMeta];
 }
 
 function draftOrderImportNumeric($value): ?float
@@ -2506,6 +2639,12 @@ function draftOrderImportResolveSupplier(PDO $pdo, string $value): array
 
 function draftOrderImportResolveSupplierFromFields(PDO $pdo, string $name = '', string $code = '', string $id = ''): array
 {
+    static $cache = [];
+    $cacheKey = spl_object_id($pdo) . ':supplier_fields:' . strtolower(trim($id) . '|' . trim($code) . '|' . trim($name));
+    if (array_key_exists($cacheKey, $cache)) {
+        return $cache[$cacheKey];
+    }
+
     $id = trim($id);
     if ($id !== '' && ctype_digit($id)) {
         try {
@@ -2513,7 +2652,7 @@ function draftOrderImportResolveSupplierFromFields(PDO $pdo, string $name = '', 
             $stmt->execute([(int) $id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if ($row) {
-                return ['id' => (int) $row['id'], 'name' => (string) $row['name']];
+                return $cache[$cacheKey] = ['id' => (int) $row['id'], 'name' => (string) $row['name']];
             }
         } catch (Throwable $e) {
         }
@@ -2523,11 +2662,11 @@ function draftOrderImportResolveSupplierFromFields(PDO $pdo, string $name = '', 
     if ($code !== '') {
         $resolved = draftOrderImportResolveSupplier($pdo, $code);
         if (!empty($resolved['id'])) {
-            return $resolved;
+            return $cache[$cacheKey] = $resolved;
         }
     }
 
-    return draftOrderImportResolveSupplier($pdo, $name !== '' ? $name : $code);
+    return $cache[$cacheKey] = draftOrderImportResolveSupplier($pdo, $name !== '' ? $name : $code);
 }
 
 function draftOrderImportResolveCustomer(PDO $pdo, string $value): array
@@ -2680,6 +2819,28 @@ function draftOrderImportLooksLikeSharedContent(string $itemNo): bool
     return $itemNo !== '' && preg_match('/^(↳|->|=>|-->)/u', $itemNo) === 1;
 }
 
+function draftOrderImportLooksLikeSummaryRow(array $row): bool
+{
+    $summaryTokens = [
+        'suppliersubtotal',
+        'supplierstotal',
+        'grandtotal',
+        'sectionitemtotal',
+        'overalltotal',
+    ];
+
+    foreach ($row as $index => $value) {
+        if (!is_int($index)) {
+            continue;
+        }
+        if (in_array(draftOrderImportHeaderKey($value), $summaryTokens, true)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 function draftOrderImportSupplierMarkerName(array $row): string
 {
     $firstValue = draftOrderImportCellString($row[0] ?? '');
@@ -2696,8 +2857,14 @@ function draftOrderImportSupplierMarkerName(array $row): string
     return '';
 }
 
-function draftOrderImportBuildItem(array $row, array $map): ?array
+function draftOrderImportBuildItem(array $row, array $map, ?string &$skipReason = null): ?array
 {
+    $skipReason = null;
+    if (draftOrderImportLooksLikeSummaryRow($row)) {
+        $skipReason = '__ignore_summary_row';
+        return null;
+    }
+
     $itemNo = draftOrderImportField($row, $map, 'item_no');
     $brand = draftOrderNormalizeItemText(draftOrderImportField($row, $map, 'brand'), 150);
     $whatBrand = draftOrderNormalizeItemText(draftOrderImportField($row, $map, 'what_brand'), 150);
@@ -2742,14 +2909,60 @@ function draftOrderImportBuildItem(array $row, array $map): ?array
     $totalWeight = draftOrderImportFieldNumber($row, $map, 'total_weight');
     $unit = draftOrderNormalizeUnit(draftOrderImportField($row, $map, 'unit'));
     $notes = trim(draftOrderImportField($row, $map, 'notes'));
+    $customDesignNote = draftOrderNormalizeItemText(draftOrderImportField($row, $map, 'custom_design_note'), 1000);
+    $photoPaths = draftOrderImportRowPhotoPaths($row, $map);
 
-    if ($itemNo === '' && $description === '' && $cartons === null && $quantity === null && $totalAmount === null && $totalCbm === null && $totalWeight === null) {
+    if (!$descriptionEntries && $code !== null) {
+        $descriptionEntries[] = [
+            'description_text' => $code,
+            'description_translated' => '',
+        ];
+        $description = $code;
+    }
+
+    if (
+        $itemNo === ''
+        && $description === ''
+        && $code === null
+        && $brand === null
+        && $materials === null
+        && $expressNumber === null
+        && !$photoPaths
+        && $cartons === null
+        && $quantity === null
+        && $totalAmount === null
+        && $totalCbm === null
+        && $totalWeight === null
+    ) {
         return null;
     }
 
     $descriptionToken = draftOrderImportHeaderKey($description);
     if (in_array($descriptionToken, ['suppliersubtotal', 'grandtotal', 'sectionitemtotal', 'overalltotal'], true)) {
+        $skipReason = '__ignore_summary_row';
         return null;
+    }
+
+    foreach ([
+        'Length' => $length,
+        'Width' => $width,
+        'Height' => $height,
+        'Cartons' => $cartons,
+        'Pieces/Carton' => $piecesPerCarton,
+        'Quantity' => $quantity,
+        'Factory Price' => $factoryPrice,
+        'Customer Price' => $customerPrice,
+        'Unit Price' => $plainUnitPrice,
+        'Total Amount' => $totalAmount,
+        'CBM' => $rawCbm,
+        'Total CBM' => $totalCbm,
+        'Weight' => $rawWeight,
+        'Total Weight' => $totalWeight,
+    ] as $label => $number) {
+        if ($number !== null && $number < 0) {
+            $skipReason = $label . ' cannot be negative.';
+            return null;
+        }
     }
 
     if ($cartons !== null && $cartons <= 0 && (($quantity !== null && $quantity > 0) || ($piecesPerCarton !== null && $piecesPerCarton > 0))) {
@@ -2815,9 +3028,9 @@ function draftOrderImportBuildItem(array $row, array $map): ?array
         'dimensions_scope' => $scope,
         'hs_code' => draftOrderNormalizeHsCode($hsCode) ?: '',
         'notes' => $notes ?: null,
-        'photo_paths' => draftOrderImportRowPhotoPaths($row),
+        'photo_paths' => $photoPaths,
         'custom_design_required' => draftOrderImportIsTruthy($customRaw) ? 1 : 0,
-        'custom_design_note' => null,
+        'custom_design_note' => $customDesignNote,
         'custom_design_paths' => [],
         'shared_carton_enabled' => 0,
         'shared_carton_code' => null,
@@ -2825,9 +3038,9 @@ function draftOrderImportBuildItem(array $row, array $map): ?array
     ];
 }
 
-function draftOrderImportBuildSharedContent(PDO $pdo, array $row, array $map, array $fallbackSupplier): ?array
+function draftOrderImportBuildSharedContent(PDO $pdo, array $row, array $map, array $fallbackSupplier, ?string &$skipReason = null): ?array
 {
-    $item = draftOrderImportBuildItem($row, $map);
+    $item = draftOrderImportBuildItem($row, $map, $skipReason);
     if (!$item) {
         return null;
     }
@@ -2904,8 +3117,9 @@ function draftOrderImportFinalizeShared(array &$sections, ?array &$pendingShared
     $pendingShared = null;
 }
 
-function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename, array $readWarnings = []): array
+function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename, array $readWarnings = [], array $readMeta = []): array
 {
+    $buildStartedAt = microtime(true);
     $warnings = $readWarnings;
     $meta = [
         'customer_name' => '',
@@ -2920,11 +3134,19 @@ function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename, a
     $importedRows = 0;
     $sawImportHeader = false;
     $sawMappedItemData = false;
+    $skippedRows = [];
+    $headerFieldsSeen = [];
 
     foreach ($rows as $row) {
         if (draftOrderImportLooksLikeHeader($row)) {
             draftOrderImportFinalizeShared($sections, $pendingShared);
             $currentHeader = draftOrderImportHeaderMap($row);
+            foreach ($currentHeader as $field => $index) {
+                if ($field === '_description_indexes') {
+                    continue;
+                }
+                $headerFieldsSeen[$field] = true;
+            }
             $sawImportHeader = true;
             continue;
         }
@@ -2959,11 +3181,22 @@ function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename, a
             $currentSupplier = draftOrderImportResolveSupplier($pdo, draftOrderImportCellString($row[2] ?? ''));
             continue;
         }
+        if (draftOrderImportLooksLikeSummaryRow($row)) {
+            draftOrderImportFinalizeShared($sections, $pendingShared);
+            continue;
+        }
         if (!$currentHeader) {
             continue;
         }
-        if (draftOrderImportRowHasMappedItemData($row, $currentHeader)) {
+        $hasMappedItemData = draftOrderImportRowHasMappedItemData($row, $currentHeader);
+        if ($hasMappedItemData) {
             $sawMappedItemData = true;
+        } else {
+            $skippedRows[] = [
+                'row' => (int) draftOrderImportRowMeta($row, '__row_number', 0),
+                'reason' => 'No importable item data found in mapped columns.',
+            ];
+            continue;
         }
 
         $rowSupplierName = draftOrderImportField($row, $currentHeader, 'supplier_name');
@@ -2978,7 +3211,8 @@ function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename, a
 
         if ($descriptionToken === 'sharedcartonmultipleitems') {
             draftOrderImportFinalizeShared($sections, $pendingShared);
-            $summary = draftOrderImportBuildItem($row, $currentHeader);
+            $skipReason = null;
+            $summary = draftOrderImportBuildItem($row, $currentHeader, $skipReason);
             if ($summary) {
                 $summary['shared_carton_enabled'] = 1;
                 $summary['shared_carton_code'] = $summary['item_no'] ?: null;
@@ -2992,22 +3226,47 @@ function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename, a
                     'contents' => [],
                 ];
                 $importedRows++;
+            } elseif ($skipReason) {
+                if ($skipReason === '__ignore_summary_row') {
+                    continue;
+                }
+                $skippedRows[] = [
+                    'row' => (int) draftOrderImportRowMeta($row, '__row_number', 0),
+                    'reason' => $skipReason,
+                ];
             }
             continue;
         }
 
         if ($pendingShared !== null && draftOrderImportLooksLikeSharedContent($itemNo)) {
-            $content = draftOrderImportBuildSharedContent($pdo, $row, $currentHeader, $pendingShared['supplier']);
+            $skipReason = null;
+            $content = draftOrderImportBuildSharedContent($pdo, $row, $currentHeader, $pendingShared['supplier'], $skipReason);
             if ($content) {
                 $pendingShared['contents'][] = $content;
                 $importedRows++;
+            } elseif ($skipReason) {
+                if ($skipReason === '__ignore_summary_row') {
+                    continue;
+                }
+                $skippedRows[] = [
+                    'row' => (int) draftOrderImportRowMeta($row, '__row_number', 0),
+                    'reason' => $skipReason,
+                ];
             }
             continue;
         }
 
         draftOrderImportFinalizeShared($sections, $pendingShared);
-        $item = draftOrderImportBuildItem($row, $currentHeader);
+        $skipReason = null;
+        $item = draftOrderImportBuildItem($row, $currentHeader, $skipReason);
         if (!$item) {
+            if ($skipReason === '__ignore_summary_row') {
+                continue;
+            }
+            $skippedRows[] = [
+                'row' => (int) draftOrderImportRowMeta($row, '__row_number', 0),
+                'reason' => $skipReason ?: 'The row did not contain a usable item name, code, item number, quantity, price, CBM, weight, or photo.',
+            ];
             continue;
         }
         draftOrderImportAddItemToSections($sections, $rowSupplier, $item);
@@ -3016,19 +3275,34 @@ function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename, a
     draftOrderImportFinalizeShared($sections, $pendingShared);
 
     if (!$importedRows || !$sections) {
+        $rowErrorDetails = $skippedRows ? [
+            'skipped_rows' => array_slice(array_values(array_filter(
+                $skippedRows,
+                static fn(array $row): bool => !empty($row['row'])
+            )), 0, 25),
+        ] : [];
         if ($sawImportHeader && !$sawMappedItemData) {
             jsonError(
                 'The import template was recognized, but no item rows were filled in. Add at least one product row below the header, then import again.',
-                400
+                400,
+                $rowErrorDetails
             );
         }
         if ($sawImportHeader) {
             jsonError(
                 'The import header was recognized, but no filled item rows could be imported. Each item row needs an item name or description, item number, quantity, price, CBM, or weight.',
-                400
+                400,
+                $rowErrorDetails
             );
         }
         jsonError('No draft-order item rows matched the import column names. Use headers like "Item No", "English Item Name", "Chinese Item Name", "Product / Names", or "Description".', 400);
+    }
+
+    $missingOptionalColumns = [];
+    foreach (draftOrderImportOptionalColumnLabels() as $field => $label) {
+        if (empty($headerFieldsSeen[$field])) {
+            $missingOptionalColumns[] = $label;
+        }
     }
 
     $customer = draftOrderImportResolveCustomer($pdo, $meta['customer_name']);
@@ -3060,6 +3334,20 @@ function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename, a
         'meta' => [
             'source_file' => $filename,
             'rows_imported' => $importedRows,
+            'rows_skipped' => count($skippedRows),
+            'skipped_rows' => array_slice(array_values(array_filter(
+                $skippedRows,
+                static fn(array $row): bool => !empty($row['row'])
+            )), 0, 25),
+            'blank_rows_skipped' => (int) ($readMeta['blank_rows_skipped'] ?? 0),
+            'rows_read' => (int) ($readMeta['rows_read'] ?? count($rows)),
+            'total_item_rows' => $importedRows + count($skippedRows),
+            'missing_optional_columns' => $missingOptionalColumns,
+            'images_found' => (int) ($readMeta['images_found'] ?? 0),
+            'images_imported' => (int) ($readMeta['images_imported'] ?? 0),
+            'read_seconds' => (float) ($readMeta['read_seconds'] ?? 0),
+            'import_seconds' => round(microtime(true) - $buildStartedAt, 3),
+            'total_seconds' => round((float) ($readMeta['read_seconds'] ?? 0) + (microtime(true) - $buildStartedAt), 3),
             'warnings' => array_values(array_unique($warnings)),
         ],
     ];
@@ -3088,8 +3376,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     clmsRequirePermission('page:procurement_drafts', ['ChinaAdmin', 'ChinaEmployee'], $pdo, $userId);
 
     if ($method === 'POST' && $id === 'import' && $action === null) {
-        [$rows, $filename, $readWarnings] = draftOrderImportReadRowsFromUpload();
-        jsonResponse(['data' => draftOrderImportBuildPayload($pdo, $rows, $filename, $readWarnings)]);
+        [$rows, $filename, $readWarnings, $readMeta] = draftOrderImportReadRowsFromUpload();
+        jsonResponse(['data' => draftOrderImportBuildPayload($pdo, $rows, $filename, $readWarnings, $readMeta)]);
     }
 
     if ($method === 'POST' && $id === 'legacy' && $action && preg_match('/^(\d+)\/migrate$/', $action, $matches)) {

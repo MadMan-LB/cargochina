@@ -16,7 +16,19 @@
     let draftOrderImportNeedsReplaceConfirm = false;
     let draftOrderImportReturnToBuilder = false;
     let draftOrderImportInProgress = false;
+    let draftOrderImportProgressTimer = null;
+    let draftOrderImportLongTimer = null;
+    let draftOrderImportStartedAt = 0;
+    let draftOrderImportProgressState = null;
     let draftOrderUnsavedGuard = null;
+    const DRAFT_ORDER_IMPORT_STEPS = [
+        { key: "uploading", label: "Uploading", target: 25 },
+        { key: "reading", label: "Reading Excel", target: 45 },
+        { key: "rows", label: "Importing rows", target: 68 },
+        { key: "images", label: "Processing images", target: 88 },
+        { key: "saving", label: "Saving draft", target: 96 },
+        { key: "done", label: "Done", target: 100 },
+    ];
 
     function draftT(text, replacements = null) {
         let value = typeof t === "function" ? t(text, replacements) : text;
@@ -898,44 +910,254 @@
         return fields.some((field) => String(field.value || "").trim() !== "");
     }
 
-    async function uploadDraftOrderImportFile(file) {
+    function clearDraftOrderImportProgressTimers() {
+        if (draftOrderImportProgressTimer) {
+            clearInterval(draftOrderImportProgressTimer);
+            draftOrderImportProgressTimer = null;
+        }
+        if (draftOrderImportLongTimer) {
+            clearTimeout(draftOrderImportLongTimer);
+            draftOrderImportLongTimer = null;
+        }
+    }
+
+    function draftOrderImportStepIndex(stepKey) {
+        return Math.max(
+            0,
+            DRAFT_ORDER_IMPORT_STEPS.findIndex((step) => step.key === stepKey),
+        );
+    }
+
+    function draftOrderImportStepLabel(stepKey) {
+        return (
+            DRAFT_ORDER_IMPORT_STEPS.find((step) => step.key === stepKey)
+                ?.label || stepKey
+        );
+    }
+
+    function draftOrderImportElapsedSeconds() {
+        if (!draftOrderImportStartedAt) return 0;
+        return Math.max(0, (Date.now() - draftOrderImportStartedAt) / 1000);
+    }
+
+    function draftOrderImportRowsText(meta = {}) {
+        const imported = Number(meta.rows_imported || 0);
+        const total = Number(meta.total_item_rows || 0) || imported;
+        return draftT("{done} / {total} rows imported", {
+            done: imported,
+            total,
+        });
+    }
+
+    function draftOrderImportImagesText(meta = {}) {
+        const found = Number(meta.images_found || 0);
+        const imported = Number(meta.images_imported || 0);
+        if (!found && !imported) return draftT("No embedded images found");
+        return draftT("{done} / {total} images processed", {
+            done: imported,
+            total: found || imported,
+        });
+    }
+
+    function renderDraftOrderImportProgress() {
+        const status = document.getElementById("draftOrderImportStatus");
+        const state = draftOrderImportProgressState;
+        if (!status || !state) return;
+        const percent = Math.max(
+            0,
+            Math.min(100, Math.round(Number(state.percent || 0))),
+        );
+        const activeIndex = draftOrderImportStepIndex(state.step || "uploading");
+        const alertClass =
+            state.type === "success"
+                ? "alert-success"
+                : state.type === "danger"
+                  ? "alert-danger"
+                  : state.type === "warning"
+                    ? "alert-warning"
+                    : "alert-info";
+        const stepMarkup = DRAFT_ORDER_IMPORT_STEPS.map((step, index) => {
+            const done = index < activeIndex || percent >= step.target;
+            const active = index === activeIndex;
+            const cls = done
+                ? "text-success"
+                : active
+                  ? "text-primary fw-semibold"
+                  : "text-muted";
+            const mark = done ? "OK" : active ? "Now" : "Next";
+            return `<span class="${cls}">${mark} ${escapeHtml(draftT(step.label))}</span>`;
+        }).join("");
+        const detailList = Array.isArray(state.details)
+            ? state.details.filter(Boolean).slice(0, 8)
+            : [];
+        status.className = `draft-import-status mt-3 alert ${alertClass} py-2 mb-0`;
+        status.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center gap-2">
+              <div>
+                <div class="fw-semibold">${escapeHtml(draftT(state.message || draftOrderImportStepLabel(state.step)))}</div>
+                <div class="small text-muted">${escapeHtml(draftT(draftOrderImportStepLabel(state.step || "uploading")))} · ${escapeHtml(draftT("Elapsed {seconds}s", { seconds: draftOrderImportElapsedSeconds().toFixed(1) }))}</div>
+              </div>
+              <div class="fw-bold">${percent}%</div>
+            </div>
+            <div class="progress mt-2" role="progressbar" aria-valuenow="${percent}" aria-valuemin="0" aria-valuemax="100" style="height: 10px;">
+              <div class="progress-bar" style="width: ${percent}%"></div>
+            </div>
+            <div class="draft-import-step-list d-flex flex-wrap gap-2 mt-2 small">${stepMarkup}</div>
+            ${
+                state.rowsText || state.imageText || state.longMessage
+                    ? `<div class="small mt-2">
+                        ${state.rowsText ? `<div>${escapeHtml(state.rowsText)}</div>` : ""}
+                        ${state.imageText ? `<div>${escapeHtml(state.imageText)}</div>` : ""}
+                        ${state.longMessage ? `<div class="text-warning fw-semibold">${escapeHtml(draftT(state.longMessage))}</div>` : ""}
+                      </div>`
+                    : ""
+            }
+            ${
+                detailList.length
+                    ? `<ul class="mb-0 mt-2 ps-3 small">${detailList
+                          .map((detail) => `<li>${escapeHtml(String(detail))}</li>`)
+                          .join("")}</ul>`
+                    : ""
+            }
+        `;
+    }
+
+    function setDraftOrderImportProgress(patch = {}) {
+        draftOrderImportProgressState = {
+            percent: 0,
+            step: "uploading",
+            type: "info",
+            message: "Uploading file...",
+            rowsText: "",
+            imageText: "",
+            details: [],
+            ...draftOrderImportProgressState,
+            ...patch,
+        };
+        renderDraftOrderImportProgress();
+    }
+
+    function startDraftOrderImportProgress(file) {
+        clearDraftOrderImportProgressTimers();
+        draftOrderImportStartedAt = Date.now();
+        draftOrderImportProgressState = null;
+        setDraftOrderImportProgress({
+            percent: 1,
+            step: "uploading",
+            message: draftT("Uploading {file}...", {
+                file: file?.name || draftT("selected file"),
+            }),
+        });
+        draftOrderImportProgressTimer = setInterval(() => {
+            if (!draftOrderImportInProgress || !draftOrderImportProgressState) {
+                return;
+            }
+            const state = draftOrderImportProgressState;
+            let step = state.step || "reading";
+            let percent = Number(state.percent || 0);
+            if (step === "uploading" && percent >= 24) {
+                step = "reading";
+            } else if (step === "reading" && percent >= 44) {
+                step = "rows";
+            } else if (step === "rows" && percent >= 67) {
+                step = "images";
+            } else if (step === "images" && percent >= 87) {
+                step = "saving";
+            }
+            const target =
+                DRAFT_ORDER_IMPORT_STEPS.find((item) => item.key === step)
+                    ?.target || 95;
+            const increment = step === "images" ? 0.45 : step === "saving" ? 0.25 : 0.8;
+            percent = Math.min(target - 1, percent + increment);
+            setDraftOrderImportProgress({
+                step,
+                percent,
+                message:
+                    step === "images"
+                        ? "Processing images..."
+                        : step === "rows"
+                          ? "Importing rows..."
+                          : step === "reading"
+                            ? "Reading Excel..."
+                            : step === "saving"
+                              ? "Saving draft..."
+                              : state.message,
+            });
+        }, 650);
+        draftOrderImportLongTimer = setTimeout(() => {
+            if (!draftOrderImportInProgress) return;
+            setDraftOrderImportProgress({
+                longMessage: "Still processing images, please wait...",
+                step:
+                    draftOrderImportProgressState?.step === "uploading"
+                        ? "reading"
+                        : draftOrderImportProgressState?.step || "images",
+            });
+        }, 15000);
+    }
+
+    function uploadDraftOrderImportFile(file, callbacks = {}) {
         const fd = new FormData();
         fd.append("file", file);
 
-        let res;
-        try {
-            res = await fetch(API + "/draft-orders/import", {
-                method: "POST",
-                credentials: "same-origin",
-                body: fd,
-            });
-        } catch (_) {
-            throw new Error(
-                draftT(
-                    "Could not reach the server. Check your connection and try again.",
-                ),
-            );
-        }
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", API + "/draft-orders/import");
+            xhr.withCredentials = true;
+            xhr.timeout = 180000;
 
-        const text = await res.text();
-        let data = {};
-        try {
-            data = text ? JSON.parse(text) : {};
-        } catch (_) {
-            throw new Error("Import failed because the server response was not JSON.");
-        }
-        if (!res.ok || data.error) {
-            const err = data.error === true ? data : data.error || {};
-            const message =
-                err.message ||
-                data.message ||
-                draftT("Import failed. Check the file and try again.");
-            const ref = err.request_id || data.request_id;
-            const error = new Error(message + (ref ? ` (ref: ${ref})` : ""));
-            error.errors = err.errors || data.errors || {};
-            throw error;
-        }
-        return data;
+            xhr.upload.onprogress = (event) => {
+                if (!event.lengthComputable) return;
+                const uploadPercent = Math.round((event.loaded / event.total) * 100);
+                callbacks.onUploadProgress?.(uploadPercent);
+            };
+            xhr.upload.onload = () => callbacks.onUploadComplete?.();
+            xhr.onerror = () =>
+                reject(
+                    new Error(
+                        draftT(
+                            "Could not reach the server. Check your connection and try again.",
+                        ),
+                    ),
+                );
+            xhr.ontimeout = () =>
+                reject(
+                    new Error(
+                        draftT(
+                            "Import is taking too long. Try a smaller file or convert the workbook to CSV.",
+                        ),
+                    ),
+                );
+            xhr.onload = () => {
+                let data = {};
+                try {
+                    data = xhr.responseText ? JSON.parse(xhr.responseText) : {};
+                } catch (_) {
+                    reject(
+                        new Error(
+                            draftT(
+                                "Import failed because the server response was not JSON.",
+                            ),
+                        ),
+                    );
+                    return;
+                }
+                if (xhr.status < 200 || xhr.status >= 300 || data.error) {
+                    const err = data.error === true ? data : data.error || {};
+                    const message =
+                        err.message ||
+                        data.message ||
+                        draftT("Import failed. Check the file and try again.");
+                    const ref = err.request_id || data.request_id;
+                    const error = new Error(message + (ref ? ` (ref: ${ref})` : ""));
+                    error.errors = err.errors || data.errors || {};
+                    reject(error);
+                    return;
+                }
+                resolve(data);
+            };
+            xhr.send(fd);
+        });
     }
 
     async function applyImportedDraftOrder(imported) {
@@ -1009,6 +1231,9 @@
     }
 
     function resetDraftOrderImportUi() {
+        clearDraftOrderImportProgressTimers();
+        draftOrderImportStartedAt = 0;
+        draftOrderImportProgressState = null;
         const ui = draftOrderImportUi();
         if (ui.fileName) ui.fileName.textContent = draftT("No file selected");
         if (ui.status) {
@@ -1055,6 +1280,7 @@
         setLoading(ui.dropBtn, loading);
         ui.dropZone?.classList.toggle("is-importing", !!loading);
         ui.dropZone?.setAttribute("aria-busy", loading ? "true" : "false");
+        ui.dropZone?.setAttribute("aria-disabled", loading ? "true" : "false");
         if (ui.plusBtn) ui.plusBtn.disabled = !!loading;
     }
 
@@ -1086,6 +1312,14 @@
             return errors.map((item) => String(item));
         }
         if (typeof errors === "object" && errors !== null) {
+            if (Array.isArray(errors.skipped_rows)) {
+                return errors.skipped_rows.map((row) =>
+                    draftT("Row {row} skipped: {reason}", {
+                        row: row.row || "-",
+                        reason: row.reason || draftT("Could not read row."),
+                    }),
+                );
+            }
             return Object.values(errors)
                 .flat()
                 .map((item) => String(item));
@@ -1093,14 +1327,73 @@
         return [];
     }
 
+    function draftOrderImportSummaryDetails(meta = {}) {
+        const details = [];
+        details.push(draftOrderImportRowsText(meta));
+        if (Number(meta.rows_skipped || 0) > 0) {
+            details.push(
+                draftT("{count} row(s) skipped", {
+                    count: meta.rows_skipped,
+                }),
+            );
+        }
+        if (Number(meta.blank_rows_skipped || 0) > 0) {
+            details.push(
+                draftT("{count} blank row(s) ignored", {
+                    count: meta.blank_rows_skipped,
+                }),
+            );
+        }
+        if (Number(meta.images_found || 0) || Number(meta.images_imported || 0)) {
+            details.push(draftOrderImportImagesText(meta));
+        }
+        if (Array.isArray(meta.missing_optional_columns) && meta.missing_optional_columns.length) {
+            details.push(
+                draftT("Missing optional columns: {columns}", {
+                    columns: meta.missing_optional_columns.join(", "),
+                }),
+            );
+        }
+        if (meta.total_seconds) {
+            details.push(
+                draftT("Finished in {seconds}s", {
+                    seconds: Number(meta.total_seconds || 0).toFixed(1),
+                }),
+            );
+        }
+        return details;
+    }
+
     function showDraftOrderImportResult(meta, fileName) {
         const imported = meta.rows_imported || 0;
         showToast(
-            draftT("Imported {count} rows from {file}.", {
+            draftT("Imported {count} row(s) from {file}.", {
                 count: imported,
                 file: fileName || meta.source_file || draftT("selected file"),
             }),
         );
+        if (meta.total_seconds) {
+            showToast(
+                draftT("Import finished in {seconds}s.", {
+                    seconds: Number(meta.total_seconds || 0).toFixed(1),
+                }),
+                "success",
+            );
+        }
+        if (Number(meta.images_found || 0) || Number(meta.images_imported || 0)) {
+            showToast(draftOrderImportImagesText(meta), "success");
+        }
+        if (
+            Array.isArray(meta.missing_optional_columns) &&
+            meta.missing_optional_columns.length
+        ) {
+            showToast(
+                draftT("Optional columns not found: {columns}", {
+                    columns: meta.missing_optional_columns.join(", "),
+                }),
+                "warning",
+            );
+        }
 
         const skippedRows = Array.isArray(meta.skipped_rows)
             ? meta.skipped_rows
@@ -1158,24 +1451,58 @@
         try {
             draftOrderImportReturnToBuilder = false;
             setDraftOrderImportBusy(true);
-            setDraftOrderImportStatus("info", "Importing…");
-            const res = await uploadDraftOrderImportFile(file);
+            startDraftOrderImportProgress(file);
+            const res = await uploadDraftOrderImportFile(file, {
+                onUploadProgress: (percent) => {
+                    setDraftOrderImportProgress({
+                        step: "uploading",
+                        percent: Math.max(1, Math.min(25, percent * 0.25)),
+                        message: draftT("Uploading {percent}%...", { percent }),
+                    });
+                },
+                onUploadComplete: () => {
+                    setDraftOrderImportProgress({
+                        step: "reading",
+                        percent: Math.max(
+                            26,
+                            Number(draftOrderImportProgressState?.percent || 0),
+                        ),
+                        message: "Reading Excel...",
+                    });
+                },
+            });
             const imported = res.data || {};
             const meta = imported.meta || {};
-            setDraftOrderImportStatus(
-                "success",
-                draftT("Imported {count} row(s) into the draft form.", {
-                    count: meta.rows_imported || 0,
-                }),
-            );
+            setDraftOrderImportProgress({
+                step: "saving",
+                percent: 96,
+                message: "Saving draft...",
+                rowsText: draftOrderImportRowsText(meta),
+                imageText: draftOrderImportImagesText(meta),
+                details: draftOrderImportSummaryDetails(meta),
+            });
             draftOrderImportGuideModal?.hide();
             await applyImportedDraftOrder(imported);
+            setDraftOrderImportProgress({
+                type: "success",
+                step: "done",
+                percent: 100,
+                message: draftT("Imported {count} row(s) into the draft form.", {
+                    count: meta.rows_imported || 0,
+                }),
+                rowsText: draftOrderImportRowsText(meta),
+                imageText: draftOrderImportImagesText(meta),
+                details: draftOrderImportSummaryDetails(meta),
+                longMessage: "",
+            });
             showDraftOrderImportResult(meta, file.name || meta.source_file || "");
         } catch (e) {
+            clearDraftOrderImportProgressTimers();
             const message = e.message || draftT("Import failed.");
             setDraftOrderImportStatus("danger", message, draftOrderImportErrorDetails(e));
             showToast(message, "danger");
         } finally {
+            clearDraftOrderImportProgressTimers();
             setDraftOrderImportBusy(false);
             draftOrderImportTrigger = null;
             const input = document.getElementById("draftOrderImportFile");

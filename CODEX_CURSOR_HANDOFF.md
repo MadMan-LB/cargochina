@@ -167,6 +167,17 @@ This file was initially written by Codex as a shared collaboration and continuit
 
 ---
 
+## 13.2 2026-06-28 Draft Order Import Hardening
+
+- `backend/api/handlers/draft-orders.php` now treats procurement import headers as normalized names, not fixed indexes. Supported aliases include supplier/supplier code/supplier id/supplier no, supplier name/factory/vendor name, photo/image/picture, item no variants, English/Chinese descriptions, SKU/item code, brand/materials, dimensions including `lenght`, express/tracking/courier/waybill numbers, quantity/carton fields, prices, CBM/volume, weight/gross weight, HS code, and custom-design note.
+- Optional columns are nullable during import preview. The response meta reports imported rows, skipped rows with row-level reasons, blank rows ignored, missing optional columns, image counts, warnings, and read/import/total seconds.
+- XLSX embedded image extraction now validates image bytes, writes safe unique names under `uploads/`, records drawing row/column ranges, maps first to the detected `Photo` column, and falls back to row overlap. Failed image extraction produces warnings instead of blocking otherwise valid rows.
+- The import modal in `frontend/js/procurement_drafts.js` now shows real upload percentage and estimated backend steps: Uploading, Reading Excel, Importing rows, Processing images, Saving draft, Done. It disables repeat import clicks, shows a long-running image-processing message, and displays final row/image/time summaries.
+- Verification: PHP lint passed for `backend/api/handlers/draft-orders.php` and `procurement_drafts.php`; `node --check frontend/js/procurement_drafts.js` passed; the exact sample workbook `test template/procurement_import_template (3)(1).xlsx` read successfully with 8 nonblank rows, 52 blank rows skipped, 2 embedded images imported, and the expected header fields detected. Parser smoke tests passed for reordered `Express Number`/`Materials`, code-only rows, negative-dimension rejection, and exported subtotal/grand-total rows being ignored on re-import.
+- Full `cmd /c run-tests.bat` passed with the XAMPP PHP runtime, including draft-order builder, upload/search smoke, lifecycle, financial, consolidation, receiving variance, and production-hardening suites.
+
+---
+
 ### Executive Framing
 
 CargoWise is the most complete logistics workflow platform in the market: 17,000+ organizations, 193 countries, 30 languages. It covers freight forwarding, customs compliance, warehouse management, document generation, milestone tracking, operational accounting, and customer/vendor portals on a single database. It is the standard for what mature internal logistics operations look like.

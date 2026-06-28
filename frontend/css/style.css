@@ -2357,6 +2357,7 @@ body.d-flex {
 .draft-import-dropzone.is-importing {
   cursor: wait;
   opacity: 0.82;
+  pointer-events: none;
 }
 
 .draft-import-plus {
@@ -2404,6 +2405,10 @@ body.d-flex {
 
 .draft-import-status {
   font-size: 0.86rem;
+}
+
+.draft-import-step-list {
+  line-height: 1.35;
 }
 
 .linked-order-panel {

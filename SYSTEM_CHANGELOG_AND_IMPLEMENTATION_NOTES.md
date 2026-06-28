@@ -5,6 +5,20 @@
 
 ---
 
+## 2026-06-28 Procurement Import Header/Image Progress Hardening
+
+- Draft Order Excel/CSV import now maps columns by normalized header names instead of fixed positions. Reordered columns such as `Materials` and `Express Number` now import into the correct fields.
+- Added broader header aliases for supplier, supplier name, photo/image, item number, English/Chinese descriptions, SKU/item code, brand, materials, dimensions, express/waybill numbers, quantity, carton fields, pricing, CBM, weight, HS code, and custom-design notes.
+- Optional procurement columns can be omitted without blocking the import. The response reports imported rows, skipped rows, blank rows ignored, missing optional columns, warnings, image counts, and timing.
+- Code-only rows can now create draft items during preview; missing optional numeric values stay blank. Negative dimensions/quantities/prices are rejected with row-level skip reasons.
+- Exported supplier subtotal, section total, and grand-total rows are ignored during re-import so grouped export files do not create fake item rows.
+- XLSX embedded image extraction now validates image bytes, stores safe unique filenames in `uploads/`, tracks drawing row/column ranges, prefers images anchored in the detected `Photo` column, and falls back to row overlap when needed.
+- Import speed was improved by skipping blank rows early, capping sheet reads, preserving supplier lookup caches including supplier-id/name/code combinations, and processing images only from workbook drawings.
+- `procurement_drafts.php` import UI now shows upload/import progress with percentage and steps: Uploading, Reading Excel, Importing rows, Processing images, Saving draft, Done. It prevents double imports, shows a long-running image-processing message, and displays final row/image/time summaries.
+- Verification: PHP lint passed for `backend/api/handlers/draft-orders.php` and `procurement_drafts.php`; JS syntax check passed for `frontend/js/procurement_drafts.js`; the exact `test template/procurement_import_template (3)(1).xlsx` workbook read successfully with 8 nonblank rows, 2 embedded images, and detected header fields; reordered-header, code-only, subtotal-row, and DB-backed preview parser smoke tests passed. Full `cmd /c run-tests.bat` passed with XAMPP PHP.
+
+---
+
 ## 2026-06-25 Procurement Item Fields and Safe Customer Lookup
 
 - Added migration `069_order_item_procurement_fields.sql` for nullable procurement item fields on `order_items`, `order_template_items`, and legacy `procurement_draft_items`: `materials`, `height`, `width`, `length`, and `brand`. Existing `express_number` support remains idempotent.

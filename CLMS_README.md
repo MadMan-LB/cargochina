@@ -368,6 +368,14 @@ Any AI/engineer working on this system must follow these operating rules:
 ## 16) DECISION_LOG (keep updating)
 > Capture CEO/ops decisions. Newest on top.
 
+- 2026-06-28 — Draft Order import robustness and progress UX
+  - Decision: Procurement/Draft Order Excel import must use normalized header names rather than fixed column positions, while continuing to support existing templates and supplier-section markers.
+  - Decision: Missing optional import columns remain non-blocking. The import preview reports missing optional columns, skipped rows, image counts, warnings, and timing instead of silently dropping data.
+  - Decision: Embedded XLSX item photos are imported from worksheet drawings when possible, matched first to the detected `Photo` column and row, then by row overlap as a fallback. Failed image extraction warns per image and does not fail otherwise valid rows.
+  - Decision: The frontend import modal shows estimated progress for server-side Excel reading/image processing, real browser upload progress, and actual final summary counts from the backend.
+  - Rationale: Operators frequently reorder procurement sheets and attach photos; the import path must be resilient without saving partial broken drafts.
+  - Impacted modules/states: `procurement_drafts.php`, `frontend/js/procurement_drafts.js`, `backend/api/handlers/draft-orders.php`, import docs/API notes
+
 - 2025-02-19 — Production hardening decisions
   - Default notification preferences: Option B — lazy seed on first GET when no rows exist; deterministic, documented in docs/API.md
   - WhatsApp provider: generic (default) or twilio; config keys WHATSAPP_TWILIO_* for Twilio; payload format differs per provider
