@@ -291,7 +291,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         }
         try {
             $file = $_FILES['file'] ?? [];
-            $preview = (new ReceivingExcelImportService())->previewFromUploadedFile($pdo, $file);
+            $preview = (new ReceivingExcelImportService())->previewFromUploadedFile($pdo, $file, [
+                'customer_id' => $_POST['customer_id'] ?? '',
+                'customer_name' => $_POST['customer_name'] ?? '',
+                'currency' => $_POST['currency'] ?? '',
+                'expected_ready_date' => $_POST['expected_ready_date'] ?? '',
+            ]);
             [$importId, $token, $status] = receivingStoreExcelImportPreview($pdo, $file, $preview, $userId);
             unset($preview['payloads']);
             unset($preview['raw_rows']);
@@ -319,7 +324,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         [$importRow, $preview] = receivingLoadExcelImportPreview($pdo, $token, $userId);
         $importId = (int) $importRow['id'];
         $service = new ReceivingExcelImportService();
-        $revalidated = $service->validateRows($pdo, $preview['raw_rows'] ?? []);
+        $isDirectIntake = ($preview['mode'] ?? '') === 'direct_intake';
+        $revalidated = $isDirectIntake
+            ? $service->validateDirectIntakeRows($pdo, $preview['raw_rows'] ?? [], $preview['template_metadata'] ?? [])
+            : $service->validateRows($pdo, $preview['raw_rows'] ?? []);
         if (empty($revalidated['is_valid'])) {
             $pdo->prepare("UPDATE receiving_excel_imports SET status = 'invalid', row_count = ?, valid_count = ?, error_count = ?, preview_json = ? WHERE id = ?")
                 ->execute([
@@ -333,25 +341,36 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         }
 
         $payloads = $revalidated['payloads'] ?? [];
-        if (!$payloads) {
+        if (!$isDirectIntake && !$payloads) {
             jsonError('No valid receiving rows to import', 400);
         }
+        if ($isDirectIntake && empty($revalidated['direct_groups'])) {
+            jsonError('No valid direct receiving rows to import', 400);
+        }
 
+        $startedAt = microtime(true);
         $results = [];
         try {
             $pdo->beginTransaction();
-            $receivingService = new OrderReceivingService();
-            foreach ($payloads as $orderId => $payload) {
-                $results[(int) $orderId] = $receivingService->receive($pdo, (int) $orderId, $payload, $userId, false, [
-                    'source' => 'excel_import',
-                    'import_id' => $importId,
-                ]);
+            if ($isDirectIntake) {
+                $resultPayload = $service->commitDirectIntake($pdo, $revalidated, $userId, $importId);
+                $results = $resultPayload['receipts'] ?? [];
+            } else {
+                $receivingService = new OrderReceivingService();
+                foreach ($payloads as $orderId => $payload) {
+                    $results[(int) $orderId] = $receivingService->receive($pdo, (int) $orderId, $payload, $userId, false, [
+                        'source' => 'excel_import',
+                        'import_id' => $importId,
+                    ]);
+                }
+                $resultPayload = [
+                    'mode' => 'existing_order_receipt',
+                    'orders_imported' => count($results),
+                    'receipts' => $results,
+                    'row_count' => (int) ($revalidated['row_count'] ?? 0),
+                ];
             }
-            $resultPayload = [
-                'orders_imported' => count($results),
-                'receipts' => $results,
-                'row_count' => (int) ($revalidated['row_count'] ?? 0),
-            ];
+            $resultPayload['total_seconds'] = round(microtime(true) - $startedAt, 3);
             $pdo->prepare("UPDATE receiving_excel_imports SET status = 'committed', result_json = ?, committed_by = ?, committed_at = NOW() WHERE id = ?")
                 ->execute([json_encode($resultPayload, JSON_UNESCAPED_UNICODE), $userId, $importId]);
             $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('receiving_excel_import', ?, 'commit', ?, ?)")

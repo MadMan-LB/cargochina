@@ -291,18 +291,35 @@ require 'includes/layout.php';
       </div>
       <div class="modal-body">
         <div class="alert alert-light border small">
-          <?= clmsT('Columns: order_id, order_item_id or product_id/shipping_code, actual_cartons, actual_cbm, actual_weight, optional pieces_per_carton, quantity, unit_price, total_amount, condition, notes.') ?>
+          <?= clmsT('Use the same Excel template as Draft an Order. Without an Order ID, this creates a direct warehouse receipt: the import creates the order/items, records receiving, and adds it to warehouse stock after you press Import Previewed Rows. If you include Order ID, it receives against that existing order.') ?>
         </div>
-        <div class="row g-3 align-items-end mb-3">
-          <div class="col-12 col-md-8">
-            <label class="form-label"><?= clmsT('Excel file') ?></label>
-            <input type="file" class="form-control" id="receivingImportFile" accept=".xlsx,.xls">
-          </div>
-          <div class="col-12 col-md-4 d-flex gap-2">
-            <button type="button" class="btn btn-primary" id="receivingImportPreviewBtn" onclick="previewReceivingImport()"><?= clmsT('Preview') ?></button>
-            <button type="button" class="btn btn-success" id="receivingImportCommitBtn" onclick="commitReceivingImport()" disabled><?= clmsT('Import') ?></button>
+        <div class="row g-3 mb-3">
+          <div class="col-12 col-lg-6">
+            <label class="form-label"><?= clmsT('Customer for direct receiving') ?></label>
+            <input type="text" class="form-control" id="receivingImportCustomer" placeholder="<?= clmsT('Search customer if the Excel customer cell is blank') ?>" autocomplete="off">
+            <input type="hidden" id="receivingImportCustomerId">
+            <small class="text-muted"><?= clmsT('Used only when the imported template has no Customer value. Customer lookup returns safe selection fields only.') ?></small>
           </div>
         </div>
+        <input type="file" class="d-none" id="receivingImportFile" accept=".xlsx,.xls,.csv,.cv,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+        <div class="draft-import-dropzone mb-3" id="receivingImportDropZone" role="button" tabindex="0" aria-describedby="receivingImportHelp">
+          <button type="button" class="draft-import-plus" id="receivingImportPlusBtn" aria-label="<?= htmlspecialchars(clmsT('Choose receiving import file')) ?>">+</button>
+          <button type="button" class="btn btn-primary btn-lg draft-import-main-btn" id="receivingImportDropBtn"><?= clmsT('Drop Excel or CSV file here') ?></button>
+          <div class="draft-import-help" id="receivingImportHelp">
+            <?= clmsT('Drag a file onto this area, or click the blue button / plus sign to choose one manually.') ?>
+          </div>
+          <div class="small text-muted mt-2" id="receivingImportFileName"><?= clmsT('No file selected') ?></div>
+        </div>
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+          <a class="btn btn-outline-primary btn-sm" href="<?= htmlspecialchars($basePath) ?>/download_template.php?slug=receiving-procurement-import-template-xlsx" download>
+            <?= clmsT('Download import template') ?>
+          </a>
+          <span class="small text-muted"><?= clmsT('Accepted: .xlsx, .xls, .csv') ?></span>
+          <div class="small text-muted">
+            <?= clmsT('Same template columns: Customer, Item No, names, SKU, Express Number, Cartons, CBM/Unit or Total CBM, Weight/Unit or Total Weight, Supplier.') ?>
+          </div>
+        </div>
+        <div id="receivingImportStatus" class="draft-import-status d-none mb-3" aria-live="polite"></div>
         <div id="receivingImportSummary" class="small text-muted mb-2"></div>
         <div id="receivingImportErrors" class="alert alert-danger d-none"></div>
         <div class="table-responsive">
@@ -324,6 +341,8 @@ require 'includes/layout.php';
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"><?= clmsT('Close') ?></button>
+        <button type="button" class="btn btn-primary" id="receivingImportChooseFileBtn"><?= clmsT('Choose Excel/CSV file') ?></button>
+        <button type="button" class="btn btn-success" id="receivingImportCommitBtn" onclick="commitReceivingImport()" disabled><?= clmsT('Import Previewed Rows') ?></button>
       </div>
     </div>
   </div>

@@ -17,6 +17,7 @@ class DownloadExampleService
         switch ($slug) {
             case 'procurement-import-template-xlsx':
             case 'example-procurement-template-xlsx':
+            case 'receiving-procurement-import-template-xlsx':
                 $this->outputProcurementImportTemplate();
                 return;
         }

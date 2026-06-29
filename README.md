@@ -89,6 +89,10 @@ Customer selectors in operational workflows use the safe lookup API (`/api/v1/cu
 
 `procurement_drafts.php` uses `/api/v1/draft-orders/import` as a preview import. The importer reads normalized header names rather than fixed column positions, tolerates missing optional fields, ignores exported subtotal/grand-total rows, reports skipped rows and warnings, and extracts embedded XLSX photos from the detected Photo column when the server supports workbook drawings. The import fills the draft form for review; it does not save the order until the user saves the draft.
 
+## Receiving Excel Import
+
+`receiving.php` uses the same generated procurement import template as Draft an Order, available from the receiving import modal. The preview step reads normalized procurement headers instead of fixed column positions, supports reordered columns, and maps columns such as Customer, Item No, SKU / Item Code, Express Number, Cartons, CBM/Unit or Total CBM, Weight/Unit or Total Weight, and Supplier. When no `Order ID` is supplied, the import is treated as a direct warehouse intake: it creates the order/items, records receiving, and places the goods into warehouse stock through the normal receiving service after final confirmation. If `Order ID` is supplied, it still supports receiving against existing approved/in-transit orders. The final import revalidates the preview token server-side and saves in one transaction.
+
 ## SuperAdmin Training Reset
 
 `admin_config.php` includes a SuperAdmin-only Training Data Reset section. It can delete selected training data groups such as draft orders, orders/receiving, containers, customers, suppliers, products, financial rows, expenses, notifications, non-SuperAdmin users, and logs. The reset requires the configured reset password, runs server-side through `/api/v1/config/training-reset`, keeps schema/config/roles/countries/departments intact, always protects SuperAdmin/admin users, and writes an audit row after completion.

@@ -778,3 +778,25 @@ This ledger should be maintained over time so both Codex and Cursor can see exec
 - Do not move the reset endpoint out from SuperAdmin-only config protection.
 - Do not expose full customer private data through operational lookup endpoints.
 - If reset groups are expanded later, update `backend/services/TrainingDataResetService.php`, `README.md`, and `SYSTEM_CHANGELOG_AND_IMPLEMENTATION_NOTES.md` together.
+
+## 2026-06-29 Receiving Import Upgrade Handoff
+
+### What changed
+- `receiving.php` now uses a Draft Order-style Excel/CSV import modal with drag/drop, click-to-select, progress percentage, step labels, preview summary, and a final commit button.
+- The receiving modal includes a `Download import template` button using the same generated procurement workbook as Draft an Order (`receiving-procurement-import-template-xlsx`).
+- `frontend/js/receiving.js` handles upload progress with XHR, prevents duplicate imports, shows server-processing progress, caps preview rendering to avoid browser freezes, and refreshes the receiving queue after successful import.
+- `backend/services/ReceivingExcelImportService.php` now reads `.xlsx`, `.xls`, and `.csv`, skips procurement-template title/metadata rows until the real item header, normalizes headers by alias instead of fixed positions, and maps Draft Order procurement columns into receiving actuals.
+- If an import row has an explicit `Order ID`, the service keeps the existing-order receiving path and validates the target approved/in-transit order/items.
+- If the sheet has no `Order ID`, the service treats it as a direct warehouse intake: preview validates the rows as new stock, commit creates the order/items, calls `OrderReceivingService`, and leaves the order in `ReadyForConsolidation` for warehouse stock visibility.
+- The receiving import modal includes a safe customer lookup field. Customers must already exist or be selected; missing suppliers referenced by code/name are created as minimal supplier records during direct intake.
+- `backend/api/handlers/receiving.php` revalidates previews and commits direct or existing-order imports through `OrderReceivingService`; the response includes `total_seconds`.
+
+### Migration status
+- No database migration was required for this receiving import pass.
+
+### Guardrails
+- Keep receiving import commits routed through `OrderReceivingService` so stock movement, logs, variance rules, and customer follow-up behavior stay aligned with manual receiving.
+- For direct intake, do not create customers silently from Excel text; use the modal safe lookup or filled Customer metadata so warehouse stock has a real customer owner.
+- Do not relax explicit existing-order item-reference validation without a business-approved matching rule.
+- Keep the receiving template slug in `DownloadExampleService`, `downloads_registry`, and `download_template.php` together if template access rules change.
+- Customer visibility/lookup permissions were not changed in this pass.

@@ -6,14 +6,17 @@ require_once __DIR__ . '/includes/sidebar_permissions.php';
 
 $slug = trim((string) ($_GET['slug'] ?? ''));
 $userRoles = $_SESSION['user_roles'] ?? [];
+$entry = $slug !== '' ? clmsFindDownloadEntry($slug, $userRoles) : null;
+$canAccessDownloads = clmsCanRolesAccessPage($userRoles, 'downloads');
+$canDirectReceivingTemplate = $entry
+    && $slug === 'receiving-procurement-import-template-xlsx'
+    && clmsCanRolesAccessPage($userRoles, 'receiving');
 
-if (!clmsCanRolesAccessPage($userRoles, 'downloads')) {
+if (!$canAccessDownloads && !$canDirectReceivingTemplate) {
     http_response_code(403);
     echo 'Access denied.';
     exit;
 }
-
-$entry = $slug !== '' ? clmsFindDownloadEntry($slug, $userRoles) : null;
 
 if (!$entry) {
     http_response_code(404);

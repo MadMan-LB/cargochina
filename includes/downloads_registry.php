@@ -103,6 +103,15 @@ function clmsDownloadRegistry(): array
             'description' => 'Warehouse and receiving Excel exports, with ready-made example files plus the live module entry points.',
             'entries' => [
                 [
+                    'slug' => 'receiving-procurement-import-template-xlsx',
+                    'mode' => 'generated',
+                    'title' => 'Receiving Procurement Import Template',
+                    'description' => 'Same Excel template used by Draft an Order, accepted by the Receiving importer for warehouse intake previews.',
+                    'file_type' => 'XLSX',
+                    'download_name' => 'receiving_procurement_import_template.xlsx',
+                    'roles' => ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'],
+                ],
+                [
                     'slug' => 'receiving-queue-export',
                     'mode' => 'module',
                     'title' => 'Receiving Queue Export',

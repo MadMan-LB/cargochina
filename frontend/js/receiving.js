@@ -6,11 +6,24 @@ let receiveCurrentOrderId = null;
 let warehouseQueueData = [];
 let warehouseQueueSourceData = [];
 let receivingImportPreviewToken = null;
+let receivingImportInProgress = false;
+let receivingImportProgressTimer = null;
+let receivingImportLongTimer = null;
+let receivingImportStartedAt = 0;
+let receivingImportProgressState = null;
 let calMonth = new Date().getMonth();
 let calYear = new Date().getFullYear();
 const RECEIVING_DEFAULT_STATUSES = ["Approved", "InTransitToWarehouse"];
 const RECEIVING_ITEM_RENDER_CHUNK = 80;
 const RECEIVING_CARD_ITEM_BADGE_LIMIT = 8;
+const RECEIVING_IMPORT_STEPS = [
+    { key: "uploading", label: "Uploading", target: 35 },
+    { key: "reading", label: "Reading Excel", target: 58 },
+    { key: "rows", label: "Importing rows", target: 76 },
+    { key: "preview", label: "Preparing preview", target: 88 },
+    { key: "saving", label: "Saving receipts", target: 96 },
+    { key: "done", label: "Done", target: 100 },
+];
 
 function receivingT(text, replacements = null) {
     return typeof t === "function" ? t(text, replacements) : text;
@@ -228,6 +241,7 @@ function updateReceivingOverview() {
 document.addEventListener("DOMContentLoaded", () => {
     registerUnsavedChangesGuard?.("#receiveForm");
     setupFilterAutocomplete();
+    setupReceivingImportCustomerAutocomplete();
     setupReceivingFilterControls();
     setReceivingStatusFilter(RECEIVING_DEFAULT_STATUSES);
     updateReceivingStatusSummary();
@@ -299,6 +313,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }),
     );
     setupReceiveOrderSearch();
+    bindReceivingImportControls();
 });
 
 function setupReceivingFilterControls() {
@@ -529,6 +544,29 @@ function setupFilterAutocomplete() {
     });
 }
 
+function setupReceivingImportCustomerAutocomplete() {
+    const ui = receivingImportUi();
+    if (!ui.customer || typeof Autocomplete === "undefined") return;
+    Autocomplete.init(ui.customer, {
+        resource: "customers",
+        searchPath: "/lookup",
+        placeholder: receivingT("Search customer if the Excel customer cell is blank"),
+        renderItem: (c) =>
+            `${c.name || ""} — ${c.default_shipping_code || c.code || ""}`
+                .replace(/^ — | — $/g, "")
+                .trim() || `#${c.id}`,
+        displayValue: (c) => c.name || c.code || `#${c.id}`,
+        onSelect: (item) => {
+            if (ui.customerId) ui.customerId.value = item.id;
+        },
+    });
+    ui.customer.addEventListener("input", () => {
+        if (!ui.customer.value.trim() && ui.customerId) {
+            ui.customerId.value = "";
+        }
+    });
+}
+
 function getFilterParams() {
     const params = new URLSearchParams();
     const s = document.getElementById("filterSupplierId")?.value;
@@ -649,13 +687,319 @@ function exportReceivingCsv() {
     exportReceivingQueue("csv");
 }
 
-function setReceivingImportBusy(isBusy) {
-    const previewBtn = document.getElementById("receivingImportPreviewBtn");
-    const commitBtn = document.getElementById("receivingImportCommitBtn");
-    if (previewBtn) setLoading(previewBtn, isBusy);
-    if (commitBtn && (isBusy || !receivingImportPreviewToken)) {
-        commitBtn.disabled = true;
+function receivingImportUi() {
+    return {
+        input: document.getElementById("receivingImportFile"),
+        status: document.getElementById("receivingImportStatus"),
+        fileName: document.getElementById("receivingImportFileName"),
+        dropZone: document.getElementById("receivingImportDropZone"),
+        chooseBtn: document.getElementById("receivingImportChooseFileBtn"),
+        dropBtn: document.getElementById("receivingImportDropBtn"),
+        plusBtn: document.getElementById("receivingImportPlusBtn"),
+        commitBtn: document.getElementById("receivingImportCommitBtn"),
+        customer: document.getElementById("receivingImportCustomer"),
+        customerId: document.getElementById("receivingImportCustomerId"),
+    };
+}
+
+function clearReceivingImportProgressTimers() {
+    if (receivingImportProgressTimer) {
+        clearInterval(receivingImportProgressTimer);
+        receivingImportProgressTimer = null;
     }
+    if (receivingImportLongTimer) {
+        clearTimeout(receivingImportLongTimer);
+        receivingImportLongTimer = null;
+    }
+}
+
+function receivingImportStepIndex(stepKey) {
+    return Math.max(
+        0,
+        RECEIVING_IMPORT_STEPS.findIndex((step) => step.key === stepKey),
+    );
+}
+
+function receivingImportStepLabel(stepKey) {
+    return (
+        RECEIVING_IMPORT_STEPS.find((step) => step.key === stepKey)?.label ||
+        stepKey
+    );
+}
+
+function receivingImportElapsedSeconds() {
+    if (!receivingImportStartedAt) return 0;
+    return Math.max(0, (Date.now() - receivingImportStartedAt) / 1000);
+}
+
+function receivingImportRowsText(meta = {}) {
+    const done = Number(meta.valid_count ?? meta.row_count ?? 0);
+    const total = Number(meta.row_count ?? done);
+    return receivingT("{done} / {total} rows ready", { done, total });
+}
+
+function renderReceivingImportProgress() {
+    const ui = receivingImportUi();
+    const status = ui.status;
+    const state = receivingImportProgressState;
+    if (!status || !state) return;
+    const percent = Math.max(
+        0,
+        Math.min(100, Math.round(Number(state.percent || 0))),
+    );
+    const activeIndex = receivingImportStepIndex(state.step || "uploading");
+    const alertClass =
+        state.type === "success"
+            ? "alert-success"
+            : state.type === "danger"
+              ? "alert-danger"
+              : state.type === "warning"
+                ? "alert-warning"
+                : "alert-info";
+    const stepMarkup = RECEIVING_IMPORT_STEPS.map((step, index) => {
+        const done = index < activeIndex || percent >= step.target;
+        const active = index === activeIndex;
+        const cls = done
+            ? "text-success"
+            : active
+              ? "text-primary fw-semibold"
+              : "text-muted";
+        const mark = done ? "OK" : active ? "Now" : "Next";
+        return `<span class="${cls}">${mark} ${escapeHtml(receivingT(step.label))}</span>`;
+    }).join("");
+    const details = Array.isArray(state.details)
+        ? state.details.filter(Boolean).slice(0, 8)
+        : [];
+    status.className = `draft-import-status alert ${alertClass} py-2 mb-3`;
+    status.innerHTML = `
+        <div class="d-flex justify-content-between align-items-center gap-2">
+          <div>
+            <div class="fw-semibold">${escapeHtml(receivingT(state.message || receivingImportStepLabel(state.step)))}</div>
+            <div class="small text-muted">${escapeHtml(receivingT(receivingImportStepLabel(state.step || "uploading")))} · ${escapeHtml(receivingT("Elapsed {seconds}s", { seconds: receivingImportElapsedSeconds().toFixed(1) }))}</div>
+          </div>
+          <div class="fw-bold">${percent}%</div>
+        </div>
+        <div class="progress mt-2" role="progressbar" aria-valuenow="${percent}" aria-valuemin="0" aria-valuemax="100" style="height: 10px;">
+          <div class="progress-bar" style="width: ${percent}%"></div>
+        </div>
+        <div class="draft-import-step-list d-flex flex-wrap gap-2 mt-2 small">${stepMarkup}</div>
+        ${
+            state.rowsText || state.longMessage
+                ? `<div class="small mt-2">
+                    ${state.rowsText ? `<div>${escapeHtml(state.rowsText)}</div>` : ""}
+                    ${state.longMessage ? `<div class="text-warning fw-semibold">${escapeHtml(receivingT(state.longMessage))}</div>` : ""}
+                  </div>`
+                : ""
+        }
+        ${
+            details.length
+                ? `<ul class="mb-0 mt-2 ps-3 small">${details
+                      .map((detail) => `<li>${escapeHtml(String(detail))}</li>`)
+                      .join("")}</ul>`
+                : ""
+        }
+    `;
+}
+
+function setReceivingImportProgress(patch = {}) {
+    receivingImportProgressState = {
+        percent: 0,
+        step: "uploading",
+        type: "info",
+        message: "Uploading file...",
+        rowsText: "",
+        details: [],
+        ...receivingImportProgressState,
+        ...patch,
+    };
+    renderReceivingImportProgress();
+}
+
+function startReceivingImportProgress(file) {
+    clearReceivingImportProgressTimers();
+    receivingImportStartedAt = Date.now();
+    receivingImportProgressState = null;
+    setReceivingImportProgress({
+        percent: 1,
+        step: "uploading",
+        message: receivingT("Uploading {file}...", {
+            file: file?.name || receivingT("selected file"),
+        }),
+    });
+    receivingImportProgressTimer = setInterval(() => {
+        if (!receivingImportInProgress || !receivingImportProgressState) return;
+        const state = receivingImportProgressState;
+        let step = state.step || "reading";
+        let percent = Number(state.percent || 0);
+        if (step === "uploading") {
+            setReceivingImportProgress({
+                step: "uploading",
+                percent: Math.min(34, percent),
+                message: state.message || "Uploading file...",
+            });
+            return;
+        }
+        if (step === "reading" && percent >= 57) {
+            step = "rows";
+        } else if (step === "rows" && percent >= 75) {
+            step = "preview";
+        } else if (step === "preview" && percent >= 87) {
+            step = "preview";
+        } else if (step === "saving" && percent >= 95) {
+            step = "saving";
+        }
+        const target =
+            RECEIVING_IMPORT_STEPS.find((item) => item.key === step)?.target ||
+            90;
+        const increment = step === "saving" ? 0.18 : step === "preview" ? 0.25 : 0.85;
+        percent = Math.min(target - 1, percent + increment);
+        setReceivingImportProgress({
+            step,
+            percent,
+            message:
+                step === "saving"
+                    ? "Saving receipts..."
+                    : step === "rows"
+                      ? "Importing rows..."
+                      : step === "preview"
+                        ? "Preparing preview..."
+                        : "Reading Excel...",
+        });
+    }, 650);
+    receivingImportLongTimer = setTimeout(() => {
+        if (!receivingImportInProgress) return;
+        const currentStep = receivingImportProgressState?.step || "uploading";
+        setReceivingImportProgress({
+            step: currentStep,
+            longMessage:
+                currentStep === "uploading"
+                    ? "Still uploading. This depends on workbook size and connection speed..."
+                    : "Still processing rows, please wait...",
+        });
+    }, 12000);
+}
+
+function setReceivingImportStatus(type, message, details = []) {
+    const status = receivingImportUi().status;
+    if (!status) return;
+    const alertClass =
+        type === "danger"
+            ? "alert-danger"
+            : type === "warning"
+              ? "alert-warning"
+              : type === "success"
+                ? "alert-success"
+                : "alert-info";
+    const list = Array.isArray(details) ? details.filter(Boolean).slice(0, 8) : [];
+    status.className = `draft-import-status alert ${alertClass} py-2 mb-3`;
+    status.innerHTML = `
+        <div>${escapeHtml(receivingT(message))}</div>
+        ${
+            list.length
+                ? `<ul class="mb-0 mt-1 ps-3">${list
+                      .map((detail) => `<li>${escapeHtml(String(detail))}</li>`)
+                      .join("")}</ul>`
+                : ""
+        }
+    `;
+}
+
+function resetReceivingImportUi() {
+    clearReceivingImportProgressTimers();
+    receivingImportStartedAt = 0;
+    receivingImportProgressState = null;
+    receivingImportPreviewToken = null;
+    const ui = receivingImportUi();
+    if (ui.input) ui.input.value = "";
+    if (ui.fileName) ui.fileName.textContent = receivingT("No file selected");
+    if (ui.customer) ui.customer.value = "";
+    if (ui.customerId) ui.customerId.value = "";
+    if (ui.status) {
+        ui.status.className = "draft-import-status d-none mb-3";
+        ui.status.innerHTML = "";
+    }
+    ui.dropZone?.classList.remove("is-dragover", "is-importing");
+    [ui.chooseBtn, ui.dropBtn, ui.plusBtn, ui.commitBtn].forEach((button) => {
+        if (button) button.disabled = button === ui.commitBtn;
+    });
+    renderReceivingImportPreview({
+        rows: [],
+        errors: [],
+        orders: [],
+        valid_count: 0,
+        error_count: 0,
+        is_valid: false,
+    });
+}
+
+function setReceivingImportBusy(isBusy) {
+    const ui = receivingImportUi();
+    receivingImportInProgress = !!isBusy;
+    setLoading(ui.chooseBtn, isBusy);
+    setLoading(ui.dropBtn, isBusy);
+    ui.dropZone?.classList.toggle("is-importing", !!isBusy);
+    ui.dropZone?.setAttribute("aria-busy", isBusy ? "true" : "false");
+    ui.dropZone?.setAttribute("aria-disabled", isBusy ? "true" : "false");
+    if (ui.plusBtn) ui.plusBtn.disabled = !!isBusy;
+    if (ui.commitBtn) {
+        ui.commitBtn.disabled = !!isBusy || !receivingImportPreviewToken;
+    }
+}
+
+function receivingImportFileAllowed(file) {
+    const name = String(file?.name || "");
+    const ext = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+    return ["xlsx", "xls", "csv", "cv"].includes(ext);
+}
+
+function uploadReceivingImportFile(file, callbacks = {}) {
+    const form = new FormData();
+    form.append("file", file);
+    const ui = receivingImportUi();
+    if (ui.customerId?.value) {
+        form.append("customer_id", ui.customerId.value);
+    }
+    if (ui.customer?.value?.trim()) {
+        form.append("customer_name", ui.customer.value.trim());
+    }
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `${window.API_BASE || "/cargochina/api/v1"}/receiving/import/preview`);
+        xhr.withCredentials = true;
+        xhr.timeout = 600000;
+        xhr.upload.onprogress = (event) => {
+            if (!event.lengthComputable) return;
+            const uploadPercent = Math.round((event.loaded / event.total) * 100);
+            callbacks.onUploadProgress?.(uploadPercent);
+        };
+        xhr.upload.onload = () => callbacks.onUploadComplete?.();
+        xhr.onerror = () =>
+            reject(new Error(receivingT("Could not reach the server. Check your connection and try again.")));
+        xhr.ontimeout = () =>
+            reject(new Error(receivingT("Import timed out before the server replied. Try a smaller file or ask the admin to increase PHP/Nginx timeouts.")));
+        xhr.onabort = () => reject(new Error(receivingT("Import was cancelled before it finished.")));
+        xhr.onload = () => {
+            let payload = {};
+            try {
+                payload = xhr.responseText ? JSON.parse(xhr.responseText) : {};
+            } catch (_) {
+                reject(new Error(receivingT("Import failed because the server response was not JSON.")));
+                return;
+            }
+            if (xhr.status < 200 || xhr.status >= 300 || payload.error) {
+                const err = payload.error === true ? payload : payload.error || {};
+                const message =
+                    err.message ||
+                    payload.message ||
+                    receivingT("Import failed. Check the file and try again.");
+                const ref = err.request_id || payload.request_id;
+                reject(new Error(message + (ref ? ` (ref: ${ref})` : "")));
+                return;
+            }
+            resolve(payload);
+        };
+        xhr.send(form);
+    });
 }
 
 function renderReceivingImportPreview(data) {
@@ -664,16 +1008,38 @@ function renderReceivingImportPreview(data) {
     const summary = document.getElementById("receivingImportSummary");
     const errors = document.getElementById("receivingImportErrors");
     const commitBtn = document.getElementById("receivingImportCommitBtn");
+    const missingOptional = Array.isArray(data?.missing_optional_columns)
+        ? data.missing_optional_columns
+        : [];
+    const readerLabel = data?.reader_mode
+        ? String(data.reader_mode).replace(/_/g, " ")
+        : "";
 
     if (summary) {
-        summary.textContent = receivingT(
-            "{valid} valid row(s), {errors} row(s) with errors, {orders} order(s).",
-            {
+        const details = [
+            receivingT("{valid} valid row(s), {errors} row(s) with errors, {orders} order(s).", {
                 valid: data?.valid_count || 0,
                 errors: data?.error_count || 0,
                 orders: data?.orders?.length || 0,
-            },
-        );
+            }),
+        ];
+        if (readerLabel) details.push(receivingT("Reader: {mode}", { mode: readerLabel }));
+        if (data?.header_row) details.push(receivingT("Header row: {row}", { row: data.header_row }));
+        if (data?.total_seconds) {
+            details.push(
+                receivingT("Preview finished in {seconds}s", {
+                    seconds: Number(data.total_seconds || 0).toFixed(1),
+                }),
+            );
+        }
+        if (missingOptional.length) {
+            details.push(
+                receivingT("Optional columns not found: {columns}", {
+                    columns: missingOptional.join(", "),
+                }),
+            );
+        }
+        summary.innerHTML = details.map((item) => `<div>${escapeHtml(item)}</div>`).join("");
     }
     if (errors) {
         const messages = data?.errors || [];
@@ -681,14 +1047,15 @@ function renderReceivingImportPreview(data) {
         errors.innerHTML = messages.map((msg) => `<div>${escapeHtml(msg)}</div>`).join("");
     }
     if (tbody) {
+        const visibleRows = rows.slice(0, 200);
         tbody.innerHTML =
-            rows
+            visibleRows
                 .map((row) => {
                     const ok = !!row.valid;
                     const rowErrors = (row.errors || []).join("; ");
                     return `<tr class="${ok ? "" : "table-danger"}">
                         <td>${escapeHtml(row.row || "")}</td>
-                        <td>#${escapeHtml(row.order_id || "")}</td>
+                        <td>${escapeHtml(row.order_label || (row.order_id ? `#${row.order_id}` : "New direct receipt"))}</td>
                         <td>${escapeHtml(row.item_label || row.shipping_code || "-")}</td>
                         <td>${escapeHtml(fmtReceivingNumber(row.actual_cartons || 0, 4))}</td>
                         <td>${escapeHtml(fmtReceivingNumber(row.actual_cbm || 0, 6))}</td>
@@ -698,54 +1065,134 @@ function renderReceivingImportPreview(data) {
                 })
                 .join("") ||
             `<tr><td colspan="7" class="text-muted">${escapeHtml(receivingT("No rows previewed."))}</td></tr>`;
+        if (rows.length > visibleRows.length) {
+            tbody.insertAdjacentHTML(
+                "beforeend",
+                `<tr><td colspan="7" class="text-muted small">${escapeHtml(receivingT("Showing first {shown} of {total} preview rows.", { shown: visibleRows.length, total: rows.length }))}</td></tr>`,
+            );
+        }
     }
     if (commitBtn) {
-        commitBtn.disabled = !data?.is_valid || !receivingImportPreviewToken;
+        commitBtn.disabled =
+            receivingImportInProgress || !data?.is_valid || !receivingImportPreviewToken;
     }
 }
 
 async function parseReceivingImportError(response) {
     const body = await response.json().catch(() => ({}));
     const err = body.error === true ? body : body.error || body;
-    return err.message || body.message || response.statusText || receivingT("Import request failed");
+    return (
+        err.message ||
+        body.message ||
+        response.statusText ||
+        receivingT("Import request failed")
+    );
 }
 
-async function previewReceivingImport() {
+async function processReceivingImportFile(file) {
     if (!canImportReceiving()) {
         showToast(receivingT("You do not have permission to import receiving Excel files"), "danger");
         return;
     }
-    const file = document.getElementById("receivingImportFile")?.files?.[0];
-    if (!file) {
-        showToast(receivingT("Choose an Excel file first"), "warning");
+    if (!file || receivingImportInProgress) return;
+    const ui = receivingImportUi();
+    if (ui.fileName) {
+        ui.fileName.textContent = receivingT("Selected: {file}", {
+            file: file.name || receivingT("selected file"),
+        });
+    }
+    if (!receivingImportFileAllowed(file)) {
+        const message = receivingT("Unsupported import file. Use XLSX, XLS, or CSV.");
+        setReceivingImportStatus("danger", message);
+        showToast(message, "danger");
         return;
     }
     receivingImportPreviewToken = null;
-    const commitBtn = document.getElementById("receivingImportCommitBtn");
-    if (commitBtn) commitBtn.disabled = true;
-    const form = new FormData();
-    form.append("file", file);
+    renderReceivingImportPreview({
+        rows: [],
+        errors: [],
+        orders: [],
+        valid_count: 0,
+        error_count: 0,
+        is_valid: false,
+    });
     try {
         setReceivingImportBusy(true);
-        const response = await fetch(`${window.API_BASE || "/cargochina/api/v1"}/receiving/import/preview`, {
-            method: "POST",
-            credentials: "same-origin",
-            body: form,
+        startReceivingImportProgress(file);
+        const payload = await uploadReceivingImportFile(file, {
+            onUploadProgress: (percent) => {
+                setReceivingImportProgress({
+                    step: "uploading",
+                    percent: Math.max(1, Math.min(35, percent * 0.35)),
+                    message: receivingT("Uploading {percent}%...", { percent }),
+                    longMessage: "",
+                });
+            },
+            onUploadComplete: () => {
+                setReceivingImportProgress({
+                    step: "reading",
+                    percent: Math.max(
+                        36,
+                        Number(receivingImportProgressState?.percent || 0),
+                    ),
+                    message: "Reading Excel...",
+                    longMessage: "",
+                });
+            },
         });
-        if (!response.ok) {
-            throw new Error(await parseReceivingImportError(response));
-        }
-        const payload = await response.json();
         const data = payload.data || {};
         receivingImportPreviewToken = data.preview_token || null;
         renderReceivingImportPreview(data);
-        showToast(data.is_valid ? receivingT("Preview ready") : receivingT("Preview has errors"), data.is_valid ? "success" : "warning");
+        setReceivingImportProgress({
+            type: data.is_valid ? "success" : "warning",
+            step: "preview",
+            percent: data.is_valid ? 88 : 100,
+            message: data.is_valid ? "Preview ready. Review and import." : "Preview has errors.",
+            rowsText: receivingImportRowsText(data),
+            details: [
+                data.total_seconds
+                    ? receivingT("Preview finished in {seconds}s", {
+                          seconds: Number(data.total_seconds || 0).toFixed(1),
+                      })
+                    : "",
+                Array.isArray(data.missing_optional_columns) &&
+                data.missing_optional_columns.length
+                    ? receivingT("Optional columns not found: {columns}", {
+                          columns: data.missing_optional_columns.join(", "),
+                      })
+                    : "",
+            ],
+            longMessage: "",
+        });
+        showToast(
+            data.is_valid ? receivingT("Receiving preview ready") : receivingT("Preview has errors"),
+            data.is_valid ? "success" : "warning",
+        );
     } catch (error) {
-        renderReceivingImportPreview({ rows: [], errors: [error.message], is_valid: false });
-        showToast(error.message, "danger");
+        clearReceivingImportProgressTimers();
+        const message = error.message || receivingT("Import failed.");
+        receivingImportPreviewToken = null;
+        renderReceivingImportPreview({
+            rows: [],
+            errors: [message],
+            is_valid: false,
+        });
+        setReceivingImportStatus("danger", message);
+        showToast(message, "danger");
     } finally {
+        clearReceivingImportProgressTimers();
         setReceivingImportBusy(false);
+        if (ui.input) ui.input.value = "";
     }
+}
+
+async function previewReceivingImport() {
+    const file = receivingImportUi().input?.files?.[0];
+    if (!file) {
+        showToast(receivingT("Choose an Excel or CSV file first"), "warning");
+        return;
+    }
+    await processReceivingImportFile(file);
 }
 
 async function commitReceivingImport() {
@@ -753,18 +1200,49 @@ async function commitReceivingImport() {
         showToast(receivingT("You do not have permission to import receiving Excel files"), "danger");
         return;
     }
-    if (!receivingImportPreviewToken) {
+    if (!receivingImportPreviewToken || receivingImportInProgress) {
         showToast(receivingT("Preview a valid Excel file first"), "warning");
         return;
     }
     try {
         setReceivingImportBusy(true);
+        startReceivingImportProgress({ name: receivingT("previewed receiving rows") });
+        setReceivingImportProgress({
+            step: "saving",
+            percent: 89,
+            message: "Saving receipts...",
+            longMessage: "",
+        });
         const res = await api("POST", "/receiving/import/commit", {
             preview_token: receivingImportPreviewToken,
         });
+        const result = res.data || {};
         receivingImportPreviewToken = null;
-        document.getElementById("receivingImportCommitBtn").disabled = true;
-        showToast(receivingT("Receiving import completed"));
+        setReceivingImportProgress({
+            type: "success",
+            step: "done",
+            percent: 100,
+            message: receivingT("Receiving import completed."),
+            rowsText: receivingT("{rows} row(s) imported", {
+                rows: result.row_count || 0,
+            }),
+            details: [
+                receivingT("{orders} order(s) imported.", {
+                    orders: result.orders_imported || 0,
+                }),
+                result.total_seconds
+                    ? receivingT("Saved in {seconds}s", {
+                          seconds: Number(result.total_seconds || 0).toFixed(1),
+                      })
+                    : "",
+            ],
+            longMessage: "",
+        });
+        showToast(
+            receivingT("Imported {rows} receiving row(s).", {
+                rows: result.row_count || 0,
+            }),
+        );
         applyFilters();
         loadReceivableOrders();
         renderReceivingImportPreview({
@@ -778,14 +1256,83 @@ async function commitReceivingImport() {
         const summary = document.getElementById("receivingImportSummary");
         if (summary) {
             summary.textContent = receivingT("{orders} order(s) imported.", {
-                orders: res.data?.orders_imported || 0,
+                orders: result.orders_imported || 0,
             });
         }
     } catch (error) {
-        showToast(error.message, "danger");
+        const message = error.message || receivingT("Receiving import failed.");
+        setReceivingImportStatus("danger", message);
+        showToast(message, "danger");
     } finally {
+        clearReceivingImportProgressTimers();
         setReceivingImportBusy(false);
     }
+}
+
+function chooseReceivingImportFile() {
+    if (receivingImportInProgress) return;
+    const input = receivingImportUi().input;
+    if (input) {
+        input.value = "";
+        input.click();
+    }
+}
+
+async function handleReceivingImportFile(event) {
+    const file = event.currentTarget?.files?.[0];
+    if (!file) return;
+    await processReceivingImportFile(file);
+}
+
+function bindReceivingImportControls() {
+    const ui = receivingImportUi();
+    if (!ui.input || !ui.dropZone) return;
+    ui.input.addEventListener("change", handleReceivingImportFile);
+    ui.chooseBtn?.addEventListener("click", chooseReceivingImportFile);
+    [ui.dropBtn, ui.plusBtn].forEach((button) => {
+        button?.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            chooseReceivingImportFile();
+        });
+    });
+    ui.dropZone.addEventListener("click", chooseReceivingImportFile);
+    ui.dropZone.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            chooseReceivingImportFile();
+        }
+    });
+    ["dragenter", "dragover"].forEach((eventName) => {
+        ui.dropZone.addEventListener(eventName, (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!receivingImportInProgress) {
+                ui.dropZone.classList.add("is-dragover");
+            }
+        });
+    });
+    ["dragleave", "dragend"].forEach((eventName) => {
+        ui.dropZone.addEventListener(eventName, (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            ui.dropZone.classList.remove("is-dragover");
+        });
+    });
+    ui.dropZone.addEventListener("drop", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        ui.dropZone.classList.remove("is-dragover");
+        const file = event.dataTransfer?.files?.[0];
+        await processReceivingImportFile(file);
+    });
+    document
+        .getElementById("receivingImportModal")
+        ?.addEventListener("hidden.bs.modal", () => {
+            if (!receivingImportInProgress) {
+                resetReceivingImportUi();
+            }
+        });
 }
 
 function renderWarehouseList() {

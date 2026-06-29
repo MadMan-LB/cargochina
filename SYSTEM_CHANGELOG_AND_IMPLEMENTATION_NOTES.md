@@ -1255,3 +1255,24 @@ otification_preferences.php and removing the sidebar link unless the user is an 
 - Added a SuperAdmin-only Training Data Reset section to `admin_config.php` backed by `backend/services/TrainingDataResetService.php` and `/api/v1/config/training-reset`. The tool uses explicit checkbox groups, a reset password, dependency-aware `DELETE` statements, protected SuperAdmin/admin users, and an audit entry after completion.
 - No database schema migration was needed for the reset tool; it only adds PHP/JS/UI logic and uses existing tables.
 - Validation performed: PHP lint on touched PHP files, JS syntax checks on touched JS files, reset preview count dry-run, and the existing batch test suite after the operational access changes.
+
+## 2026-06-29 - Receiving Excel Import UX + Speed Pass
+
+- Reworked `receiving.php` import UI to match the Draft an Order importer pattern: drag/drop zone, click-to-select controls, upload/server progress percentage, clear steps, preview summary, and a separate final "Import Previewed Rows" action.
+- Added a "Download import template" button to the Receiving import modal. It downloads the same generated procurement import workbook used by Draft an Order through `receiving-procurement-import-template-xlsx`.
+- Updated `frontend/js/receiving.js` to prevent duplicate imports, show live upload progress via `XMLHttpRequest`, estimate server reading/row-processing progress, display row counts and elapsed time, keep the preview table capped for browser performance, and report backend final counts after commit.
+- Optimized `backend/services/ReceivingExcelImportService.php`:
+  - `.xlsx`, `.xls`, and `.csv` are accepted.
+  - Excel readers use data-only mode, bounded row reads, no empty-cell inflation where supported, and worksheet cleanup after reading.
+  - CSV delimiter detection supports comma, semicolon, and tab files.
+  - Headers are normalized and mapped by alias, not fixed column position.
+  - The importer now skips procurement template title/metadata rows until it finds the blue item header row and maps procurement columns such as `Item No`, `English Item Name`, `Chinese Item Name`, `SKU / Item Code`, `Express Number`, `Cartons`, `CBM/Unit`, `Total CBM`, `Weight/Unit`, `Total Weight`, `Supplier`, and `Supplier Name`.
+  - If the sheet includes `Order ID`, the importer keeps the existing-order receiving path and validates the target order/items before commit.
+  - If the sheet has no `Order ID`, the importer now treats it as a direct warehouse intake: it validates the spreadsheet as new stock, creates the order/items, records the warehouse receipt, and moves the order to warehouse-stock-visible status through `OrderReceivingService`.
+  - The receiving import modal now includes a safe customer lookup field so a direct intake can be assigned to a customer even when the Excel template's Customer metadata cell is blank.
+  - Suppliers referenced by code/name in a valid direct intake are reused when found and created as minimal supplier records when missing; customers must already exist or be selected.
+  - SKU / Item Code columns are stored as item code metadata for direct intake and match `order_items.code` only in explicit existing-order receiving mode.
+- `backend/api/handlers/receiving.php` now returns actual commit duration in the import response while revalidating the preview token and committing direct or existing-order receiving in one transaction.
+- `download_template.php`, `includes/downloads_registry.php`, and `backend/services/DownloadExampleService.php` were updated so receiving users can download this generated template directly from the receiving workflow.
+- Downstream impact reviewed: receiving page modal, generated template download path, safe customer lookup, receiving import preview/commit API, direct order/item creation, existing-order receiving fallback, stock/receipt movement path through `OrderReceivingService`, queue refresh after import, warehouse stock visibility, export/list filters left unchanged, permissions unchanged (`receiving.import` still enforced server-side), and no database migration required.
+- Validation performed: PHP lint on `receiving.php`, `backend/api/handlers/receiving.php`, and `backend/services/ReceivingExcelImportService.php`; JS syntax check on `frontend/js/receiving.js`; DB-backed preview test with the sample procurement template; rollback-only direct commit test verified 1 order, 2 order items, and 1 warehouse receipt would be created.
