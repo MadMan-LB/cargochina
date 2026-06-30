@@ -23,8 +23,20 @@ function canCreateCustomers() {
     return customerPageEl()?.dataset?.canCreateCustomers === "1";
 }
 
+function canManageCustomers() {
+    return customerPageEl()?.dataset?.canManageCustomers === "1";
+}
+
 function canImportCustomers() {
     return customerPageEl()?.dataset?.canImportCustomers === "1";
+}
+
+function canMessageCustomers() {
+    return customerPageEl()?.dataset?.canMessageCustomers === "1";
+}
+
+function canUseCustomerAttachments() {
+    return customerPageEl()?.dataset?.canCustomerAttachments === "1";
 }
 
 function canGeneratePortalLinks() {
@@ -34,14 +46,26 @@ function canGeneratePortalLinks() {
 function setCustomerSaveState(isEditing) {
     const saveBtn = document.getElementById("customerSaveBtn");
     if (!saveBtn) return;
-    const blocked = !isEditing && !canCreateCustomers();
+    const blocked = isEditing ? !canManageCustomers() : !canCreateCustomers();
     saveBtn.disabled = blocked;
-    saveBtn.title = blocked ? "You do not have permission to add customers" : "";
+    saveBtn.title = blocked
+        ? isEditing
+            ? "You do not have permission to edit customers"
+            : "You do not have permission to add customers"
+        : "";
+}
+
+function updateCustomerAttachmentUi() {
+    const section = document.getElementById("customerPassportSection");
+    if (section) {
+        section.classList.toggle("d-none", !canUseCustomerAttachments());
+    }
 }
 
 document.addEventListener("DOMContentLoaded", () => {
     loadCustomers();
     setCustomerSaveState(false);
+    updateCustomerAttachmentUi();
     const searchInput = document.getElementById("customerSearch");
     if (searchInput) {
         searchInput.addEventListener("input", () => {
@@ -67,6 +91,8 @@ async function loadCustomers() {
         const path = q ? "/customers?q=" + encodeURIComponent(q) : "/customers";
         const res = await api("GET", path);
         const rows = res.data || [];
+        const manageActionsEnabled = canManageCustomers();
+        const messageActionsEnabled = canMessageCustomers();
         const portalActionsEnabled = canGeneratePortalLinks();
         tbody.innerHTML =
             rows
@@ -79,13 +105,13 @@ async function loadCustomers() {
         <td class="text-truncate" style="max-width:180px" title="${esc(r.address || "")}">${esc((r.address || "-").substring(0, 50))}${(r.address || "").length > 50 ? "…" : ""}</td>
         <td>${esc(r.payment_terms || "-")}</td>
         <td class="table-actions">
-          <button type="button" class="btn btn-sm btn-outline-primary" onclick="editCustomer(${r.id})">Edit</button>
+          ${manageActionsEnabled ? `<button type="button" class="btn btn-sm btn-outline-primary" onclick="editCustomer(${r.id})">Edit</button>` : ""}
           <button type="button" class="btn btn-sm btn-outline-info" onclick="showOrders(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Orders</button>
-          <button type="button" class="btn btn-sm btn-outline-success" onclick="openDepositModal(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Deposit</button>
+          ${manageActionsEnabled ? `<button type="button" class="btn btn-sm btn-outline-success" onclick="openDepositModal(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Deposit</button>` : ""}
           <button type="button" class="btn btn-sm btn-outline-secondary" onclick="showBalance(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Balance</button>
           ${portalActionsEnabled ? `<button type="button" class="btn btn-sm btn-outline-info" onclick="generatePortalLink(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')" title="One-time customer status link">Portal Link</button>` : ""}
-          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="openMessagesModal(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Messages</button>
-          <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteCustomer(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Del</button>
+          ${messageActionsEnabled ? `<button type="button" class="btn btn-sm btn-outline-secondary" onclick="openMessagesModal(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Messages</button>` : ""}
+          ${manageActionsEnabled ? `<button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteCustomer(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Del</button>` : ""}
         </td>
       </tr>
     `,
@@ -263,6 +289,10 @@ function openCustomerForm() {
 }
 
 async function editCustomer(id) {
+    if (!canManageCustomers()) {
+        showToast("You do not have permission to edit customers", "warning");
+        return;
+    }
     try {
         const res = await api("GET", "/customers/" + id);
         const d = res.data;
@@ -315,6 +345,10 @@ async function saveCustomer() {
     const id = document.getElementById("customerId").value;
     if (!id && !canCreateCustomers()) {
         showToast("You do not have permission to add customers", "danger");
+        return;
+    }
+    if (id && !canManageCustomers()) {
+        showToast("You do not have permission to edit customers", "danger");
         return;
     }
     const payload = {
@@ -377,6 +411,10 @@ async function saveCustomer() {
 async function loadCustomerPassportAttachments(customerId) {
     const listEl = document.getElementById("customerPassportList");
     if (!listEl) return;
+    if (!canUseCustomerAttachments()) {
+        listEl.innerHTML = "";
+        return;
+    }
     try {
         const res = await api("GET", "/design-attachments?entity_type=customer&entity_id=" + customerId);
         const list = res.data || [];
@@ -398,6 +436,10 @@ async function loadCustomerPassportAttachments(customerId) {
 }
 
 window.deleteCustomerPassport = async function (attachmentId, customerId) {
+    if (!canUseCustomerAttachments()) {
+        showToast("You do not have permission to manage customer attachments", "warning");
+        return;
+    }
     try {
         await api("DELETE", "/design-attachments/" + attachmentId);
         showToast("Attachment removed");
@@ -411,6 +453,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const passportInput = document.getElementById("customerPassportInput");
     if (passportInput) {
         passportInput.addEventListener("change", async function () {
+            if (!canUseCustomerAttachments()) {
+                showToast("You do not have permission to manage customer attachments", "warning");
+                this.value = "";
+                return;
+            }
             const customerId = document.getElementById("customerId")?.value;
             if (!customerId) {
                 showToast("Save customer first to add passport/ID attachments", "warning");
@@ -444,6 +491,10 @@ document.addEventListener("DOMContentLoaded", () => {
 let depOrderAc = null;
 
 function openDepositModal(customerId, name) {
+    if (!canManageCustomers()) {
+        showToast("You do not have permission to record customer deposits", "warning");
+        return;
+    }
     document.getElementById("depCustomerId").value = customerId;
     document.getElementById("depCustomerName").textContent = name;
     document.getElementById("depAmount").value = "";
@@ -468,6 +519,10 @@ function openDepositModal(customerId, name) {
 }
 
 async function submitDeposit() {
+    if (!canManageCustomers()) {
+        showToast("You do not have permission to record customer deposits", "danger");
+        return;
+    }
     const customerId = document.getElementById("depCustomerId").value;
     const amount = parseFloat(document.getElementById("depAmount").value || 0);
     if (amount <= 0) {
@@ -612,6 +667,10 @@ function renderOrders(orders) {
 }
 
 async function deleteCustomer(id, name) {
+    if (!canManageCustomers()) {
+        showToast("You do not have permission to delete customers", "warning");
+        return;
+    }
     if (!confirm('Delete customer "' + name + '"?')) return;
     try {
         await api("DELETE", "/customers/" + id);
@@ -624,7 +683,7 @@ async function deleteCustomer(id, name) {
 
 window.generatePortalLink = function (customerId, name) {
     if (!canGeneratePortalLinks()) {
-        showToast("Only Admin and Super Admin can generate portal links", "warning");
+        showToast("You do not have permission to generate portal links", "warning");
         return;
     }
     window._portalCustomerId = customerId;
@@ -721,6 +780,10 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 window.openMessagesModal = function (customerId, name) {
+    if (!canMessageCustomers()) {
+        showToast("You do not have permission to use customer messages", "warning");
+        return;
+    }
     window._messagesCustomerId = customerId;
     document.getElementById("messagesCustomerName").textContent = name;
     document.getElementById("messageBody").value = "";
@@ -754,6 +817,10 @@ async function loadMessages() {
 }
 
 window.sendMessage = async function () {
+    if (!canMessageCustomers()) {
+        showToast("You do not have permission to use customer messages", "danger");
+        return;
+    }
     const customerId = window._messagesCustomerId;
     const body = document.getElementById("messageBody").value.trim();
     if (!body) return;

@@ -51,7 +51,7 @@ This file was initially written by Codex as a shared collaboration and continuit
 
 ## 6. Core Modules Expected in the Codebase
 - Auth and roles: present now via `login.php`, session-based auth, `includes/area_bootstrap.php`, `includes/layout.php`, and `backend/config/rbac.php`.
-- Customers: present now in root pages, buyers area pages, and `backend/api/handlers/customers.php`. Operational users can open `customers.php` and add customers; customer rows on that page are filtered by full-visibility roles, unassigned legacy rows, own created rows, and configured selected-creator exceptions.
+- Customers: present now in root pages, buyers area pages, and `backend/api/handlers/customers.php`. Operational users can open `customers.php` and add customers; customer rows on that page are filtered by full-visibility roles, unassigned legacy rows, own created rows, and configured selected-creator exceptions. Sensitive customer-page actions such as edit/delete/deposit, imports, portal links, messages, and attachments remain tied to their narrower backend permissions.
 - Suppliers: present now in root pages, buyers area pages, supplier payments/interactions schema, and `backend/api/handlers/suppliers.php`.
 - Products: present now in UI and `backend/api/handlers/products.php`, with translation-related support nearby.
 - Translation cache: present conceptually and in schema/service form via `translations` and `backend/services/TranslationService.php`.

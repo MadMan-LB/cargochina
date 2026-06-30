@@ -8,12 +8,15 @@ $roles = $_SESSION['user_roles'] ?? [];
 $userId = isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null;
 $customerCreateRoles = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'];
 $canCreateCustomers = clmsUserCan('customers.create', $customerCreateRoles, null, $userId, $roles);
+$canManageCustomers = clmsUserCan('customers.write', ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'], null, $userId, $roles);
 $canImportCustomers = clmsUserCan('customers.import', ['ChinaAdmin', 'SuperAdmin'], null, $userId, $roles);
-$canGeneratePortalLinks = in_array('ChinaAdmin', $roles, true) || in_array('SuperAdmin', $roles, true);
+$canMessageCustomers = clmsUserCan('internal-messages', ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'SuperAdmin', 'WarehouseStaff'], null, $userId, $roles);
+$canUseCustomerAttachments = clmsUserCan('design-attachments', ['ChinaAdmin', 'ChinaEmployee', 'WarehouseStaff', 'SuperAdmin'], null, $userId, $roles);
+$canGeneratePortalLinks = clmsUserCan('customer-portal-tokens', ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'], null, $userId, $roles);
 require 'includes/layout.php';
 ?>
 <h1 class="mb-4">Customers</h1>
-<div class="card" id="customersPage" data-can-create-customers="<?= $canCreateCustomers ? '1' : '0' ?>" data-can-import-customers="<?= $canImportCustomers ? '1' : '0' ?>" data-can-generate-portal="<?= $canGeneratePortalLinks ? '1' : '0' ?>">
+<div class="card" id="customersPage" data-can-create-customers="<?= $canCreateCustomers ? '1' : '0' ?>" data-can-manage-customers="<?= $canManageCustomers ? '1' : '0' ?>" data-can-import-customers="<?= $canImportCustomers ? '1' : '0' ?>" data-can-message-customers="<?= $canMessageCustomers ? '1' : '0' ?>" data-can-customer-attachments="<?= $canUseCustomerAttachments ? '1' : '0' ?>" data-can-generate-portal="<?= $canGeneratePortalLinks ? '1' : '0' ?>">
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2 py-3">
     <span class="fw-semibold">Customer List</span>
     <div class="d-flex gap-2 align-items-center flex-wrap">
