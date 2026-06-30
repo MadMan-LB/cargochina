@@ -51,7 +51,7 @@ This file was initially written by Codex as a shared collaboration and continuit
 
 ## 6. Core Modules Expected in the Codebase
 - Auth and roles: present now via `login.php`, session-based auth, `includes/area_bootstrap.php`, `includes/layout.php`, and `backend/config/rbac.php`.
-- Customers: present now in root pages, buyers area pages, and `backend/api/handlers/customers.php`.
+- Customers: present now in root pages, buyers area pages, and `backend/api/handlers/customers.php`. Operational users can open `customers.php` and add customers; customer rows on that page are filtered by full-visibility roles, unassigned legacy rows, own created rows, and configured selected-creator exceptions.
 - Suppliers: present now in root pages, buyers area pages, supplier payments/interactions schema, and `backend/api/handlers/suppliers.php`.
 - Products: present now in UI and `backend/api/handlers/products.php`, with translation-related support nearby.
 - Translation cache: present conceptually and in schema/service form via `translations` and `backend/services/TranslationService.php`.
@@ -59,7 +59,7 @@ This file was initially written by Codex as a shared collaboration and continuit
 - Orders: present now in UI, handlers, schema, and tests.
 - Order items: present now in schema and handlers, including item-level capture fields such as cartons, shipping code, pricing, notes, and image paths.
 - Attachments: present now via `order_attachments`, upload handling, and order-level file references.
-- Warehouse receiving: present now in root and area routes, `backend/api/handlers/orders.php`, `backend/api/handlers/receiving.php`, and warehouse pages.
+- Warehouse receiving: present now in root and area routes, `backend/api/handlers/orders.php`, `backend/api/handlers/receiving.php`, and warehouse pages. Receiving Excel import can use the Draft an Order procurement template as a direct warehouse intake; when no customer is supplied in the template or modal, it assigns the order to the controlled fallback customer `Direct Warehouse Intake` with a preview warning instead of blocking stock intake.
 - Evidence/photos: present now via upload utilities, receipt photo tables, and frontend receiving scripts.
 - Variance detection: present now in receiving flow and lifecycle transitions, but still needs operational QA.
 - Notifications: present now in dashboard notification UI, preferences, `NotificationService`, and notification delivery logging.

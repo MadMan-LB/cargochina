@@ -298,7 +298,7 @@ require 'includes/layout.php';
             <label class="form-label"><?= clmsT('Customer for direct receiving') ?></label>
             <input type="text" class="form-control" id="receivingImportCustomer" placeholder="<?= clmsT('Search customer if the Excel customer cell is blank') ?>" autocomplete="off">
             <input type="hidden" id="receivingImportCustomerId">
-            <small class="text-muted"><?= clmsT('Used only when the imported template has no Customer value. Customer lookup returns safe selection fields only.') ?></small>
+            <small class="text-muted"><?= clmsT('Used only when the imported template has no Customer value. If left blank, stock is assigned to Direct Warehouse Intake and the preview shows a warning.') ?></small>
           </div>
         </div>
         <input type="file" class="d-none" id="receivingImportFile" accept=".xlsx,.xls,.csv,.cv,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">

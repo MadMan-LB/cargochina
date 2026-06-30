@@ -81,7 +81,7 @@ See `.env.example` for:
 
 ## Operational Customer Visibility
 
-Customer owner/creator visibility rules are intentionally limited to the full customer management surface (`customers.php` and full customer-management API actions). Operational workflows such as Orders, Draft an Order, Receiving, Warehouse Stock, Consolidation, Containers, Expenses, Financials, and Balances should show the full operational data allowed by the user's page/module permission.
+Customer owner/creator visibility rules are intentionally limited to the full customer management surface (`customers.php` and full customer-management API actions). The Customers page is visible to operational users, and operational users can add customers. The records inside the Customers page are filtered by the customer visibility rules: full-visibility roles see all, other users see unassigned legacy customers, their own customers, and any selected creators configured by an admin. Operational workflows such as Orders, Draft an Order, Receiving, Warehouse Stock, Consolidation, Containers, Expenses, Financials, and Balances should show the full operational data allowed by the user's page/module permission.
 
 Customer selectors in operational workflows use the safe lookup API (`/api/v1/customers/lookup` and `/api/v1/customers/{id}/lookup`), which returns only minimal selection fields and must not expose full customer profiles, balances, private notes, contacts, addresses, or payment links.
 
@@ -91,7 +91,7 @@ Customer selectors in operational workflows use the safe lookup API (`/api/v1/cu
 
 ## Receiving Excel Import
 
-`receiving.php` uses the same generated procurement import template as Draft an Order, available from the receiving import modal. The preview step reads normalized procurement headers instead of fixed column positions, supports reordered columns, and maps columns such as Customer, Item No, SKU / Item Code, Express Number, Cartons, CBM/Unit or Total CBM, Weight/Unit or Total Weight, and Supplier. When no `Order ID` is supplied, the import is treated as a direct warehouse intake: it creates the order/items, records receiving, and places the goods into warehouse stock through the normal receiving service after final confirmation. If `Order ID` is supplied, it still supports receiving against existing approved/in-transit orders. The final import revalidates the preview token server-side and saves in one transaction.
+`receiving.php` uses the same generated procurement import template as Draft an Order, available from the receiving import modal. The preview step reads normalized procurement headers instead of fixed column positions, supports reordered columns, and maps columns such as Customer, Item No, SKU / Item Code, Express Number, Cartons, CBM/Unit or Total CBM, Weight/Unit or Total Weight, and Supplier. When no `Order ID` is supplied, the import is treated as a direct warehouse intake: it creates the order/items, records receiving, and places the goods into warehouse stock through the normal receiving service after final confirmation. If the template has no customer and the user does not select one in the modal, the import assigns the receipt to the controlled fallback customer `Direct Warehouse Intake` and shows a warning in preview. If `Order ID` is supplied, it still supports receiving against existing approved/in-transit orders. The final import revalidates the preview token server-side and saves in one transaction.
 
 ## SuperAdmin Training Reset
 

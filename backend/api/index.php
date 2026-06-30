@@ -140,7 +140,7 @@ if (!in_array($resource, $publicResources)) {
             exit;
         }
     }
-    if ($resource === 'customers' && $method === 'POST' && $id === null && !hasPermission('customers.create', [])) {
+    if ($resource === 'customers' && $method === 'POST' && $id === null && !hasPermission('customers.create', $rbac['customers']['create'] ?? $operationalRoles)) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;

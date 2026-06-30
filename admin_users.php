@@ -60,7 +60,7 @@ require 'includes/layout.php';
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-3 py-3 bg-light">
     <div>
       <h5 class="mb-1">Customer Visibility Exceptions</h5>
-      <p class="text-muted mb-0 small">Control whether a user sees only their own customers, selected creators' customers, or all customers.</p>
+      <p class="text-muted mb-0 small">Control whether a user sees unassigned legacy customers plus their own customers, selected creators' customers, or all customers.</p>
     </div>
     <div class="d-flex flex-wrap gap-2 align-items-center">
       <select class="form-select form-select-sm" id="customerVisibilityUserSelect" style="min-width:260px"></select>
@@ -69,7 +69,7 @@ require 'includes/layout.php';
   </div>
   <div class="card-body">
     <div class="alert alert-info py-2 small mb-3">
-      SuperAdmin, ChinaAdmin, and LebanonAdmin see all customers by role. Other users see their own created customers unless an exception is configured here.
+      SuperAdmin, ChinaAdmin, and LebanonAdmin see all customers by role. Other users see unassigned legacy customers and their own created customers unless an exception is configured here.
     </div>
     <div id="customerVisibilityLoading" class="text-center py-4 text-muted">Loading customer visibility…</div>
     <div id="customerVisibilityEditor" class="d-none">
@@ -81,7 +81,7 @@ require 'includes/layout.php';
               <input class="form-check-input mt-1 customer-visibility-mode" type="radio" name="customerVisibilityMode" value="own">
               <span>
                 <span class="fw-semibold d-block">Own customers only</span>
-                <span class="small text-muted">The user sees customers they personally created.</span>
+                <span class="small text-muted">The user sees unassigned legacy customers and customers they personally created.</span>
               </span>
             </label>
             <label class="list-group-item d-flex gap-2 align-items-start">

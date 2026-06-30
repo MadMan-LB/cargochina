@@ -18,10 +18,10 @@ return [
         'confirm' => $operationalRoles,
     ],
     'customers' => [
-        'read' => ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'SuperAdmin'],
+        'read' => $operationalRoles,
         'lookup' => $operationalRoles,
         'write' => ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'],
-        'create' => ['ChinaAdmin', 'SuperAdmin'],
+        'create' => $operationalRoles,
         'import' => ['ChinaAdmin', 'SuperAdmin'],
     ],
     'products' => [

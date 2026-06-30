@@ -6,6 +6,8 @@ class ReceivingExcelImportService
 {
     private const MAX_ROWS = 1000;
     private const READ_LIMIT_EXTRA_ROWS = 25;
+    private const DIRECT_INTAKE_CUSTOMER_CODE = 'DIRECT-WAREHOUSE-INTAKE';
+    private const DIRECT_INTAKE_CUSTOMER_NAME = 'Direct Warehouse Intake';
 
     private array $aliases = [
         'order_id' => ['orderid', 'order', 'orderno', 'ordernumber', 'orderref', 'orderreference'],
@@ -281,6 +283,9 @@ class ReceivingExcelImportService
             $rowNumber = (int) ($raw['_row'] ?? 0);
 
             $customer = $this->resolveDirectCustomer($pdo, $raw, $metadata, $customerCache, $rowErrors);
+            if (!empty($customer['_fallback'])) {
+                $rowWarnings[] = 'No customer supplied; this direct receipt will be assigned to ' . self::DIRECT_INTAKE_CUSTOMER_NAME . '.';
+            }
             $supplier = $this->resolveDirectSupplierPreview($pdo, $raw, $supplierCache);
             $supplierLabel = trim((string) (($raw['supplier_name'] ?? '') ?: ($raw['supplier_code'] ?? '') ?: ($raw['supplier_id'] ?? '')));
             if (!$supplier && $supplierLabel !== '') {
@@ -385,6 +390,7 @@ class ReceivingExcelImportService
             $directItem = [
                 'customer_id' => $customerId ?: null,
                 'customer_name' => $customer['name'] ?? trim((string) (($raw['customer_name'] ?? '') ?: ($metadata['customer_name'] ?? ''))),
+                'customer_fallback' => !empty($customer['_fallback']),
                 'supplier_id' => $supplier['id'] ?? null,
                 'supplier_code' => $this->cleanDirectText($raw['supplier_code'] ?? '', 100),
                 'supplier_name' => $this->cleanDirectText(($raw['supplier_name'] ?? '') ?: ($raw['supplier_code'] ?? ''), 255),
@@ -555,6 +561,13 @@ class ReceivingExcelImportService
         $results = [];
         $receivingService = new OrderReceivingService();
         foreach ($groups as $group) {
+            if ((int) ($group['customer_id'] ?? 0) <= 0 && !empty($group['customer_fallback'])) {
+                $group['customer_id'] = $this->resolveOrCreateDirectIntakeCustomer($pdo, $userId, $importId);
+                $group['customer_name'] = self::DIRECT_INTAKE_CUSTOMER_NAME;
+            }
+            if ((int) ($group['customer_id'] ?? 0) <= 0) {
+                throw new OrderReceivingValidationException('Customer is required for direct receiving import.', 422);
+            }
             $supplierId = $this->resolveOrCreateSupplierForDirectIntake($pdo, $group, $userId, $importId);
             $orderId = $this->insertDirectIntakeOrder($pdo, $group, $supplierId, $userId);
             $items = $this->insertDirectIntakeItems($pdo, $orderId, $group['items'] ?? [], $supplierId);
@@ -642,9 +655,11 @@ class ReceivingExcelImportService
         }
 
         if ($value === '') {
-            $errors[] = 'Customer is required in the template metadata or row.';
-            $cache[$cacheKey] = null;
-            return null;
+            return $cache[$cacheKey] = [
+                'id' => 0,
+                'name' => self::DIRECT_INTAKE_CUSTOMER_NAME,
+                '_fallback' => true,
+            ];
         }
 
         $clauses = ['LOWER(TRIM(name)) = LOWER(TRIM(?))'];
@@ -667,6 +682,56 @@ class ReceivingExcelImportService
             ? 'Customer "' . $value . '" matches multiple records. Use Customer ID in the template.'
             : 'Customer "' . $value . '" was not found.';
         return $cache[$cacheKey] = null;
+    }
+
+    private function resolveOrCreateDirectIntakeCustomer(PDO $pdo, int $userId, int $importId): int
+    {
+        $clauses = ['code = ?'];
+        $params = [self::DIRECT_INTAKE_CUSTOMER_CODE];
+        $clauses[] = 'name = ?';
+        $params[] = self::DIRECT_INTAKE_CUSTOMER_NAME;
+
+        $stmt = $pdo->prepare("SELECT id FROM customers WHERE " . implode(' OR ', $clauses) . " ORDER BY id ASC LIMIT 1");
+        $stmt->execute($params);
+        $existingId = (int) ($stmt->fetchColumn() ?: 0);
+        if ($existingId > 0) {
+            return $existingId;
+        }
+
+        $columns = ['code', 'name'];
+        $values = ['?', '?'];
+        $insertParams = [self::DIRECT_INTAKE_CUSTOMER_CODE, self::DIRECT_INTAKE_CUSTOMER_NAME];
+        if ($this->tableHasColumn($pdo, 'customers', 'default_shipping_code')) {
+            $columns[] = 'default_shipping_code';
+            $values[] = '?';
+            $insertParams[] = 'DIRECT-WH';
+        }
+        if ($this->tableHasColumn($pdo, 'customers', 'created_by')) {
+            $columns[] = 'created_by';
+            $values[] = '?';
+            $insertParams[] = $userId;
+        }
+
+        $pdo->prepare("INSERT INTO customers (" . implode(', ', $columns) . ") VALUES (" . implode(', ', $values) . ")")
+            ->execute($insertParams);
+        $customerId = (int) $pdo->lastInsertId();
+        $this->logDirectIntakeCustomer($pdo, $customerId, $userId, $importId);
+        return $customerId;
+    }
+
+    private function logDirectIntakeCustomer(PDO $pdo, int $customerId, int $userId, int $importId): void
+    {
+        try {
+            $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('customer', ?, 'direct_receive_import_fallback_create', ?, ?)")
+                ->execute([$customerId, json_encode([
+                    'import_id' => $importId,
+                    'code' => self::DIRECT_INTAKE_CUSTOMER_CODE,
+                    'name' => self::DIRECT_INTAKE_CUSTOMER_NAME,
+                    'source' => 'receiving_excel_direct_intake',
+                ], JSON_UNESCAPED_UNICODE), $userId]);
+        } catch (Throwable $e) {
+            // Audit logging should never block receiving intake.
+        }
     }
 
     private function resolveDirectSupplierPreview(PDO $pdo, array $raw, array &$cache): ?array
@@ -813,6 +878,7 @@ class ReceivingExcelImportService
                 $groups[$key] = [
                     'customer_id' => (int) ($item['customer_id'] ?? 0),
                     'customer_name' => $item['customer_name'] ?? '',
+                    'customer_fallback' => !empty($item['customer_fallback']),
                     'supplier_id' => $item['supplier_id'] ?? null,
                     'supplier_code' => $item['supplier_code'] ?? null,
                     'supplier_name' => $item['supplier_name'] ?? null,
@@ -830,6 +896,7 @@ class ReceivingExcelImportService
     {
         return md5(implode('|', [
             (string) ($item['customer_id'] ?? ''),
+            !empty($item['customer_fallback']) ? 'fallback' : '',
             (string) ($item['supplier_id'] ?? ''),
             $this->normalizeMatchText($item['supplier_code'] ?? ''),
             $this->normalizeMatchText($item['supplier_name'] ?? ''),

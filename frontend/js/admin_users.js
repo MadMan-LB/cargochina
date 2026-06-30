@@ -698,8 +698,8 @@ function customerVisibilityStatusForUser(user) {
             : mode === "all"
               ? "All customers by exception"
               : mode === "selected"
-                ? "Own + selected creators"
-                : "Own customers only",
+                ? "Legacy/unassigned + own + selected creators"
+                : "Legacy/unassigned + own customers",
         detail:
             mode === "selected" && creatorNames.length
                 ? creatorNames.join(", ")
@@ -804,8 +804,8 @@ function renderCustomerVisibilityEditor() {
         : mode === "all"
           ? "All customers by exception"
           : mode === "selected"
-            ? "Own customers plus selected creators"
-            : "Own customers only";
+            ? "Legacy/unassigned customers plus own customers and selected creators"
+            : "Legacy/unassigned customers plus own customers";
     statusEl.textContent = `${label}: ${modeText}`;
     renderCustomerVisibilityCreatorState();
 }

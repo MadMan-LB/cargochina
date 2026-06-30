@@ -157,7 +157,7 @@ function clmsCustomerVisibilityClause(PDO $pdo, string $customerAlias = 'c', ?in
     }
     $placeholders = implode(',', array_fill(0, count($creatorIds), '?'));
     return [
-        'sql' => "$customerAlias.created_by IN ($placeholders)",
+        'sql' => "($customerAlias.created_by IN ($placeholders) OR $customerAlias.created_by IS NULL OR $customerAlias.created_by = 0)",
         'params' => $creatorIds,
         'is_all' => false,
     ];

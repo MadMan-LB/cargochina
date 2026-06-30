@@ -101,6 +101,11 @@ function customerLookupRoles(): array
     return ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'];
 }
 
+function customerCreateRoles(): array
+{
+    return customerLookupRoles();
+}
+
 function customerLookupSelectColumns(PDO $pdo): string
 {
     $cols = ['id', 'code', 'name'];
@@ -520,7 +525,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt->execute([$newId]);
                 jsonResponse(['data' => $stmt->fetch(PDO::FETCH_ASSOC)], 201);
             }
-            requirePermission('customers.create', []);
+            requirePermission('customers.create', customerCreateRoles());
             $name = trim($input['name'] ?? '');
             if (!$name) {
                 jsonError('Missing required fields', 400, ['name' => 'Required']);
