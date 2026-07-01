@@ -5,6 +5,7 @@
     let legacyMigrationCustomerAc = null;
     let builderModal = null;
     let migrationModal = null;
+    let quickCustomerModal = null;
     let quickSupplierModal = null;
     let sectionIndex = 0;
     let itemIndex = 0;
@@ -3574,6 +3575,113 @@
         }
     }
 
+    function resetDraftQuickCustomerForm() {
+        document.getElementById("draftCustomerQuickForm")?.reset();
+        refreshUnsavedBaseline?.(
+            document.querySelector("#draftCustomerQuickAddModal .modal-body"),
+        );
+    }
+
+    function openDraftQuickCustomer() {
+        quickCustomerModal =
+            quickCustomerModal ||
+            bootstrap.Modal.getOrCreateInstance(
+                document.getElementById("draftCustomerQuickAddModal"),
+            );
+        resetDraftQuickCustomerForm();
+        const currentCustomer = draftOrderCustomerAc?.getSelected?.();
+        const customerName =
+            currentCustomer?.name ||
+            document.getElementById("draftOrderCustomer")?.value?.trim() ||
+            "";
+        const shippingCode =
+            currentCustomer?.default_shipping_code ||
+            currentCustomer?.code ||
+            "";
+        const nameInput = document.getElementById("draftQuickCustomerName");
+        const codeInput = document.getElementById("draftQuickCustomerShippingCode");
+        if (nameInput && customerName) nameInput.value = customerName;
+        if (codeInput && shippingCode) codeInput.value = shippingCode;
+        refreshUnsavedBaseline?.(
+            document.querySelector("#draftCustomerQuickAddModal .modal-body"),
+        );
+        quickCustomerModal.show();
+        setTimeout(() => {
+            (nameInput?.value ? codeInput : nameInput)?.focus?.();
+        }, 150);
+    }
+
+    async function saveDraftQuickCustomer() {
+        const name = document.getElementById("draftQuickCustomerName")?.value?.trim() || "";
+        const shippingCode =
+            document.getElementById("draftQuickCustomerShippingCode")?.value?.trim() ||
+            "";
+        if (!name) {
+            showToast(draftT("Customer name is required."), "danger");
+            return;
+        }
+        if (!shippingCode) {
+            showToast(draftT("Default shipping code is required."), "danger");
+            return;
+        }
+        const payload = {
+            name,
+            default_shipping_code: shippingCode,
+            phone:
+                document.getElementById("draftQuickCustomerPhone")?.value?.trim() ||
+                null,
+            email:
+                document.getElementById("draftQuickCustomerEmail")?.value?.trim() ||
+                null,
+            payment_terms:
+                document
+                    .getElementById("draftQuickCustomerPaymentTerms")
+                    ?.value?.trim() || null,
+            address:
+                document.getElementById("draftQuickCustomerAddress")?.value?.trim() ||
+                null,
+        };
+        const btn = document.getElementById("draftQuickCustomerSaveBtn");
+        try {
+            btn.disabled = true;
+            const res = await api("POST", "/customers", payload);
+            const customer = res.data || {};
+            if (!customer.id) {
+                throw new Error(
+                    draftT("Customer was saved but could not be selected. Refresh and search for it."),
+                );
+            }
+            const selected = {
+                id: customer.id,
+                name: customer.name || payload.name,
+                code: customer.code || payload.default_shipping_code,
+                default_shipping_code:
+                    customer.default_shipping_code ||
+                    payload.default_shipping_code ||
+                    customer.code ||
+                    "",
+            };
+            draftOrderCustomerAc?.setValue(selected);
+            clearDraftInvalidTarget(document.getElementById("draftOrderCustomer"));
+            await loadDraftCustomerCountryContext(
+                selected.id,
+                selected.default_shipping_code || "",
+            );
+            if (res?.warning) {
+                showToast(res.warning, "warning");
+            }
+            showToast(draftT("Customer added and selected for this draft."));
+            refreshUnsavedBaseline?.(
+                document.querySelector("#draftCustomerQuickAddModal .modal-body"),
+            );
+            quickCustomerModal.hide();
+        } catch (error) {
+            showToast(error.message || draftT("Failed to save customer."), "danger");
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
     function collectDescriptionEntries(card) {
         return Array.from(
             card.querySelectorAll(".draft-item-description-entry-input"),
@@ -4501,8 +4609,17 @@
         );
         registerUnsavedChangesGuard?.("#legacyMigrationModal .modal-body");
         registerUnsavedChangesGuard?.(
+            "#draftCustomerQuickAddModal .modal-body",
+        );
+        registerUnsavedChangesGuard?.(
             "#draftSupplierQuickAddModal .modal-body",
         );
+        document
+            .getElementById("draftCustomerQuickForm")
+            ?.addEventListener("submit", (event) => {
+                event.preventDefault();
+                saveDraftQuickCustomer();
+            });
         ensureDraftValidationSummary();
         bindDraftValidationAutoClear(document.getElementById("draftOrderModal"));
 
@@ -4642,6 +4759,8 @@
     window.openDraftOrderBuilder = openDraftOrderBuilder;
     window.addDraftOrderSection = addDraftOrderSection;
     window.saveDraftOrder = saveDraftOrder;
+    window.openDraftQuickCustomer = openDraftQuickCustomer;
+    window.saveDraftQuickCustomer = saveDraftQuickCustomer;
     window.addDraftQuickSupplierPaymentLink = addDraftQuickSupplierPaymentLink;
     window.saveDraftQuickSupplier = saveDraftQuickSupplier;
     window.submitDraftOrder = submitDraftOrder;

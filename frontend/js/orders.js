@@ -605,7 +605,7 @@ function updateOrderStatusFilterSummary() {
             ? orderT("Excluding: {labels}", { labels })
             : orderT("Including: {labels}", { labels });
 }
-
+    
 function setOrderStatusFilter(statuses = [], mode = "include") {
     const selected = new Set((statuses || []).map(String));
     document.querySelectorAll(".order-status-filter").forEach((el) => {

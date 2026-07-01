@@ -4,6 +4,15 @@ require_once 'includes/page_guard.php';
 requireRoleForPage(['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin']);
 $currentPage = 'procurement_drafts';
 $pageTitle = 'Draft an Order';
+$roles = $_SESSION['user_roles'] ?? [];
+$userId = isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null;
+$canCreateDraftCustomers = clmsUserCan(
+  'customers.create',
+  ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'],
+  null,
+  $userId,
+  $roles
+);
 require 'includes/layout.php';
 ?>
 <h1 class="mb-3">Draft an Order</h1>
@@ -135,7 +144,12 @@ require 'includes/layout.php';
               <div class="row g-3">
                 <div class="col-12 col-lg-4">
                   <label class="form-label">Customer *</label>
-                  <input type="text" class="form-control form-control-sm" id="draftOrderCustomer" placeholder="Type to search customer..." autocomplete="off">
+                  <div class="input-group input-group-sm">
+                    <input type="text" class="form-control form-control-sm" id="draftOrderCustomer" placeholder="Type to search customer..." autocomplete="off">
+                    <?php if ($canCreateDraftCustomers): ?>
+                      <button type="button" class="btn btn-outline-primary draft-item-action" id="draftQuickCustomerOpenBtn" data-builder-action="quick-add-customer" onclick="openDraftQuickCustomer()" title="Add customer without leaving this draft">+ Add</button>
+                    <?php endif; ?>
+                  </div>
                 </div>
                 <div class="col-12 col-md-4 col-lg-3">
                   <label class="form-label">Country / Destination</label>
@@ -239,6 +253,54 @@ require 'includes/layout.php';
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
         <button type="button" class="btn btn-primary" id="legacyMigrationSubmitBtn" onclick="submitLegacyMigration()">Migrate</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="draftCustomerQuickAddModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h5 class="modal-title mb-1">Quick Add Customer</h5>
+          <small class="text-muted">Create a customer without leaving this draft. The saved customer is selected immediately.</small>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <form id="draftCustomerQuickForm">
+          <div class="row g-3">
+            <div class="col-12 col-md-6">
+              <label class="form-label">Name *</label>
+              <input type="text" class="form-control" id="draftQuickCustomerName" required>
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label">Default Shipping Code *</label>
+              <input type="text" class="form-control" id="draftQuickCustomerShippingCode" required>
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">Phone</label>
+              <input type="text" class="form-control" id="draftQuickCustomerPhone">
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">Email</label>
+              <input type="email" class="form-control" id="draftQuickCustomerEmail">
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">Payment Terms</label>
+              <input type="text" class="form-control" id="draftQuickCustomerPaymentTerms" placeholder="e.g. Net 30">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Address</label>
+              <textarea class="form-control" id="draftQuickCustomerAddress" rows="2"></textarea>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="draftQuickCustomerSaveBtn" onclick="saveDraftQuickCustomer()">Save Customer</button>
       </div>
     </div>
   </div>
