@@ -112,6 +112,15 @@ class OrderReceivingService
 
                 $aCbm = isset($it['actual_cbm']) ? (float) $it['actual_cbm'] : null;
                 $aWeight = isset($it['actual_weight']) ? (float) $it['actual_weight'] : null;
+                $aHeight = isset($it['actual_height']) && $it['actual_height'] !== ''
+                    ? (float) $it['actual_height']
+                    : null;
+                $aWidth = isset($it['actual_width']) && $it['actual_width'] !== ''
+                    ? (float) $it['actual_width']
+                    : null;
+                $aLength = isset($it['actual_length']) && $it['actual_length'] !== ''
+                    ? (float) $it['actual_length']
+                    : null;
                 $aCartons = isset($it['actual_cartons']) ? (int) $it['actual_cartons'] : null;
                 $aPiecesPerCarton = isset($it['actual_pieces_per_carton']) && $it['actual_pieces_per_carton'] !== ''
                     ? (float) $it['actual_pieces_per_carton']
@@ -152,8 +161,11 @@ class OrderReceivingService
 
                 if (($aCartons !== null && $aCartons < 0)
                     || ($aCbm !== null && $aCbm < 0)
-                    || ($aWeight !== null && $aWeight < 0)) {
-                    $errors["items.$idx.actuals"] = 'Actual cartons, CBM, and weight must be zero or positive';
+                    || ($aWeight !== null && $aWeight < 0)
+                    || ($aHeight !== null && $aHeight < 0)
+                    || ($aWidth !== null && $aWidth < 0)
+                    || ($aLength !== null && $aLength < 0)) {
+                    $errors["items.$idx.actuals"] = 'Actual cartons, CBM, weight, and dimensions must be zero or positive';
                 }
 
                 $itCond = $it['condition'] ?? 'good';
@@ -223,7 +235,7 @@ class OrderReceivingService
                 $receiptItemCols = "receipt_id, order_item_id, actual_cartons, actual_cbm, actual_weight, receipt_condition, variance_detected, notes";
                 $receiptItemVals = "?,?,?,?,?,?,?,?";
                 $receiptExtraCols = [];
-                foreach (['actual_pieces_per_carton', 'actual_quantity', 'unit_price', 'total_amount'] as $column) {
+                foreach (['actual_pieces_per_carton', 'actual_quantity', 'unit_price', 'total_amount', 'actual_height', 'actual_width', 'actual_length'] as $column) {
                     if ($this->tableHasColumn($pdo, 'warehouse_receipt_items', $column)) {
                         $receiptExtraCols[] = $column;
                         $receiptItemCols .= ", $column";
@@ -253,6 +265,15 @@ class OrderReceivingService
                     }
                     $aCbm = isset($it['actual_cbm']) ? (float) $it['actual_cbm'] : null;
                     $aWeight = isset($it['actual_weight']) ? (float) $it['actual_weight'] : null;
+                    $aHeight = isset($it['actual_height']) && $it['actual_height'] !== ''
+                        ? (float) $it['actual_height']
+                        : null;
+                    $aWidth = isset($it['actual_width']) && $it['actual_width'] !== ''
+                        ? (float) $it['actual_width']
+                        : null;
+                    $aLength = isset($it['actual_length']) && $it['actual_length'] !== ''
+                        ? (float) $it['actual_length']
+                        : null;
                     $aCartons = isset($it['actual_cartons']) ? (int) $it['actual_cartons'] : null;
                     $aPiecesPerCarton = isset($it['actual_pieces_per_carton']) && $it['actual_pieces_per_carton'] !== ''
                         ? (float) $it['actual_pieces_per_carton']
@@ -290,6 +311,15 @@ class OrderReceivingService
                                 break;
                             case 'total_amount':
                                 $receiptParams[] = $aTotalAmount;
+                                break;
+                            case 'actual_height':
+                                $receiptParams[] = $aHeight;
+                                break;
+                            case 'actual_width':
+                                $receiptParams[] = $aWidth;
+                                break;
+                            case 'actual_length':
+                                $receiptParams[] = $aLength;
                                 break;
                             default:
                                 $receiptParams[] = null;

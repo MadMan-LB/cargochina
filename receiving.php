@@ -218,6 +218,7 @@ require 'includes/layout.php';
   <?= clmsT('Hide item details') ?>
 </button>
 <button type="button" class="btn btn-outline-primary btn-sm" onclick="fillReceiveActualsFromDeclared()"><?= clmsT('Fill from declared') ?></button>
+<a class="btn btn-outline-success btn-sm d-none" id="receiveOrderExportBtn" href="#" target="_blank" rel="noopener"><?= clmsT('Download Order Excel') ?></a>
 </div>        </div>
         <div id="itemLevelTable" class="table-responsive">
           <table class="table table-sm align-middle">
@@ -232,6 +233,7 @@ require 'includes/layout.php';
                 <th><?= clmsT('Total Amount') ?></th>
                 <th><?= clmsT('Actual CBM') ?></th>
                 <th><?= clmsT('Actual Weight') ?></th>
+                <th><?= clmsT('Dimensions H/W/L') ?></th>
                 <th><?= clmsT('Condition') ?></th>
                 <th><?= clmsT('Photos') ?></th>
               </tr>

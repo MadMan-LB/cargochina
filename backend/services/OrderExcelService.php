@@ -221,7 +221,8 @@ class OrderExcelService
                     'HS:' . (trim((string) ($item['hs_code'] ?? '')) !== '' ? (string) $item['hs_code'] : '-'),
                 ];
                 foreach ([
-                    'Brand' => $item['what_brand'] ?? '',
+                    'Brand' => ($item['what_brand'] ?? '') ?: ($item['brand'] ?? ''),
+                    'Materials' => $item['materials'] ?? '',
                     'Code' => $item['code'] ?? '',
                     'Express' => $item['express_number'] ?? '',
                     'Size' => $item['size'] ?? '',
@@ -230,6 +231,17 @@ class OrderExcelService
                     if ($value !== '') {
                         $summaryParts[] = $label . ':' . $value;
                     }
+                }
+                $height = $item['height'] ?? $item['item_height'] ?? null;
+                $width = $item['width'] ?? $item['item_width'] ?? null;
+                $length = $item['length'] ?? $item['item_length'] ?? null;
+                $dims = array_filter([
+                    $height !== null && $height !== '' ? 'H:' . $height : '',
+                    $width !== null && $width !== '' ? 'W:' . $width : '',
+                    $length !== null && $length !== '' ? 'L:' . $length : '',
+                ]);
+                if ($dims) {
+                    $summaryParts[] = 'Dims ' . implode('/', $dims);
                 }
                 $itemsSummary[] = trim(implode(' ', $summaryParts));
             }
@@ -250,6 +262,47 @@ class OrderExcelService
         }, $rows);
 
         $this->exportSimpleTable('Receiving Queue', $headers, $bodyRows, $filename);
+    }
+
+    public function exportWarehouseStockSummary(array $rows, string $filename = 'warehouse_stock.xlsx'): void
+    {
+        $headers = [
+            'Order ID',
+            'Customer',
+            'Supplier',
+            'Status',
+            'Item',
+            'Shipping Code',
+            'Item No',
+            'Quantity',
+            'Declared CBM',
+            'Actual CBM',
+            'Actual Weight',
+            'Actual Height',
+            'Actual Width',
+            'Actual Length',
+        ];
+
+        $bodyRows = array_map(function (array $row): array {
+            return [
+                (int) ($row['order_id'] ?? 0),
+                (string) ($row['customer_name'] ?? ''),
+                (string) ($row['supplier_name'] ?? ''),
+                $this->statusText((string) ($row['status'] ?? '')),
+                (string) (($row['description_en'] ?? '') ?: ($row['description_cn'] ?? '') ?: ($row['product_desc_en'] ?? '') ?: ($row['product_desc_cn'] ?? '')),
+                (string) ($row['shipping_code'] ?? ''),
+                (string) ($row['item_no'] ?? ''),
+                $row['quantity'] ?? null,
+                $row['declared_cbm'] ?? null,
+                $row['item_actual_cbm'] ?? $row['order_actual_cbm'] ?? null,
+                $row['item_actual_weight'] ?? $row['order_actual_weight'] ?? null,
+                $row['item_actual_height'] ?? $row['height'] ?? $row['item_height'] ?? null,
+                $row['item_actual_width'] ?? $row['width'] ?? $row['item_width'] ?? null,
+                $row['item_actual_length'] ?? $row['length'] ?? $row['item_length'] ?? null,
+            ];
+        }, $rows);
+
+        $this->exportSimpleTable('Warehouse Stock', $headers, $bodyRows, $filename);
     }
 
     private function setStandardColumnWidths($sheet): void

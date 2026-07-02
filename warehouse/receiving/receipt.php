@@ -13,7 +13,10 @@ require __DIR__ . '/../../includes/area_layout.php';
 ?>
 <div class="d-flex justify-content-between align-items-center mb-4">
   <h1 class="h3 mb-0">Receipt #<?= (int)$receiptId ?></h1>
-  <a href="<?= $areaBase ?>/receiving/" class="btn btn-outline-secondary btn-sm">← Back to Receiving</a>
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="#" id="receiptOrderExportBtn" class="btn btn-outline-success btn-sm d-none" target="_blank" rel="noopener"><?= htmlspecialchars(clmsT('Download Order Excel')) ?></a>
+    <a href="<?= $areaBase ?>/receiving/" class="btn btn-outline-secondary btn-sm">← Back to Receiving</a>
+  </div>
 </div>
 
 <div id="receiptContent" class="card">

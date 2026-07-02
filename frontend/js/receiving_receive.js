@@ -79,6 +79,20 @@ function formatReceiveInputNumber(value, decimals = 4) {
         .replace(/\.0+$/, "");
 }
 
+function receiveItemDimensionValue(item, actualKey, declaredKey) {
+    const value = item?.[actualKey] ?? item?.[declaredKey] ?? "";
+    return formatReceiveInputNumber(value, 4);
+}
+
+function receiveDimensionInputs(item = {}) {
+    return `
+        <div class="input-group input-group-sm">
+            <input type="number" class="form-control item-actual-height" min="0" step="0.0001" placeholder="${escapeHtml(receiveT("H"))}" title="${escapeHtml(receiveT("Height"))}" value="${escapeHtml(receiveItemDimensionValue(item, "actual_height", "item_height") || receiveItemDimensionValue(item, "actual_height", "height"))}">
+            <input type="number" class="form-control item-actual-width" min="0" step="0.0001" placeholder="${escapeHtml(receiveT("W"))}" title="${escapeHtml(receiveT("Width"))}" value="${escapeHtml(receiveItemDimensionValue(item, "actual_width", "item_width") || receiveItemDimensionValue(item, "actual_width", "width"))}">
+            <input type="number" class="form-control item-actual-length" min="0" step="0.0001" placeholder="${escapeHtml(receiveT("L"))}" title="${escapeHtml(receiveT("Length"))}" value="${escapeHtml(receiveItemDimensionValue(item, "actual_length", "item_length") || receiveItemDimensionValue(item, "actual_length", "length"))}">
+        </div>`;
+}
+
 function formatReceiveDisplayNumber(value, decimals = 4) {
     if (typeof window.formatDisplayNumber === "function") {
         return window.formatDisplayNumber(value, { maxDecimals: decimals }) || "0";
@@ -227,6 +241,13 @@ function bindReceiveItemCalculation(row) {
         markDirty();
         updateReceiveOrderLevelTotals();
     });
+    [
+        ".item-actual-height",
+        ".item-actual-width",
+        ".item-actual-length",
+    ].forEach((selector) => {
+        row.querySelector(selector)?.addEventListener("input", markDirty);
+    });
     row.querySelector(".item-condition")?.addEventListener("change", markDirty);
     recalcReceiveItemRow(row);
 }
@@ -250,6 +271,7 @@ function addReceivePackagingSplitLine(orderItemId, split = {}) {
             <td class="small text-muted ps-4">${escapeHtml(receiveT("Packaging split"))}</td>
             <td></td>
             ${receivePackagingSplitCells(split, true)}
+            <td></td>
             <td></td>
             <td></td>
             <td></td>
@@ -359,6 +381,7 @@ async function loadOrder() {
             <td><input type="number" class="form-control form-control-sm item-total-amount" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.total_amount || 0, 4))}"></td>
             <td><input type="number" step="0.000001" class="form-control form-control-sm item-actual-cbm" min="0" placeholder="0"></td>
             <td><input type="number" step="0.0001" class="form-control form-control-sm item-actual-weight" min="0" placeholder="0"></td>
+            <td>${receiveDimensionInputs(it)}</td>
             <td><select class="form-select form-select-sm item-condition"><option value="good">${escapeHtml(receiveT("Good"))}</option><option value="damaged">${escapeHtml(receiveT("Damaged"))}</option><option value="partial">${escapeHtml(receiveT("Partial"))}</option></select></td>
             <td><input type="file" class="d-none item-photo-input" accept="image/*" multiple><button type="button" class="btn btn-sm btn-outline-secondary item-add-photo">+</button><div class="item-photo-preview d-inline"></div></td>
           </tr>
@@ -570,8 +593,10 @@ document.getElementById("submitReceiveBtn").onclick = async () => {
     }
     const items = [];
     const tbody = document.getElementById("itemLevelBody");
+    let itemValidationError = "";
     if (tbody && receiveOrderItems.length) {
         receiveOrderItems.forEach((it) => {
+            if (itemValidationError) return;
             const row = tbody.querySelector(
                 `tr[data-order-item-id="${it.id}"]`,
             );
@@ -595,6 +620,19 @@ document.getElementById("submitReceiveBtn").onclick = async () => {
             const aWeight = parseFloat(
                 row.querySelector(".item-actual-weight")?.value || 0,
             );
+            const aHeight = parseFloat(
+                row.querySelector(".item-actual-height")?.value || 0,
+            );
+            const aWidth = parseFloat(
+                row.querySelector(".item-actual-width")?.value || 0,
+            );
+            const aLength = parseFloat(
+                row.querySelector(".item-actual-length")?.value || 0,
+            );
+            if (aHeight < 0 || aWidth < 0 || aLength < 0) {
+                itemValidationError = receiveT("Item dimensions must be zero or positive");
+                return;
+            }
             const aPiecesPerCarton = parseFloat(
                 row.querySelector(".item-actual-pieces-per-carton")?.value || 0,
             );
@@ -615,6 +653,9 @@ document.getElementById("submitReceiveBtn").onclick = async () => {
                 aCartons > 0 ||
                 aCbm > 0 ||
                 aWeight > 0 ||
+                aHeight > 0 ||
+                aWidth > 0 ||
+                aLength > 0 ||
                 itPhotos.length
             ) {
                 items.push({
@@ -627,12 +668,19 @@ document.getElementById("submitReceiveBtn").onclick = async () => {
                     packaging_splits: packagingSplits,
                     actual_cbm: aCbm || null,
                     actual_weight: aWeight || null,
+                    actual_height: aHeight || null,
+                    actual_width: aWidth || null,
+                    actual_length: aLength || null,
                     condition:
                         row.querySelector(".item-condition")?.value || "good",
                     photo_paths: itPhotos,
                 });
             }
         });
+    }
+    if (itemValidationError) {
+        showToast(itemValidationError, "danger");
+        return;
     }
     const payload = {
         actual_cartons: actualCartons,

@@ -14,6 +14,10 @@ function receivingIndexStatusText(status) {
         : receivingIndexT(status);
 }
 
+function receivingOrderExcelUrl(orderId) {
+    return `${API}/orders/${encodeURIComponent(orderId)}/export?format=xlsx`;
+}
+
 async function api(path) {
     if (typeof window.api === "function") {
         return window.api("GET", path);
@@ -80,7 +84,12 @@ async function loadQueue() {
                     <td>${escapeHtml(o.supplier_name)}</td>
                     <td>${escapeHtml(o.expected_ready_date)}</td>
                     <td>${parseFloat(o.declared_cbm || 0).toFixed(2)} CBM / ${parseFloat(o.declared_weight || 0).toFixed(0)} kg</td>
-                    <td><a class="btn btn-sm btn-primary" href="${AREA_BASE}/receiving/receive.php?order_id=${o.id}">${escapeHtml(receivingIndexT("Receive"))}</a></td>
+                    <td>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <a class="btn btn-sm btn-primary" href="${AREA_BASE}/receiving/receive.php?order_id=${o.id}">${escapeHtml(receivingIndexT("Receive"))}</a>
+                            <a class="btn btn-sm btn-outline-success" href="${receivingOrderExcelUrl(o.id)}">${escapeHtml(receivingIndexT("XLSX"))}</a>
+                        </div>
+                    </td>
                 </tr>
             `,
                 )
@@ -128,7 +137,12 @@ async function loadHistory() {
                     <td>${escapeHtml(r.customer_name)}${r.customer_priority_level && r.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(r.customer_priority_note || "")}">${escapeHtml(receivingIndexStatusText(r.customer_priority_level))}</span>` : ""}</td>
                     <td>${parseFloat(r.actual_cbm || 0).toFixed(2)} CBM / ${parseFloat(r.actual_weight || 0).toFixed(0)} kg</td>
                     <td>${escapeHtml((r.received_at || "").replace(" ", " "))}</td>
-                    <td><a class="btn btn-sm btn-outline-secondary" href="${AREA_BASE}/receiving/receipt.php?id=${r.id}">${escapeHtml(receivingIndexT("View"))}</a></td>
+                    <td>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <a class="btn btn-sm btn-outline-secondary" href="${AREA_BASE}/receiving/receipt.php?id=${r.id}">${escapeHtml(receivingIndexT("View"))}</a>
+                            <a class="btn btn-sm btn-outline-success" href="${receivingOrderExcelUrl(r.order_id)}">${escapeHtml(receivingIndexT("XLSX"))}</a>
+                        </div>
+                    </td>
                 </tr>
             `,
                 )

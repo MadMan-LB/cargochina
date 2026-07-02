@@ -299,6 +299,13 @@ Any AI/engineer working on this system must follow these operating rules:
 ## 15) DB_CHANGELOG (keep updating)
 > Add entries as changes happen. Newest on top.
 
+- 2026-07-01 - Migration 070 (Receipt item actual dimensions)
+  - Change: Adds nullable `actual_height`, `actual_width`, and `actual_length` to `warehouse_receipt_items`.
+  - Reason: Store warehouse-measured item dimensions captured during receiving without changing declared procurement/order dimensions.
+  - Affected tables: warehouse_receipt_items
+  - Migration steps: Run `php backend/migrations/run.php` or `run-migrations.bat`.
+  - Rollback plan: ALTER TABLE warehouse_receipt_items DROP COLUMN actual_height, DROP COLUMN actual_width, DROP COLUMN actual_length;
+
 - 2025-02-19 — Migration 018 (Production Hardening config)
   - Change: system_config WHATSAPP_PROVIDER, WHATSAPP_TWILIO_ACCOUNT_SID, WHATSAPP_TWILIO_AUTH_TOKEN, WHATSAPP_TWILIO_FROM, WHATSAPP_TWILIO_TO, NOTIFICATION_MAX_ATTEMPTS, NOTIFICATION_RETRY_SECONDS
   - Reason: Configurable WhatsApp provider (generic|twilio); notification retry policy
@@ -367,6 +374,12 @@ Any AI/engineer working on this system must follow these operating rules:
 
 ## 16) DECISION_LOG (keep updating)
 > Capture CEO/ops decisions. Newest on top.
+
+- 2026-07-01 - Receiving item dimensions and stock exports
+  - Decision: Warehouse receiving now captures actual item Height / Width / Length per receipt item, stored separately from declared procurement dimensions.
+  - Decision: Receiving queue/history, order packets, and warehouse stock can be downloaded as Excel through existing receiving/order/warehouse permissions.
+  - Rationale: Warehouse staff need item-level measured dimensions during receiving, and operations need quick Excel exports from receiving and stock pages without leaving the workflow.
+  - Impacted modules/states: `receiving.php`, `warehouse/receiving/*`, `warehouse_stock.php`, receiving import, receipt detail, receiving queue export, order Excel download, warehouse stock export
 
 - 2026-06-28 — Draft Order import robustness and progress UX
   - Decision: Procurement/Draft Order Excel import must use normalized header names rather than fixed column positions, while continuing to support existing templates and supplier-section markers.

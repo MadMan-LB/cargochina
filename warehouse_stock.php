@@ -54,7 +54,10 @@ require 'includes/layout.php';
         </div>
       </div>
       <div class="col-md-2"><label class="form-label small">Search</label><input type="text" class="form-control form-control-sm" id="filterQ" placeholder="Description..."></div>
-      <div class="col-md-2 d-flex align-items-end"><button class="btn btn-primary btn-sm" onclick="loadStock()">Apply</button></div>
+      <div class="col-md-2 d-flex align-items-end gap-2">
+        <button class="btn btn-primary btn-sm" onclick="loadStock()">Apply</button>
+        <button class="btn btn-outline-success btn-sm" onclick="exportWarehouseStockXlsx()">Export XLSX</button>
+      </div>
     </div>
     <div class="table-responsive">
       <table class="table table-hover table-sm">
@@ -68,6 +71,7 @@ require 'includes/layout.php';
             <th>Qty</th>
             <th>Declared CBM</th>
             <th>Actual CBM</th>
+            <th>Dims H/W/L</th>
             <th>Actions</th>
           </tr>
         </thead>

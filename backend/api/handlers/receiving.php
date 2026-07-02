@@ -119,7 +119,7 @@ function receivingFetchQueueRowsForRequest(PDO $pdo): array
         ? ", COALESCE(oi.hs_code, p.hs_code) as hs_code"
         : ", p.hs_code as hs_code";
     $itemMetaCols = '';
-    foreach (['what_brand', 'copy_normal_goods', 'code', 'express_number', 'size'] as $column) {
+    foreach (['what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'height', 'width', 'length'] as $column) {
         if (receivingTableHasColumn($pdo, 'order_items', $column)) {
             $itemMetaCols .= ", oi.$column";
         }
@@ -172,7 +172,8 @@ function receivingOutputQueueCsv(array $rows, ?string $filename = null): void
                 'HS:' . (trim((string) ($item['hs_code'] ?? '')) !== '' ? (string) $item['hs_code'] : '-'),
             ];
             foreach ([
-                'Brand' => $item['what_brand'] ?? '',
+                'Brand' => ($item['what_brand'] ?? '') ?: ($item['brand'] ?? ''),
+                'Materials' => $item['materials'] ?? '',
                 'Code' => $item['code'] ?? '',
                 'Express' => $item['express_number'] ?? '',
                 'Size' => $item['size'] ?? '',
@@ -181,6 +182,17 @@ function receivingOutputQueueCsv(array $rows, ?string $filename = null): void
                 if ($value !== '') {
                     $summaryParts[] = $label . ':' . $value;
                 }
+            }
+            $height = $item['height'] ?? $item['item_height'] ?? null;
+            $width = $item['width'] ?? $item['item_width'] ?? null;
+            $length = $item['length'] ?? $item['item_length'] ?? null;
+            $dims = array_filter([
+                $height !== null && $height !== '' ? 'H:' . $height : '',
+                $width !== null && $width !== '' ? 'W:' . $width : '',
+                $length !== null && $length !== '' ? 'L:' . $length : '',
+            ]);
+            if ($dims) {
+                $summaryParts[] = 'Dims ' . implode('/', $dims);
             }
             $itemsSummary[] = trim(implode(' ', $summaryParts));
         }
@@ -540,7 +552,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $rip->execute([$receiptId]);
             $row['photos'] = $rip->fetchAll(PDO::FETCH_ASSOC);
             $receiptItemCols = "oi.declared_cbm, oi.declared_weight, oi.description_cn, oi.description_en, oi.item_no, oi.shipping_code, oi.cartons, oi.qty_per_carton, oi.quantity, oi.unit_price as declared_unit_price, oi.total_amount as declared_total_amount";
-            foreach (['what_brand', 'copy_normal_goods', 'code', 'express_number', 'size'] as $column) {
+            foreach (['what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'height', 'width', 'length'] as $column) {
                 $chkMeta = @$pdo->query("SHOW COLUMNS FROM order_items LIKE " . $pdo->quote($column));
                 if ($chkMeta && $chkMeta->rowCount() > 0) {
                     $receiptItemCols .= ", oi.$column";

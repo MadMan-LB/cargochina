@@ -152,6 +152,9 @@ class ReceivingExcelImportService
             $totalAmount = $this->parseNumber($raw['total_amount'] ?? null, 'Total Amount', false, $rowErrors);
             $actualCbm = $this->parseNumber($raw['actual_cbm'] ?? null, 'Actual CBM', true, $rowErrors);
             $actualWeight = $this->parseNumber($raw['actual_weight'] ?? null, 'Actual Weight', true, $rowErrors);
+            $actualHeight = $this->parseNumber($raw['height'] ?? null, 'Height', false, $rowErrors);
+            $actualWidth = $this->parseNumber($raw['width'] ?? null, 'Width', false, $rowErrors);
+            $actualLength = $this->parseNumber($raw['length'] ?? null, 'Length', false, $rowErrors);
             $condition = strtolower(trim((string) ($raw['condition'] ?? 'good')));
             if ($condition === '') {
                 $condition = 'good';
@@ -174,6 +177,9 @@ class ReceivingExcelImportService
                 'Total Amount' => $totalAmount,
                 'Actual CBM' => $actualCbm,
                 'Actual Weight' => $actualWeight,
+                'Height' => $actualHeight,
+                'Width' => $actualWidth,
+                'Length' => $actualLength,
             ] as $label => $value) {
                 if ($value !== null && $value < 0) {
                     $rowErrors[] = $label . ' must be zero or positive.';
@@ -235,6 +241,9 @@ class ReceivingExcelImportService
                 'total_amount' => $totalAmount,
                 'actual_cbm' => $actualCbm,
                 'actual_weight' => $actualWeight,
+                'actual_height' => $actualHeight,
+                'actual_width' => $actualWidth,
+                'actual_length' => $actualLength,
                 'condition' => $condition,
                 'notes' => trim((string) ($raw['notes'] ?? '')),
             ];
@@ -440,6 +449,9 @@ class ReceivingExcelImportService
                 'total_amount' => $totalAmount,
                 'actual_cbm' => $actualCbm,
                 'actual_weight' => $actualWeight,
+                'actual_height' => $height,
+                'actual_width' => $width,
+                'actual_length' => $length,
                 'condition' => $condition,
                 'notes' => $directItem['notes'],
                 'direct_item' => $directItem,
@@ -508,6 +520,9 @@ class ReceivingExcelImportService
                 'total_amount' => $row['total_amount'],
                 'actual_cbm' => $row['actual_cbm'],
                 'actual_weight' => $row['actual_weight'],
+                'actual_height' => $row['actual_height'] ?? null,
+                'actual_width' => $row['actual_width'] ?? null,
+                'actual_length' => $row['actual_length'] ?? null,
                 'condition' => $row['condition'] ?: 'good',
                 'notes' => $row['notes'] ?: null,
                 'photo_paths' => [],
@@ -1072,6 +1087,9 @@ class ReceivingExcelImportService
                 'total_amount' => $totalAmount,
                 'actual_cbm' => (float) ($item['declared_cbm'] ?? 0),
                 'actual_weight' => (float) ($item['declared_weight'] ?? 0),
+                'actual_height' => $item['height'] ?? null,
+                'actual_width' => $item['width'] ?? null,
+                'actual_length' => $item['length'] ?? null,
                 'condition' => $item['condition'] ?? 'good',
                 'notes' => $item['notes'] ?? null,
                 'photo_paths' => [],
@@ -1321,6 +1339,9 @@ class ReceivingExcelImportService
             'description_en' => 'English Item Name',
             'description_cn' => 'Chinese Item Name',
             'supplier_name' => 'Supplier Name',
+            'height' => 'Height',
+            'width' => 'Width',
+            'length' => 'Length',
             'actual_pieces_per_carton' => 'Pieces / Carton',
             'actual_quantity' => 'Quantity',
             'unit_price' => 'Unit Price',

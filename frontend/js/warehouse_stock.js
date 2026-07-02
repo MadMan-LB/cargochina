@@ -34,6 +34,38 @@
         return typeof statusLabel === "function" ? statusLabel(status) : status;
     }
 
+    function buildStockParams() {
+        const params = new URLSearchParams();
+        const cid = document.getElementById("filterCustomerId").value;
+        const sid = document.getElementById("filterSupplierId").value;
+        const statuses = getSelectedStockStatuses();
+        const statusMode =
+            document.getElementById("filterStatusMode")?.value || "include";
+        const q = document.getElementById("filterQ").value.trim();
+        if (cid) params.set("customer_id", cid);
+        if (sid) params.set("supplier_id", sid);
+        statuses.forEach((status) => params.append("status[]", status));
+        if (statuses.length) params.set("status_mode", statusMode);
+        if (q) params.set("q", q);
+        return params;
+    }
+
+    function stockOrderExcelUrl(orderId) {
+        return `${API}/orders/${encodeURIComponent(orderId)}/export?format=xlsx`;
+    }
+
+    function stockDimensionText(row) {
+        const height = row.item_actual_height ?? row.height ?? row.item_height;
+        const width = row.item_actual_width ?? row.width ?? row.item_width;
+        const length = row.item_actual_length ?? row.length ?? row.item_length;
+        const parts = [
+            height !== null && height !== undefined && height !== "" ? `H:${height}` : "",
+            width !== null && width !== undefined && width !== "" ? `W:${width}` : "",
+            length !== null && length !== undefined && length !== "" ? `L:${length}` : "",
+        ].filter(Boolean);
+        return parts.length ? parts.join(" / ") : "—";
+    }
+
     window.updateStockStatusFilterSummary = function () {
         const summaryEl = document.getElementById("filterStatusSummary");
         if (!summaryEl) return;
@@ -75,18 +107,7 @@
     }
 
     window.loadStock = async function () {
-        const params = new URLSearchParams();
-        const cid = document.getElementById("filterCustomerId").value;
-        const sid = document.getElementById("filterSupplierId").value;
-        const statuses = getSelectedStockStatuses();
-        const statusMode =
-            document.getElementById("filterStatusMode")?.value || "include";
-        const q = document.getElementById("filterQ").value.trim();
-        if (cid) params.set("customer_id", cid);
-        if (sid) params.set("supplier_id", sid);
-        statuses.forEach((status) => params.append("status[]", status));
-        if (statuses.length) params.set("status_mode", statusMode);
-        if (q) params.set("q", q);
+        const params = buildStockParams();
         try {
             const d = await api("/warehouse-stock?" + params.toString());
             renderStock(d.data);
@@ -95,11 +116,17 @@
         }
     };
 
+    window.exportWarehouseStockXlsx = function () {
+        const params = buildStockParams();
+        params.set("format", "xlsx");
+        window.location.href = `${API}/warehouse-stock/export?${params.toString()}`;
+    };
+
     function renderStock(rows) {
         const tbody = document.getElementById("stockTableBody");
         if (!rows || rows.length === 0) {
             tbody.innerHTML =
-                `<tr><td colspan="9" class="text-center text-muted py-4">${escapeHtml(
+                `<tr><td colspan="10" class="text-center text-muted py-4">${escapeHtml(
                     stockT("No stock found."),
                 )}</td></tr>`;
             return;
@@ -115,8 +142,9 @@
                 <td>${escapeHtml(r.description_en || r.description_cn || r.product_desc_en || r.product_desc_cn || "—")}</td>
                 <td>${r.quantity || "—"}</td>
                 <td>${r.declared_cbm != null ? formatStockCbm(r.declared_cbm, 2) : "—"}</td>
-                <td>${r.order_actual_cbm != null ? formatStockCbm(r.order_actual_cbm, 2) : "—"}</td>
-                <td><button type="button" class="btn btn-sm btn-outline-info" onclick="openStockOrderInfo(${Number(r.order_id)})" title="${escapeHtml(stockT("View full order details"))}">${escapeHtml(stockT("Info"))}</button></td>
+                <td>${r.item_actual_cbm != null ? formatStockCbm(r.item_actual_cbm, 2) : r.order_actual_cbm != null ? formatStockCbm(r.order_actual_cbm, 2) : "—"}</td>
+                <td>${escapeHtml(stockDimensionText(r))}</td>
+                <td><div class="d-flex flex-wrap gap-1"><button type="button" class="btn btn-sm btn-outline-info" onclick="openStockOrderInfo(${Number(r.order_id)})" title="${escapeHtml(stockT("View full order details"))}">${escapeHtml(stockT("Info"))}</button><a class="btn btn-sm btn-outline-success" href="${stockOrderExcelUrl(r.order_id)}" target="_blank" rel="noopener">XLSX</a></div></td>
             </tr>
         `,
             )
@@ -159,6 +187,7 @@
                         <td>${escapeHtml(item.supplier_name || order.supplier_name || "—")}</td>
                         <td>${item.quantity != null ? escapeHtml(String(item.quantity)) : "—"}</td>
                         <td>${item.declared_cbm != null ? formatStockCbm(item.declared_cbm || 0, 3) : "—"}</td>
+                        <td>${escapeHtml(stockDimensionText(item))}</td>
                     </tr>
                 `,
             )
@@ -190,10 +219,11 @@
                                         <th>${escapeHtml(stockT("Supplier"))}</th>
                                         <th>${escapeHtml(stockT("Qty"))}</th>
                                         <th>${escapeHtml(stockT("CBM"))}</th>
+                                        <th>${escapeHtml(stockT("Dims H/W/L"))}</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${itemsHtml || `<tr><td colspan="6" class="text-center text-muted py-3">${escapeHtml(stockT("No items found."))}</td></tr>`}
+                                    ${itemsHtml || `<tr><td colspan="7" class="text-center text-muted py-3">${escapeHtml(stockT("No items found."))}</td></tr>`}
                                 </tbody>
                             </table>
                         </div>

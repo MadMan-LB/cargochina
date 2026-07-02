@@ -800,3 +800,18 @@ This ledger should be maintained over time so both Codex and Cursor can see exec
 - Do not relax explicit existing-order item-reference validation without a business-approved matching rule.
 - Keep the receiving template slug in `DownloadExampleService`, `downloads_registry`, and `download_template.php` together if template access rules change.
 - Customer visibility/lookup permissions were not changed in this pass.
+
+## 2026-07-01 Receiving Dimensions + Warehouse Excel Handoff
+
+### What changed
+- Added migration `backend/migrations/070_receipt_item_actual_dimensions.sql` for nullable `warehouse_receipt_items.actual_height`, `actual_width`, and `actual_length`.
+- Manual receiving now shows per-item Height / Width / Length inputs on both the root `receiving.php` workflow and the warehouse-area receive page.
+- Receiving Excel import maps Height / Width / Length into receipt item actual dimensions for both existing-order receiving and direct warehouse intake.
+- Receipt detail views, receiving queue summaries, and warehouse stock display/export now include item dimensions where available.
+- Added quick Excel downloads for order packets from receiving cards, receiving schedule/history, warehouse-area receiving, and warehouse stock rows.
+- Added a filter-aware Warehouse Stock XLSX/CSV export at `/api/v1/warehouse-stock/export`.
+
+### Guardrails
+- Actual receiving dimensions are stored on receipt items and should not overwrite declared procurement/order item dimensions.
+- Keep receiving saves routed through `OrderReceivingService` so variance, stock movement, logging, and status transitions remain centralized.
+- Warehouse stock export reuses existing warehouse-stock RBAC; do not expose it as a public download.

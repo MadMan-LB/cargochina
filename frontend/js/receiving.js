@@ -29,6 +29,10 @@ function receivingT(text, replacements = null) {
     return typeof t === "function" ? t(text, replacements) : text;
 }
 
+function receivingOrderExcelUrl(orderId) {
+    return `${window.API_BASE || "/cargochina/api/v1"}/orders/${encodeURIComponent(orderId)}/export?format=xlsx`;
+}
+
 function receivingPageEl() {
     return document.getElementById("receivingPage");
 }
@@ -1386,9 +1390,10 @@ function renderWarehouseList() {
                 <dt class="col-5">${escapeHtml(receivingT("CBM / Weight"))}</dt><dd class="col-7">${typeof formatDisplayCbm === "function" ? formatDisplayCbm(parseFloat(o.declared_cbm || 0), 6) : parseFloat(o.declared_cbm || 0).toFixed(6)} / ${typeof formatDisplayWeight === "function" ? formatDisplayWeight(parseFloat(o.declared_weight || 0), 2) : parseFloat(o.declared_weight || 0)} kg</dd>
               </dl>
               ${items.length ? `<div class="mt-2 pt-2 border-top"><small class="text-muted">${escapeHtml(receivingT("Items"))}:</small> ${badgeItems.map((it) => `<span class="badge bg-light text-dark me-1">${escapeHtml(it.shipping_code || "—")} ${it.cartons || 0}ctn ${it.qty_per_carton || ""}/ctn HS:${escapeHtml(it.hs_code || "-")}${it.product_high_alert_note || it.product_required_design ? ` ${escapeHtml(receivingT("ALERT"))}` : ""}</span>`).join("")}${hiddenItemCount ? `<span class="badge bg-secondary-subtle text-secondary border">+${hiddenItemCount} ${escapeHtml(receivingT("more"))}</span>` : ""}</div>` : ""}
-              ${canRecordReceiving() ? `<div class="mt-2 pt-2">
-                <button type="button" class="btn btn-sm btn-primary js-receive-btn" data-order-id="${o.id}">${escapeHtml(receivingT("Receive"))}</button>
-              </div>` : ""}
+              <div class="mt-2 pt-2 d-flex flex-wrap gap-2">
+                ${canRecordReceiving() ? `<button type="button" class="btn btn-sm btn-primary js-receive-btn" data-order-id="${o.id}">${escapeHtml(receivingT("Receive"))}</button>` : ""}
+                <a class="btn btn-sm btn-outline-success" href="${receivingOrderExcelUrl(o.id)}" target="_blank" rel="noopener">${escapeHtml(receivingT("XLSX"))}</a>
+              </div>
             </div>
           </div>
         </div>`;
@@ -1433,6 +1438,11 @@ function receiveOrderById(orderId) {
     searchEl.dataset.declaredCbm = String(dcbm);
     searchEl.dataset.declaredWeight = String(dw);
     idEl.value = String(orderId);
+    const exportBtn = document.getElementById("receiveOrderExportBtn");
+    if (exportBtn) {
+        exportBtn.href = receivingOrderExcelUrl(orderId);
+        exportBtn.classList.remove("d-none");
+    }
     form?.classList.remove("d-none");
     form?.scrollIntoView({ behavior: "smooth", block: "start" });
     updateVariancePhotoAlert();
@@ -1582,7 +1592,10 @@ function renderSchedule() {
                 <div class="fw-semibold">#${o.id} — ${escapeHtml(o.customer_name)}</div>
                 <div class="small text-muted">${escapeHtml(o.supplier_name || "-")} · ${typeof formatDisplayCbm === "function" ? formatDisplayCbm(parseFloat(o.declared_cbm || 0), 2) : parseFloat(o.declared_cbm || 0).toFixed(2)} CBM</div>
               </div>
-              <button type="button" class="btn btn-sm btn-outline-primary js-receive-btn" data-order-id="${o.id}">${escapeHtml(receivingT("Receive"))}</button>
+              <div class="d-flex flex-wrap gap-2">
+                <button type="button" class="btn btn-sm btn-outline-primary js-receive-btn" data-order-id="${o.id}">${escapeHtml(receivingT("Receive"))}</button>
+                <a class="btn btn-sm btn-outline-success" href="${receivingOrderExcelUrl(o.id)}" target="_blank" rel="noopener">${escapeHtml(receivingT("XLSX"))}</a>
+              </div>
             </div>
           `,
               )
@@ -1698,8 +1711,14 @@ function fillReceiveActualsFromDeclared() {
         if (!row) return;
         const cbm = row.querySelector(".item-actual-cbm");
         const weight = row.querySelector(".item-actual-weight");
+        const height = row.querySelector(".item-actual-height");
+        const width = row.querySelector(".item-actual-width");
+        const length = row.querySelector(".item-actual-length");
         if (cbm) cbm.value = formatReceiveInputNumber(item.declared_cbm || 0, 6);
         if (weight) weight.value = formatReceiveInputNumber(item.declared_weight || 0, 4);
+        if (height) height.value = formatReceiveInputNumber(item.item_height ?? item.height ?? 0, 4);
+        if (width) width.value = formatReceiveInputNumber(item.item_width ?? item.width ?? 0, 4);
+        if (length) length.value = formatReceiveInputNumber(item.item_length ?? item.length ?? 0, 4);
         row.dataset.itemDirty = "1";
         updateReceiveItemSplitTotals(item.id);
     });
@@ -1716,6 +1735,20 @@ function formatReceiveInputNumber(value, decimals = 4) {
         .toFixed(decimals)
         .replace(/(\.\d*?[1-9])0+$/, "$1")
         .replace(/\.0+$/, "");
+}
+
+function receivingItemDimensionValue(item, actualKey, declaredKey) {
+    const value = item?.[actualKey] ?? item?.[declaredKey] ?? "";
+    return formatReceiveInputNumber(value, 4);
+}
+
+function receivingDimensionInputs(item = {}) {
+    return `
+        <div class="input-group input-group-sm receiving-dimension-inputs">
+            <input type="number" class="form-control item-actual-height" min="0" step="0.0001" placeholder="${escapeHtml(receivingT("H"))}" title="${escapeHtml(receivingT("Height"))}" value="${escapeHtml(receivingItemDimensionValue(item, "actual_height", "item_height") || receivingItemDimensionValue(item, "actual_height", "height"))}">
+            <input type="number" class="form-control item-actual-width" min="0" step="0.0001" placeholder="${escapeHtml(receivingT("W"))}" title="${escapeHtml(receivingT("Width"))}" value="${escapeHtml(receivingItemDimensionValue(item, "actual_width", "item_width") || receivingItemDimensionValue(item, "actual_width", "width"))}">
+            <input type="number" class="form-control item-actual-length" min="0" step="0.0001" placeholder="${escapeHtml(receivingT("L"))}" title="${escapeHtml(receivingT("Length"))}" value="${escapeHtml(receivingItemDimensionValue(item, "actual_length", "item_length") || receivingItemDimensionValue(item, "actual_length", "length"))}">
+        </div>`;
 }
 
 function getReceivingItemMetaText(item) {
@@ -1857,6 +1890,13 @@ function bindReceiveItemCalculation(row) {
         markDirty();
         updateReceiveOrderLevelTotals();
     });
+    [
+        ".item-actual-height",
+        ".item-actual-width",
+        ".item-actual-length",
+    ].forEach((selector) => {
+        row.querySelector(selector)?.addEventListener("input", markDirty);
+    });
     row.querySelector(".item-condition")?.addEventListener("change", markDirty);
     recalcReceiveItemRow(row);
 }
@@ -1880,6 +1920,7 @@ function addReceivePackagingSplitLine(orderItemId, split = {}) {
             <td class="small text-muted ps-4">${escapeHtml(receivingT("Packaging split"))}</td>
             <td></td>
             ${receivePackagingSplitCells(split, true)}
+            <td></td>
             <td></td>
             <td></td>
             <td></td>
@@ -1951,6 +1992,7 @@ async function loadOrderForReceive(orderId) {
             <td><input type="number" class="form-control form-control-sm item-total-amount" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.total_amount || 0, 4))}"></td>
             <td><input type="number" step="0.000001" class="form-control form-control-sm item-actual-cbm" min="0" placeholder="0"></td>
             <td><input type="number" step="0.0001" class="form-control form-control-sm item-actual-weight" min="0" placeholder="0"></td>
+            <td>${receivingDimensionInputs(it)}</td>
             <td><select class="form-select form-select-sm item-condition"><option value="good">${escapeHtml(receivingT("Good"))}</option><option value="damaged">${escapeHtml(receivingT("Damaged"))}</option><option value="partial">${escapeHtml(receivingT("Partial"))}</option></select></td>
             <td><input type="file" class="d-none item-photo-input" accept="image/*" multiple data-order-item-id="${it.id}"><button type="button" class="btn btn-sm btn-outline-secondary item-add-photo">+</button><div class="item-photo-preview d-inline"></div></td>
           </tr>`;
@@ -1958,7 +2000,7 @@ async function loadOrderForReceive(orderId) {
             )
             .join("") +
             (hiddenItemCount
-                ? `<tr class="receive-show-more-row"><td colspan="11" class="text-center py-3">
+                ? `<tr class="receive-show-more-row"><td colspan="12" class="text-center py-3">
                     <button type="button" class="btn btn-outline-primary btn-sm receive-show-more-items">
                       ${escapeHtml(receivingT("Show more items"))} (${visibleItems.length}/${receiveOrderItems.length})
                     </button>
@@ -2081,8 +2123,10 @@ async function submitReceive() {
 
     const items = [];
     const tbody = document.getElementById("itemLevelBody");
+    let itemValidationError = "";
     if (tbody && receiveOrderItems.length) {
         receiveOrderItems.forEach((it) => {
+            if (itemValidationError) return;
             const row = tbody.querySelector(
                 `tr[data-order-item-id="${it.id}"]`,
             );
@@ -2107,6 +2151,19 @@ async function submitReceive() {
             const aWeight = parseFloat(
                 row.querySelector(".item-actual-weight")?.value || 0,
             );
+            const aHeight = parseFloat(
+                row.querySelector(".item-actual-height")?.value || 0,
+            );
+            const aWidth = parseFloat(
+                row.querySelector(".item-actual-width")?.value || 0,
+            );
+            const aLength = parseFloat(
+                row.querySelector(".item-actual-length")?.value || 0,
+            );
+            if (aHeight < 0 || aWidth < 0 || aLength < 0) {
+                itemValidationError = receivingT("Item dimensions must be zero or positive");
+                return;
+            }
             const aPiecesPerCarton = parseFloat(
                 row.querySelector(".item-actual-pieces-per-carton")?.value || 0,
             );
@@ -2129,6 +2186,9 @@ async function submitReceive() {
                 aCartons > 0 ||
                 aCbm > 0 ||
                 aWeight > 0 ||
+                aHeight > 0 ||
+                aWidth > 0 ||
+                aLength > 0 ||
                 itPhotos.length
             ) {
                 items.push({
@@ -2141,11 +2201,18 @@ async function submitReceive() {
                     packaging_splits: packagingSplits,
                     actual_cbm: aCbm || null,
                     actual_weight: aWeight || null,
+                    actual_height: aHeight || null,
+                    actual_width: aWidth || null,
+                    actual_length: aLength || null,
                     condition: itCond,
                     photo_paths: itPhotos,
                 });
             }
         });
+    }
+    if (itemValidationError) {
+        showToast(itemValidationError, "danger");
+        return;
     }
 
     const payload = {
@@ -2177,6 +2244,7 @@ async function submitReceive() {
         document.getElementById("receiveForm").classList.add("d-none");
         document.getElementById("receiveOrderSearch").value = "";
         document.getElementById("receiveOrderId").value = "";
+        document.getElementById("receiveOrderExportBtn")?.classList.add("d-none");
         receivePhotoPaths = [];
         receiveOrderItems = [];
         receiveItemPhotos = {};

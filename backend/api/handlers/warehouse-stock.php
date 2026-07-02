@@ -24,12 +24,43 @@ function warehouseStockHasColumn(PDO $pdo, string $table, string $column): bool
     return $cache[$key];
 }
 
+function warehouseStockOutputCsv(array $rows, ?string $filename = null): void
+{
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . ($filename ?: ('warehouse_stock_' . date('Y-m-d') . '.csv')) . '"');
+    header('Cache-Control: no-cache, no-store, must-revalidate');
+
+    $out = fopen('php://output', 'w');
+    fputcsv($out, ['Order ID', 'Customer', 'Supplier', 'Status', 'Item', 'Shipping Code', 'Item No', 'Quantity', 'Declared CBM', 'Actual CBM', 'Actual Weight', 'Actual Height', 'Actual Width', 'Actual Length']);
+    foreach ($rows as $row) {
+        fputcsv($out, [
+            (int) ($row['order_id'] ?? 0),
+            (string) ($row['customer_name'] ?? ''),
+            (string) ($row['supplier_name'] ?? ''),
+            function_exists('clmsStatusLabel') ? clmsStatusLabel((string) ($row['status'] ?? '')) : (string) ($row['status'] ?? ''),
+            (string) (($row['description_en'] ?? '') ?: ($row['description_cn'] ?? '') ?: ($row['product_desc_en'] ?? '') ?: ($row['product_desc_cn'] ?? '')),
+            (string) ($row['shipping_code'] ?? ''),
+            (string) ($row['item_no'] ?? ''),
+            $row['quantity'] ?? null,
+            $row['declared_cbm'] ?? null,
+            $row['item_actual_cbm'] ?? $row['order_actual_cbm'] ?? null,
+            $row['item_actual_weight'] ?? $row['order_actual_weight'] ?? null,
+            $row['item_actual_height'] ?? $row['height'] ?? $row['item_height'] ?? null,
+            $row['item_actual_width'] ?? $row['width'] ?? $row['item_width'] ?? null,
+            $row['item_actual_length'] ?? $row['length'] ?? $row['item_length'] ?? null,
+        ]);
+    }
+    fclose($out);
+    exit;
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
     if (!getAuthUserId()) jsonError('Unauthorized', 401);
     if (!hasAnyRole(['WarehouseStaff', 'ChinaAdmin', 'LebanonAdmin', 'ContainersStaff', 'SuperAdmin'])) jsonError('Forbidden', 403);
 
     if ($method !== 'GET') jsonError('Method not allowed', 405);
+    if ($id !== null && $id !== 'export') jsonError('Not found', 404);
 
     $customerId = $_GET['customer_id'] ?? null;
     $supplierId = $_GET['supplier_id'] ?? null;
@@ -50,9 +81,37 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         ? " WHERE w.voided_at IS NULL"
         : "";
 
+    $orderItemDimensionCols = '';
+    foreach (['item_length', 'item_width', 'item_height'] as $column) {
+        $orderItemDimensionCols .= warehouseStockHasColumn($pdo, 'order_items', $column)
+            ? ", oi.$column"
+            : ", NULL as $column";
+    }
+    foreach (['height', 'width', 'length'] as $column) {
+        $orderItemDimensionCols .= warehouseStockHasColumn($pdo, 'order_items', $column)
+            ? ", oi.$column"
+            : ", NULL as $column";
+    }
+    $orderItemMetaCols = '';
+    foreach (['shipping_code', 'item_no'] as $column) {
+        $orderItemMetaCols .= warehouseStockHasColumn($pdo, 'order_items', $column)
+            ? ", oi.$column"
+            : ", NULL as $column";
+    }
+    $hasReceiptItems = warehouseStockHasColumn($pdo, 'warehouse_receipt_items', 'order_item_id');
+    $receiptItemCols = '';
+    foreach (['actual_cbm', 'actual_weight', 'actual_height', 'actual_width', 'actual_length'] as $column) {
+        $receiptItemCols .= ($hasReceiptItems && warehouseStockHasColumn($pdo, 'warehouse_receipt_items', $column))
+            ? ", wri.$column as item_$column"
+            : ", NULL as item_$column";
+    }
+    $receiptItemJoin = $hasReceiptItems
+        ? " LEFT JOIN warehouse_receipt_items wri ON wri.receipt_id = wr.receipt_id AND wri.order_item_id = oi.id"
+        : "";
+
     $sql = "SELECT o.id as order_id, o.customer_id, o.supplier_id, o.status, o.expected_ready_date,
         c.name as customer_name, s.name as supplier_name,
-        oi.id as item_id, oi.product_id, oi.quantity, oi.unit, oi.declared_cbm, oi.declared_weight, oi.description_cn, oi.description_en,
+        oi.id as item_id, oi.product_id, oi.quantity, oi.unit, oi.declared_cbm, oi.declared_weight, oi.description_cn, oi.description_en$orderItemMetaCols$orderItemDimensionCols$receiptItemCols,
         p.description_cn as product_desc_cn, p.description_en as product_desc_en,
         wr.actual_cbm as order_actual_cbm, wr.actual_weight as order_actual_weight, wr.actual_cartons as order_actual_cartons
         FROM orders o
@@ -61,7 +120,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         JOIN order_items oi ON oi.order_id = o.id
         LEFT JOIN products p ON oi.product_id = p.id
         LEFT JOIN (
-            SELECT w.order_id, w.actual_cbm, w.actual_weight, w.actual_cartons
+            SELECT w.id as receipt_id, w.order_id, w.actual_cbm, w.actual_weight, w.actual_cartons
             FROM warehouse_receipts w
             INNER JOIN (
                 SELECT order_id, MAX(id) as mid
@@ -69,6 +128,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 GROUP BY order_id
             ) x ON w.order_id = x.order_id AND w.id = x.mid" . $latestReceiptOuterWhere . "
         ) wr ON wr.order_id = o.id
+        $receiptItemJoin
         WHERE o.status IN ('ReceivedAtWarehouse','AwaitingCustomerConfirmation','Confirmed','ReadyForConsolidation')";
     $params = [];
     if ($customerId) {
@@ -99,5 +159,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
     if ($params) $stmt->execute($params);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    if ($id === 'export') {
+        $format = strtolower(trim((string) ($_GET['format'] ?? 'xlsx')));
+        if ($format === 'csv') {
+            warehouseStockOutputCsv($rows);
+        }
+        require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
+        (new OrderExcelService())->exportWarehouseStockSummary(
+            $rows,
+            'warehouse_stock_' . date('Y-m-d') . '.xlsx'
+        );
+    }
     jsonResponse(['data' => $rows]);
 };

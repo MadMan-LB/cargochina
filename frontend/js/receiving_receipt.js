@@ -23,6 +23,10 @@ function receiptStatusText(status) {
         : receiptT(status);
 }
 
+function receiptOrderExcelUrl(orderId) {
+    return `${RECEIPT_API_BASE}/orders/${encodeURIComponent(orderId)}/export?format=xlsx`;
+}
+
 function escapeHtml(s) {
     const d = document.createElement("div");
     d.textContent = s ?? "";
@@ -59,6 +63,18 @@ function receiptItemMetaText(item) {
         .join(" · ");
 }
 
+function receiptDimensionText(item) {
+    const height = item?.actual_height ?? item?.height ?? item?.item_height;
+    const width = item?.actual_width ?? item?.width ?? item?.item_width;
+    const length = item?.actual_length ?? item?.length ?? item?.item_length;
+    const parts = [
+        height !== null && height !== undefined && height !== "" ? `H:${height}` : "",
+        width !== null && width !== undefined && width !== "" ? `W:${width}` : "",
+        length !== null && length !== undefined && length !== "" ? `L:${length}` : "",
+    ].filter(Boolean);
+    return parts.length ? parts.join(" / ") : "-";
+}
+
 function receiptPackagingSplitsHtml(item) {
     const splits = Array.isArray(item?.packaging_splits)
         ? item.packaging_splits
@@ -77,6 +93,11 @@ function receiptPackagingSplitsHtml(item) {
 async function loadReceipt() {
     const res = await api("/receiving/receipts/" + RECEIPT_ID);
     const r = res.data;
+    const exportBtn = document.getElementById("receiptOrderExportBtn");
+    if (exportBtn && r.order_id) {
+        exportBtn.href = receiptOrderExcelUrl(r.order_id);
+        exportBtn.classList.remove("d-none");
+    }
     let statusBadge =
         '<span class="badge bg-success">' +
         escapeHtml(receiptStatusText(r.order_status)) +
@@ -96,7 +117,7 @@ async function loadReceipt() {
         itemsHtml = `
           <h6 class="mt-3">${escapeHtml(receiptT("Per-Item Actuals"))}</h6>
           <table class="table table-sm">
-            <thead><tr><th>${escapeHtml(receiptT("Item"))}</th><th>${escapeHtml(receiptT("Declared"))}</th><th>${escapeHtml(receiptT("Received Qty"))}</th><th>${escapeHtml(receiptT("Price / Amount"))}</th><th>${escapeHtml(receiptT("Actual CBM / Weight"))}</th><th>${escapeHtml(receiptT("Condition"))}</th><th>${escapeHtml(receiptT("Variance"))}</th><th>${escapeHtml(receiptT("Photos"))}</th></tr></thead>
+            <thead><tr><th>${escapeHtml(receiptT("Item"))}</th><th>${escapeHtml(receiptT("Declared"))}</th><th>${escapeHtml(receiptT("Received Qty"))}</th><th>${escapeHtml(receiptT("Price / Amount"))}</th><th>${escapeHtml(receiptT("Actual CBM / Weight"))}</th><th>${escapeHtml(receiptT("Dims H/W/L"))}</th><th>${escapeHtml(receiptT("Condition"))}</th><th>${escapeHtml(receiptT("Variance"))}</th><th>${escapeHtml(receiptT("Photos"))}</th></tr></thead>
             <tbody>
               ${r.items
                   .map((it) => {
@@ -114,6 +135,7 @@ async function loadReceipt() {
                   <td>${receiptPackagingSplitsHtml(it)}<div class="small text-muted">${escapeHtml(receiptT("Item total"))}: ${receiptNumber(it.actual_quantity || 0, 4)}</div></td>
                   <td>${it.unit_price != null ? receiptNumber(it.unit_price, 4) : "-"} / ${it.total_amount != null ? receiptNumber(it.total_amount, 4) : "-"}</td>
                   <td>${it.actual_cbm ?? "-"} CBM / ${it.actual_weight ?? "-"} kg</td>
+                  <td>${escapeHtml(receiptDimensionText(it))}</td>
                   <td>${escapeHtml(receiptStatusText(it.receipt_condition || it.condition || "good"))}</td>
                   <td>${it.variance_detected ? `<span class="badge bg-warning">${escapeHtml(receiptT("Yes"))}</span>` : "-"}</td>
                   <td>${itemPhotos || "-"}</td>
