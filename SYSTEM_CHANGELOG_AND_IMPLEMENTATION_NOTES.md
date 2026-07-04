@@ -24,7 +24,7 @@
 - Added migration `069_order_item_procurement_fields.sql` for nullable procurement item fields on `order_items`, `order_template_items`, and legacy `procurement_draft_items`: `materials`, `height`, `width`, `length`, and `brand`. Existing `express_number` support remains idempotent.
 - Draft Order/procurement builder now captures and reloads Brand, Materials, Express Number, and dimensions on normal items and shared-carton contained items while preserving the legacy `what_brand` and `item_length/item_width/item_height` fields used by existing calculations.
 - Draft Order Excel/CSV import now maps by normalized header names instead of fixed column positions, including reordered columns and aliases such as `factory name`, `material(s)`, `h/w/l`, `lenght`, `brand name`, `express no`, `tracking number`, and `courier number`.
-- Procurement import template now includes Photo, Brand, Materials, Height, Width, Length, Express Number, Supplier, and Supplier Name headers, with metadata labels using colon suffixes.
+- Procurement import template now includes Photo, Brand, Materials, Height, Width, Length, Express Number, HS Code, and Notes headers, with metadata labels using colon suffixes. Supplier grouping now uses `Supplier:` marker rows instead of per-item supplier columns.
 - Draft Order/customer Excel export now places Supplier in column A and Supplier Name in column B, adds Brand, Materials, Height, Width, Length, and Express Number, keeps images, and continues to use customer-visible sell pricing rather than internal buy/margin fields.
 - Added `customers.lookup` RBAC and safe customer lookup responses for operational workflows. `/customers/lookup` and `/customers/{id}/lookup` return only minimal selection data (`id`, `code`, `name`, `default_shipping_code`, and country shipping mappings) while full `customers.php` management data remains protected by existing customer-management visibility checks.
 - Updated Draft Orders, Orders, Receiving, and warehouse receiving customer autocomplete calls to use the safe lookup route instead of full customer records.
@@ -1266,7 +1266,7 @@ otification_preferences.php and removing the sidebar link unless the user is an 
   - Excel readers use data-only mode, bounded row reads, no empty-cell inflation where supported, and worksheet cleanup after reading.
   - CSV delimiter detection supports comma, semicolon, and tab files.
   - Headers are normalized and mapped by alias, not fixed column position.
-  - The importer now skips procurement template title/metadata rows until it finds the blue item header row and maps procurement columns such as `Item No`, `English Item Name`, `Chinese Item Name`, `SKU / Item Code`, `Express Number`, `Cartons`, `CBM/Unit`, `Total CBM`, `Weight/Unit`, `Total Weight`, `Supplier`, and `Supplier Name`.
+  - The importer now skips procurement template title/metadata rows until it finds the blue item header row, maps procurement columns such as `Item No`, `English Item Name`, `Chinese Item Name`, `SKU / Item Code`, `Express Number`, `Cartons`, `CBM/Unit`, `Total CBM`, `Weight/Unit`, and `Total Weight`, and honors `Supplier:` marker rows for supplier sections.
   - If the sheet includes `Order ID`, the importer keeps the existing-order receiving path and validates the target order/items before commit.
   - If the sheet has no `Order ID`, the importer now treats it as a direct warehouse intake: it validates the spreadsheet as new stock, creates the order/items, records the warehouse receipt, and moves the order to warehouse-stock-visible status through `OrderReceivingService`.
   - The receiving import modal now includes a safe customer lookup field so a direct intake can be assigned to a customer even when the Excel template's Customer metadata cell is blank.
@@ -1286,3 +1286,20 @@ otification_preferences.php and removing the sidebar link unless the user is an 
 - Aligned Customers page action buttons with backend permissions: add is available to operational roles, while edit/delete/deposit, internal messages, customer attachments, imports, and portal-link actions only appear when the matching server-side permission allows them.
 - Kept customer data security scoped to the Customers page: full customer-management API reads still apply centralized customer visibility rules, while operational customer lookup remains minimal and broad for workflows.
 - No database migration required; this is a PHP/RBAC behavior change.
+
+## 2026-07-03 - Draft Order Good Type / Dangerous Goods
+
+- Added `Dangerous Goods` as a supported Draft Order item good type alongside `Normal Goods` and `Copy Goods`.
+- Renamed the visible/export/template label from `Copy / Normal Goods` to `Good Type` while keeping old import aliases for backwards-compatible Excel uploads.
+- Updated the generated procurement import template dropdown, Draft Order builder UI, Orders builder UI, Draft/Order/Container CSV/XLSX exports, procurement print view, receiving item displays, receiving direct-intake import, and customer confirmation display.
+- Reused existing nullable item metadata column `order_items.copy_normal_goods`; no database migration was required.
+- Downstream behavior reviewed: calculations/totals are unchanged because good type is classification metadata only; search/export/print/display paths now show the new option consistently.
+
+## 2026-07-04 - Procurement Supplier Section Template
+
+- Removed per-item `Supplier` and `Supplier Name` columns from the generated procurement import workbook.
+- Added template guidance that supplier groups should be marked with a row containing `Supplier:` in column A and the supplier name/code in column B.
+- Kept Draft Order import's existing supplier marker support and old supplier-column aliases for backwards compatibility.
+- Updated Receiving Excel import to skip supplier marker rows and apply the current supplier to following direct-intake rows, so Receiving and Draft an Order share the same template behavior.
+- Updated visible Draft Order/Receiving import help and the Downloads registry wording.
+- No database migration was required; the change is limited to template/import semantics and UI documentation.

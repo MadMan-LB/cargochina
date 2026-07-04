@@ -29,6 +29,16 @@ function orderT(text, replacements = null) {
     return typeof t === "function" ? t(text, replacements) : text;
 }
 
+function normalizeOrderGoodType(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const normalized = raw.toLowerCase().replace(/[\s_\/\\-]+/g, "");
+    if (["copy", "copygoods", "replica", "仿牌", "仿货"].includes(normalized)) return "Copy";
+    if (["dangerous", "dangerousgoods", "hazmat", "hazardous", "hazardousgoods", "dg", "危险品", "危险货"].includes(normalized)) return "Dangerous";
+    if (["normal", "normalgoods", "regular", "普通货", "常规货"].includes(normalized)) return "Normal";
+    return raw;
+}
+
 function parseStructuredItemNo(value) {
     const match = String(value || "")
         .trim()
@@ -165,7 +175,7 @@ function setOrderItemMetadata(card, item = {}) {
     set(".item-brand", item.brand || item.what_brand);
     set(".item-materials", item.materials);
     set(".item-what-brand", item.what_brand);
-    set(".item-copy-normal-goods", item.copy_normal_goods);
+    set(".item-copy-normal-goods", normalizeOrderGoodType(item.copy_normal_goods));
     set(".item-code", item.code);
     set(".item-express-number", item.express_number);
     set(".item-size", item.size);
@@ -487,13 +497,15 @@ function orderItemMetaText(item) {
     const copyNormalLabel =
         copyNormalRaw.toLowerCase() === "copy"
             ? orderT("Copy Goods")
+            : copyNormalRaw.toLowerCase() === "dangerous"
+              ? orderT("Dangerous Goods")
             : copyNormalRaw.toLowerCase() === "normal"
               ? orderT("Normal Goods")
               : copyNormalRaw;
     return [
         item?.what_brand ? `${orderT("What Brand")}: ${item.what_brand}` : "",
         copyNormalLabel
-            ? `${orderT("Copy / Normal Goods")}: ${copyNormalLabel}`
+            ? `${orderT("Good Type")}: ${copyNormalLabel}`
             : "",
         item?.code ? `${orderT("Code")}: ${item.code}` : "",
         item?.express_number
@@ -1185,7 +1197,20 @@ const ORDER_CSV_ALIASES = {
     brand: ["brand", "brandname"],
     what_brand: ["whatbrand", "whatebrand"],
     materials: ["material", "materials"],
-    copy_normal_goods: ["copynormalgoods", "copynormal", "copyornormalgoods"],
+    copy_normal_goods: [
+        "goodtype",
+        "goodstype",
+        "goodsclassification",
+        "goodscategory",
+        "itemtype",
+        "producttype",
+        "copynormalgoods",
+        "copynormal",
+        "copyornormalgoods",
+        "copygoods",
+        "normalgoods",
+        "dangerousgoods",
+    ],
     code: ["code", "serialcode", "serialno", "serialnumber"],
     express_number: ["expressnumber", "expressno", "trackingnumber", "trackingno", "couriernumber"],
     size: ["size", "cartonsize", "outercartonsize", "outsidecartonsize"],
@@ -1261,7 +1286,7 @@ function importOrderItemsFromCsv() {
             set(".item-brand", idx(row, "brand"));
             set(".item-materials", idx(row, "materials"));
             set(".item-what-brand", idx(row, "what_brand"));
-            set(".item-copy-normal-goods", idx(row, "copy_normal_goods"));
+            set(".item-copy-normal-goods", normalizeOrderGoodType(idx(row, "copy_normal_goods")));
             set(".item-code", idx(row, "code"));
             set(".item-express-number", idx(row, "express_number"));
             set(".item-size", idx(row, "size"));
@@ -1447,10 +1472,11 @@ function addOrderItem() {
                       <input type="text" class="form-control form-control-sm item-what-brand" placeholder="${escapeHtml(orderT("Brand marker"))}" data-idx="${idx}">
                     </div>
                     <div class="col-12 col-sm-6 col-xl-2">
-                      <label class="form-label order-item-label">${escapeHtml(orderT("Copy / Normal Goods"))}</label>
+                      <label class="form-label order-item-label">${escapeHtml(orderT("Good Type"))}</label>
                       <select class="form-select form-select-sm item-copy-normal-goods" data-idx="${idx}">
                         <option value=""></option>
                         <option value="Normal">${escapeHtml(orderT("Normal Goods"))}</option>
+                        <option value="Dangerous">${escapeHtml(orderT("Dangerous Goods"))}</option>
                         <option value="Copy">${escapeHtml(orderT("Copy Goods"))}</option>
                       </select>
                     </div>

@@ -23,6 +23,7 @@ class ReceivingExcelImportService
         'description_cn' => ['chineseitemname', 'chinesename', 'descriptioncn', 'chinesedescription'],
         'brand' => ['brand', 'brandname', 'whatbrand'],
         'materials' => ['material', 'materials'],
+        'copy_normal_goods' => ['goodtype', 'goodstype', 'goodsclassification', 'goodscategory', 'itemtype', 'producttype', 'copynormalgoods', 'copynormal', 'copygoods', 'normalgoods', 'dangerousgoods', 'copyornormalgoods'],
         'height' => ['height', 'h'],
         'width' => ['width', 'w'],
         'length' => ['length', 'lenght', 'l'],
@@ -78,13 +79,25 @@ class ReceivingExcelImportService
         $metadata = $this->applyPreviewOverrides($metadata, $overrides);
         $headerErrors = $this->validateHeaders($headers);
         $rawRows = [];
+        $currentSupplierName = trim((string) ($metadata['supplier_name'] ?? ''));
         foreach ($rows as $rowNumber => $row) {
             if ((int) $rowNumber <= $headerRowNumber) {
+                continue;
+            }
+            $supplierMarkerName = $this->supplierMarkerName($row);
+            if ($supplierMarkerName !== '') {
+                $currentSupplierName = $supplierMarkerName;
                 continue;
             }
             $normalized = $this->normalizeSpreadsheetRow((int) $rowNumber, $row, $headers);
             if ($this->isBlankRow($normalized)) {
                 continue;
+            }
+            if ($currentSupplierName !== ''
+                && trim((string) ($normalized['supplier_id'] ?? '')) === ''
+                && trim((string) ($normalized['supplier_code'] ?? '')) === ''
+                && trim((string) ($normalized['supplier_name'] ?? '')) === '') {
+                $normalized['supplier_name'] = $currentSupplierName;
             }
             $this->applyDerivedTemplateValues($normalized);
             $rawRows[] = $normalized;
@@ -320,6 +333,7 @@ class ReceivingExcelImportService
                 $rowErrors[] = 'Condition must be good, damaged, or partial.';
                 $condition = 'good';
             }
+            $goodType = $this->normalizeGoodType($raw['copy_normal_goods'] ?? '');
 
             if ($actualQuantity === null && $actualCartons !== null && $actualPieces !== null && $actualCartons > 0 && $actualPieces > 0) {
                 $actualQuantity = round($actualCartons * $actualPieces, 4);
@@ -411,6 +425,7 @@ class ReceivingExcelImportService
                 'express_number' => $this->cleanDirectText($raw['express_number'] ?? '', 150),
                 'brand' => $this->cleanDirectText($raw['brand'] ?? '', 150),
                 'materials' => $this->cleanDirectText($raw['materials'] ?? '', 1000),
+                'copy_normal_goods' => $goodType,
                 'height' => $height,
                 'width' => $width,
                 'length' => $length,
@@ -628,6 +643,31 @@ class ReceivingExcelImportService
             return mb_substr($text, 0, $maxLength, 'UTF-8');
         }
         return substr($text, 0, $maxLength);
+    }
+
+    private function normalizeGoodType($value): ?string
+    {
+        $raw = trim((string) ($value ?? ''));
+        if ($raw === '') {
+            return null;
+        }
+        $compact = strtolower(preg_replace('/[\s_\-\/\\\\]+/u', '', $raw) ?? '');
+        $headerKey = $this->normalizeHeaderKey($raw);
+        $keys = array_values(array_unique(array_filter([$compact, $headerKey], static fn($key) => $key !== '')));
+
+        foreach ($keys as $key) {
+            if (in_array($key, ['copy', 'copygoods', 'replica', '仿牌', '仿货'], true)) {
+                return 'Copy';
+            }
+            if (in_array($key, ['dangerous', 'dangerousgoods', 'hazmat', 'hazardous', 'hazardousgoods', 'dg', '危险品', '危险货'], true)) {
+                return 'Dangerous';
+            }
+            if (in_array($key, ['normal', 'normalgoods', 'regular', '普通货', '常规货'], true)) {
+                return 'Normal';
+            }
+        }
+
+        return $this->cleanDirectText($raw, 60);
     }
 
     private function normalizeDirectUnit($value, ?float $quantity, ?float $cartons): string
@@ -1009,6 +1049,9 @@ class ReceivingExcelImportService
                     case 'materials':
                         $params[] = $item['materials'] ?? null;
                         break;
+                    case 'copy_normal_goods':
+                        $params[] = $item['copy_normal_goods'] ?? null;
+                        break;
                     case 'code':
                         $params[] = $item['code'] ?? null;
                         break;
@@ -1236,6 +1279,23 @@ class ReceivingExcelImportService
         return preg_replace('/[^a-z0-9]+/', '', $value) ?: '';
     }
 
+    private function supplierMarkerName(array $row): string
+    {
+        $values = array_values($row);
+        $firstValue = trim((string) ($values[0] ?? ''));
+        $secondValue = trim((string) ($values[1] ?? ''));
+        $first = $this->normalizeHeaderKey($firstValue);
+
+        if ($first === 'supplier' && $secondValue !== '') {
+            return $secondValue;
+        }
+        if (preg_match('/^supplier\s*:\s*(.+)$/i', $firstValue, $matches)) {
+            return trim((string) $matches[1]);
+        }
+
+        return '';
+    }
+
     private function mapHeaders(array $row): array
     {
         $mapped = [];
@@ -1338,7 +1398,7 @@ class ReceivingExcelImportService
             'item_no' => 'Item No',
             'description_en' => 'English Item Name',
             'description_cn' => 'Chinese Item Name',
-            'supplier_name' => 'Supplier Name',
+            'copy_normal_goods' => 'Good Type',
             'height' => 'Height',
             'width' => 'Width',
             'length' => 'Length',

@@ -260,6 +260,7 @@ $clientTranslations = clmsGetClientTranslationPayload();
       const raw = String(value || '').trim();
       const normalized = raw.toLowerCase();
       if (normalized === 'copy') return tr('Copy Goods');
+      if (normalized === 'dangerous') return tr('Dangerous Goods');
       if (normalized === 'normal') return tr('Normal Goods');
       return raw;
     }
@@ -268,7 +269,7 @@ $clientTranslations = clmsGetClientTranslationPayload();
       const copyNormal = copyNormalGoodsLabel(it.copy_normal_goods);
       return [
         it.what_brand ? `${tr('What Brand')}: ${it.what_brand}` : '',
-        copyNormal ? `${tr('Copy / Normal Goods')}: ${copyNormal}` : '',
+        copyNormal ? `${tr('Good Type')}: ${copyNormal}` : '',
         it.code ? `${tr('Code')}: ${it.code}` : '',
         it.express_number ? `${tr('Express Number')}: ${it.express_number}` : '',
         it.size ? `${tr('Size')}: ${it.size}` : ''

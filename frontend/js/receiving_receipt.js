@@ -45,13 +45,15 @@ function receiptItemMetaText(item) {
     const copyNormalLabel =
         copyNormalRaw.toLowerCase() === "copy"
             ? receiptT("Copy Goods")
+            : copyNormalRaw.toLowerCase() === "dangerous"
+              ? receiptT("Dangerous Goods")
             : copyNormalRaw.toLowerCase() === "normal"
               ? receiptT("Normal Goods")
               : copyNormalRaw;
     return [
         item?.what_brand ? `${receiptT("What Brand")}: ${item.what_brand}` : "",
         copyNormalLabel
-            ? `${receiptT("Copy / Normal Goods")}: ${copyNormalLabel}`
+            ? `${receiptT("Good Type")}: ${copyNormalLabel}`
             : "",
         item?.code ? `${receiptT("Code")}: ${item.code}` : "",
         item?.express_number

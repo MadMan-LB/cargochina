@@ -815,3 +815,34 @@ This ledger should be maintained over time so both Codex and Cursor can see exec
 - Actual receiving dimensions are stored on receipt items and should not overwrite declared procurement/order item dimensions.
 - Keep receiving saves routed through `OrderReceivingService` so variance, stock movement, logging, and status transitions remain centralized.
 - Warehouse stock export reuses existing warehouse-stock RBAC; do not expose it as a public download.
+
+## 2026-07-03 Draft Order Good Type Handoff
+
+### What changed
+- Draft Order item metadata now treats the existing `order_items.copy_normal_goods` value as a three-option good type: `Normal`, `Dangerous`, or `Copy`.
+- The generated procurement import template now shows a `Good Type` column with a dropdown for `Normal Goods`, `Dangerous Goods`, and `Copy Goods`.
+- Draft Order import, receiving direct-intake import, order export, procurement export, container export, print pages, customer confirmation, and receiving item displays all understand/display `Dangerous Goods`.
+
+### Migration status
+- No new database migration was required. The existing nullable `copy_normal_goods` item metadata column already stores this classification safely.
+
+### Guardrails
+- Keep stored values canonical (`Normal`, `Dangerous`, `Copy`) so filters/search/exports remain consistent.
+- Keep old `Copy / Normal Goods` import aliases accepted for older templates.
+- Do not use good type for calculations unless the business defines dangerous-goods pricing or workflow rules later.
+
+## 2026-07-04 Procurement Supplier Section Template Handoff
+
+### What changed
+- The generated procurement import workbook no longer includes per-item `Supplier` or `Supplier Name` columns.
+- Supplier grouping is now expressed the same way operators manage it in Draft an Order: add a row with `Supplier:` in column A and the supplier name/code in column B, then list that supplier's item rows below it.
+- Draft Order import already supported these supplier marker rows; the visible import guidance now documents them as the primary workflow.
+- Receiving direct-intake import now recognizes the same marker rows, skips them as data rows, and carries the current supplier name forward for subsequent item rows.
+- Older import files that still contain supplier columns remain supported for compatibility.
+
+### Migration status
+- No database migration was required. Supplier section handling is an import/template behavior change only.
+
+### Guardrails
+- Keep the generated template, Draft Order import parser, Receiving import parser, modal help text, and Downloads registry aligned when changing procurement import columns.
+- Do not remove the old supplier-column aliases unless legacy files have been formally retired.

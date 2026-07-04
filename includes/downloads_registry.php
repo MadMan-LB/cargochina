@@ -80,7 +80,7 @@ function clmsDownloadRegistry(): array
                     'slug' => 'procurement-import-template-xlsx',
                     'mode' => 'generated',
                     'title' => 'Procurement Import Template',
-                    'description' => 'Import-ready Excel template with the supported English and Chinese item columns, quantities, prices, supplier, HS code, and notes.',
+                    'description' => 'Import-ready Excel template with supported English and Chinese item columns, quantities, prices, supplier-section rows, HS code, and notes.',
                     'file_type' => 'XLSX',
                     'download_name' => 'procurement_import_template.xlsx',
                     'roles' => ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'],

@@ -119,6 +119,7 @@ function draftOrderCopyNormalGoodsDisplay($value): string
     $raw = trim((string) ($value ?? ''));
     return match (strtolower($raw)) {
         'copy' => clmsT('Copy Goods'),
+        'dangerous' => clmsT('Dangerous Goods'),
         'normal' => clmsT('Normal Goods'),
         default => $raw,
     };
@@ -130,6 +131,9 @@ function draftOrderNormalizeCopyNormalGoods($value): ?string
     $normalized = strtolower(preg_replace('/[\s_\-\/]+/', '', $raw) ?? '');
     if (in_array($normalized, ['copy', 'copygoods', 'replica', '仿牌', '仿货'], true)) {
         return 'Copy';
+    }
+    if (in_array($normalized, ['dangerous', 'dangerousgoods', 'hazmat', 'hazardous', 'hazardousgoods', 'dg', '危险品', '危险货'], true)) {
+        return 'Dangerous';
     }
     if (in_array($normalized, ['normal', 'normalgoods', 'regular', '普通货', '常规货'], true)) {
         return 'Normal';
@@ -1660,7 +1664,7 @@ function draftOrderExportCsv(PDO $pdo, int $orderId): void
 
     foreach ($order['supplier_sections'] as $section) {
         fputcsv($out, [clmsT('Supplier') . ':', $section['supplier_name']]);
-        fputcsv($out, array_map('clmsT', ['Supplier', 'Supplier Name', 'Brand', 'Materials', 'Height', 'Width', 'Length', 'What Brand', 'Copy / Normal Goods', 'Code', 'Item No', 'Product / Names', 'Notes', 'HS Code', 'Pieces/Carton', 'Cartons', 'Quantity', 'Unit', 'Factory Price', 'Customer Price', 'Total Amount', 'CBM/Unit', 'Total CBM', 'Weight/Unit', 'Total Weight', 'Custom Design', 'Express Number', 'Size']));
+        fputcsv($out, array_map('clmsT', ['Supplier', 'Supplier Name', 'Brand', 'Materials', 'Height', 'Width', 'Length', 'What Brand', 'Good Type', 'Code', 'Item No', 'Product / Names', 'Notes', 'HS Code', 'Pieces/Carton', 'Cartons', 'Quantity', 'Unit', 'Factory Price', 'Customer Price', 'Total Amount', 'CBM/Unit', 'Total CBM', 'Weight/Unit', 'Total Weight', 'Custom Design', 'Express Number', 'Size']));
         foreach (draftOrderBuildExportRows([$section]) as $item) {
             $customDesignValue = strtolower(trim((string) ($item['custom_design_required'] ?? '')));
             $customDesignLabel = $customDesignValue === ''
@@ -1791,7 +1795,7 @@ function draftOrderImportColumnAliases(): array
         'brand' => ['brand', 'brandname'],
         'what_brand' => ['whatbrand', 'whatebrand'],
         'materials' => ['material', 'materials'],
-        'copy_normal_goods' => ['copynormalgoods', 'copynormal', 'copygoods', 'normalgoods', 'copyornormalgoods'],
+        'copy_normal_goods' => ['goodtype', 'goodstype', 'goodsclassification', 'goodscategory', 'itemtype', 'producttype', 'copynormalgoods', 'copynormal', 'copygoods', 'normalgoods', 'dangerousgoods', 'copyornormalgoods'],
         'code' => ['code', 'serialcode', 'serialno', 'serialnumber', 'sku', 'itemcode', 'skucode', 'skuitemcode'],
         'express_number' => ['expressnumber', 'expressno', 'express', 'trackingnumber', 'trackingno', 'couriernumber', 'waybill', 'waybillnumber'],
         'size' => ['size', 'outsidecartonsize', 'cartonsize', 'outercartonsize'],
@@ -1830,6 +1834,7 @@ function draftOrderImportOptionalColumnLabels(): array
         'photo' => 'Photo',
         'brand' => 'Brand',
         'materials' => 'Materials',
+        'copy_normal_goods' => 'Good Type',
         'height' => 'Height',
         'width' => 'Width',
         'length' => 'Length',

@@ -318,7 +318,7 @@ require 'includes/layout.php';
           </a>
           <span class="small text-muted"><?= clmsT('Accepted: .xlsx, .xls, .csv') ?></span>
           <div class="small text-muted">
-            <?= clmsT('Same template columns: Customer, Item No, names, SKU, Express Number, Cartons, CBM/Unit or Total CBM, Weight/Unit or Total Weight, Supplier.') ?>
+            <?= clmsT('Same template columns: Customer, Item No, names, SKU, Express Number, Cartons, CBM/Unit or Total CBM, Weight/Unit or Total Weight. Use Supplier: rows in column A/B to split suppliers.') ?>
           </div>
         </div>
         <div id="receivingImportStatus" class="draft-import-status d-none mb-3" aria-live="polite"></div>

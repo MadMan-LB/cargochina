@@ -375,11 +375,24 @@ Any AI/engineer working on this system must follow these operating rules:
 ## 16) DECISION_LOG (keep updating)
 > Capture CEO/ops decisions. Newest on top.
 
+- 2026-07-03 - Draft Order good type / dangerous goods
+  - Decision: Draft Order item good type supports three canonical values: `Normal`, `Dangerous`, and `Copy`, shown to users as Normal Goods, Dangerous Goods, and Copy Goods.
+  - Decision: The Excel/template/user-facing label is `Good Type`, but old `Copy / Normal Goods` aliases stay supported for backwards-compatible imports.
+  - Rationale: Operations need to flag dangerous goods during draft creation/import without adding a separate workflow or changing existing item schema.
+  - Impacted modules/states: Draft an Order builder, procurement import template/import parser, Orders builder, receiving direct-intake import, order/procurement/container exports, print/customer confirmation/receiving displays
+  - Migration: none; uses existing nullable `order_items.copy_normal_goods` metadata column.
+
 - 2026-07-01 - Receiving item dimensions and stock exports
   - Decision: Warehouse receiving now captures actual item Height / Width / Length per receipt item, stored separately from declared procurement dimensions.
   - Decision: Receiving queue/history, order packets, and warehouse stock can be downloaded as Excel through existing receiving/order/warehouse permissions.
   - Rationale: Warehouse staff need item-level measured dimensions during receiving, and operations need quick Excel exports from receiving and stock pages without leaving the workflow.
   - Impacted modules/states: `receiving.php`, `warehouse/receiving/*`, `warehouse_stock.php`, receiving import, receipt detail, receiving queue export, order Excel download, warehouse stock export
+
+- 2026-07-04 - Procurement supplier-section import template
+  - Decision: The generated procurement import template no longer uses per-item `Supplier` / `Supplier Name` columns. Supplier grouping is driven by section marker rows: put `Supplier:` in column A and the supplier name or code in column B before each group of item rows.
+  - Decision: Draft Order import and Receiving direct-intake import both honor the same supplier-section marker behavior. Older uploaded files with supplier columns remain accepted for backwards compatibility.
+  - Rationale: The operator workflow manages suppliers as sections in `procurement_drafts.php`; matching the template to that model prevents mixed supplier values from being placed on item rows.
+  - Impacted modules/states: generated procurement/receiving template, Draft Order import guidance, Receiving import parser, Downloads registry
 
 - 2026-06-28 — Draft Order import robustness and progress UX
   - Decision: Procurement/Draft Order Excel import must use normalized header names rather than fixed column positions, while continuing to support existing templates and supplier-section markers.

@@ -301,6 +301,7 @@ function orderCopyNormalGoodsDisplay($value): string
     $raw = trim((string) ($value ?? ''));
     return match (strtolower($raw)) {
         'copy' => clmsT('Copy Goods'),
+        'dangerous' => clmsT('Dangerous Goods'),
         'normal' => clmsT('Normal Goods'),
         default => $raw,
     };
@@ -312,6 +313,9 @@ function orderNormalizeCopyNormalGoods($value): ?string
     $normalized = strtolower(preg_replace('/[\s_\-\/]+/', '', $raw) ?? '');
     if (in_array($normalized, ['copy', 'copygoods', 'replica', '仿牌', '仿货'], true)) {
         return 'Copy';
+    }
+    if (in_array($normalized, ['dangerous', 'dangerousgoods', 'hazmat', 'hazardous', 'hazardousgoods', 'dg', '危险品', '危险货'], true)) {
+        return 'Dangerous';
     }
     if (in_array($normalized, ['normal', 'normalgoods', 'regular', '普通货', '常规货'], true)) {
         return 'Normal';
@@ -980,7 +984,7 @@ function outputOrderCsv(array $order, array $items, ?string $filename = null): v
     fputcsv($out, [clmsT('Status'), clmsStatusLabel((string) ($order['status'] ?? ''))]);
     fputcsv($out, [clmsT('Currency'), (string) ($order['currency'] ?? '')]);
     fputcsv($out, ['']);
-    fputcsv($out, array_map('clmsT', ['What Brand', 'Copy / Normal Goods', 'Code', 'Photo Count', 'Item No', 'Supplier', 'Description', 'Total CTNS', 'QTY/CTN', 'TOTAL QTY', 'UNIT PRICE', 'TOTAL AMOUNT', 'CBM', 'TOTAL CBM', 'GWKG', 'TOTAL GW', 'Express Number', 'Size']));
+    fputcsv($out, array_map('clmsT', ['What Brand', 'Good Type', 'Code', 'Photo Count', 'Item No', 'Supplier', 'Description', 'Total CTNS', 'QTY/CTN', 'TOTAL QTY', 'UNIT PRICE', 'TOTAL AMOUNT', 'CBM', 'TOTAL CBM', 'GWKG', 'TOTAL GW', 'Express Number', 'Size']));
 
     foreach ($items as $item) {
         $imagePaths = $item['image_paths'] ?? [];

@@ -108,13 +108,15 @@ function getReceiveItemMetaText(item) {
     const copyNormalLabel =
         copyNormalRaw.toLowerCase() === "copy"
             ? receiveT("Copy Goods")
+            : copyNormalRaw.toLowerCase() === "dangerous"
+              ? receiveT("Dangerous Goods")
             : copyNormalRaw.toLowerCase() === "normal"
               ? receiveT("Normal Goods")
               : copyNormalRaw;
     return [
         item?.what_brand ? `${receiveT("What Brand")}: ${item.what_brand}` : "",
         copyNormalLabel
-            ? `${receiveT("Copy / Normal Goods")}: ${copyNormalLabel}`
+            ? `${receiveT("Good Type")}: ${copyNormalLabel}`
             : "",
         item?.code ? `${receiveT("Code")}: ${item.code}` : "",
         item?.express_number

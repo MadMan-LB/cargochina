@@ -179,6 +179,7 @@ function containerCopyNormalGoodsDisplay($value): string
     $raw = trim((string) ($value ?? ''));
     return match (strtolower($raw)) {
         'copy' => clmsT('Copy Goods'),
+        'dangerous' => clmsT('Dangerous Goods'),
         'normal' => clmsT('Normal Goods'),
         default => $raw,
     };
@@ -194,7 +195,7 @@ function outputContainerOrdersCsv(array $container, array $ordersWithItems): voi
     $out = fopen('php://output', 'w');
     fputcsv($out, [clmsT('Container'), (string) ($container['code'] ?? '')]);
     fputcsv($out, ['']);
-    fputcsv($out, array_map('clmsT', ['What Brand', 'Copy / Normal Goods', 'Code', 'Order ID', 'Customer', 'Supplier', 'Item No', 'Shipping Code', 'Description', 'Cartons', 'Qty/Carton', 'Total Qty', 'Unit Price', 'Total Amount', 'Declared CBM', 'Declared Weight', 'Express Number', 'Size', 'Photo Count']));
+    fputcsv($out, array_map('clmsT', ['What Brand', 'Good Type', 'Code', 'Order ID', 'Customer', 'Supplier', 'Item No', 'Shipping Code', 'Description', 'Cartons', 'Qty/Carton', 'Total Qty', 'Unit Price', 'Total Amount', 'Declared CBM', 'Declared Weight', 'Express Number', 'Size', 'Photo Count']));
     foreach ($ordersWithItems as $data) {
         $order = $data['order'] ?? [];
         foreach (($data['items'] ?? []) as $item) {

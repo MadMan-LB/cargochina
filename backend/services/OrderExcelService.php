@@ -420,7 +420,7 @@ class OrderExcelService
             'C' => 'BRAND',
             'D' => 'MATERIALS',
             'E' => 'WHAT BRAND',
-            'F' => 'copy /NORMAL Goods',
+            'F' => 'GOOD TYPE',
             'G' => 'CODE',
             'H' => 'PHOTO',
             'I' => 'ITEM NO',
@@ -538,7 +538,7 @@ class OrderExcelService
     {
         $headers = [
             'B' => 'WHAT BRAND',
-            'C' => 'copy /NORMAL Goods',
+            'C' => 'GOOD TYPE',
             'D' => 'CODE',
             'E' => 'PHOTO',
             'F' => 'ITEM NO',
@@ -1065,6 +1065,7 @@ class OrderExcelService
         $value = $this->itemText($item, 'copy_normal_goods');
         return match (strtolower($value)) {
             'copy' => $this->tr('Copy Goods'),
+            'dangerous' => $this->tr('Dangerous Goods'),
             'normal' => $this->tr('Normal Goods'),
             default => $value,
         };

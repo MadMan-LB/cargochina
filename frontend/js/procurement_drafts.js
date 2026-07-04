@@ -123,6 +123,16 @@
         return trimDisplayNumber(raw, maxDecimals);
     }
 
+    function normalizeDraftGoodType(value) {
+        const raw = String(value || "").trim();
+        if (!raw) return "";
+        const normalized = raw.toLowerCase().replace(/[\s_\/\\-]+/g, "");
+        if (["copy", "copygoods", "replica", "仿牌", "仿货"].includes(normalized)) return "Copy";
+        if (["dangerous", "dangerousgoods", "hazmat", "hazardous", "hazardousgoods", "dg", "危险品", "危险货"].includes(normalized)) return "Dangerous";
+        if (["normal", "normalgoods", "regular", "普通货", "常规货"].includes(normalized)) return "Normal";
+        return raw;
+    }
+
     function getDraftQuickSupplierPaymentMethods() {
         return Array.isArray(window.STANDARD_PAYMENT_METHODS)
             ? window.STANDARD_PAYMENT_METHODS
@@ -2014,6 +2024,15 @@
                   <input type="text" class="form-control form-control-sm draft-shared-content-materials" placeholder="${escapeHtml(draftT("Materials"))}">
                 </div>
                 <div class="col-12 col-sm-6 col-xl-2">
+                  <label class="form-label draft-item-label">${escapeHtml(draftT("Good Type"))}</label>
+                  <select class="form-select form-select-sm draft-shared-content-copy-normal-goods">
+                    <option value=""></option>
+                    <option value="Normal">${escapeHtml(draftT("Normal Goods"))}</option>
+                    <option value="Dangerous">${escapeHtml(draftT("Dangerous Goods"))}</option>
+                    <option value="Copy">${escapeHtml(draftT("Copy Goods"))}</option>
+                  </select>
+                </div>
+                <div class="col-12 col-sm-6 col-xl-2">
                   <label class="form-label draft-item-label">Express No.</label>
                   <input type="text" class="form-control form-control-sm draft-shared-content-express-number" placeholder="${escapeHtml(draftT("Express no."))}">
                 </div>
@@ -2244,6 +2263,8 @@
             initial.brand || initial.what_brand || "";
         row.querySelector(".draft-shared-content-materials").value =
             initial.materials || "";
+        row.querySelector(".draft-shared-content-copy-normal-goods").value =
+            normalizeDraftGoodType(initial.copy_normal_goods);
         row.querySelector(".draft-shared-content-express-number").value =
             initial.express_number || "";
         row.querySelector(".draft-shared-content-height").value =
@@ -2284,6 +2305,7 @@
             ".draft-shared-content-notes",
             ".draft-shared-content-brand",
             ".draft-shared-content-materials",
+            ".draft-shared-content-copy-normal-goods",
             ".draft-shared-content-express-number",
             ".draft-shared-content-height",
             ".draft-shared-content-width",
@@ -2587,10 +2609,11 @@
                               <input type="text" class="form-control form-control-sm draft-item-what-brand" placeholder="${escapeHtml(draftT("Brand marker"))}">
                             </div>
                             <div class="col-12 col-sm-6 col-xl-2">
-                              <label class="form-label draft-item-label">${escapeHtml(draftT("Copy / Normal Goods"))}</label>
+                              <label class="form-label draft-item-label">${escapeHtml(draftT("Good Type"))}</label>
                               <select class="form-select form-select-sm draft-item-copy-normal-goods">
                                 <option value=""></option>
                                 <option value="Normal">${escapeHtml(draftT("Normal Goods"))}</option>
+                                <option value="Dangerous">${escapeHtml(draftT("Dangerous Goods"))}</option>
                                 <option value="Copy">${escapeHtml(draftT("Copy Goods"))}</option>
                               </select>
                             </div>
@@ -3180,7 +3203,7 @@
         card.querySelector(".draft-item-what-brand").value =
             initial.what_brand || "";
         card.querySelector(".draft-item-copy-normal-goods").value =
-            initial.copy_normal_goods || "";
+            normalizeDraftGoodType(initial.copy_normal_goods);
         card.querySelector(".draft-item-code").value = initial.code || "";
         card.querySelector(".draft-item-express-number").value =
             initial.express_number || "";
@@ -3749,6 +3772,10 @@
             materials:
                 row
                     .querySelector(".draft-shared-content-materials")
+                    ?.value?.trim() || null,
+            copy_normal_goods:
+                row
+                    .querySelector(".draft-shared-content-copy-normal-goods")
                     ?.value?.trim() || null,
             express_number:
                 row

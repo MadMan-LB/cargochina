@@ -71,6 +71,7 @@ function printDraftCopyNormalGoodsDisplay($value): string
     $raw = trim((string) ($value ?? ''));
     return match (strtolower($raw)) {
         'copy' => clmsT('Copy Goods'),
+        'dangerous' => clmsT('Dangerous Goods'),
         'normal' => clmsT('Normal Goods'),
         default => $raw !== '' ? $raw : '—',
     };
@@ -440,7 +441,7 @@ if ($orderId > 0) {
         <tr>
           <th>#</th>
           <th><?= htmlspecialchars(clmsT('What Brand')) ?></th>
-          <th><?= htmlspecialchars(clmsT('Copy / Normal Goods')) ?></th>
+          <th><?= htmlspecialchars(clmsT('Good Type')) ?></th>
           <th><?= htmlspecialchars(clmsT('Code')) ?></th>
           <th><?= htmlspecialchars(clmsT('Item No')) ?></th>
           <th><?= htmlspecialchars(clmsT('Product / Names')) ?></th>

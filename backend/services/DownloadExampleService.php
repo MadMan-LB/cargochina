@@ -3,6 +3,7 @@
 require_once dirname(__DIR__, 2) . '/vendor/autoload.php';
 
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Cell\DataValidation;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
@@ -39,6 +40,7 @@ class DownloadExampleService
             'SKU / Item Code',
             'Brand',
             'Materials',
+            'Good Type',
             'Height',
             'Width',
             'Length',
@@ -54,8 +56,6 @@ class DownloadExampleService
             'Total CBM',
             'Weight/Unit',
             'Total Weight',
-            'Supplier',
-            'Supplier Name',
             'HS Code',
             'Notes / Description',
             'Custom Design',
@@ -84,6 +84,15 @@ class DownloadExampleService
             $row++;
         }
 
+        $sheet->setCellValue('A' . $row, 'Supplier sections: type "Supplier:" in column A and the supplier name or code in column B before each group of item rows.');
+        $sheet->mergeCells('A' . $row . ':' . $lastColumn . $row);
+        $sheet->getStyle('A' . $row . ':' . $lastColumn . $row)->applyFromArray([
+            'font' => ['bold' => true, 'size' => 10, 'color' => ['rgb' => '1F4E79']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F3F8FF']],
+            'alignment' => ['vertical' => Alignment::VERTICAL_CENTER, 'wrapText' => true],
+        ]);
+        $sheet->getRowDimension($row)->setRowHeight(24);
+
         $row++;
         $sheet->fromArray($headers, null, 'A' . $row);
         $headerRow = $row;
@@ -99,17 +108,23 @@ class DownloadExampleService
             ],
             'alignment' => ['vertical' => Alignment::VERTICAL_TOP, 'wrapText' => true],
         ]);
-        $sheet->getStyle("B" . ($headerRow + 1) . ":G" . ($headerRow + 50))->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
-        $sheet->getStyle("K" . ($headerRow + 1) . ":K" . ($headerRow + 50))->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
-        $sheet->getStyle("W" . ($headerRow + 1) . ":Y" . ($headerRow + 50))->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
+        $sheet->getStyle("B" . ($headerRow + 1) . ":H" . ($headerRow + 50))->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
+        $sheet->getStyle("L" . ($headerRow + 1) . ":L" . ($headerRow + 50))->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
+        $sheet->getStyle("X" . ($headerRow + 1) . ":Z" . ($headerRow + 50))->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
         $sheet->freezePane('A' . ($headerRow + 1));
         $sheet->setAutoFilter("A{$headerRow}:{$lastColumn}{$headerRow}");
 
         for ($bodyRow = $headerRow + 1; $bodyRow <= $headerRow + 50; $bodyRow++) {
             $sheet->getRowDimension($bodyRow)->setRowHeight(72);
+            $validation = $sheet->getCell('H' . $bodyRow)->getDataValidation();
+            $validation->setType(DataValidation::TYPE_LIST);
+            $validation->setErrorStyle(DataValidation::STYLE_STOP);
+            $validation->setAllowBlank(true);
+            $validation->setShowDropDown(true);
+            $validation->setFormula1('"Normal Goods,Dangerous Goods,Copy Goods"');
         }
 
-        $widths = [18, 16, 24, 22, 18, 16, 24, 10, 10, 10, 18, 12, 10, 15, 10, 14, 14, 14, 12, 12, 13, 13, 24, 24, 12, 36, 14];
+        $widths = [18, 16, 24, 22, 18, 16, 24, 16, 10, 10, 10, 18, 12, 10, 15, 10, 14, 14, 14, 12, 12, 13, 13, 12, 36, 14];
         foreach ($widths as $index => $width) {
             $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($index + 1))->setWidth($width);
         }
