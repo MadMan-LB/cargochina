@@ -111,7 +111,7 @@ require 'includes/layout.php';
 
         <div class="draft-import-guide small text-muted mt-3">
           <div><strong>Required header:</strong> English Item Name, Chinese Item Name, Product / Names, or Description.</div>
-          <div><strong>After downloading:</strong> fill at least one product row below the blue header before importing. Start each supplier group with <code>Supplier:</code> in column A and the supplier name/code in column B.</div>
+          <div><strong>After downloading:</strong> fill at least one product row below the blue header before importing. Start each supplier group with <code>Supplier:</code> in column A and the supplier name/code in column B. The first Express Number in a supplier group carries down until the next supplier group.</div>
           <div><strong>Photo column:</strong> insert or paste the product image into the Photo cell on the same row.</div>
           <div><strong>Useful columns:</strong> SKU / item code, Brand, Materials, Good Type, Height, Width, Length, Express Number, Quantity, Unit, Pieces/Carton, Cartons, Factory Price, Customer Price, CBM/Unit, Weight/Unit, HS Code, Notes / Description.</div>
           <div><strong>Optional metadata:</strong> Customer, Destination Country, Expected Ready, Currency. Older Supplier/Supplier Name columns are still accepted for old files.</div>

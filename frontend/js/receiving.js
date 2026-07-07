@@ -396,30 +396,7 @@ function setupReceiveOrderSearch() {
 
 function setupReceiveDimensionInputs() {
     const cbmEl = document.getElementById("actualCbm");
-    const lEl = document.getElementById("actualLength");
-    const wEl = document.getElementById("actualWidth");
-    const hEl = document.getElementById("actualHeight");
-    if (!cbmEl || !lEl || !wEl || !hEl) return;
-
-    const calcCbmFromLwh = () => {
-        const l = parseFloat(lEl.value) || 0;
-        const w = parseFloat(wEl.value) || 0;
-        const h = parseFloat(hEl.value) || 0;
-        if (l > 0 && w > 0 && h > 0) {
-            const cbm = Math.round(((l * w * h) / 1000000) * 1e6) / 1e6;
-            cbmEl.value = fmtReceivingNumber(cbm, 6);
-            updateVariancePhotoAlert();
-        }
-    };
-    [lEl, wEl, hEl].forEach((el) =>
-        el.addEventListener("input", calcCbmFromLwh),
-    );
-
-    cbmEl.addEventListener("input", () => {
-        if (parseFloat(cbmEl.value) > 0) {
-            lEl.value = wEl.value = hEl.value = "";
-        }
-    });
+    cbmEl?.addEventListener("input", updateVariancePhotoAlert);
 }
 
 async function loadReceivingConfig() {
@@ -1639,7 +1616,7 @@ function updateDeclaredSummary(order) {
         const acbm = document.getElementById("actualCbm");
         const aw = document.getElementById("actualWeight");
         if (ac) ac.placeholder = "";
-        if (acbm) acbm.placeholder = receivingT("Direct or from L×W×H");
+        if (acbm) acbm.placeholder = receivingT("Auto from item dimensions or enter total");
         if (aw) aw.placeholder = "";
         return;
     }
@@ -1677,7 +1654,7 @@ function updateDeclaredSummary(order) {
     const aw = document.getElementById("actualWeight");
     if (ac) ac.placeholder = String(cartons || "");
     if (acbm)
-        acbm.placeholder = cbm > 0 ? fmtReceivingNumber(cbm, 6) : receivingT("Direct or from L×W×H");
+        acbm.placeholder = cbm > 0 ? fmtReceivingNumber(cbm, 6) : receivingT("Auto from item dimensions or enter total");
     if (aw) aw.placeholder = weight > 0 ? fmtReceivingNumber(weight, 4) : "";
 }
 
@@ -1710,11 +1687,13 @@ function fillReceiveActualsFromDeclared() {
         const row = document.querySelector(`tr[data-order-item-id="${item.id}"]`);
         if (!row) return;
         const cbm = row.querySelector(".item-actual-cbm");
+        const weightPerCarton = row.querySelector(".item-weight-per-carton");
         const weight = row.querySelector(".item-actual-weight");
         const height = row.querySelector(".item-actual-height");
         const width = row.querySelector(".item-actual-width");
         const length = row.querySelector(".item-actual-length");
         if (cbm) cbm.value = formatReceiveInputNumber(item.declared_cbm || 0, 6);
+        if (weightPerCarton) weightPerCarton.value = formatReceiveInputNumber(receivingDeclaredWeightPerCarton(item), 4);
         if (weight) weight.value = formatReceiveInputNumber(item.declared_weight || 0, 4);
         if (height) height.value = formatReceiveInputNumber(item.item_height ?? item.height ?? 0, 4);
         if (width) width.value = formatReceiveInputNumber(item.item_width ?? item.width ?? 0, 4);
@@ -1740,6 +1719,21 @@ function formatReceiveInputNumber(value, decimals = 4) {
 function receivingItemDimensionValue(item, actualKey, declaredKey) {
     const value = item?.[actualKey] ?? item?.[declaredKey] ?? "";
     return formatReceiveInputNumber(value, 4);
+}
+
+function receivingCalculateDimensionCbm(cartons, height, width, length) {
+    const ctn = parseFloat(cartons) || 0;
+    const h = parseFloat(height) || 0;
+    const w = parseFloat(width) || 0;
+    const l = parseFloat(length) || 0;
+    if (ctn <= 0 || h <= 0 || w <= 0 || l <= 0) return 0;
+    return Math.round(((h * w * l * ctn) / 1000000) * 1e6) / 1e6;
+}
+
+function receivingDeclaredWeightPerCarton(item = {}) {
+    const cartons = parseFloat(item.cartons || 0) || 0;
+    const weight = parseFloat(item.declared_weight || 0) || 0;
+    return cartons > 0 && weight > 0 ? weight / cartons : 0;
 }
 
 function receivingDimensionInputs(item = {}) {
@@ -1787,6 +1781,9 @@ function recalcReceiveItemRow(row, source = "auto") {
     const qtyInput = row.querySelector(".item-actual-quantity");
     const unitInput = row.querySelector(".item-unit-price");
     const amountInput = row.querySelector(".item-total-amount");
+    const cbmInput = row.querySelector(".item-actual-cbm");
+    const weightPerCartonInput = row.querySelector(".item-weight-per-carton");
+    const weightInput = row.querySelector(".item-actual-weight");
 
     if (qtyInput && source !== "quantity" && cartons > 0 && pieces > 0) {
         qtyInput.value = formatReceiveInputNumber(cartons * pieces, 4);
@@ -1796,6 +1793,21 @@ function recalcReceiveItemRow(row, source = "auto") {
     const unitPrice = parseFloat(unitInput?.value || 0);
     if (amountInput && source !== "amount" && quantity > 0 && unitPrice > 0) {
         amountInput.value = formatReceiveInputNumber(quantity * unitPrice, 4);
+    }
+    if (cbmInput && source !== "cbm") {
+        const cbm = receivingCalculateDimensionCbm(
+            cartons,
+            row.querySelector(".item-actual-height")?.value || 0,
+            row.querySelector(".item-actual-width")?.value || 0,
+            row.querySelector(".item-actual-length")?.value || 0,
+        );
+        if (cbm > 0) cbmInput.value = formatReceiveInputNumber(cbm, 6);
+    }
+    if (weightInput && source !== "weight") {
+        const weightPerCarton = parseFloat(weightPerCartonInput?.value || 0) || 0;
+        if (cartons > 0 && weightPerCarton > 0) {
+            weightInput.value = formatReceiveInputNumber(cartons * weightPerCarton, 4);
+        }
     }
     updateReceiveItemSplitTotals(row.dataset.orderItemId || row.dataset.parentOrderItemId);
 }
@@ -1888,6 +1900,10 @@ function bindReceiveItemCalculation(row) {
         markDirty();
         updateReceiveOrderLevelTotals();
     });
+    row.querySelector(".item-weight-per-carton")?.addEventListener("input", () => {
+        markDirty();
+        recalcReceiveItemRow(row, "weight_per_carton");
+    });
     row.querySelector(".item-actual-weight")?.addEventListener("input", () => {
         markDirty();
         updateReceiveOrderLevelTotals();
@@ -1897,7 +1913,10 @@ function bindReceiveItemCalculation(row) {
         ".item-actual-width",
         ".item-actual-length",
     ].forEach((selector) => {
-        row.querySelector(selector)?.addEventListener("input", markDirty);
+        row.querySelector(selector)?.addEventListener("input", () => {
+            markDirty();
+            recalcReceiveItemRow(row, "dimensions");
+        });
     });
     row.querySelector(".item-condition")?.addEventListener("change", markDirty);
     recalcReceiveItemRow(row);
@@ -1922,6 +1941,7 @@ function addReceivePackagingSplitLine(orderItemId, split = {}) {
             <td class="small text-muted ps-4">${escapeHtml(receivingT("Packaging split"))}</td>
             <td></td>
             ${receivePackagingSplitCells(split, true)}
+            <td></td>
             <td></td>
             <td></td>
             <td></td>
@@ -1992,8 +2012,9 @@ async function loadOrderForReceive(orderId) {
             <td><input type="number" class="form-control form-control-sm item-actual-quantity" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.quantity || 0, 4))}"></td>
             <td><input type="number" class="form-control form-control-sm item-unit-price" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.unit_price || 0, 4))}"></td>
             <td><input type="number" class="form-control form-control-sm item-total-amount" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.total_amount || 0, 4))}"></td>
-            <td><input type="number" step="0.000001" class="form-control form-control-sm item-actual-cbm" min="0" placeholder="0"></td>
-            <td><input type="number" step="0.0001" class="form-control form-control-sm item-actual-weight" min="0" placeholder="0"></td>
+            <td><input type="number" step="0.000001" class="form-control form-control-sm item-actual-cbm" min="0" placeholder="${escapeHtml(fmtReceivingNumber(it.declared_cbm || 0, 6))}"></td>
+            <td><input type="number" step="0.0001" class="form-control form-control-sm item-weight-per-carton" min="0" value="${escapeHtml(formatReceiveInputNumber(receivingDeclaredWeightPerCarton(it), 4))}"></td>
+            <td><input type="number" step="0.0001" class="form-control form-control-sm item-actual-weight" min="0" placeholder="${escapeHtml(fmtReceivingNumber(it.declared_weight || 0, 4))}"></td>
             <td>${receivingDimensionInputs(it)}</td>
             <td><select class="form-select form-select-sm item-condition"><option value="good">${escapeHtml(receivingT("Good"))}</option><option value="damaged">${escapeHtml(receivingT("Damaged"))}</option><option value="partial">${escapeHtml(receivingT("Partial"))}</option></select></td>
             <td><input type="file" class="d-none item-photo-input" accept="image/*" multiple data-order-item-id="${it.id}"><button type="button" class="btn btn-sm btn-outline-secondary item-add-photo">+</button><div class="item-photo-preview d-inline"></div></td>
@@ -2002,7 +2023,7 @@ async function loadOrderForReceive(orderId) {
             )
             .join("") +
             (hiddenItemCount
-                ? `<tr class="receive-show-more-row"><td colspan="12" class="text-center py-3">
+                ? `<tr class="receive-show-more-row"><td colspan="13" class="text-center py-3">
                     <button type="button" class="btn btn-outline-primary btn-sm receive-show-more-items">
                       ${escapeHtml(receivingT("Show more items"))} (${visibleItems.length}/${receiveOrderItems.length})
                     </button>
@@ -2081,19 +2102,13 @@ async function submitReceive() {
     }
     const actualCartons =
         parseInt(document.getElementById("actualCartons").value) || 0;
-    const cbmRaw = document.getElementById("actualCbm").value;
-    const l = parseFloat(document.getElementById("actualLength")?.value) || 0;
-    const w = parseFloat(document.getElementById("actualWidth")?.value) || 0;
-    const h = parseFloat(document.getElementById("actualHeight")?.value) || 0;
-    const actualCbm =
-        parseFloat(cbmRaw) ||
-        (l > 0 && w > 0 && h > 0 ? (l * w * h) / 1000000 : 0);
+    const actualCbm = parseFloat(document.getElementById("actualCbm").value) || 0;
     const actualWeight =
         parseFloat(document.getElementById("actualWeight").value) || 0;
 
     if (actualCbm <= 0) {
         showToast(
-            receivingT("Enter Actual CBM directly or L/H/W (cm) to calculate"),
+            receivingT("Enter Total CBM or item dimensions to calculate it"),
             "danger",
         );
         return;
@@ -2153,6 +2168,9 @@ async function submitReceive() {
             const aWeight = parseFloat(
                 row.querySelector(".item-actual-weight")?.value || 0,
             );
+            const aWeightPerCarton = parseFloat(
+                row.querySelector(".item-weight-per-carton")?.value || 0,
+            );
             const aHeight = parseFloat(
                 row.querySelector(".item-actual-height")?.value || 0,
             );
@@ -2162,8 +2180,8 @@ async function submitReceive() {
             const aLength = parseFloat(
                 row.querySelector(".item-actual-length")?.value || 0,
             );
-            if (aHeight < 0 || aWidth < 0 || aLength < 0) {
-                itemValidationError = receivingT("Item dimensions must be zero or positive");
+            if (aHeight < 0 || aWidth < 0 || aLength < 0 || aWeightPerCarton < 0) {
+                itemValidationError = receivingT("Item dimensions and weight per carton must be zero or positive");
                 return;
             }
             const aPiecesPerCarton = parseFloat(
@@ -2188,6 +2206,7 @@ async function submitReceive() {
                 aCartons > 0 ||
                 aCbm > 0 ||
                 aWeight > 0 ||
+                aWeightPerCarton > 0 ||
                 aHeight > 0 ||
                 aWidth > 0 ||
                 aLength > 0 ||
@@ -2203,6 +2222,7 @@ async function submitReceive() {
                     packaging_splits: packagingSplits,
                     actual_cbm: aCbm || null,
                     actual_weight: aWeight || null,
+                    weight_per_carton: aWeightPerCarton || null,
                     actual_height: aHeight || null,
                     actual_width: aWidth || null,
                     actual_length: aLength || null,

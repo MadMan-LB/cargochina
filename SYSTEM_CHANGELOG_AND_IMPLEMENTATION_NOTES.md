@@ -5,6 +5,15 @@
 
 ---
 
+## 2026-07-07 Procurement/Receiving Express Number Carry-Down
+
+- Procurement import now carries the first filled `Express Number` down through later blank express-number rows in the same supplier section, resetting at the next `Supplier:` marker or explicit supplier change.
+- Receiving import applies the same carry-down before preview validation and direct-intake/existing-order commit, keeping the shared procurement template behavior consistent between Draft an Order and Warehouse Receiving.
+- Updated the generated import template, Draft Order import modal, Receiving import modal, README, and API docs so operators and developers know `Express Number` is section-scoped when blank below the first filled value.
+- Verification added in `tests/draft_order_builder_test.php` for Draft Order import and Receiving import supplier-section carry behavior. No database migration required; `order_items.express_number` already exists.
+
+---
+
 ## 2026-06-28 Procurement Import Header/Image Progress Hardening
 
 - Draft Order Excel/CSV import now maps columns by normalized header names instead of fixed positions. Reordered columns such as `Materials` and `Express Number` now import into the correct fields.

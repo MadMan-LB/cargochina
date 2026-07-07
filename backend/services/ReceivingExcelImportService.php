@@ -80,6 +80,8 @@ class ReceivingExcelImportService
         $headerErrors = $this->validateHeaders($headers);
         $rawRows = [];
         $currentSupplierName = trim((string) ($metadata['supplier_name'] ?? ''));
+        $currentSupplierKey = $currentSupplierName !== '' ? $this->supplierTextKey('name', $currentSupplierName) : '';
+        $currentExpressNumber = '';
         foreach ($rows as $rowNumber => $row) {
             if ((int) $rowNumber <= $headerRowNumber) {
                 continue;
@@ -87,6 +89,8 @@ class ReceivingExcelImportService
             $supplierMarkerName = $this->supplierMarkerName($row);
             if ($supplierMarkerName !== '') {
                 $currentSupplierName = $supplierMarkerName;
+                $currentSupplierKey = $this->supplierTextKey('name', $supplierMarkerName);
+                $currentExpressNumber = '';
                 continue;
             }
             $normalized = $this->normalizeSpreadsheetRow((int) $rowNumber, $row, $headers);
@@ -99,6 +103,21 @@ class ReceivingExcelImportService
                 && trim((string) ($normalized['supplier_name'] ?? '')) === '') {
                 $normalized['supplier_name'] = $currentSupplierName;
             }
+            $rowSupplierKey = $this->supplierContextKey($normalized);
+            if ($rowSupplierKey !== '' && $currentSupplierKey !== '' && $rowSupplierKey !== $currentSupplierKey) {
+                $currentExpressNumber = '';
+            }
+            if ($rowSupplierKey !== '') {
+                $currentSupplierKey = $rowSupplierKey;
+                $explicitSupplierName = trim((string) ($normalized['supplier_name'] ?? ''));
+                $explicitSupplierCode = trim((string) ($normalized['supplier_code'] ?? ''));
+                if ($explicitSupplierName !== '') {
+                    $currentSupplierName = $explicitSupplierName;
+                } elseif ($explicitSupplierCode !== '') {
+                    $currentSupplierName = $explicitSupplierCode;
+                }
+            }
+            $this->applyExpressNumberCarry($normalized, $currentExpressNumber);
             $this->applyDerivedTemplateValues($normalized);
             $rawRows[] = $normalized;
             if (count($rawRows) > self::MAX_ROWS) {
@@ -1378,8 +1397,9 @@ class ReceivingExcelImportService
         if (!isset($headers['actual_cartons'])) {
             $errors[] = 'Missing required column: Cartons.';
         }
-        if (!isset($headers['actual_cbm']) && !isset($headers['cbm_unit'])) {
-            $errors[] = 'Missing required column: Total CBM or CBM/Unit.';
+        $hasDimensionCbmSource = isset($headers['height'], $headers['width'], $headers['length']);
+        if (!isset($headers['actual_cbm']) && !isset($headers['cbm_unit']) && !$hasDimensionCbmSource) {
+            $errors[] = 'Missing required column: Total CBM, CBM/Unit, or Height/Width/Length.';
         }
         if (!isset($headers['actual_weight']) && !isset($headers['weight_unit'])) {
             $errors[] = 'Missing required column: Total Weight or Weight/Unit.';
@@ -1428,6 +1448,45 @@ class ReceivingExcelImportService
             $normalized[$field] = $column !== null ? trim((string) ($row[$column] ?? '')) : '';
         }
         return $normalized;
+    }
+
+    private function supplierContextKey(array $row): string
+    {
+        $supplierId = trim((string) ($row['supplier_id'] ?? ''));
+        if ($supplierId !== '') {
+            return $this->supplierTextKey('id', $supplierId);
+        }
+
+        $supplierCode = trim((string) ($row['supplier_code'] ?? ''));
+        if ($supplierCode !== '') {
+            return $this->supplierTextKey('code', $supplierCode);
+        }
+
+        $supplierName = trim((string) ($row['supplier_name'] ?? ''));
+        if ($supplierName !== '') {
+            return $this->supplierTextKey('name', $supplierName);
+        }
+
+        return '';
+    }
+
+    private function supplierTextKey(string $type, string $value): string
+    {
+        return $type . ':' . md5(strtolower(trim($value)));
+    }
+
+    private function applyExpressNumberCarry(array &$row, string &$currentExpressNumber): void
+    {
+        $expressNumber = $this->cleanDirectText($row['express_number'] ?? '', 150);
+        if ($expressNumber !== null) {
+            $currentExpressNumber = $expressNumber;
+            $row['express_number'] = $currentExpressNumber;
+            return;
+        }
+
+        if ($currentExpressNumber !== '') {
+            $row['express_number'] = $currentExpressNumber;
+        }
     }
 
     private function normalizeDateValue(string $value): string
@@ -1481,6 +1540,14 @@ class ReceivingExcelImportService
                     : ($quantity !== null && $quantity > 0 ? $quantity : null);
                 if ($multiplier !== null) {
                     $row['actual_cbm'] = $this->formatImportNumber($cbmUnit * $multiplier, 6);
+                }
+            }
+            if (trim((string) ($row['actual_cbm'] ?? '')) === '') {
+                $height = $this->numberFromString($row['height'] ?? '');
+                $width = $this->numberFromString($row['width'] ?? '');
+                $length = $this->numberFromString($row['length'] ?? '');
+                if ($cartons !== null && $cartons > 0 && $height !== null && $width !== null && $length !== null && $height > 0 && $width > 0 && $length > 0) {
+                    $row['actual_cbm'] = $this->formatImportNumber(($height * $width * $length * $cartons) / 1000000, 6);
                 }
             }
         }

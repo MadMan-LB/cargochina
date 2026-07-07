@@ -122,6 +122,9 @@ class OrderReceivingService
                     ? (float) $it['actual_length']
                     : null;
                 $aCartons = isset($it['actual_cartons']) ? (int) $it['actual_cartons'] : null;
+                $aWeightPerCarton = isset($it['weight_per_carton']) && $it['weight_per_carton'] !== ''
+                    ? (float) $it['weight_per_carton']
+                    : null;
                 $aPiecesPerCarton = isset($it['actual_pieces_per_carton']) && $it['actual_pieces_per_carton'] !== ''
                     ? (float) $it['actual_pieces_per_carton']
                     : null;
@@ -140,6 +143,15 @@ class OrderReceivingService
                 }
                 if (($aTotalAmount === null || $aTotalAmount <= 0) && $aQuantity !== null && $aUnitPrice !== null && $aQuantity > 0 && $aUnitPrice >= 0) {
                     $aTotalAmount = round($aQuantity * $aUnitPrice, 4);
+                }
+                if (($aCbm === null || $aCbm <= 0) && $aCartons !== null) {
+                    $derivedCbm = $this->calculateCbmFromDimensions($aCartons, $aHeight, $aWidth, $aLength);
+                    if ($derivedCbm !== null) {
+                        $aCbm = $derivedCbm;
+                    }
+                }
+                if (($aWeight === null || $aWeight <= 0) && $aCartons !== null && $aWeightPerCarton !== null && $aCartons > 0 && $aWeightPerCarton > 0) {
+                    $aWeight = round($aCartons * $aWeightPerCarton, 4);
                 }
 
                 if (($aPiecesPerCarton !== null && $aPiecesPerCarton < 0)
@@ -162,10 +174,11 @@ class OrderReceivingService
                 if (($aCartons !== null && $aCartons < 0)
                     || ($aCbm !== null && $aCbm < 0)
                     || ($aWeight !== null && $aWeight < 0)
+                    || ($aWeightPerCarton !== null && $aWeightPerCarton < 0)
                     || ($aHeight !== null && $aHeight < 0)
                     || ($aWidth !== null && $aWidth < 0)
                     || ($aLength !== null && $aLength < 0)) {
-                    $errors["items.$idx.actuals"] = 'Actual cartons, CBM, weight, and dimensions must be zero or positive';
+                    $errors["items.$idx.actuals"] = 'Actual cartons, CBM, weight, weight per carton, and dimensions must be zero or positive';
                 }
 
                 $itCond = $it['condition'] ?? 'good';
@@ -200,6 +213,20 @@ class OrderReceivingService
             if (!empty($errors)) {
                 throw new OrderReceivingValidationException('Validation failed', 400, $errors);
             }
+
+            if ($actualCbm <= 0 && $hasItemCbm) {
+                $actualCbm = round($sumCbm, 6);
+            }
+            if ($actualWeight <= 0 && $hasItemWeight) {
+                $actualWeight = round($sumWeight, 4);
+            }
+
+            $orderVariancePct = $declaredCbm > 0 ? abs($actualCbm - $declaredCbm) / $declaredCbm * 100 : 0;
+            $orderVarianceAbs = abs($actualCbm - $declaredCbm);
+            $hasVariance = $orderVariancePct >= $thresholdPct
+                || $orderVarianceAbs >= $thresholdAbs
+                || $condition !== 'good'
+                || in_array(true, $itemVariances, true);
 
             $tolerance = 0.01;
             if (($hasItemCbm && abs($sumCbm - $actualCbm) > $tolerance)
@@ -275,6 +302,9 @@ class OrderReceivingService
                         ? (float) $it['actual_length']
                         : null;
                     $aCartons = isset($it['actual_cartons']) ? (int) $it['actual_cartons'] : null;
+                    $aWeightPerCarton = isset($it['weight_per_carton']) && $it['weight_per_carton'] !== ''
+                        ? (float) $it['weight_per_carton']
+                        : null;
                     $aPiecesPerCarton = isset($it['actual_pieces_per_carton']) && $it['actual_pieces_per_carton'] !== ''
                         ? (float) $it['actual_pieces_per_carton']
                         : null;
@@ -293,6 +323,15 @@ class OrderReceivingService
                     }
                     if (($aTotalAmount === null || $aTotalAmount <= 0) && $aQuantity !== null && $aUnitPrice !== null && $aQuantity > 0 && $aUnitPrice >= 0) {
                         $aTotalAmount = round($aQuantity * $aUnitPrice, 4);
+                    }
+                    if (($aCbm === null || $aCbm <= 0) && $aCartons !== null) {
+                        $derivedCbm = $this->calculateCbmFromDimensions($aCartons, $aHeight, $aWidth, $aLength);
+                        if ($derivedCbm !== null) {
+                            $aCbm = $derivedCbm;
+                        }
+                    }
+                    if (($aWeight === null || $aWeight <= 0) && $aCartons !== null && $aWeightPerCarton !== null && $aCartons > 0 && $aWeightPerCarton > 0) {
+                        $aWeight = round($aCartons * $aWeightPerCarton, 4);
                     }
 
                     $itCond = in_array($it['condition'] ?? 'good', ['good', 'damaged', 'partial'], true) ? ($it['condition'] ?? 'good') : 'good';
@@ -409,6 +448,17 @@ class OrderReceivingService
         }
 
         return array_values(array_unique(array_filter(array_map('strval', $paths))));
+    }
+
+    private function calculateCbmFromDimensions(?float $cartons, ?float $height, ?float $width, ?float $length): ?float
+    {
+        if ($cartons === null || $height === null || $width === null || $length === null) {
+            return null;
+        }
+        if ($cartons <= 0 || $height <= 0 || $width <= 0 || $length <= 0) {
+            return null;
+        }
+        return round(($height * $width * $length * $cartons) / 1000000, 6);
     }
 
     private function tableHasColumn(PDO $pdo, string $table, string $column): bool

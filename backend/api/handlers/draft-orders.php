@@ -3583,6 +3583,34 @@ function draftOrderImportFinalizeShared(array &$sections, ?array &$pendingShared
     $pendingShared = null;
 }
 
+function draftOrderImportSupplierContextKey(array $supplier): string
+{
+    if (!empty($supplier['id'])) {
+        return 'id:' . (int) $supplier['id'];
+    }
+
+    $name = trim((string) ($supplier['name'] ?? ''));
+    if ($name !== '') {
+        return 'name:' . md5(strtolower($name));
+    }
+
+    return 'blank';
+}
+
+function draftOrderImportApplySectionExpressNumber(array &$item, ?string &$currentSectionExpressNumber): void
+{
+    $rowExpress = draftOrderNormalizeItemText($item['express_number'] ?? null, 150);
+    if ($rowExpress !== null) {
+        $currentSectionExpressNumber = $rowExpress;
+        $item['express_number'] = $rowExpress;
+        return;
+    }
+
+    if ($currentSectionExpressNumber !== null) {
+        $item['express_number'] = $currentSectionExpressNumber;
+    }
+}
+
 function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename, array $readWarnings = [], array $readMeta = []): array
 {
     $buildStartedAt = microtime(true);
@@ -3595,6 +3623,8 @@ function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename, a
     ];
     $sections = [];
     $currentSupplier = ['id' => null, 'name' => ''];
+    $currentSupplierContextKey = draftOrderImportSupplierContextKey($currentSupplier);
+    $currentSectionExpressNumber = null;
     $currentHeader = null;
     $pendingShared = null;
     $importedRows = 0;
@@ -3640,11 +3670,15 @@ function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename, a
         if ($supplierMarkerName !== '') {
             draftOrderImportFinalizeShared($sections, $pendingShared);
             $currentSupplier = draftOrderImportResolveSupplier($pdo, $supplierMarkerName);
+            $currentSupplierContextKey = draftOrderImportSupplierContextKey($currentSupplier);
+            $currentSectionExpressNumber = null;
             continue;
         }
         if (draftOrderImportCellString($row[0] ?? '') === '@@' || draftOrderImportHeaderKey($row[1] ?? '') === 'suppliernameandinfo') {
             draftOrderImportFinalizeShared($sections, $pendingShared);
             $currentSupplier = draftOrderImportResolveSupplier($pdo, draftOrderImportCellString($row[2] ?? ''));
+            $currentSupplierContextKey = draftOrderImportSupplierContextKey($currentSupplier);
+            $currentSectionExpressNumber = null;
             continue;
         }
         if (draftOrderImportLooksLikeSummaryRow($row)) {
@@ -3671,6 +3705,12 @@ function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename, a
         $rowSupplier = ($rowSupplierName !== '' || $rowSupplierCode !== '' || $rowSupplierId !== '')
             ? draftOrderImportResolveSupplierFromFields($pdo, $rowSupplierName, $rowSupplierCode, $rowSupplierId)
             : $currentSupplier;
+        $rowSupplierContextKey = draftOrderImportSupplierContextKey($rowSupplier);
+        if ($rowSupplierContextKey !== $currentSupplierContextKey) {
+            draftOrderImportFinalizeShared($sections, $pendingShared);
+            $currentSupplierContextKey = $rowSupplierContextKey;
+            $currentSectionExpressNumber = null;
+        }
         $itemNo = draftOrderImportField($row, $currentHeader, 'item_no');
         $description = draftOrderImportField($row, $currentHeader, 'description');
         $descriptionToken = draftOrderImportHeaderKey($description);
@@ -3680,6 +3720,7 @@ function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename, a
             $skipReason = null;
             $summary = draftOrderImportBuildItem($row, $currentHeader, $skipReason);
             if ($summary) {
+                draftOrderImportApplySectionExpressNumber($summary, $currentSectionExpressNumber);
                 $summary['shared_carton_enabled'] = 1;
                 $summary['shared_carton_code'] = $summary['item_no'] ?: null;
                 $summary['item_no'] = null;
@@ -3708,6 +3749,7 @@ function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename, a
             $skipReason = null;
             $content = draftOrderImportBuildSharedContent($pdo, $row, $currentHeader, $pendingShared['supplier'], $skipReason);
             if ($content) {
+                draftOrderImportApplySectionExpressNumber($content, $currentSectionExpressNumber);
                 $pendingShared['contents'][] = $content;
                 $importedRows++;
             } elseif ($skipReason) {
@@ -3735,6 +3777,7 @@ function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename, a
             ];
             continue;
         }
+        draftOrderImportApplySectionExpressNumber($item, $currentSectionExpressNumber);
         draftOrderImportAddItemToSections($sections, $rowSupplier, $item);
         $importedRows++;
     }

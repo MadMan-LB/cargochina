@@ -7,6 +7,7 @@
 
 $root = dirname(__DIR__);
 require_once $root . '/backend/config/database.php';
+require_once $root . '/backend/services/ReceivingExcelImportService.php';
 require_once $root . '/vendor/autoload.php';
 
 try {
@@ -463,6 +464,91 @@ test('draft-orders import endpoint keeps missing exported fields empty', functio
         }
         if (($item['cartons'] ?? 'not-empty') !== '' || ($item['cbm'] ?? 'not-empty') !== '' || ($item['weight'] ?? 'not-empty') !== '') {
             throw new Exception('Missing spreadsheet values should remain empty in the preview payload');
+        }
+    } finally {
+        @unlink($csvPath);
+    }
+});
+
+test('draft-orders import carries express number within supplier sections', function () use ($root) {
+    $csvPath = tempnam(sys_get_temp_dir(), 'draft_express_carry_');
+    $fh = fopen($csvPath, 'w');
+    fputcsv($fh, ['Supplier:', 'Express Carry Supplier A']);
+    fputcsv($fh, ['Item No', 'Product / Names', 'Express Number', 'Cartons']);
+    fputcsv($fh, ['EC-A1', 'Express carry first item', 'EXP-A-001', '1']);
+    fputcsv($fh, ['EC-A2', 'Express carry second item', '', '1']);
+    fputcsv($fh, ['Supplier:', 'Express Carry Supplier B']);
+    fputcsv($fh, ['EC-B1', 'Express carry reset item', '', '1']);
+    fputcsv($fh, ['EC-B2', 'Express carry new item', 'EXP-B-001', '1']);
+    fputcsv($fh, ['EC-B3', 'Express carry inherited item', '', '1']);
+    fclose($fh);
+
+    try {
+        $out = runHandlerScriptWithUploadedFile(
+            $root,
+            'backend/api/handlers/draft-orders.php',
+            'POST',
+            'import',
+            null,
+            $csvPath,
+            'draft_express_carry.csv'
+        );
+        $json = json_decode($out, true);
+        $sections = $json['data']['supplier_sections'] ?? [];
+        if (count($sections) !== 2) {
+            throw new Exception('Expected two supplier sections, got: ' . substr($out, 0, 300));
+        }
+
+        $firstItems = $sections[0]['items'] ?? [];
+        $secondItems = $sections[1]['items'] ?? [];
+        if (($firstItems[0]['express_number'] ?? '') !== 'EXP-A-001' || ($firstItems[1]['express_number'] ?? '') !== 'EXP-A-001') {
+            throw new Exception('Express number should carry down inside the first supplier section');
+        }
+        if (($secondItems[0]['express_number'] ?? '') !== '') {
+            throw new Exception('Express number should reset at a new supplier section');
+        }
+        if (($secondItems[1]['express_number'] ?? '') !== 'EXP-B-001' || ($secondItems[2]['express_number'] ?? '') !== 'EXP-B-001') {
+            throw new Exception('Express number should restart and carry down inside the second supplier section');
+        }
+    } finally {
+        @unlink($csvPath);
+    }
+});
+
+test('receiving import carries express number within supplier sections', function () use ($pdo) {
+    $csvPath = tempnam(sys_get_temp_dir(), 'receiving_express_carry_');
+    $fh = fopen($csvPath, 'w');
+    fputcsv($fh, ['Supplier:', 'Receiving Carry Supplier A']);
+    fputcsv($fh, ['Item No', 'Product / Names', 'Express Number', 'Cartons', 'Total CBM', 'Total Weight']);
+    fputcsv($fh, ['REC-A1', 'Receiving carry first item', 'RX-A-001', '1', '0.1', '2']);
+    fputcsv($fh, ['REC-A2', 'Receiving carry second item', '', '1', '0.2', '3']);
+    fputcsv($fh, ['Supplier:', 'Receiving Carry Supplier B']);
+    fputcsv($fh, ['REC-B1', 'Receiving carry reset item', '', '1', '0.3', '4']);
+    fputcsv($fh, ['REC-B2', 'Receiving carry new item', 'RX-B-001', '1', '0.4', '5']);
+    fputcsv($fh, ['REC-B3', 'Receiving carry inherited item', '', '1', '0.5', '6']);
+    fclose($fh);
+
+    try {
+        $service = new ReceivingExcelImportService();
+        $preview = $service->previewFromUploadedFile($pdo, [
+            'name' => 'receiving_express_carry.csv',
+            'type' => 'text/csv',
+            'tmp_name' => $csvPath,
+            'error' => UPLOAD_ERR_OK,
+            'size' => filesize($csvPath),
+        ]);
+        $rawRows = $preview['raw_rows'] ?? [];
+        if (count($rawRows) !== 5) {
+            throw new Exception('Expected five receiving raw rows, got ' . count($rawRows));
+        }
+        if (($rawRows[0]['express_number'] ?? '') !== 'RX-A-001' || ($rawRows[1]['express_number'] ?? '') !== 'RX-A-001') {
+            throw new Exception('Receiving express number should carry down inside the first supplier section');
+        }
+        if (($rawRows[2]['express_number'] ?? '') !== '') {
+            throw new Exception('Receiving express number should reset at a new supplier section');
+        }
+        if (($rawRows[3]['express_number'] ?? '') !== 'RX-B-001' || ($rawRows[4]['express_number'] ?? '') !== 'RX-B-001') {
+            throw new Exception('Receiving express number should restart and carry down inside the second supplier section');
         }
     } finally {
         @unlink($csvPath);

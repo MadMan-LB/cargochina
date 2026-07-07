@@ -28,23 +28,15 @@ require __DIR__ . '/../../includes/area_layout.php';
 </div>
 
 <div id="receiveForm" class="card mb-3">
-    <div class="card-header"><?= htmlspecialchars(clmsT('B) Enter Actual Totals')) ?></div>
+    <div class="card-header"><?= htmlspecialchars(clmsT('B) Enter Total Receipt Values')) ?></div>
     <div class="card-body">
         <div class="row mb-3">
-            <div class="col-md-4"><label class="form-label"><?= htmlspecialchars(clmsT('Actual Cartons *')) ?></label><input type="number"
+            <div class="col-md-4"><label class="form-label"><?= htmlspecialchars(clmsT('Total Cartons *')) ?></label><input type="number"
                     class="form-control" id="actualCartons" min="0" required></div>
-            <div class="col-md-4"><label class="form-label"><?= htmlspecialchars(clmsT('Actual CBM')) ?></label><input type="number" step="0.0001"
-                    class="form-control" id="actualCbm" min="0" placeholder="<?= htmlspecialchars(clmsT('Direct or from L×W×H')) ?>"></div>
-            <div class="col-md-4"><label class="form-label"><?= htmlspecialchars(clmsT('L / W / H (cm)')) ?></label>
-                <div class="input-group input-group-sm">
-                    <input type="number" step="0.01" class="form-control" id="actualLength" placeholder="<?= htmlspecialchars(clmsT('L')) ?>" title="<?= htmlspecialchars(clmsT('Length cm')) ?>">
-                    <input type="number" step="0.01" class="form-control" id="actualWidth" placeholder="<?= htmlspecialchars(clmsT('W')) ?>" title="<?= htmlspecialchars(clmsT('Width cm')) ?>">
-                    <input type="number" step="0.01" class="form-control" id="actualHeight" placeholder="<?= htmlspecialchars(clmsT('H')) ?>" title="<?= htmlspecialchars(clmsT('Height cm')) ?>">
-                </div>
-                <small class="text-muted"><?= htmlspecialchars(clmsT('Optional: auto-calculates CBM')) ?></small>
-            </div>
-            <div class="col-md-4"><label class="form-label"><?= htmlspecialchars(clmsT('Actual Weight *')) ?></label><input type="number" step="0.0001"
-                    class="form-control" id="actualWeight" min="0" required></div>
+            <div class="col-md-4"><label class="form-label"><?= htmlspecialchars(clmsT('Total CBM')) ?></label><input type="number" step="0.0001"
+                    class="form-control" id="actualCbm" min="0" placeholder="<?= htmlspecialchars(clmsT('Auto from item dimensions or enter total')) ?>"></div>
+            <div class="col-md-4"><label class="form-label"><?= htmlspecialchars(clmsT('Total Weight *')) ?></label><input type="number" step="0.0001"
+                    class="form-control" id="actualWeight" min="0" required placeholder="<?= htmlspecialchars(clmsT('Auto from item weight/carton or enter total')) ?>"></div>
         </div>
         <div class="row mb-3">
             <div class="col-md-4"><label class="form-label"><?= htmlspecialchars(clmsT('Condition')) ?></label><select class="form-select" id="condition">
@@ -70,14 +62,15 @@ require __DIR__ . '/../../includes/area_layout.php';
                     <tr>
                         <th><?= htmlspecialchars(clmsT('Item')) ?></th>
                         <th><?= htmlspecialchars(clmsT('Declared')) ?></th>
-                        <th><?= htmlspecialchars(clmsT('Actual Cartons')) ?></th>
+                        <th><?= htmlspecialchars(clmsT('Total Cartons')) ?></th>
                         <th><?= htmlspecialchars(clmsT('Pieces / Carton')) ?></th>
                         <th><?= htmlspecialchars(clmsT('Total Qty')) ?></th>
                         <th><?= htmlspecialchars(clmsT('Unit Price / Factory Price')) ?></th>
                         <th><?= htmlspecialchars(clmsT('Total Amount')) ?></th>
-                        <th><?= htmlspecialchars(clmsT('Actual CBM')) ?></th>
-                        <th><?= htmlspecialchars(clmsT('Actual Weight')) ?></th>
-                        <th><?= htmlspecialchars(clmsT('Dimensions H/W/L')) ?></th>
+                        <th><?= htmlspecialchars(clmsT('Total CBM')) ?></th>
+                        <th><?= htmlspecialchars(clmsT('Weight / Carton')) ?></th>
+                        <th><?= htmlspecialchars(clmsT('Total Weight')) ?></th>
+                        <th><?= htmlspecialchars(clmsT('Dimensions H/W/L (cm)')) ?></th>
                         <th><?= htmlspecialchars(clmsT('Condition')) ?></th>
                         <th><?= htmlspecialchars(clmsT('Photos')) ?></th>
                     </tr>

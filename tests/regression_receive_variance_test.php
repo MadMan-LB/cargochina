@@ -10,6 +10,7 @@ $root = dirname(__DIR__);
 require_once $root . '/backend/config/database.php';
 require_once $root . '/backend/api/helpers.php';
 require_once $root . '/backend/services/NotificationService.php';
+require_once $root . '/backend/services/OrderReceivingService.php';
 
 $pdo = getDb();
 $passed = 0;
@@ -31,6 +32,7 @@ function test(string $name, callable $fn): void
 $orderId = null;
 $receiptId = null;
 $itemIds = [];
+$calcOrderId = null;
 
 try {
     $cust = $pdo->query("SELECT id FROM customers LIMIT 1")->fetch(PDO::FETCH_ASSOC);
@@ -105,7 +107,56 @@ try {
         $after = (int) $pdo->query("SELECT COUNT(*) FROM notification_delivery_log WHERE status='sent'")->fetchColumn();
         if ($after > $before + 2) throw new Exception("Idempotency may have failed: sent count increased too much");
     });
+
+    test('OrderReceivingService derives item CBM and total weight from dimensions and weight/carton', function () use ($pdo, $cust, $supp, $user, &$calcOrderId) {
+        $pdo->beginTransaction();
+        $pdo->prepare("INSERT INTO orders (customer_id, supplier_id, expected_ready_date, status, created_by) VALUES (?,?,CURDATE(),'Approved',?)")
+            ->execute([$cust['id'], $supp['id'], $user['id']]);
+        $calcOrderId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO order_items (order_id, quantity, unit, cartons, declared_cbm, declared_weight, description_en) VALUES (?,10,'cartons',10,6.0,25,'Auto Calc Item')")
+            ->execute([$calcOrderId]);
+        $calcItemId = (int) $pdo->lastInsertId();
+        $pdo->commit();
+
+        $result = (new OrderReceivingService())->receive($pdo, $calcOrderId, [
+            'actual_cartons' => 10,
+            'actual_cbm' => 0,
+            'actual_weight' => 0,
+            'condition' => 'good',
+            'photo_paths' => [],
+            'items' => [[
+                'order_item_id' => $calcItemId,
+                'actual_cartons' => 10,
+                'actual_height' => 100,
+                'actual_width' => 100,
+                'actual_length' => 60,
+                'weight_per_carton' => 2.5,
+            ]],
+        ], (int) $user['id']);
+
+        $stmt = $pdo->prepare("SELECT actual_cbm, actual_weight FROM warehouse_receipt_items WHERE receipt_id = ? AND order_item_id = ?");
+        $stmt->execute([(int) $result['receipt_id'], $calcItemId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$row) throw new Exception('Missing derived receipt item row');
+        if (abs((float) $row['actual_cbm'] - 6.0) > 0.00001) throw new Exception('Expected derived CBM 6.0, got ' . $row['actual_cbm']);
+        if (abs((float) $row['actual_weight'] - 25.0) > 0.0001) throw new Exception('Expected derived weight 25.0, got ' . $row['actual_weight']);
+    });
 } finally {
+    if ($calcOrderId) {
+        $receipts = $pdo->query("SELECT id FROM warehouse_receipts WHERE order_id=$calcOrderId")->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($receipts as $rid) {
+            $riIds = $pdo->query("SELECT id FROM warehouse_receipt_items WHERE receipt_id=$rid")->fetchAll(PDO::FETCH_COLUMN);
+            foreach ($riIds as $riid) $pdo->exec("DELETE FROM warehouse_receipt_item_photos WHERE receipt_item_id=$riid");
+            $pdo->exec("DELETE FROM warehouse_receipt_items WHERE receipt_id=$rid");
+            $pdo->exec("DELETE FROM warehouse_receipt_photos WHERE receipt_id=$rid");
+            $pdo->exec("DELETE FROM warehouse_receipts WHERE id=$rid");
+        }
+        $nIds = $pdo->query("SELECT id FROM notifications WHERE type IN ('variance_confirmation','order_received') AND title LIKE 'Order #$calcOrderId%'")->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($nIds as $nid) $pdo->exec("DELETE FROM notification_delivery_log WHERE notification_id=$nid");
+        foreach ($nIds as $nid) $pdo->exec("DELETE FROM notifications WHERE id=$nid");
+        $pdo->exec("DELETE FROM order_items WHERE order_id=$calcOrderId");
+        $pdo->exec("DELETE FROM orders WHERE id=$calcOrderId");
+    }
     if ($orderId) {
         $receipts = $pdo->query("SELECT id FROM warehouse_receipts WHERE order_id=$orderId")->fetchAll(PDO::FETCH_COLUMN);
         foreach ($receipts as $rid) {

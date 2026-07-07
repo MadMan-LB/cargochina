@@ -84,7 +84,7 @@ class DownloadExampleService
             $row++;
         }
 
-        $sheet->setCellValue('A' . $row, 'Supplier sections: type "Supplier:" in column A and the supplier name or code in column B before each group of item rows.');
+        $sheet->setCellValue('A' . $row, 'Supplier sections: type "Supplier:" in column A and the supplier name or code in column B before each group. Express Number carries down inside that supplier section until the next Supplier row.');
         $sheet->mergeCells('A' . $row . ':' . $lastColumn . $row);
         $sheet->getStyle('A' . $row . ':' . $lastColumn . $row)->applyFromArray([
             'font' => ['bold' => true, 'size' => 10, 'color' => ['rgb' => '1F4E79']],

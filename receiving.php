@@ -226,14 +226,15 @@ require 'includes/layout.php';
               <tr>
                 <th><?= clmsT('Item') ?></th>
                 <th><?= clmsT('Declared') ?></th>
-                <th><?= clmsT('Actual Cartons *') ?></th>
+                <th><?= clmsT('Total Cartons *') ?></th>
                 <th><?= clmsT('Pieces / Carton') ?></th>
                 <th><?= clmsT('Total Qty') ?></th>
                 <th><?= clmsT('Unit Price / Factory Price') ?></th>
                 <th><?= clmsT('Total Amount') ?></th>
-                <th><?= clmsT('Actual CBM') ?></th>
-                <th><?= clmsT('Actual Weight') ?></th>
-                <th><?= clmsT('Dimensions H/W/L') ?></th>
+                <th><?= clmsT('Total CBM') ?></th>
+                <th><?= clmsT('Weight / Carton') ?></th>
+                <th><?= clmsT('Total Weight') ?></th>
+                <th><?= clmsT('Dimensions H/W/L (cm)') ?></th>
                 <th><?= clmsT('Condition') ?></th>
                 <th><?= clmsT('Photos') ?></th>
               </tr>
@@ -243,21 +244,15 @@ require 'includes/layout.php';
         </div>
       </div>
       <div class="row mb-3 form-row-responsive">
-        <div class="col-12 col-md-4 mb-2"><label class="form-label"><?= clmsT('Actual Cartons *') ?></label><input type="number" class="form-control" id="actualCartons" min="0" required></div>
+        <div class="col-12 col-md-4 mb-2"><label class="form-label"><?= clmsT('Total Cartons *') ?></label><input type="number" class="form-control" id="actualCartons" min="0" required></div>
         <div class="col-12 col-md-4 mb-2">
-          <label class="form-label"><?= clmsT('Actual CBM') ?></label>
-          <input type="number" step="0.0001" class="form-control" id="actualCbm" min="0" placeholder="<?= clmsT('Direct or from L×W×H') ?>">
+          <label class="form-label"><?= clmsT('Total CBM') ?></label>
+          <input type="number" step="0.0001" class="form-control" id="actualCbm" min="0" placeholder="<?= clmsT('Auto from item dimensions or enter total') ?>">
         </div>
         <div class="col-12 col-md-4 mb-2">
-          <label class="form-label"><?= clmsT('L / W / H (cm)') ?></label>
-          <div class="input-group input-group-sm">
-            <input type="number" step="0.01" class="form-control" id="actualLength" placeholder="<?= clmsT('L') ?>" title="<?= clmsT('Length cm') ?>">
-            <input type="number" step="0.01" class="form-control" id="actualWidth" placeholder="<?= clmsT('W') ?>" title="<?= clmsT('Width cm') ?>">
-            <input type="number" step="0.01" class="form-control" id="actualHeight" placeholder="<?= clmsT('H') ?>" title="<?= clmsT('Height cm') ?>">
-          </div>
-          <small class="text-muted"><?= clmsT('Optional: auto-calculates CBM') ?></small>
+          <label class="form-label"><?= clmsT('Total Weight *') ?></label>
+          <input type="number" step="0.0001" class="form-control" id="actualWeight" min="0" required placeholder="<?= clmsT('Auto from item weight/carton or enter total') ?>">
         </div>
-        <div class="col-12 col-md-4 mb-2"><label class="form-label"><?= clmsT('Actual Weight *') ?></label><input type="number" step="0.0001" class="form-control" id="actualWeight" min="0" required></div>
       </div>
       <div class="row mb-3 form-row-responsive">
         <div class="col-12 col-md-4 mb-2"><label class="form-label"><?= clmsT('Condition') ?></label><select class="form-select" id="condition">
@@ -318,7 +313,7 @@ require 'includes/layout.php';
           </a>
           <span class="small text-muted"><?= clmsT('Accepted: .xlsx, .xls, .csv') ?></span>
           <div class="small text-muted">
-            <?= clmsT('Same template columns: Customer, Item No, names, SKU, Express Number, Cartons, CBM/Unit or Total CBM, Weight/Unit or Total Weight. Use Supplier: rows in column A/B to split suppliers.') ?>
+            <?= clmsT('Same template columns: Customer, Item No, names, SKU, Express Number, Cartons, CBM/Unit or Total CBM or Height/Width/Length, Weight/Carton or Total Weight. Use Supplier: rows in column A/B to split suppliers; Express Number carries down within each supplier section.') ?>
           </div>
         </div>
         <div id="receivingImportStatus" class="draft-import-status d-none mb-3" aria-live="polite"></div>
