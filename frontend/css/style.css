@@ -2455,12 +2455,15 @@ body.d-flex {
 
 #draftOrderModal .draft-item-photo-panel {
   min-height: 0;
+  min-width: 0;
 }
 
 #draftOrderModal .draft-item-photos {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
   gap: 0.4rem;
+  align-items: start;
+  max-width: 100%;
 }
 
 #draftOrderModal .draft-item-photo-thumb {
@@ -2469,7 +2472,10 @@ body.d-flex {
   border-radius: 12px;
   border: 1px solid #d7e3f4;
   background: #eff6ff;
-  min-height: 74px;
+  aspect-ratio: 1 / 1;
+  min-height: 0;
+  max-width: 120px;
+  width: 100%;
 }
 
 #draftOrderModal .draft-item-photo-thumb a,
@@ -2481,6 +2487,7 @@ body.d-flex {
 
 #draftOrderModal .draft-item-photo-thumb img {
   object-fit: cover;
+  min-width: 0;
 }
 
 #draftOrderModal .draft-item-photo-remove {
@@ -2665,8 +2672,12 @@ body.d-flex {
     gap: 0.35rem;
   }
 
+  #draftOrderModal .draft-item-photos {
+    grid-template-columns: repeat(auto-fit, minmax(64px, 92px));
+  }
+
   #draftOrderModal .draft-item-photo-thumb {
-    min-height: 68px;
+    max-width: 92px;
   }
 }
 
@@ -2707,8 +2718,12 @@ body.d-flex {
     grid-template-columns: 1fr 1fr;
   }
 
+  #draftOrderModal .draft-item-photos {
+    grid-template-columns: repeat(auto-fit, minmax(58px, 84px));
+  }
+
   #draftOrderModal .draft-item-photo-thumb {
-    min-height: 62px;
+    max-width: 84px;
   }
 }
 

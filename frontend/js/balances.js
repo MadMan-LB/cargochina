@@ -1027,19 +1027,39 @@
     document.addEventListener("DOMContentLoaded", () => {
         registerUnsavedChangesGuard?.("#balanceTransactionModal .modal-body");
         if (typeof Autocomplete !== "undefined") {
+            const renderBalanceParty = (item) => {
+                const parts = [
+                    item?.name,
+                    item?.default_shipping_code || item?.code || item?.store_id,
+                    item?.phone,
+                ]
+                    .map((part) => (part == null ? "" : String(part).trim()))
+                    .filter(Boolean);
+                return parts.join(" — ") || `#${item?.id || ""}`;
+            };
             balanceCustomerAc = Autocomplete.init(el("balanceTxnCustomerSearch"), {
-                resource: "customers",
-                searchPath: "/search",
+                resource: "balances",
+                searchPath: "/party-search",
+                extraParams: { party_type: "customer" },
                 placeholder: balancesT("Type to search customer..."),
+                minChars: 0,
+                limit: 20,
+                renderItem: renderBalanceParty,
+                displayValue: (item) => item?.name || "",
                 onSelect: (item) => {
                     el("balanceTxnCustomerId").value = item.id || "";
                     loadBalancePartyAccounts("customer", item.id || "");
                 },
             });
             balanceSupplierAc = Autocomplete.init(el("balanceTxnSupplierSearch"), {
-                resource: "suppliers",
-                searchPath: "/search",
+                resource: "balances",
+                searchPath: "/party-search",
+                extraParams: { party_type: "supplier" },
                 placeholder: balancesT("Type to search supplier..."),
+                minChars: 0,
+                limit: 20,
+                renderItem: renderBalanceParty,
+                displayValue: (item) => item?.name || "",
                 onSelect: (item) => {
                     el("balanceTxnSupplierId").value = item.id || "";
                     loadBalancePartyAccounts("supplier", item.id || "");

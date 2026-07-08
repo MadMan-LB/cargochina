@@ -29,6 +29,44 @@ function orderT(text, replacements = null) {
     return typeof t === "function" ? t(text, replacements) : text;
 }
 
+function orderReceiptFees(receipt = {}) {
+    return Array.isArray(receipt?.fees) ? receipt.fees : [];
+}
+
+function orderReceiptFeesTable(receipt = {}) {
+    const fees = orderReceiptFees(receipt);
+    if (!fees.length) return "";
+    return `
+      <div class="table-responsive mt-2">
+        <table class="table table-sm mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>${escapeHtml(orderT("Fee"))}</th>
+              <th class="text-end">${escapeHtml(orderT("Amount"))}</th>
+              <th>${escapeHtml(orderT("Currency"))}</th>
+              <th>${escapeHtml(orderT("Notes"))}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${fees
+                .map((fee) => {
+                    const amount =
+                        typeof fmtOrderAmount === "function"
+                            ? fmtOrderAmount(fee.amount || 0)
+                            : String(fee.amount || 0);
+                    return `<tr>
+                      <td>${escapeHtml(fee.fee_label || fee.label || orderT("Warehouse fee"))}</td>
+                      <td class="text-end">${escapeHtml(amount)}</td>
+                      <td>${escapeHtml(fee.currency || "")}</td>
+                      <td>${escapeHtml(fee.notes || "")}</td>
+                    </tr>`;
+                })
+                .join("")}
+          </tbody>
+        </table>
+      </div>`;
+}
+
 function normalizeOrderGoodType(value) {
     const raw = String(value || "").trim();
     if (!raw) return "";
@@ -2638,7 +2676,8 @@ async function showOrderFinance(id) {
             <div class="col-3"><div class="border rounded p-2 text-center"><div class="small text-muted">Actual Weight</div><div class="fw-bold text-warning">${fmtOrderWeight(receipt.actual_weight || 0, 2)} kg</div></div></div>
             <div class="col-3"><div class="border rounded p-2 text-center"><div class="small text-muted">Actual Cartons</div><div class="fw-bold">${receipt.actual_cartons ?? "—"}</div></div></div>
             <div class="col-3"><div class="border rounded p-2 text-center"><div class="small text-muted">Condition</div><div class="fw-bold">${escapeHtml(receipt.receipt_condition || "—")}</div></div></div>
-          </div>`
+          </div>
+          ${orderReceiptFeesTable(receipt)}`
             : "";
 
         document.getElementById("financeModalBody").innerHTML = `
@@ -2654,7 +2693,7 @@ async function showOrderFinance(id) {
             <span class="badge bg-light text-dark border">${escapeHtml(typeof statusLabel === "function" ? statusLabel(o.status) : o.status || "—")}</span>
             <span class="badge bg-light text-dark border">${escapeHtml(o.expected_ready_date || "—")}</span>
           </div>
-          ${receipt ? `<h6 class="mt-3 mb-2 fw-semibold">Warehouse Receipt</h6>${receiptHtml}` : '<p class="text-muted small">No warehouse receipt yet.</p>'}
+          ${receipt ? `<h6 class="mt-3 mb-2 fw-semibold">${escapeHtml(orderT("Warehouse Receipt"))}</h6>${receiptHtml}` : `<p class="text-muted small">${escapeHtml(orderT("No warehouse receipt yet."))}</p>`}
           <h6 class="mt-3 mb-2 fw-semibold">Items — Supplier Cost Breakdown</h6>
           <div class="table-responsive">
             <table class="table table-sm table-hover">
@@ -2853,13 +2892,14 @@ async function showOrderInfo(id) {
         const receiptHtml = receipt
             ? `
           <div class="mt-3">
-            <h6 class="fw-semibold mb-2">Warehouse Receipt</h6>
+            <h6 class="fw-semibold mb-2">${escapeHtml(orderT("Warehouse Receipt"))}</h6>
             <div class="row g-2 mb-2">
               <div class="col-6 col-md-3"><div class="order-info-stat-card"><div class="label">Actual CBM</div><div class="value text-warning">${fmtOrderCbm(receipt.actual_cbm || 0, 4)}</div></div></div>
               <div class="col-6 col-md-3"><div class="order-info-stat-card"><div class="label">Actual Weight</div><div class="value text-warning">${fmtOrderWeight(receipt.actual_weight || 0, 2)} kg</div></div></div>
               <div class="col-6 col-md-3"><div class="order-info-stat-card"><div class="label">Actual Cartons</div><div class="value">${receipt.actual_cartons ?? "—"}</div></div></div>
               <div class="col-6 col-md-3"><div class="order-info-stat-card"><div class="label">Condition</div><div class="value">${escapeHtml(receipt.receipt_condition || "—")}</div></div></div>
             </div>
+            ${orderReceiptFeesTable(receipt)}
             ${receiptItemRows ? `<div class="table-responsive mt-2"><table class="table table-sm mb-0"><thead class="table-light"><tr><th>${escapeHtml(orderT("Item"))}</th><th class="text-end">${escapeHtml(orderT("Received Qty"))}</th><th class="text-end">${escapeHtml(orderT("Price / Amount"))}</th><th class="text-end">${escapeHtml(orderT("CBM / Weight"))}</th></tr></thead><tbody>${receiptItemRows}</tbody></table></div>` : ""}
             ${receipt.photos?.length ? `<div class="d-flex gap-2 flex-wrap mt-2">${receipt.photos.map((p) => `<a href="${escapeHtml(uploadedFileUrl(p))}" target="_blank" rel="noopener"><img src="${escapeHtml(uploadedThumbUrl(p, 72, 72, "cover"))}" class="order-info-thumb" style="width:72px;height:72px" loading="lazy"></a>`).join("")}</div>` : ""}
           </div>`

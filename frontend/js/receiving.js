@@ -3,6 +3,7 @@ let receiveOrderItems = [];
 let receiveItemPhotos = {};
 let receiveItemRenderLimit = 80;
 let receiveCurrentOrderId = null;
+let receiveCurrentOrderCurrency = "USD";
 let warehouseQueueData = [];
 let warehouseQueueSourceData = [];
 let receivingImportPreviewToken = null;
@@ -31,6 +32,88 @@ function receivingT(text, replacements = null) {
 
 function receivingOrderExcelUrl(orderId) {
     return `${window.API_BASE || "/cargochina/api/v1"}/orders/${encodeURIComponent(orderId)}/export?format=xlsx`;
+}
+
+function receivingReceiptFeeCurrency() {
+    return String(receiveCurrentOrderCurrency || "USD").trim().toUpperCase() || "USD";
+}
+
+function updateReceiptFeeCurrency() {
+    const currency = receivingReceiptFeeCurrency();
+    const target = document.getElementById("receiptFeesCurrency");
+    if (target) target.textContent = currency;
+    document.querySelectorAll(".receipt-fee-currency").forEach((el) => {
+        el.textContent = currency;
+    });
+}
+
+function addReceiptFeeRow(fee = {}) {
+    const rows = document.getElementById("receiptFeesRows");
+    if (!rows) return;
+    const row = document.createElement("div");
+    row.className = "receipt-fee-row row g-2 align-items-end";
+    row.innerHTML = `
+        <div class="col-12 col-md-4">
+            <label class="form-label small mb-1">${escapeHtml(receivingT("Fee"))}</label>
+            <input type="text" class="form-control form-control-sm receipt-fee-label" placeholder="${escapeHtml(receivingT("Pallet fee"))}" value="${escapeHtml(fee.label || fee.fee_label || "")}">
+        </div>
+        <div class="col-8 col-md-3">
+            <label class="form-label small mb-1">${escapeHtml(receivingT("Amount"))} <span class="text-muted receipt-fee-currency">${escapeHtml(receivingReceiptFeeCurrency())}</span></label>
+            <input type="number" class="form-control form-control-sm receipt-fee-amount" min="0" step="0.0001" placeholder="0" value="${escapeHtml(fee.amount ?? "")}">
+        </div>
+        <div class="col-12 col-md-4">
+            <label class="form-label small mb-1">${escapeHtml(receivingT("Notes"))}</label>
+            <input type="text" class="form-control form-control-sm receipt-fee-notes" placeholder="${escapeHtml(receivingT("Optional"))}" value="${escapeHtml(fee.notes || "")}">
+        </div>
+        <div class="col-4 col-md-1 d-grid">
+            <button type="button" class="btn btn-outline-danger btn-sm receipt-fee-remove">${escapeHtml(receivingT("Remove"))}</button>
+        </div>`;
+    row.querySelector(".receipt-fee-remove")?.addEventListener("click", () => {
+        row.remove();
+    });
+    rows.appendChild(row);
+    updateReceiptFeeCurrency();
+}
+
+function resetReceiptFees() {
+    const rows = document.getElementById("receiptFeesRows");
+    if (!rows) return;
+    rows.innerHTML = "";
+    addReceiptFeeRow();
+    updateReceiptFeeCurrency();
+}
+
+function collectReceiptFees() {
+    const rows = Array.from(document.querySelectorAll(".receipt-fee-row"));
+    const fees = [];
+    for (let index = 0; index < rows.length; index++) {
+        const row = rows[index];
+        const label = row.querySelector(".receipt-fee-label")?.value.trim() || "";
+        const notes = row.querySelector(".receipt-fee-notes")?.value.trim() || "";
+        const amountRaw = row.querySelector(".receipt-fee-amount")?.value.trim() || "";
+        if (!label && !notes && !amountRaw) continue;
+        const amount = Number(String(amountRaw).replace(/,/g, ""));
+        if (!Number.isFinite(amount)) {
+            return {
+                fees: [],
+                error: receivingT("Fee row {row}: amount must be numeric", { row: index + 1 }),
+            };
+        }
+        if (amount < 0) {
+            return {
+                fees: [],
+                error: receivingT("Fee row {row}: amount must be zero or positive", { row: index + 1 }),
+            };
+        }
+        if (amount <= 0) continue;
+        fees.push({
+            label: label || receivingT("Warehouse fee"),
+            amount,
+            currency: receivingReceiptFeeCurrency(),
+            notes: notes || null,
+        });
+    }
+    return { fees };
 }
 
 function receivingPageEl() {
@@ -292,6 +375,10 @@ document.addEventListener("DOMContentLoaded", () => {
         .getElementById("condition")
         ?.addEventListener("change", updateVariancePhotoAlert);
     setupReceiveDimensionInputs();
+    document
+        .getElementById("addReceiptFeeBtn")
+        ?.addEventListener("click", () => addReceiptFeeRow());
+    resetReceiptFees();
     document.getElementById("calPrev")?.addEventListener("click", () => {
         calMonth--;
         if (calMonth < 0) {
@@ -389,6 +476,8 @@ function setupReceiveOrderSearch() {
             receiveOrderItems = [];
             receiveItemPhotos = {};
             receiveCurrentOrderId = null;
+            receiveCurrentOrderCurrency = "USD";
+            resetReceiptFees();
             updateDeclaredSummary(null);
         }
     });
@@ -1993,7 +2082,10 @@ async function loadOrderForReceive(orderId) {
             receiveItemPhotos = {};
             receiveItemRenderLimit = RECEIVING_ITEM_RENDER_CHUNK;
             receiveCurrentOrderId = orderId;
+            resetReceiptFees();
         }
+        receiveCurrentOrderCurrency = order?.currency || "USD";
+        updateReceiptFeeCurrency();
         updateDeclaredSummary(order);
         const tbody = document.getElementById("itemLevelBody");
         if (!tbody) return;
@@ -2116,6 +2208,11 @@ async function submitReceive() {
     const condition = document.getElementById("condition").value;
     const notes = document.getElementById("receiveNotes").value;
     const photoPaths = receivePhotoPaths;
+    const feeResult = collectReceiptFees();
+    if (feeResult.error) {
+        showToast(feeResult.error, "danger");
+        return;
+    }
 
     const searchEl = document.getElementById("receiveOrderSearch");
     const declaredCbm = parseFloat(searchEl?.dataset.declaredCbm || 0);
@@ -2246,6 +2343,7 @@ async function submitReceive() {
         photo_paths: photoPaths,
     };
     if (items.length) payload.items = items;
+    if (feeResult.fees.length) payload.fees = feeResult.fees;
 
     const submitBtn = document.getElementById("submitReceiveBtn");
     try {
@@ -2271,6 +2369,8 @@ async function submitReceive() {
         receiveOrderItems = [];
         receiveItemPhotos = {};
         receiveCurrentOrderId = null;
+        receiveCurrentOrderCurrency = "USD";
+        resetReceiptFees();
         renderReceivePhotoPreview();
         refreshUnsavedBaseline?.(document.getElementById("receiveForm"));
     } catch (e) {

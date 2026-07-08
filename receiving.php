@@ -262,6 +262,17 @@ require 'includes/layout.php';
           </select></div>
         <div class="col-12 col-md-8 mb-2"><label class="form-label"><?= clmsT('Notes') ?></label><input type="text" class="form-control" id="receiveNotes"></div>
       </div>
+      <div class="mb-3 border rounded p-3 bg-light-subtle" id="receiptFeesSection">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+          <div>
+            <div class="fw-semibold"><?= clmsT('Customer fees') ?></div>
+            <div class="small text-muted"><?= clmsT('Add customer-facing receiving fees such as pallet fees. These appear on the customer Excel download.') ?></div>
+          </div>
+          <button type="button" class="btn btn-outline-primary btn-sm" id="addReceiptFeeBtn">+ <?= clmsT('Add fee') ?></button>
+        </div>
+        <div id="receiptFeesRows" class="d-flex flex-column gap-2"></div>
+        <div class="small text-muted mt-2"><?= clmsT('Fee currency follows this order:') ?> <span id="receiptFeesCurrency">—</span></div>
+      </div>
       <div class="mb-3">
         <label class="form-label"><?= clmsT('Evidence Photos') ?> <span class="text-danger"><?= clmsT('*required if variance or damage') ?></span></label>
         <div id="variancePhotoAlert" class="alert alert-warning py-2 d-none" role="alert">

@@ -56,7 +56,8 @@ class OrderExcelService
         $row = $this->writeCompanyHeader($sheet, 1, self::STANDARD_LAST_COL);
         $this->writeStandardColumnHeaders($sheet, $row);
         $row++;
-        $this->writeStandardItems($sheet, $items, $row, $order);
+        $row = $this->writeStandardItems($sheet, $items, $row, $order);
+        $this->writeStandardReceiptFees($sheet, $row, $order, $items);
 
         $outName = $filename ?? ('order_' . (int) ($order['id'] ?? 0) . '_goods_details.xlsx');
         $this->outputXlsx($spreadsheet, $outName);
@@ -529,6 +530,87 @@ class OrderExcelService
                 $this->writePhotoCell($sheet, self::PHOTO_COLUMN . $row, $item['image_paths'] ?? []);
                 $row++;
             }
+        }
+
+        return $row;
+    }
+
+    private function writeStandardReceiptFees($sheet, int $startRow, array $order, array $items): int
+    {
+        $fees = $this->extractReceiptFees($order);
+        if (!$fees) {
+            return $startRow;
+        }
+
+        $row = $startRow + 1;
+        $sheet->setCellValue('A' . $row, $this->tr('Customer-facing receiving fees'));
+        $sheet->mergeCells('A' . $row . ':' . self::STANDARD_LAST_COL . $row);
+        $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
+            'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true, 'color' => ['rgb' => self::HEADER_BLUE]],
+            'alignment' => [
+                'horizontal' => Alignment::HORIZONTAL_LEFT,
+                'vertical' => Alignment::VERTICAL_CENTER,
+            ],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_BLUE]],
+            'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
+        ]);
+        $sheet->getRowDimension($row)->setRowHeight(22);
+        $row++;
+
+        foreach ($fees as $fee) {
+            $amount = round((float) ($fee['amount'] ?? 0), 4);
+            $currency = $this->normalizeCurrency((string) ($fee['currency'] ?? $order['currency'] ?? 'USD'));
+            $label = trim((string) ($fee['fee_label'] ?? $fee['label'] ?? 'Warehouse fee'));
+            $notes = trim((string) ($fee['notes'] ?? ''));
+
+            $sheet->setCellValue('A' . $row, $label !== '' ? $label : $this->tr('Warehouse fee'));
+            $sheet->setCellValue('R' . $row, $amount);
+            $sheet->setCellValue('S' . $row, $currency);
+            $sheet->setCellValue('T' . $row, $notes);
+            $sheet->mergeCells('A' . $row . ':Q' . $row);
+            $sheet->mergeCells('T' . $row . ':' . self::STANDARD_LAST_COL . $row);
+            $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
+                'font' => ['name' => 'Arial', 'size' => 10],
+                'alignment' => [
+                    'horizontal' => Alignment::HORIZONTAL_LEFT,
+                    'vertical' => Alignment::VERTICAL_CENTER,
+                    'wrapText' => true,
+                ],
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FFFFFF']],
+                'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
+            ]);
+            $sheet->getStyle('R' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
+            $sheet->getStyle('R' . $row . ':S' . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+            $sheet->getRowDimension($row)->setRowHeight(22);
+            $row++;
+        }
+
+        $goodsTotals = $this->calculateStandardSellTotals($items, $order);
+        $feeTotals = $this->calculateReceiptFeeTotals($fees, (string) ($order['currency'] ?? 'USD'));
+        $summaryRows = [
+            ['Goods total', $goodsTotals, self::LIGHT_BLUE],
+            ['Receiving fees total', $feeTotals, self::LIGHT_YELLOW],
+            ['Total amount with receiving fees', $this->mergeCurrencyTotals($goodsTotals, $feeTotals), 'FFE699'],
+        ];
+
+        foreach ($summaryRows as $entry) {
+            [$label, $amounts, $fill] = $entry;
+            $sheet->setCellValue('A' . $row, $this->tr($label));
+            $sheet->setCellValue('R' . $row, $this->formatCurrencyBreakdown($amounts));
+            $sheet->mergeCells('A' . $row . ':Q' . $row);
+            $sheet->mergeCells('R' . $row . ':' . self::STANDARD_LAST_COL . $row);
+            $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
+                'font' => ['name' => 'Arial', 'size' => 10, 'bold' => true],
+                'alignment' => [
+                    'horizontal' => Alignment::HORIZONTAL_LEFT,
+                    'vertical' => Alignment::VERTICAL_CENTER,
+                ],
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => $fill]],
+                'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
+            ]);
+            $sheet->getStyle('R' . $row . ':' . self::STANDARD_LAST_COL . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+            $sheet->getRowDimension($row)->setRowHeight(22);
+            $row++;
         }
 
         return $row;
@@ -1145,6 +1227,58 @@ class OrderExcelService
         }
 
         return $unitPrice;
+    }
+
+    private function extractReceiptFees(array $order): array
+    {
+        $fees = $order['receipt_fees'] ?? $order['receipt']['fees'] ?? [];
+        if (!is_array($fees)) {
+            return [];
+        }
+
+        return array_values(array_filter($fees, static function ($fee): bool {
+            if (!is_array($fee)) {
+                return false;
+            }
+            return (float) ($fee['amount'] ?? 0) > 0;
+        }));
+    }
+
+    private function calculateStandardSellTotals(array $items, array $order): array
+    {
+        $totals = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $quantity = $this->resolveQuantity($item);
+            $unitPrice = $this->resolveUnitPrice($item);
+            if ($quantity <= 0 || $unitPrice === null) {
+                continue;
+            }
+            $currency = $this->resolveCurrency($order, $item);
+            $this->addCurrencyTotal($totals, $currency, round($quantity * $unitPrice, 4));
+        }
+
+        return $totals;
+    }
+
+    private function calculateReceiptFeeTotals(array $fees, string $defaultCurrency): array
+    {
+        $totals = [];
+        foreach ($fees as $fee) {
+            if (!is_array($fee)) {
+                continue;
+            }
+            $amount = round((float) ($fee['amount'] ?? 0), 4);
+            if ($amount <= 0) {
+                continue;
+            }
+            $currency = $this->normalizeCurrency((string) ($fee['currency'] ?? $defaultCurrency));
+            $this->addCurrencyTotal($totals, $currency, $amount);
+        }
+
+        return $totals;
     }
 
     private function resolveCurrency(array $order, array $item): string

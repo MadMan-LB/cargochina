@@ -250,7 +250,7 @@ function balancesPartySearchClause(PDO $pdo, string $alias, string $table, array
     return $parts ? (' AND (' . implode(' OR ', $parts) . ')') : '';
 }
 
-function balancesFetchParties(PDO $pdo, string $partyType, string $q): array
+function balancesFetchParties(PDO $pdo, string $partyType, string $q, int $limit = 0): array
 {
     $table = $partyType === 'customer' ? 'customers' : 'suppliers';
     $alias = $partyType === 'customer' ? 'c' : 's';
@@ -263,16 +263,25 @@ function balancesFetchParties(PDO $pdo, string $partyType, string $q): array
         $cols[] = "NULL as phone";
     }
     if ($partyType === 'customer' && balancesTableHasColumn($pdo, 'customers', 'default_shipping_code')) {
+        $cols[] = "$alias.default_shipping_code";
         $searchCols[] = 'default_shipping_code';
+    } else {
+        $cols[] = "NULL as default_shipping_code";
     }
     if ($partyType === 'supplier' && balancesTableHasColumn($pdo, 'suppliers', 'store_id')) {
+        $cols[] = "$alias.store_id";
         $searchCols[] = 'store_id';
+    } else {
+        $cols[] = "NULL as store_id";
     }
 
     $params = [];
     $sql = 'SELECT ' . implode(', ', $cols) . " FROM $table $alias WHERE 1=1";
     $sql .= balancesPartySearchClause($pdo, $alias, $table, $searchCols, $q, $params);
     $sql .= " ORDER BY $alias.name";
+    if ($limit > 0) {
+        $sql .= ' LIMIT ' . max(1, min(50, $limit));
+    }
     $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
     if ($params) {
         $stmt->execute($params);
@@ -1269,6 +1278,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
         if ($id === 'transactions') {
             jsonResponse(['data' => balancesListTransactions($pdo, $_GET)]);
+        }
+
+        if ($id === 'party-search') {
+            $partyType = balancesNormalizePartyType($_GET['party_type'] ?? null);
+            if (!$partyType) {
+                jsonError('Party type must be customer or supplier', 400);
+            }
+            $q = trim((string) ($_GET['q'] ?? ''));
+            $limit = isset($_GET['limit']) ? (int) $_GET['limit'] : 20;
+            jsonResponse(['data' => balancesFetchParties($pdo, $partyType, $q, $limit)]);
         }
 
         if ($id === 'export') {

@@ -354,7 +354,7 @@ The sidebar is defined in `includes/layout.php`. All links use root paths (`/car
 | **URL** | `/cargochina/receiving.php` |
 | **Purpose** | Warehouse receiving: list/calendar/schedule views; inline receive form |
 | **Access** | WarehouseStaff, SuperAdmin |
-| **UI** | Filters (supplier, customer, date, shipping code); Tabs: List, Calendar, Schedule; Receive Order card with order search + form (actuals, condition, per-item optional, photos) |
+| **UI** | Filters (supplier, customer, date, shipping code); Tabs: List, Calendar, Schedule; Receive Order card with order search + total receipt fields, item-level CBM/weight/dimension entry, condition, and photos |
 | **Actions** | Filter; Receive (record receipt); Export CSV |
 | **Backend** | `GET /receiving/queue`, `/search`; `GET /orders/{id}`; `POST /orders/{id}/receive`; `GET /config/receiving` |
 | **DB** | orders, warehouse_receipts, warehouse_receipt_photos, warehouse_receipt_items, warehouse_receipt_item_photos |
@@ -386,7 +386,7 @@ The sidebar is defined in `includes/layout.php`. All links use root paths (`/car
 | **URL** | `/cargochina/warehouse/receiving/receive.php?order_id=X` |
 | **Purpose** | Dedicated receive form for order X |
 | **Access** | WarehouseStaff, SuperAdmin |
-| **UI** | Order overview; Actual totals (cartons, CBM, L×W×H, weight, condition, notes); Per-item actuals (if item-level enabled); Evidence photos; Variance results |
+| **UI** | Order overview; Total receipt values (cartons, CBM, weight, condition, notes); Per-item cartons, dimensions, CBM, weight/carton, total weight, condition, and evidence photos; Variance results |
 | **Actions** | Record receipt |
 | **Backend** | `GET /orders/{id}`; `GET /config/receiving`; `POST /orders/{id}/receive` |
 | **Script** | `frontend/js/receiving_receive.js`, `photo_uploader.js`, `upload-utils.js` |

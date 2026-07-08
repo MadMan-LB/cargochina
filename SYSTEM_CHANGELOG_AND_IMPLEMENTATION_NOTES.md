@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-07-08 Receiving Customer Fees, Balances Lookup, and UI Hardening
+
+- Added migration `071_warehouse_receipt_customer_fees.sql` with `warehouse_receipt_fees` to store customer-facing fees entered during warehouse receiving, such as pallet fees.
+- Root `receiving.php` and warehouse-area `warehouse/receiving/receive.php` now let operators add receipt fees directly while recording a receipt. Fees are validated server-side by `OrderReceivingService`, saved in the same transaction as the warehouse receipt, and included in receiving audit/log metadata.
+- Order/receipt read paths now return `receipt.fees`; receipt detail, order info, and order finance modals display the fees. Standard order Excel/CSV exports include fee rows and fee-inclusive customer totals through `OrderExcelService` and `orders.php` export fallback.
+- Accounting/balances were intentionally not auto-posted from receiving fees. The fees are receipt/export charges only until the business confirms ledger behavior.
+- Balances transaction customer/supplier autocomplete now uses `/balances/party-search`, a safe page-scoped lookup that works for any user who can access Balances without requiring full customer/supplier management API permissions.
+- Chinese UI translations were updated for receiving fees, fee totals, and export labels; the existing `Dangerous Goods` mapping remains available as `危险品`.
+- Draft Order photo thumbnails now use responsive square sizing to prevent image/control overlap when `procurement_drafts.php` is narrowed.
+
+---
+
+## 2026-07-07 Receiving Totalization and Item Dimension Calculations
+
+- Removed the order-level `L / W / H (cm)` receiving inputs from both root `receiving.php` and warehouse-area `warehouse/receiving/receive.php`.
+- Renamed receiving entry labels from `Actual` to `Total` where operators enter receipt totals, while leaving historical receipt/report labels unchanged.
+- Added item-level `Weight / Carton` input. Item Total Weight now auto-calculates from `cartons * weight_per_carton`, and item Total CBM auto-calculates from `height * width * length * cartons / 1000000`.
+- Updated both receiving JavaScript flows to roll calculated item CBM/weight/cartons into the receipt-level totals and to submit `weight_per_carton` as a helper value.
+- Updated `OrderReceivingService` so direct API/import callers get the same derived item CBM and total weight behavior server-side; no database migration was required because existing receipt item total/dimension columns are reused.
+- Updated receiving import header validation and derived values so `Height`, `Width`, and `Length` can satisfy CBM calculation when `Total CBM`/`CBM per carton` is not supplied.
+- Verification: PHP lint passed with XAMPP PHP, JS syntax checks passed for both receiving scripts, and `tests/regression_receive_variance_test.php` now verifies server-side derived CBM/weight with 6/6 passing.
+
+---
+
 ## 2026-07-07 Procurement/Receiving Express Number Carry-Down
 
 - Procurement import now carries the first filled `Express Number` down through later blank express-number rows in the same supplier section, resetting at the next `Supplier:` marker or explicit supplier change.

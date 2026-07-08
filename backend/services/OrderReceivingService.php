@@ -56,6 +56,11 @@ class OrderReceivingService
         }
 
         $photoPaths = $this->normalizeStoredUploadPathList($input['photo_paths'] ?? []);
+        $receiptFees = $this->normalizeReceiptFees($input['fees'] ?? [], (string) ($order['currency'] ?? 'USD'));
+        if ($receiptFees && !$this->tableExists($pdo, 'warehouse_receipt_fees')) {
+            throw new OrderReceivingValidationException('Receipt fee storage is not installed. Run the latest database migrations.', 500);
+        }
+        $receiptFeeTotals = $this->summarizeReceiptFees($receiptFees);
         $itemsInput = is_array($input['items'] ?? null) ? $input['items'] : [];
         $config = require dirname(__DIR__) . '/config/config.php';
         $thresholdPct = $config['variance_threshold_percent'] ?? 10;
@@ -258,6 +263,24 @@ class OrderReceivingService
                 $insPhoto->execute([$receiptId, $path]);
             }
 
+            if ($receiptFees) {
+                $insFee = $pdo->prepare(
+                    "INSERT INTO warehouse_receipt_fees (receipt_id, order_id, fee_label, amount, currency, notes, created_by)
+                     VALUES (?,?,?,?,?,?,?)"
+                );
+                foreach ($receiptFees as $fee) {
+                    $insFee->execute([
+                        $receiptId,
+                        $orderId,
+                        $fee['label'],
+                        $fee['amount'],
+                        $fee['currency'],
+                        $fee['notes'],
+                        $userId,
+                    ]);
+                }
+            }
+
             if (!empty($itemsInput)) {
                 $receiptItemCols = "receipt_id, order_item_id, actual_cartons, actual_cbm, actual_weight, receipt_condition, variance_detected, notes";
                 $receiptItemVals = "?,?,?,?,?,?,?,?";
@@ -401,6 +424,8 @@ class OrderReceivingService
                 'actual_weight' => $actualWeight,
                 'status' => $newStatus,
                 'receipt_id' => $receiptId,
+                'fees_count' => count($receiptFees),
+                'fees_total' => $receiptFeeTotals,
             ];
             if (!empty($options['source'])) {
                 $auditPayload['source'] = (string) $options['source'];
@@ -418,6 +443,8 @@ class OrderReceivingService
                     'user_id' => $userId,
                     'item_level' => !empty($itemsInput),
                     'variance_detected' => $hasVariance,
+                    'fees_count' => count($receiptFees),
+                    'fees_total' => $receiptFeeTotals,
                     'source' => $options['source'] ?? 'manual',
                     'import_id' => $options['import_id'] ?? null,
                 ]);
@@ -432,6 +459,8 @@ class OrderReceivingService
                 'status' => $newStatus,
                 'receipt_id' => $receiptId,
                 'variance_detected' => $hasVariance,
+                'fees_count' => count($receiptFees),
+                'fees_total' => $receiptFeeTotals,
             ];
         } catch (Throwable $e) {
             if ($startedTransaction && $pdo->inTransaction()) {
@@ -448,6 +477,95 @@ class OrderReceivingService
         }
 
         return array_values(array_unique(array_filter(array_map('strval', $paths))));
+    }
+
+    private function normalizeReceiptFees($rawFees, string $defaultCurrency): array
+    {
+        if (!is_array($rawFees)) {
+            return [];
+        }
+
+        $defaultCurrency = $this->normalizeCurrency($defaultCurrency);
+        $fees = [];
+        $errors = [];
+
+        foreach ($rawFees as $idx => $rawFee) {
+            if (!is_array($rawFee)) {
+                continue;
+            }
+
+            $amountRaw = $rawFee['amount'] ?? null;
+            $amountText = is_string($amountRaw)
+                ? str_replace([',', ' '], '', trim($amountRaw))
+                : $amountRaw;
+            $label = trim((string) (
+                $rawFee['label']
+                ?? $rawFee['fee_label']
+                ?? $rawFee['description']
+                ?? $rawFee['type']
+                ?? ''
+            ));
+            $notes = trim((string) ($rawFee['notes'] ?? ''));
+
+            if (($amountText === null || $amountText === '') && $label === '' && $notes === '') {
+                continue;
+            }
+            if (!is_numeric($amountText)) {
+                $errors["fees.$idx.amount"] = 'Fee amount must be numeric';
+                continue;
+            }
+
+            $amount = round((float) $amountText, 4);
+            if ($amount < 0) {
+                $errors["fees.$idx.amount"] = 'Fee amount must be zero or positive';
+                continue;
+            }
+            if ($amount <= 0) {
+                continue;
+            }
+
+            if ($label === '') {
+                $label = 'Warehouse fee';
+            }
+
+            $currency = $this->normalizeCurrency((string) ($rawFee['currency'] ?? $defaultCurrency));
+            $fees[] = [
+                'label' => mb_substr($label, 0, 160),
+                'amount' => $amount,
+                'currency' => $currency,
+                'notes' => $notes !== '' ? $notes : null,
+            ];
+        }
+
+        if ($errors) {
+            throw new OrderReceivingValidationException('Validation failed', 400, $errors);
+        }
+
+        return $fees;
+    }
+
+    private function normalizeCurrency(string $currency): string
+    {
+        $currency = strtoupper(trim($currency));
+        return $currency !== '' ? mb_substr($currency, 0, 10) : 'USD';
+    }
+
+    private function summarizeReceiptFees(array $fees): array
+    {
+        $totals = [];
+        foreach ($fees as $fee) {
+            $currency = $this->normalizeCurrency((string) ($fee['currency'] ?? 'USD'));
+            if (!isset($totals[$currency])) {
+                $totals[$currency] = 0.0;
+            }
+            $totals[$currency] += (float) ($fee['amount'] ?? 0);
+        }
+
+        foreach ($totals as $currency => $amount) {
+            $totals[$currency] = round($amount, 4);
+        }
+
+        return $totals;
     }
 
     private function calculateCbmFromDimensions(?float $cartons, ?float $height, ?float $width, ?float $length): ?float

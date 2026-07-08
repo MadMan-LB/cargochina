@@ -35,6 +35,38 @@ function receivingTableHasColumn(PDO $pdo, string $table, string $column): bool
     return $cache[$key];
 }
 
+function receivingTableExists(PDO $pdo, string $table): bool
+{
+    static $cache = [];
+    if (array_key_exists($table, $cache)) {
+        return $cache[$table];
+    }
+    try {
+        $stmt = $pdo->prepare("SHOW TABLES LIKE ?");
+        $stmt->execute([$table]);
+        $cache[$table] = (bool) $stmt->fetchColumn();
+    } catch (Throwable $e) {
+        $cache[$table] = false;
+    }
+    return $cache[$table];
+}
+
+function receivingFetchReceiptFees(PDO $pdo, int $receiptId): array
+{
+    if ($receiptId <= 0 || !receivingTableExists($pdo, 'warehouse_receipt_fees')) {
+        return [];
+    }
+
+    $stmt = $pdo->prepare(
+        "SELECT id, receipt_id, order_id, fee_label, amount, currency, notes, created_by, created_at
+         FROM warehouse_receipt_fees
+         WHERE receipt_id = ?
+         ORDER BY id ASC"
+    );
+    $stmt->execute([$receiptId]);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
 function receivingUtf8LikeExpr(string $expr): string
 {
     return "CONVERT($expr USING utf8mb4) COLLATE utf8mb4_unicode_ci";
@@ -551,6 +583,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $rip = $pdo->prepare("SELECT * FROM warehouse_receipt_photos WHERE receipt_id = ?");
             $rip->execute([$receiptId]);
             $row['photos'] = $rip->fetchAll(PDO::FETCH_ASSOC);
+            $row['fees'] = receivingFetchReceiptFees($pdo, $receiptId);
             $receiptItemCols = "oi.declared_cbm, oi.declared_weight, oi.description_cn, oi.description_en, oi.item_no, oi.shipping_code, oi.cartons, oi.qty_per_carton, oi.quantity, oi.unit_price as declared_unit_price, oi.total_amount as declared_total_amount";
             foreach (['what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'height', 'width', 'length'] as $column) {
                 $chkMeta = @$pdo->query("SHOW COLUMNS FROM order_items LIKE " . $pdo->quote($column));
@@ -606,7 +639,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $custCols = 'c.name as customer_name';
         $chkPrio = @$pdo->query("SHOW COLUMNS FROM customers LIKE 'priority_level'");
         if ($chkPrio && $chkPrio->rowCount() > 0) $custCols .= ', c.priority_level as customer_priority_level, c.priority_note as customer_priority_note';
-        $sql = "SELECT wr.id, wr.order_id, wr.actual_cartons, wr.actual_cbm, wr.actual_weight, wr.received_at, wr.receipt_condition,
+        $feeSelect = receivingTableExists($pdo, 'warehouse_receipt_fees')
+            ? ", (SELECT COALESCE(SUM(wrf.amount), 0) FROM warehouse_receipt_fees wrf WHERE wrf.receipt_id = wr.id) as fees_total"
+            : ", 0 as fees_total";
+        $sql = "SELECT wr.id, wr.order_id, wr.actual_cartons, wr.actual_cbm, wr.actual_weight, wr.received_at, wr.receipt_condition$feeSelect,
             o.expected_ready_date, o.status as order_status, $custCols, s.name as supplier_name
             FROM warehouse_receipts wr
             JOIN orders o ON wr.order_id = o.id

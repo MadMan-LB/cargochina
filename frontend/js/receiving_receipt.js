@@ -92,6 +92,40 @@ function receiptPackagingSplitsHtml(item) {
         .join("");
 }
 
+function receiptFeesHtml(fees) {
+    const rows = Array.isArray(fees) ? fees : [];
+    if (!rows.length) {
+        return "";
+    }
+    return `
+      <h6 class="mt-3">${escapeHtml(receiptT("Customer-facing receiving fees"))}</h6>
+      <div class="table-responsive">
+        <table class="table table-sm">
+          <thead>
+            <tr>
+              <th>${escapeHtml(receiptT("Fee"))}</th>
+              <th class="text-end">${escapeHtml(receiptT("Amount"))}</th>
+              <th>${escapeHtml(receiptT("Currency"))}</th>
+              <th>${escapeHtml(receiptT("Notes"))}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows
+                .map(
+                    (fee) => `
+                <tr>
+                  <td>${escapeHtml(fee.fee_label || fee.label || receiptT("Warehouse fee"))}</td>
+                  <td class="text-end">${receiptNumber(fee.amount || 0, 4)}</td>
+                  <td>${escapeHtml(fee.currency || "")}</td>
+                  <td>${escapeHtml(fee.notes || "")}</td>
+                </tr>`,
+                )
+                .join("")}
+          </tbody>
+        </table>
+      </div>`;
+}
+
 async function loadReceipt() {
     const res = await api("/receiving/receipts/" + RECEIPT_ID);
     const r = res.data;
@@ -170,6 +204,7 @@ async function loadReceipt() {
         <p><strong>${escapeHtml(receiptT("Received at:"))}</strong> ${escapeHtml(r.received_at || "-")}</p>
         <p><strong>${escapeHtml(receiptT("Actual totals:"))}</strong> ${r.actual_cartons || 0} ${escapeHtml(receiptT("cartons"))}, ${parseFloat(r.actual_cbm || 0).toFixed(2)} CBM, ${parseFloat(r.actual_weight || 0).toFixed(0)} kg</p>
         <p><strong>${escapeHtml(receiptT("Condition:"))}</strong> ${escapeHtml(receiptStatusText(r.receipt_condition || r.condition || "good"))}</p>
+        ${receiptFeesHtml(r.fees || [])}
         ${itemsHtml}
         ${photosHtml}
       </div>

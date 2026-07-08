@@ -47,6 +47,17 @@ require __DIR__ . '/../../includes/area_layout.php';
             <div class="col-md-8"><label class="form-label"><?= htmlspecialchars(clmsT('Notes')) ?></label><input type="text" class="form-control"
                     id="receiveNotes"></div>
         </div>
+        <div class="border rounded p-3 bg-light-subtle" id="receiptFeesSection">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                <div>
+                    <div class="fw-semibold"><?= htmlspecialchars(clmsT('Customer fees')) ?></div>
+                    <div class="small text-muted"><?= htmlspecialchars(clmsT('Add customer-facing receiving fees such as pallet fees. These appear on the customer Excel download.')) ?></div>
+                </div>
+                <button type="button" class="btn btn-outline-primary btn-sm" id="addReceiptFeeBtn">+ <?= htmlspecialchars(clmsT('Add fee')) ?></button>
+            </div>
+            <div id="receiptFeesRows" class="d-flex flex-column gap-2"></div>
+            <div class="small text-muted mt-2"><?= htmlspecialchars(clmsT('Fee currency follows this order:')) ?> <span id="receiptFeesCurrency">—</span></div>
+        </div>
     </div>
 </div>
 

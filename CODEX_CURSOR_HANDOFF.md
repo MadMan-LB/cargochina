@@ -801,6 +801,23 @@ This ledger should be maintained over time so both Codex and Cursor can see exec
 - Keep the receiving template slug in `DownloadExampleService`, `downloads_registry`, and `download_template.php` together if template access rules change.
 - Customer visibility/lookup permissions were not changed in this pass.
 
+## 2026-07-08 Receiving Customer Fees + Balances Lookup Handoff
+
+### What changed
+- Added migration `071_warehouse_receipt_customer_fees.sql` for `warehouse_receipt_fees`.
+- Root receiving and warehouse receiving forms now accept customer-facing receipt fees such as pallet fees. `OrderReceivingService` validates and stores them in the same transaction as the receipt.
+- `GET /orders/{id}`, `GET /receiving/receipts/{id}`, order info/finance modals, receipt detail, and order Excel/CSV exports now carry/show receipt fees.
+- `OrderExcelService` appends customer-facing fee rows plus goods total, receiving fees total, and total amount with receiving fees. These rows use customer-visible pricing only.
+- Balances customer/supplier modal autocomplete now uses `/balances/party-search`, which is scoped by Balances page access and returns minimal safe fields.
+- `procurement_drafts.php` photo thumbnails were tightened with responsive square sizing for narrower screens.
+
+### Migration status
+- Run migration `071_warehouse_receipt_customer_fees.sql` before using receiving fees in production.
+
+### Guardrails
+- Receiving fees are not automatic ledger entries. If pallet fees should affect customer balances or invoices, add an explicit accounting flow rather than inferring it from receipt export rows.
+- Keep Balances lookup separate from full Customers/Suppliers APIs so users with Balances access can work without receiving full customer/supplier management permission.
+
 ## 2026-07-01 Receiving Dimensions + Warehouse Excel Handoff
 
 ### What changed
@@ -809,6 +826,8 @@ This ledger should be maintained over time so both Codex and Cursor can see exec
 - Receiving Excel import maps Height / Width / Length into receipt item actual dimensions for both existing-order receiving and direct warehouse intake.
 - Receipt detail views, receiving queue summaries, and warehouse stock display/export now include item dimensions where available.
 - Added quick Excel downloads for order packets from receiving cards, receiving schedule/history, warehouse-area receiving, and warehouse stock rows.
+- Receiving entry now uses receipt-level Total Cartons / Total CBM / Total Weight labels and no longer shows the old order-level `L / W / H (cm)` block.
+- Item-level receiving calculates Total CBM from `height * width * length * cartons / 1000000` and Total Weight from `cartons * weight_per_carton`; `OrderReceivingService` repeats those derivations server-side for direct API/import callers.
 - Added a filter-aware Warehouse Stock XLSX/CSV export at `/api/v1/warehouse-stock/export`.
 
 ### Guardrails

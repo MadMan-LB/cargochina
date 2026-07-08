@@ -142,6 +142,38 @@ function orderTableExists(PDO $pdo, string $table): bool
     return $cache[$table];
 }
 
+function orderFetchReceiptFees(PDO $pdo, int $receiptId): array
+{
+    if ($receiptId <= 0 || !orderTableExists($pdo, 'warehouse_receipt_fees')) {
+        return [];
+    }
+
+    $stmt = $pdo->prepare(
+        "SELECT id, receipt_id, order_id, fee_label, amount, currency, notes, created_by, created_at
+         FROM warehouse_receipt_fees
+         WHERE receipt_id = ?
+         ORDER BY id ASC"
+    );
+    $stmt->execute([$receiptId]);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
+function orderFetchLatestReceiptForOrder(PDO $pdo, int $orderId): ?array
+{
+    if ($orderId <= 0) {
+        return null;
+    }
+
+    $stmt = $pdo->prepare("SELECT * FROM warehouse_receipts WHERE order_id = ? ORDER BY received_at DESC LIMIT 1");
+    $stmt->execute([$orderId]);
+    $receipt = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$receipt) {
+        return null;
+    }
+    $receipt['fees'] = orderFetchReceiptFees($pdo, (int) $receipt['id']);
+    return $receipt;
+}
+
 function orderNormalizeReceiptPackagingSplits(array $itemInput): array
 {
     $rawSplits = $itemInput['packaging_splits'] ?? $itemInput['splits'] ?? [];
@@ -1033,6 +1065,24 @@ function outputOrderCsv(array $order, array $items, ?string $filename = null): v
             (string) ($item['size'] ?? ''),
         ]);
     }
+
+    $fees = $order['receipt_fees'] ?? ($order['receipt']['fees'] ?? []);
+    if (is_array($fees) && $fees) {
+        fputcsv($out, ['']);
+        fputcsv($out, [clmsT('Customer-facing receiving fees')]);
+        fputcsv($out, array_map('clmsT', ['Fee', 'Amount', 'Currency', 'Notes']));
+        foreach ($fees as $fee) {
+            if (!is_array($fee)) {
+                continue;
+            }
+            fputcsv($out, [
+                (string) ($fee['fee_label'] ?? $fee['label'] ?? clmsT('Warehouse fee')),
+                isset($fee['amount']) ? format_display_amount($fee['amount'], 4) : '',
+                (string) ($fee['currency'] ?? ($order['currency'] ?? '')),
+                (string) ($fee['notes'] ?? ''),
+            ]);
+        }
+    }
     fclose($out);
     exit;
 }
@@ -1396,6 +1446,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $order = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$order) jsonError('Order not found', 404);
                 $items = normalizeOrderItems($pdo, fetchOrderItems($pdo, (int) $id));
+                $latestReceipt = orderFetchLatestReceiptForOrder($pdo, (int) $id);
+                if ($latestReceipt) {
+                    $order['receipt'] = $latestReceipt;
+                    $order['receipt_fees'] = $latestReceipt['fees'] ?? [];
+                }
                 $format = strtolower(trim((string) ($_GET['format'] ?? 'xlsx')));
                 if ($format === 'csv') {
                     outputOrderCsv($order, $items, 'order_' . (int) $id . '.csv');
@@ -1425,9 +1480,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $att = $pdo->prepare("SELECT * FROM order_attachments WHERE order_id = ?");
             $att->execute([$id]);
             $row['attachments'] = $att->fetchAll(PDO::FETCH_ASSOC);
-            $wr = $pdo->prepare("SELECT * FROM warehouse_receipts WHERE order_id = ? ORDER BY received_at DESC LIMIT 1");
-            $wr->execute([$id]);
-            $receipt = $wr->fetch(PDO::FETCH_ASSOC);
+            $receipt = orderFetchLatestReceiptForOrder($pdo, (int) $id);
             if ($receipt) {
                 $row['receipt'] = $receipt;
                 $rip = $pdo->prepare("SELECT * FROM warehouse_receipt_photos WHERE receipt_id = ?");

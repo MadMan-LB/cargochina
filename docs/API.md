@@ -57,13 +57,13 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 ## Orders
 - `GET /orders?status=&customer_id=&order_type=` — List (optional filters). `order_type=draft_procurement` isolates Draft an Order records from standard orders.
 - `GET /orders/search?q=...&order_type=` — Search by order ID, customer, supplier, phone, shipping code, item description, and item-level HS code (`order_items.hs_code` with fallback to product HS code).
-- `GET /orders/{id}/export` — Export a standard order as Template-style CSV (company header + GOOD DETAILS table: PHOTO, ITEM NO, DESCRIPTION, TOTAL CTNS, QTY/CTN, TOTAL QTY, UNIT PRICE, TOTAL AMOUNT, CBM, TOTAL CBM, GWKG, TOTAL GW). Draft-procurement orders use `GET /draft-orders/{id}/export` for grouped supplier-section export.
-- `GET /orders/{id}` — Get one with items, attachments, receipt (when present), receipt.items, receipt.photos, customer_photo_visibility
+- `GET /orders/{id}/export` — Export a standard order as Template-style CSV/XLSX (company header + GOOD DETAILS table: PHOTO, ITEM NO, DESCRIPTION, TOTAL CTNS, QTY/CTN, TOTAL QTY, UNIT PRICE, TOTAL AMOUNT, CBM, TOTAL CBM, GWKG, TOTAL GW). When the latest warehouse receipt has customer-facing receiving fees, those fee rows and fee-inclusive totals are included in the customer Excel export. Draft-procurement orders use `GET /draft-orders/{id}/export` for grouped supplier-section export.
+- `GET /orders/{id}` — Get one with items, attachments, receipt (when present), receipt.items, receipt.photos, receipt.fees, customer_photo_visibility
 - `POST /orders` — Create `{customer_id, supplier_id?, expected_ready_date?, currency (USD|RMB), items}` — `expected_ready_date` is optional. Items: `product_id?`, `supplier_id?`, `item_no?`, `shipping_code?`, `cartons?`, `qty_per_carton?`, `quantity`, `unit`, `declared_cbm`, `declared_weight`, `item_length?`, `item_width?`, `item_height?`, `unit_price?`, `total_amount?`, `notes?`, `image_paths?`, `description_cn?`, `description_en?`, `hs_code?`, `custom_design_required?`, `custom_design_note?` — Submit requires min 1 photo per item (configurable). CBM auto-calculated from L*W*H/1000000 on client.
 - `PUT /orders/{id}` — Update (any status)
 - `POST /orders/{id}/submit` — Draft → Submitted
 - `POST /orders/{id}/approve` — Submitted → Approved
-- `POST /orders/{id}/receive` — Record receipt `{actual_cartons, actual_cbm, actual_weight, condition, notes?, photo_paths?, items?}` — items: `[{order_item_id, actual_cartons?, actual_cbm?, actual_weight?, condition?, photo_paths?}]` for item-level receiving. Sum of items must match order-level. Evidence photos required when variance or damage.
+- `POST /orders/{id}/receive` — Record receipt `{actual_cartons, actual_cbm, actual_weight, condition, notes?, photo_paths?, fees?, items?}` — fees: `[{label, amount, currency?, notes?}]` for customer-facing receiving charges such as pallet fees. Fees are stored with the warehouse receipt and exported to customer Excel, but do not automatically create accounting ledger transactions. Items: `[{order_item_id, actual_cartons?, actual_cbm?, actual_weight?, weight_per_carton?, actual_height?, actual_width?, actual_length?, actual_pieces_per_carton?, actual_quantity?, unit_price?, total_amount?, condition?, photo_paths?}]` for item-level receiving. If item `actual_cbm` is missing, the service can derive it from `actual_height * actual_width * actual_length * actual_cartons / 1000000`; if item `actual_weight` is missing, it can derive it from `actual_cartons * weight_per_carton`. Sum of items must match or fill order-level CBM/weight. Evidence photos required when variance or damage.
 - `POST /orders/{id}/confirm` — AwaitingCustomerConfirmation → Confirmed
 
 ## Draft Orders
@@ -135,6 +135,10 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 - `PUT /expenses/{id}` — Update (same fields as POST; `category_name` creates category when `category_id` is 0)
 - `DELETE /expenses/{id}` — Delete
 
+## Balances
+- `GET /balances/party-search?party_type=customer|supplier&q=&limit=` — Safe customer/supplier autocomplete for users who can access the Balances page. Returns minimal transaction-selection fields only (`id`, `name`, `code`, `default_shipping_code` or `store_id`, `phone`) and does not expose full customer/supplier management records.
+- `GET /balances/payment-accounts?party_type=customer|supplier&party_id=` — Returns saved payment-account metadata needed by the Balances transaction modal after the selected party is validated.
+
 ## Config
 - `GET /config` — Get system config (SuperAdmin only; tokens masked as ********)
 - `GET /config/receiving` — Get receiving config `{item_level_receiving_enabled}` (WarehouseStaff, SuperAdmin)
@@ -142,6 +146,7 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 ## Receiving (WarehouseStaff, SuperAdmin)
 - `GET /receiving/search?q=` — Search orders by order ID, customer/supplier name, customer/supplier phone, shipping code. Returns Approved/InTransit orders (limit 30).
 - `GET /receiving/queue?status=&customer_id=&supplier_id=&order_id=&date_from=&date_to=&shipping_code=` — List pending orders for receiving
+- `GET /receiving/receipts/{id}` — Get receipt detail including receipt photos, per-item actuals, item photos/splits, and customer-facing receiving `fees`.
 
 ## Customer Confirmation (Public — no auth)
 - `GET /confirm?token=` — Fetch order summary for a pending confirmation (returns order details, actual measurements, photos)
