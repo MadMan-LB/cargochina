@@ -5,10 +5,13 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
+require_once dirname(__DIR__, 2) . '/services/NotificationTargetService.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
-    $userId = getAuthUserId() ?? 1;
+    $userId = (int) (getAuthUserId() ?? 0);
+    if ($userId <= 0) jsonError('Unauthorized', 401);
+    $targetService = new NotificationTargetService($pdo);
 
     switch ($method) {
         case 'GET':
@@ -26,10 +29,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
             $varianceOrderIds = [];
             foreach ($rows as &$row) {
+                $row['target'] = $targetService->resolve($row, $userId, getUserRoles());
                 if (($row['type'] ?? '') !== 'variance_confirmation') {
                     continue;
                 }
-                if (preg_match('/Confirmation link:\s*(\S+)/', $row['body'] ?? '', $match)) {
+                if (preg_match('/(?:Confirmation|Customer review) link:\s*(\S+)/', $row['body'] ?? '', $match)) {
                     $row['confirmation_link'] = trim($match[1]);
                 }
                 if (preg_match('/Order #(\d+)/', $row['title'] ?? '', $match)) {
@@ -61,6 +65,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             break;
 
         case 'POST':
+            if ($id && $action === 'open') {
+                $stmt=$pdo->prepare('SELECT * FROM notifications WHERE id=? AND user_id=?');$stmt->execute([(int)$id,$userId]);$notification=$stmt->fetch(PDO::FETCH_ASSOC);
+                if(!$notification)jsonError('Notification not found',404);
+                $target=$targetService->resolve($notification,$userId,getUserRoles());
+                if(empty($target['available']))jsonError($target['reason']??'The related record is unavailable.',403,['target'=>'unavailable']);
+                $pdo->prepare('UPDATE notifications SET read_at=COALESCE(read_at,NOW()) WHERE id=? AND user_id=?')->execute([(int)$id,$userId]);
+                jsonResponse(['data'=>['url'=>$target['url'],'read'=>true,'target_type'=>$target['target_type'],'target_id'=>$target['target_id']]]);
+            }
             if ($id && $action === 'read') {
                 $stmt = $pdo->prepare("UPDATE notifications SET read_at = NOW() WHERE id = ? AND user_id = ?");
                 $stmt->execute([$id, $userId]);

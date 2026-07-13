@@ -12,8 +12,7 @@ IF NOT EXISTS warehouse_receipts
 (10,4) NOT NULL DEFAULT 0,
     actual_weight DECIMAL
 (10,4) NOT NULL DEFAULT 0,
-    receipt_condition VARCHAR
-(20) NOT NULL DEFAULT 'good',
+    receipt_condition ENUM('good', 'damaged', 'partial') NOT NULL DEFAULT 'good',
     notes TEXT,
     received_by INT UNSIGNED,
     received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -26,10 +25,6 @@ REFERENCES users
 (id) ON
 DELETE
 SET NULL
-,
-    CONSTRAINT chk_receipt_condition CHECK
-(receipt_condition IN
-('good', 'damaged', 'partial'))
 );
 
 CREATE TABLE

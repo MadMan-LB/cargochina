@@ -6,6 +6,7 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
+require_once dirname(__DIR__, 2) . '/services/DecimalMath.php';
 
 function financialsTableHasColumn(PDO $pdo, string $table, string $column): bool
 {
@@ -50,13 +51,13 @@ function financialsDecodeSharedCartonContents(array $row): array
         return [];
     }
 
-    $cartons = (float) ($row['cartons'] ?? 0);
+    $cartons = DecimalMath::normalize($row['cartons'] ?? '0');
     foreach ($decoded as &$content) {
         $content['supplier_id'] = !empty($content['supplier_id']) ? (int) $content['supplier_id'] : null;
-        $content['quantity_per_carton'] = round((float) ($content['quantity_per_carton'] ?? $content['quantity'] ?? 0), 4);
-        $content['quantity'] = round($content['quantity_per_carton'] * $cartons, 4);
-        $content['unit_price'] = isset($content['unit_price']) && $content['unit_price'] !== '' ? (float) $content['unit_price'] : null;
-        $content['sell_price'] = isset($content['sell_price']) && $content['sell_price'] !== '' ? (float) $content['sell_price'] : null;
+        $content['quantity_per_carton'] = DecimalMath::normalize($content['quantity_per_carton'] ?? $content['quantity'] ?? '0');
+        $content['quantity'] = DecimalMath::multiply($content['quantity_per_carton'], $cartons);
+        $content['unit_price'] = isset($content['unit_price']) && $content['unit_price'] !== '' ? DecimalMath::normalize($content['unit_price']) : null;
+        $content['sell_price'] = isset($content['sell_price']) && $content['sell_price'] !== '' ? DecimalMath::normalize($content['sell_price']) : null;
     }
     unset($content);
 
@@ -135,14 +136,14 @@ function financialsBuildOrderItemAnalysis(PDO $pdo, array $orderIds): array
                     $orderSuppliers[$orderId][$supplierId] = true;
                     $supplierIdsSeen[$supplierId] = true;
                 }
-                $qty = (float) ($content['quantity'] ?? 0);
+                $qty = DecimalMath::normalize($content['quantity'] ?? '0');
                 $buyPrice = $content['unit_price'];
                 $sellPrice = $content['sell_price'] ?? $buyPrice;
                 $lines[] = [
                     'order_id' => $orderId,
                     'supplier_id' => $supplierId,
-                    'buy_total' => $qty * (float) ($buyPrice ?? 0),
-                    'sell_total' => $qty * (float) ($sellPrice ?? 0),
+                    'buy_total' => DecimalMath::multiply($qty, $buyPrice ?? '0'),
+                    'sell_total' => DecimalMath::multiply($qty, $sellPrice ?? '0'),
                 ];
             }
             continue;
@@ -152,14 +153,14 @@ function financialsBuildOrderItemAnalysis(PDO $pdo, array $orderIds): array
             $orderSuppliers[$orderId][$defaultSupplierId] = true;
             $supplierIdsSeen[$defaultSupplierId] = true;
         }
-        $qty = (float) ($row['quantity'] ?? 0);
-        $buyPrice = isset($row['buy_price']) && $row['buy_price'] !== null ? (float) $row['buy_price'] : (float) ($row['unit_price'] ?? 0);
-        $sellPrice = isset($row['sell_price']) && $row['sell_price'] !== null ? (float) $row['sell_price'] : (float) ($row['unit_price'] ?? 0);
+        $qty = DecimalMath::normalize($row['quantity'] ?? '0');
+        $buyPrice = isset($row['buy_price']) && $row['buy_price'] !== null ? DecimalMath::normalize($row['buy_price']) : DecimalMath::normalize($row['unit_price'] ?? '0');
+        $sellPrice = isset($row['sell_price']) && $row['sell_price'] !== null ? DecimalMath::normalize($row['sell_price']) : DecimalMath::normalize($row['unit_price'] ?? '0');
         $lines[] = [
             'order_id' => $orderId,
             'supplier_id' => $defaultSupplierId,
-            'buy_total' => $qty * $buyPrice,
-            'sell_total' => $qty * $sellPrice,
+            'buy_total' => DecimalMath::multiply($qty, $buyPrice),
+            'sell_total' => DecimalMath::multiply($qty, $sellPrice),
         ];
     }
 
@@ -202,6 +203,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $statusMode = strtolower(trim((string) ($_GET['status_mode'] ?? 'include')));
     $statusMode = $statusMode === 'exclude' ? 'exclude' : 'include';
     $defaultExcludedStatuses = ['Draft', 'CustomerDeclined', 'CustomerDeclinedAfterAutoConfirm'];
+    $itemType = clmsNormalizeItemTypeFilter($_GET['item_type'] ?? null);
 
     if ($id === 'balances') {
         $customers = [];
@@ -235,7 +237,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $depStmt->execute($depParams);
             }
             while ($dep = $depStmt->fetch(PDO::FETCH_ASSOC)) {
-                $depositMap[(int) $dep['customer_id']][(string) ($dep['currency'] ?: 'USD')] = (float) $dep['total'];
+                $depositMap[(int) $dep['customer_id']][(string) ($dep['currency'] ?: 'USD')] = DecimalMath::normalize($dep['total']);
             }
         }
         $receivableExpr = $hasSell
@@ -257,19 +259,28 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         }
         $receivableMap = [];
         while ($rr = $receivableStmt->fetch(PDO::FETCH_ASSOC)) {
-            $receivableMap[(int) $rr['customer_id']][(string) ($rr['currency'] ?: 'USD')] = (float) $rr['total'];
+            $receivableMap[(int) $rr['customer_id']][(string) ($rr['currency'] ?: 'USD')] = DecimalMath::normalize($rr['total']);
+        }
+        $pendingChargeMap=[];
+        $hasShipmentLedger=(bool)$pdo->query("SHOW TABLES LIKE 'shipment_financial_entries'")->fetchColumn();
+        if($hasShipmentLedger){
+            $chargeSql="SELECT customer_id,base_currency,posting_state,CAST(COALESCE(SUM(base_amount),0) AS CHAR) total FROM shipment_financial_entries WHERE entry_role='customer_charge' AND archived_at IS NULL";
+            $chargeParams=[];if($customerId){$chargeSql.=' AND customer_id=?';$chargeParams[]=$customerId;}$chargeSql.=' GROUP BY customer_id,base_currency,posting_state';
+            $chargeStmt=$pdo->prepare($chargeSql);$chargeStmt->execute($chargeParams);
+            foreach($chargeStmt->fetchAll(PDO::FETCH_ASSOC) as $charge){$cid=(int)$charge['customer_id'];$cur=(string)$charge['base_currency'];if($charge['posting_state']==='finalized')$receivableMap[$cid][$cur]=DecimalMath::add($receivableMap[$cid][$cur]??'0',$charge['total']);elseif($charge['posting_state']==='provisional')$pendingChargeMap[$cid][$cur]=DecimalMath::normalize($charge['total']);}
         }
 
         while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
             $custId = $r['id'];
             $currencies = [];
             foreach (['USD', 'RMB'] as $currency) {
-                $deposits = (float) ($depositMap[$custId][$currency] ?? 0);
-                $receivable = (float) ($receivableMap[$custId][$currency] ?? 0);
+                $deposits = (string) ($depositMap[$custId][$currency] ?? '0.0000');
+                $receivable = (string) ($receivableMap[$custId][$currency] ?? '0.0000');
                 $currencies[$currency] = [
                     'deposits' => $deposits,
                     'receivable' => $receivable,
-                    'balance' => round($deposits - $receivable, 4),
+                    'balance' => DecimalMath::subtract($deposits, $receivable),
+                    'pending_shipment_charges' => $pendingChargeMap[$custId][$currency] ?? '0.0000',
                 ];
             }
             $customers[] = [
@@ -308,22 +319,22 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $paymentMap = [];
             while ($pay = $paymentStmt->fetch(PDO::FETCH_ASSOC)) {
                 $paymentMap[(int) $pay['supplier_id']][(string) ($pay['currency'] ?: 'USD')] = [
-                    'paid' => (float) $pay['total_paid'],
-                    'invoiced' => (float) $pay['total_invoiced'],
-                    'settlement_delta' => (float) $pay['total_settlement'],
+                    'paid' => DecimalMath::normalize($pay['total_paid']),
+                    'invoiced' => DecimalMath::normalize($pay['total_invoiced']),
+                    'settlement_delta' => DecimalMath::normalize($pay['total_settlement']),
                 ];
             }
             while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
                 $supplierCurrencies = [];
                 foreach (['USD', 'RMB'] as $currency) {
-                    $paidVal = (float) ($paymentMap[(int) $r['id']][$currency]['paid'] ?? 0);
-                    $invVal = (float) ($paymentMap[(int) $r['id']][$currency]['invoiced'] ?? 0);
-                    $settled = (float) ($paymentMap[(int) $r['id']][$currency]['settlement_delta'] ?? 0);
+                    $paidVal = (string) ($paymentMap[(int) $r['id']][$currency]['paid'] ?? '0.0000');
+                    $invVal = (string) ($paymentMap[(int) $r['id']][$currency]['invoiced'] ?? '0.0000');
+                    $settled = (string) ($paymentMap[(int) $r['id']][$currency]['settlement_delta'] ?? '0.0000');
                     $supplierCurrencies[$currency] = [
                         'paid' => $paidVal,
                         'invoiced' => $invVal,
                         'settlement_delta' => $settled,
-                        'payable' => round($invVal - $paidVal - $settled, 4),
+                        'payable' => DecimalMath::subtract(DecimalMath::subtract($invVal, $paidVal), $settled),
                     ];
                 }
                 $detailStmt = $pdo->prepare("SELECT payment_facility_days, payment_links FROM suppliers WHERE id = ?");
@@ -349,13 +360,17 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     'name' => $r['name'],
                     'code' => $r['code'],
                     'currencies' => [
-                        'USD' => ['paid' => 0, 'invoiced' => 0, 'settlement_delta' => 0, 'payable' => 0],
-                        'RMB' => ['paid' => 0, 'invoiced' => 0, 'settlement_delta' => 0, 'payable' => 0],
+                        'USD' => ['paid' => '0.0000', 'invoiced' => '0.0000', 'settlement_delta' => '0.0000', 'payable' => '0.0000'],
+                        'RMB' => ['paid' => '0.0000', 'invoiced' => '0.0000', 'settlement_delta' => '0.0000', 'payable' => '0.0000'],
                     ],
                     'payment_facility_days' => null,
                     'payment_links' => [],
                 ];
             }
+        }
+        if ($itemType !== null && financialsTableHasColumn($pdo,'item_classifications','item_type_code')) {
+            $sql .= " AND EXISTS (SELECT 1 FROM order_items fit JOIN item_classifications fic ON fic.entity_type='order_item' AND fic.entity_id=fit.id WHERE fit.order_id=o.id AND fic.item_type_code=?)";
+            $params[]=$itemType;
         }
         jsonResponse(['data' => ['customers' => $customers, 'suppliers' => $suppliers]]);
     }
@@ -433,6 +448,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
         if ($params) $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $shipmentTotals=[];
+        if($rows && (bool)$pdo->query("SHOW TABLES LIKE 'shipment_financial_entries'")->fetchColumn()){
+            $ids=array_map('intval',array_column($rows,'id'));$ph=implode(',',array_fill(0,count($ids),'?'));
+            $shipmentStmt=$pdo->prepare("SELECT order_id,entry_role,CAST(COALESCE(SUM(base_amount),0) AS CHAR) total FROM shipment_financial_entries WHERE posting_state='finalized' AND archived_at IS NULL AND order_id IN ($ph) GROUP BY order_id,entry_role");$shipmentStmt->execute($ids);
+            foreach($shipmentStmt->fetchAll(PDO::FETCH_ASSOC) as $entry)$shipmentTotals[(int)$entry['order_id']][(string)$entry['entry_role']]=DecimalMath::normalize($entry['total']);
+        }
 
         $itemAnalysis = null;
         if (!empty($rows) && (($supplierId && $hasItemSupplier) || ($hasCommission && $hasItemSupplier))) {
@@ -468,40 +489,43 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 $sid = !empty($it['supplier_id']) ? (int) $it['supplier_id'] : null;
                 $meta = $sid ? ($supplierMeta[$sid] ?? null) : null;
-                $rate = (float) ($meta['commission_rate'] ?? 0);
+                $rate = DecimalMath::normalize($meta['commission_rate'] ?? '0',8);
                 $type = $meta['commission_type'] ?? 'percentage';
                 $appliedOn = $meta['commission_applied_on'] ?? 'buy_value';
-                if (!$rate || !$sid) continue;
-                $buyVal = (float) ($it['buy_total'] ?? 0);
-                $sellVal = (float) ($it['sell_total'] ?? 0);
+                if (DecimalMath::compare($rate,'0',8)===0 || !$sid) continue;
+                $buyVal = DecimalMath::normalize($it['buy_total'] ?? '0');
+                $sellVal = DecimalMath::normalize($it['sell_total'] ?? '0');
                 $base = $appliedOn === 'sell_value' ? $sellVal : $buyVal;
                 if ($type === 'fixed') {
-                    if (!isset($orderCommissions[$oid])) $orderCommissions[$oid] = ['pct' => 0, 'fixed' => []];
+                    if (!isset($orderCommissions[$oid])) $orderCommissions[$oid] = ['pct' => '0.0000', 'fixed' => []];
                     if (!isset($orderCommissions[$oid]['fixed'][$sid])) $orderCommissions[$oid]['fixed'][$sid] = $rate;
                 } else {
-                    if (!isset($orderCommissions[$oid])) $orderCommissions[$oid] = ['pct' => 0, 'fixed' => []];
-                    $orderCommissions[$oid]['pct'] += $base * $rate / 100;
+                    if (!isset($orderCommissions[$oid])) $orderCommissions[$oid] = ['pct' => '0.0000', 'fixed' => []];
+                    $commission=DecimalMath::divide(DecimalMath::multiply($base,$rate,8),'100',4);
+                    $orderCommissions[$oid]['pct']=DecimalMath::add($orderCommissions[$oid]['pct'],$commission);
                 }
             }
         } elseif ($hasCommission && !empty($rows)) {
             foreach ($rows as $r) {
                 $oid = (int) $r['id'];
-                $rate = (float) ($r['commission_rate'] ?? 0);
-                if (!$rate) continue;
+                $rate = DecimalMath::normalize($r['commission_rate'] ?? '0',8);
+                if (DecimalMath::compare($rate,'0',8)===0) continue;
                 $type = $r['commission_type'] ?? 'percentage';
                 $appliedOn = $r['commission_applied_on'] ?? 'buy_value';
-                $base = $appliedOn === 'sell_value' ? (float) ($r['order_total'] ?? 0) : (float) ($r['buy_total'] ?? 0);
+                $base = DecimalMath::normalize($appliedOn === 'sell_value' ? ($r['order_total'] ?? '0') : ($r['buy_total'] ?? '0'));
                 if ($type === 'fixed') {
-                    $orderCommissions[$oid] = ['pct' => 0, 'fixed' => [0 => $rate]];
+                    $orderCommissions[$oid] = ['pct' => '0.0000', 'fixed' => [0 => $rate]];
                 } else {
-                    $orderCommissions[$oid] = ['pct' => $base * $rate / 100, 'fixed' => []];
+                    $orderCommissions[$oid] = ['pct' => DecimalMath::divide(DecimalMath::multiply($base,$rate,8),'100',4), 'fixed' => []];
                 }
             }
         }
 
-        $totalSell = 0;
-        $totalBuy = 0;
-        $totalCommission = 0;
+        $totalSell = '0.0000';
+        $totalBuy = '0.0000';
+        $totalCommission = '0.0000';
+        $totalShipmentCharges='0.0000';
+        $totalShipmentExpenses='0.0000';
         foreach ($rows as &$r) {
             $supplierNames = [];
             if ($itemAnalysis !== null) {
@@ -511,19 +535,26 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if ($r['supplier_name_display'] !== '') {
                 $r['supplier_name'] = $r['supplier_name_display'];
             }
-            $r['order_total'] = (float) ($r['order_total'] ?? 0);
-            $r['buy_total'] = (float) ($r['buy_total'] ?? $r['order_total']);
-            $commission = 0.0;
+            $r['order_total'] = DecimalMath::normalize($r['order_total'] ?? '0');
+            $r['buy_total'] = DecimalMath::normalize($r['buy_total'] ?? $r['order_total']);
+            $commission = '0.0000';
             $oid = (int) $r['id'];
             if (isset($orderCommissions[$oid])) {
-                $commission = $orderCommissions[$oid]['pct'] ?? 0;
-                $commission += isset($orderCommissions[$oid]['fixed']) ? array_sum($orderCommissions[$oid]['fixed']) : 0;
+                $commission = (string)($orderCommissions[$oid]['pct'] ?? '0.0000');
+                if(isset($orderCommissions[$oid]['fixed']))$commission=DecimalMath::add($commission,DecimalMath::sum($orderCommissions[$oid]['fixed']));
             }
-            $r['commission'] = round($commission, 4);
-            $r['margin'] = $r['order_total'] - $r['buy_total'] - $r['commission'];
-            $totalSell += $r['order_total'];
-            $totalBuy += $r['buy_total'];
-            $totalCommission += $r['commission'];
+            $r['commission'] = DecimalMath::normalize($commission);
+            $r['shipment_customer_charges']=$shipmentTotals[$oid]['customer_charge']??'0.0000';
+            $r['shipment_operational_expenses']=$shipmentTotals[$oid]['shipment_expense']??'0.0000';
+            $r['total_customer_charges']=DecimalMath::add($r['order_total'],$r['shipment_customer_charges']);
+            $r['gross_result']=DecimalMath::subtract($r['total_customer_charges'],$r['buy_total']);
+            $r['net_shipment_result']=DecimalMath::subtract($r['gross_result'],$r['shipment_operational_expenses']);
+            $r['margin']=$r['net_shipment_result'];
+            $totalSell = DecimalMath::add($totalSell,$r['order_total']);
+            $totalBuy = DecimalMath::add($totalBuy,$r['buy_total']);
+            $totalCommission = DecimalMath::add($totalCommission,$r['commission']);
+            $totalShipmentCharges=DecimalMath::add($totalShipmentCharges,$r['shipment_customer_charges']);
+            $totalShipmentExpenses=DecimalMath::add($totalShipmentExpenses,$r['shipment_operational_expenses']);
         }
         $expenseSql = "SELECT currency, SUM(amount) as total FROM expenses WHERE 1=1";
         $expParams = [];
@@ -539,7 +570,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $expStmt = $expParams ? $pdo->prepare($expenseSql) : $pdo->query($expenseSql);
         if ($expParams) $expStmt->execute($expParams);
         $expenses = $expStmt->fetchAll(PDO::FETCH_ASSOC);
-        jsonResponse(['data' => $rows, 'summary' => ['total_sell' => $totalSell, 'total_buy' => $totalBuy, 'total_commission' => $totalCommission, 'gross_profit' => $totalSell - $totalBuy, 'net_profit' => $totalSell - $totalBuy - $totalCommission, 'expenses' => $expenses]]);
+        foreach($expenses as &$expense)$expense['total']=DecimalMath::normalize($expense['total']??'0');
+        unset($expense);
+        $limit=clmsQueryLimit($_GET['limit']??null,50,200);$offset=clmsQueryOffset($_GET['offset']??null);$totalCount=count($rows);$pageRows=array_slice($rows,$offset,$limit);
+        $totalCustomerCharges=DecimalMath::add($totalSell,$totalShipmentCharges);$grossResult=DecimalMath::subtract($totalCustomerCharges,$totalBuy);$netShipmentResult=DecimalMath::subtract($grossResult,$totalShipmentExpenses);
+        jsonResponse(['data' => $pageRows, 'meta'=>['limit'=>$limit,'offset'=>$offset,'total_count'=>$totalCount,'has_more'=>$offset+$limit<$totalCount], 'summary' => ['total_sell' => $totalSell, 'shipment_customer_charges'=>$totalShipmentCharges,'total_customer_charges'=>$totalCustomerCharges,'total_buy' => $totalBuy,'shipment_operational_expenses'=>$totalShipmentExpenses, 'total_commission' => $totalCommission, 'gross_profit' => $grossResult, 'net_profit' => $netShipmentResult,'gross_result'=>$grossResult,'net_shipment_result'=>$netShipmentResult, 'expenses' => $expenses]]);
     }
 
     jsonError('Not found', 404);

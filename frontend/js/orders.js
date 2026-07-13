@@ -2,6 +2,16 @@ let itemIndex = 0;
 let orderCustomerAc, orderSupplierAc, orderSearchAc, orderDestinationCountryAc;
 let orderCustomerCountryShipping = [];
 let orderEffectiveShippingCode = "";
+let orderOffset = 0;
+const orderPageSize = 50;
+let lastOrderFilterQuery = null;
+let orderCreateRequestKey = null;
+let orderLockVersion = 0;
+
+function newOrderRequestKey() {
+    if (globalThis.crypto?.randomUUID) return `order:${globalThis.crypto.randomUUID()}`;
+    return `order:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+}
 
 /** Round CBM to 6 decimals to avoid floating-point drift (e.g. 0.2 → 0.2 not 0.20000000000000004). */
 function roundCbm6(val) {
@@ -678,11 +688,13 @@ function buildOrderListQuery() {
     const customerFeedback = (
         document.getElementById("filterCustomerFeedback")?.value || ""
     ).trim();
+    const itemType = (document.getElementById("filterItemType")?.value || "").trim();
     statuses.forEach((status) => params.append("status[]", status));
     if (statuses.length) params.set("status_mode", statusMode);
     if (q) params.set("q", q);
     if (orderType) params.set("order_type", orderType);
     if (customerFeedback) params.set("customer_feedback", customerFeedback);
+    if (itemType) params.set("item_type", itemType);
     return params.toString();
 }
 
@@ -830,15 +842,26 @@ document.addEventListener("DOMContentLoaded", () => {
         updateOrderStatusFilterSummary();
     }
     loadOrders();
+    const exactOrderId = urlParams.get("order_id");
+    if (exactOrderId && /^\d+$/.test(exactOrderId)) {
+        editOrder(parseInt(exactOrderId, 10));
+    }
+    document.getElementById("ordersPrevPage")?.addEventListener("click", () => { orderOffset = Math.max(0, orderOffset - orderPageSize); loadOrders(); });
+    document.getElementById("ordersNextPage")?.addEventListener("click", () => { orderOffset += orderPageSize; loadOrders(); });
 });
 
 async function loadOrders() {
     try {
-        const qs = buildOrderListQuery();
-        let path = "/orders";
-        if (qs) path += "?" + qs;
+        const filterQs = buildOrderListQuery();
+        if (lastOrderFilterQuery !== null && lastOrderFilterQuery !== filterQs) orderOffset = 0;
+        lastOrderFilterQuery = filterQs;
+        const pageParams = new URLSearchParams(filterQs);
+        pageParams.set("limit", String(orderPageSize));
+        pageParams.set("offset", String(orderOffset));
+        const path = "/orders?" + pageParams.toString();
         const res = await api("GET", path);
         const rows = res.data || [];
+        const meta = res.meta || {};
         const tbody = document.querySelector("#ordersTable tbody");
         const submittedCount = rows.filter(
             (r) => r.status === "Submitted",
@@ -932,6 +955,12 @@ async function loadOrders() {
         tbody.querySelectorAll(".order-bulk-cb").forEach((cb) => {
             cb.addEventListener("change", updateSelectAllState);
         });
+        const prev = document.getElementById("ordersPrevPage");
+        const next = document.getElementById("ordersNextPage");
+        if (prev) prev.disabled = orderOffset === 0;
+        if (next) next.disabled = !meta.has_more;
+        const summary = document.getElementById("ordersPageSummary");
+        if (summary) summary.textContent = rows.length ? `${orderOffset + 1}–${orderOffset + rows.length}` : "0 results";
     } catch (e) {
         updateOrderOverview([]);
         showToast(e.message, "danger");
@@ -959,6 +988,8 @@ function openOrderForm() {
     orderCustomerAc?.setValue(null);
     orderSupplierAc?.setValue(null);
     document.getElementById("orderId").value = "";
+    orderCreateRequestKey = newOrderRequestKey();
+    orderLockVersion = 0;
     document.getElementById("orderDestinationCountryId").value = "";
     orderCustomerCountryShipping = [];
     orderEffectiveShippingCode = "";
@@ -1482,7 +1513,7 @@ function addOrderItem() {
             </div>
             <div class="col-6 col-md-2">
               <label class="form-label form-label-sm">Item No</label>
-              <input type="text" class="form-control form-control-sm item-item-no" placeholder="Auto" data-idx="${idx}">
+              <input type="text" class="form-control form-control-sm item-item-no" placeholder="Auto" data-idx="${idx}" readonly aria-readonly="true">
               <input type="hidden" class="item-shipping-code" value="${escapeHtml(effectiveShipCode || "")}">
             </div>
             <div class="col-12 col-md-7">
@@ -2102,6 +2133,8 @@ async function copyOrder(id) {
         const res = await api("GET", "/orders/" + id);
         const o = res.data;
         document.getElementById("orderId").value = "";
+        orderCreateRequestKey = newOrderRequestKey();
+        orderLockVersion = 0;
         orderCustomerAc?.setValue({
             id: o.customer_id,
             name: o.customer_name,
@@ -2242,6 +2275,8 @@ async function editOrder(id) {
             return;
         }
         document.getElementById("orderId").value = o.id;
+        orderCreateRequestKey = null;
+        orderLockVersion = Number(o.lock_version || 0);
         orderCustomerAc?.setValue({
             id: o.customer_id,
             name: o.customer_name,
@@ -2498,6 +2533,8 @@ async function saveOrder() {
         destination_country_id: destCountryId ? parseInt(destCountryId, 10) : null,
         items,
     };
+    if (id) payload.lock_version = orderLockVersion;
+    else payload.idempotency_key = orderCreateRequestKey || (orderCreateRequestKey = newOrderRequestKey());
     if (!payload.customer_id) {
         showToast("Customer is required", "danger");
         return;
@@ -2515,6 +2552,7 @@ async function saveOrder() {
         let res;
         if (id) {
             res = await api("PUT", "/orders/" + id, payload);
+            orderLockVersion = Number(res?.data?.lock_version ?? orderLockVersion + 1);
             showToast("Order updated");
         } else {
             res = await api("POST", "/orders", payload);

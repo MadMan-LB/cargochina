@@ -10,7 +10,10 @@ require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__, 2) . '/services/NotificationService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderCountryService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderItemNumberingService.php';
+require_once dirname(__DIR__, 2) . '/services/ItemNumberReservationService.php';
 require_once dirname(__DIR__, 2) . '/services/TranslationService.php';
+require_once dirname(__DIR__, 2) . '/services/ItemClassificationService.php';
+require_once dirname(__DIR__, 2) . '/services/DraftOrderCostService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
 
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate as SpreadsheetCoordinate;
@@ -76,6 +79,28 @@ function draftOrderNormalizeItemText($value, int $maxLength = 150): ?string
         return mb_substr($value, 0, $maxLength, 'UTF-8');
     }
     return substr($value, 0, $maxLength);
+}
+
+function draftOrderNormalizeItemNumberSource(array $input): string
+{
+    $source = strtolower(trim((string) ($input['item_no_source'] ?? '')));
+    if (in_array($source, ['generated', 'manual', 'imported'], true)) return $source;
+    return !empty($input['item_no_manual']) ? 'manual' : 'generated';
+}
+
+function draftOrderValidateItemNumber($value, string $source = 'generated'): ?string
+{
+    if ($value === null) return null;
+    $value = (string) $value;
+    if (trim($value) === '') return null;
+    $length = function_exists('mb_strlen') ? mb_strlen($value, 'UTF-8') : strlen($value);
+    if ($length > 150) {
+        jsonError('Item number is too long.', 400, ['items.item_no' => 'Item number must be 150 characters or fewer.']);
+    }
+    if (preg_match('/[\x00-\x1F\x7F]/u', $value)) {
+        jsonError('Item number contains unsupported control characters.', 400, ['items.item_no' => 'Remove line breaks or control characters from the item number.']);
+    }
+    return $value;
 }
 
 function draftOrderFirstFilledValue(array $input, array $keys)
@@ -441,10 +466,10 @@ function draftOrderNormalizeSharedCartonContents(PDO $pdo, array $rawContents, i
         }
 
         $unitPrice = isset($rawContent['unit_price']) && $rawContent['unit_price'] !== ''
-            ? round((float) $rawContent['unit_price'], 4)
+            ? clmsFinancialDecimal($rawContent['unit_price'], 'Unit price', true)
             : null;
         $sellPrice = isset($rawContent['sell_price']) && $rawContent['sell_price'] !== ''
-            ? round((float) $rawContent['sell_price'], 4)
+            ? clmsFinancialDecimal($rawContent['sell_price'], 'Sell price', true)
             : null;
         $totalQuantity = round($quantityPerCarton * $cartons, 4);
         $priceForTotal = $sellPrice ?? $unitPrice;
@@ -454,11 +479,14 @@ function draftOrderNormalizeSharedCartonContents(PDO $pdo, array $rawContents, i
             $brand = $whatBrand;
         }
 
+        $itemNumberSource = draftOrderNormalizeItemNumberSource($rawContent);
         $normalized[] = [
             'product_id' => !empty($rawContent['product_id']) ? (int) $rawContent['product_id'] : null,
             'supplier_id' => $supplierId,
-            'item_no' => trim((string) ($rawContent['item_no'] ?? '')) ?: null,
-            'item_no_manual' => !empty($rawContent['item_no_manual']) ? 1 : 0,
+            'item_no' => draftOrderValidateItemNumber($rawContent['item_no'] ?? null, $itemNumberSource),
+            'item_no_source' => $itemNumberSource,
+            'item_no_manual' => $itemNumberSource !== 'generated' ? 1 : 0,
+            'existing_item_id' => !empty($rawContent['existing_item_id']) ? (int) $rawContent['existing_item_id'] : null,
             'shipping_code' => trim((string) ($rawContent['shipping_code'] ?? '')) ?: null,
             'what_brand' => $whatBrand,
             'brand' => $brand,
@@ -474,7 +502,7 @@ function draftOrderNormalizeSharedCartonContents(PDO $pdo, array $rawContents, i
             'quantity' => $totalQuantity,
             'unit_price' => $unitPrice,
             'sell_price' => $sellPrice,
-            'total_amount' => $priceForTotal !== null ? round($priceForTotal * $totalQuantity, 4) : null,
+            'total_amount' => $priceForTotal !== null ? DecimalMath::multiply($priceForTotal, (string) $totalQuantity) : null,
             'hs_code' => draftOrderNormalizeHsCode($rawContent['hs_code'] ?? ($product['hs_code'] ?? null)),
             'description_entries' => $description['entries'],
             'description_cn' => $description['description_cn'],
@@ -494,8 +522,8 @@ function draftOrderSummarizeSharedCartonContents(array $contents, int $cartons):
 {
     $qtyPerCarton = 0.0;
     $quantity = 0.0;
-    $buyTotal = 0.0;
-    $sellTotal = 0.0;
+    $buyTotal = '0.0000';
+    $sellTotal = '0.0000';
     $hasBuy = false;
     $hasSell = false;
 
@@ -507,12 +535,12 @@ function draftOrderSummarizeSharedCartonContents(array $contents, int $cartons):
 
         if ($content['unit_price'] !== null && $content['unit_price'] !== '') {
             $hasBuy = true;
-            $buyTotal += $lineQty * (float) $content['unit_price'];
+            $buyTotal = DecimalMath::add($buyTotal, DecimalMath::multiply((string) $lineQty, $content['unit_price']));
         }
         $lineSell = $content['sell_price'] ?? $content['unit_price'];
         if ($lineSell !== null && $lineSell !== '') {
             $hasSell = true;
-            $sellTotal += $lineQty * (float) $lineSell;
+            $sellTotal = DecimalMath::add($sellTotal, DecimalMath::multiply((string) $lineQty, $lineSell));
         }
     }
 
@@ -521,11 +549,11 @@ function draftOrderSummarizeSharedCartonContents(array $contents, int $cartons):
     return [
         'pieces_per_carton' => round($qtyPerCarton, 4),
         'quantity' => round($quantity, 4),
-        'unit_price' => ($hasBuy && $quantity > 0) ? round($buyTotal / $quantity, 4) : null,
+        'unit_price' => ($hasBuy && $quantity > 0) ? DecimalMath::divide($buyTotal, (string) $quantity) : null,
         'sell_price' => (($hasSell || $hasBuy) && $quantity > 0)
-            ? round(($hasSell ? $sellTotal : $buyTotal) / $quantity, 4)
+            ? DecimalMath::divide($hasSell ? $sellTotal : $buyTotal, (string) $quantity)
             : null,
-        'total_amount' => $priceForTotal !== null ? round($priceForTotal, 4) : null,
+        'total_amount' => $priceForTotal,
     ];
 }
 
@@ -559,10 +587,10 @@ function draftOrderDecodeSharedCartonContents(PDO $pdo, array $item): array
         $content['supplier_name'] = $content['supplier_id'] ? ($supplierNames[$content['supplier_id']] ?? null) : null;
         $content['quantity_per_carton'] = round((float) ($content['quantity_per_carton'] ?? $content['quantity'] ?? 0), 4);
         $content['quantity'] = round($content['quantity_per_carton'] * $cartons, 4);
-        $content['unit_price'] = isset($content['unit_price']) && $content['unit_price'] !== '' ? round((float) $content['unit_price'], 4) : null;
-        $content['sell_price'] = isset($content['sell_price']) && $content['sell_price'] !== '' ? round((float) $content['sell_price'], 4) : null;
+        $content['unit_price'] = isset($content['unit_price']) && $content['unit_price'] !== '' ? DecimalMath::normalize($content['unit_price']) : null;
+        $content['sell_price'] = isset($content['sell_price']) && $content['sell_price'] !== '' ? DecimalMath::normalize($content['sell_price']) : null;
         $linePrice = $content['sell_price'] ?? $content['unit_price'];
-        $content['total_amount'] = $linePrice !== null ? round($content['quantity'] * $linePrice, 4) : null;
+        $content['total_amount'] = $linePrice !== null ? DecimalMath::multiply((string) $content['quantity'], $linePrice) : null;
         $content['hs_code'] = draftOrderNormalizeHsCode($content['hs_code'] ?? null);
         $content['brand'] = draftOrderNormalizeItemText($content['brand'] ?? $content['what_brand'] ?? null, 150);
         $content['what_brand'] = draftOrderNormalizeItemText($content['what_brand'] ?? $content['brand'] ?? null, 150);
@@ -877,10 +905,10 @@ function draftOrderNormalizeItem(PDO $pdo, array $rawItem, int $supplierId, ?arr
     $multiplier = $dimensionsScope === 'carton' ? $cartons : $quantity;
     $declaredCbm = round($cbmPerUnit * $multiplier, 6);
     $declaredWeight = round($weightPerUnit * $multiplier, 4);
-    $unitPrice = isset($rawItem['unit_price']) && $rawItem['unit_price'] !== '' ? round((float) $rawItem['unit_price'], 4) : null;
-    $sellPrice = isset($rawItem['sell_price']) && $rawItem['sell_price'] !== '' ? round((float) $rawItem['sell_price'], 4) : null;
+    $unitPrice = isset($rawItem['unit_price']) && $rawItem['unit_price'] !== '' ? clmsFinancialDecimal($rawItem['unit_price'], 'Unit price', true) : null;
+    $sellPrice = isset($rawItem['sell_price']) && $rawItem['sell_price'] !== '' ? clmsFinancialDecimal($rawItem['sell_price'], 'Sell price', true) : null;
     $priceForTotal = $sellPrice ?? $unitPrice;
-    $totalAmount = $priceForTotal !== null ? round($priceForTotal * $quantity, 4) : null;
+    $totalAmount = $priceForTotal !== null ? DecimalMath::multiply($priceForTotal, (string) $quantity) : null;
     $photoPaths = normalizeStoredUploadPathList($rawItem['photo_paths'] ?? []);
     $customDesignPaths = normalizeStoredUploadPathList($rawItem['custom_design_paths'] ?? []);
     $customDesignRequired = !empty($rawItem['custom_design_required']) ? 1 : 0;
@@ -945,17 +973,43 @@ function draftOrderNormalizeItem(PDO $pdo, array $rawItem, int $supplierId, ?arr
     if ($brand === null && $whatBrand !== null) {
         $brand = $whatBrand;
     }
+    $classificationService = new ItemClassificationService($pdo);
+    $providedType = trim((string) ($rawItem['item_type_code'] ?? $rawItem['copy_normal_goods'] ?? ''));
+    if ($providedType !== '') {
+        $classification = [
+            'item_type_code' => $classificationService->normalize($providedType),
+            'confidence' => 1.0,
+            'requires_confirmation' => false,
+            'source' => 'manual',
+        ];
+    } else {
+        $classification = $classificationService->suggest([
+            'description_cn' => $description['description_cn'],
+            'description_en' => $description['description_en'],
+            'brand' => $brand,
+            'supplier_name' => $product['supplier_name'] ?? null,
+        ]);
+        $classification['source'] = 'suggested';
+    }
+    $legacyGoodType = ['normal' => 'Normal', 'replica' => 'Copy', 'dangerous' => 'Dangerous'][$classification['item_type_code']] ?? null;
+    $itemNumberSource = draftOrderNormalizeItemNumberSource($rawItem);
 
     return [
         'product_id' => $sharedCartonEnabled ? null : (!empty($rawItem['product_id']) ? (int) $rawItem['product_id'] : null),
         'supplier_id' => $supplierId,
-        'item_no' => $sharedCartonEnabled ? null : (trim((string) ($rawItem['item_no'] ?? '')) ?: null),
-        'item_no_manual' => $sharedCartonEnabled ? 0 : (!empty($rawItem['item_no_manual']) ? 1 : 0),
+        'item_no' => $sharedCartonEnabled ? null : draftOrderValidateItemNumber($rawItem['item_no'] ?? null, $itemNumberSource),
+        'item_no_source' => $sharedCartonEnabled ? 'generated' : $itemNumberSource,
+        'item_no_manual' => $sharedCartonEnabled ? 0 : ($itemNumberSource !== 'generated' ? 1 : 0),
+        'existing_item_id' => !empty($rawItem['existing_item_id']) ? (int) $rawItem['existing_item_id'] : null,
         'shipping_code' => trim((string) ($rawItem['shipping_code'] ?? '')) ?: null,
         'what_brand' => $whatBrand,
         'brand' => $brand,
         'materials' => draftOrderNormalizeItemText($rawItem['materials'] ?? $rawItem['material'] ?? null, 1000),
-        'copy_normal_goods' => draftOrderNormalizeCopyNormalGoods($rawItem['copy_normal_goods'] ?? null),
+        'copy_normal_goods' => $legacyGoodType,
+        'item_type_code' => $classification['item_type_code'],
+        'item_type_confidence' => $classification['confidence'],
+        'item_type_confirmed' => empty($classification['requires_confirmation']) ? 1 : 0,
+        'item_type_source' => $classification['source'],
         'code' => draftOrderNormalizeItemText($rawItem['code'] ?? null, 100),
         'express_number' => draftOrderNormalizeItemText($rawItem['express_number'] ?? null, 150),
         'size' => draftOrderNormalizeItemText($rawItem['size'] ?? null, 150),
@@ -1037,6 +1091,8 @@ function draftOrderAssignCanonicalItemNumbers(PDO $pdo, int $customerId, array $
                     'supplier_id' => $content['supplier_id'] ?? $item['supplier_id'] ?? $defaultSupplierId,
                     'item_no' => $content['item_no'] ?? null,
                     'item_no_manual' => !empty($content['item_no_manual']) ? 1 : 0,
+                    'item_no_source' => $content['item_no_source'] ?? 'generated',
+                    'item_no_preserve' => !empty($content['item_no_preserve']) ? 1 : 0,
                     'shipping_code' => trim((string) ($content['shipping_code'] ?? '')) ?: $itemShippingCode,
                 ];
                 $numberingMap[] = [$itemIndex, $contentIndex];
@@ -1048,6 +1104,8 @@ function draftOrderAssignCanonicalItemNumbers(PDO $pdo, int $customerId, array $
             'supplier_id' => $item['supplier_id'] ?? $defaultSupplierId,
             'item_no' => $item['item_no'] ?? null,
             'item_no_manual' => !empty($item['item_no_manual']) ? 1 : 0,
+            'item_no_source' => $item['item_no_source'] ?? 'generated',
+            'item_no_preserve' => !empty($item['item_no_preserve']) ? 1 : 0,
             'shipping_code' => $itemShippingCode,
         ];
         $numberingMap[] = [$itemIndex, null];
@@ -1073,6 +1131,160 @@ function draftOrderAssignCanonicalItemNumbers(PDO $pdo, int $customerId, array $
     return $items;
 }
 
+function draftOrderLockCustomerNumbering(PDO $pdo, int $customerId): void
+{
+    $stmt = $pdo->prepare('SELECT id FROM customers WHERE id = ? FOR UPDATE');
+    $stmt->execute([$customerId]);
+    if (!$stmt->fetchColumn()) {
+        throw new RuntimeException('Customer not found while reserving item numbers');
+    }
+}
+
+function draftOrderAssertUniqueItemNumbers(PDO $pdo, int $customerId, array $items, int $excludeOrderId = 0): array
+{
+    $numbers = [];
+    $sources = [];
+    $warnings = [];
+    foreach ($items as $item) {
+        $candidates = empty($item['shared_carton_enabled']) ? [[
+            'value' => $item['item_no'] ?? null,
+            'source' => $item['item_no_source'] ?? 'generated',
+        ]] : [];
+        foreach (($item['shared_carton_contents'] ?? []) as $content) {
+            $candidates[] = is_array($content) ? ['value'=>$content['item_no']??null,'source'=>$content['item_no_source']??'generated'] : ['value'=>null,'source'=>'generated'];
+        }
+        foreach ($candidates as $candidate) {
+            $number = (string) ($candidate['value'] ?? '');
+            $source = (string) ($candidate['source'] ?? 'generated');
+            if (trim($number) === '') {
+                if (in_array($source, ['manual','imported'], true)) continue;
+                throw new RuntimeException('Generated item number is blank');
+            }
+            $key = ItemNumberReservationService::normalize($number);
+            if (isset($numbers[$key])) {
+                if ($source === 'imported' || ($sources[$key] ?? '') === 'imported') {
+                    $warnings[] = 'Duplicate imported item number preserved: ' . $number;
+                    continue;
+                }
+                throw new RuntimeException('Duplicate item number in this draft: ' . $number);
+            }
+            $numbers[$key] = $number;
+            $sources[$key] = $source;
+        }
+    }
+    if (!$numbers) return $warnings;
+
+    $strictNumbers=[];
+    foreach($numbers as $key=>$number) if(($sources[$key]??'generated')!=='imported') $strictNumbers[]=$number;
+    if($strictNumbers) (new ItemNumberReservationService($pdo))->assertCandidatesAvailable($customerId, $strictNumbers, $excludeOrderId);
+
+    $sql = "SELECT oi.item_no,oi.shared_carton_contents FROM order_items oi JOIN orders o ON o.id=oi.order_id
+            WHERE o.customer_id=?";
+    $params = [$customerId];
+    if ($excludeOrderId > 0) {
+        $sql .= ' AND o.id<>?';
+        $params[] = $excludeOrderId;
+    }
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    foreach($stmt->fetchAll(PDO::FETCH_ASSOC) as $row){
+        $existing=[(string)($row['item_no']??'')];$contents=json_decode((string)($row['shared_carton_contents']??''),true);
+        if(is_array($contents))foreach($contents as $content)$existing[]=(string)($content['item_no']??'');
+        foreach($existing as $value){
+            $normalized=ItemNumberReservationService::normalize($value);
+            if($normalized===''||!isset($numbers[$normalized]))continue;
+            if(($sources[$normalized]??'generated')==='imported'){$warnings[]='Imported item number conflicts with an existing active number and was preserved: '.$numbers[$normalized];continue;}
+            throw new RuntimeException('Item number already exists for this customer: '.$value);
+        }
+    }
+    return array_values(array_unique($warnings));
+}
+
+function draftOrderPreserveExistingNumbers(PDO $pdo, int $orderId, array $items): array
+{
+    $sourceSelect = draftOrderTableHasColumn($pdo, 'order_items', 'item_no_source') ? 'item_no_source' : "'generated' AS item_no_source";
+    $stmt=$pdo->prepare("SELECT id,item_no,$sourceSelect,shared_carton_contents FROM order_items WHERE order_id=?");
+    $stmt->execute([$orderId]);
+    $existing=[];
+    foreach($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $existing[(int)$row['id']]=$row;
+
+    foreach($items as &$item){
+        $existingId=(int)($item['existing_item_id']??0);
+        $old=$existing[$existingId]??null;
+        if(!$old) continue;
+        $oldSource=in_array((string)($old['item_no_source']??''),['generated','manual','imported'],true)?(string)$old['item_no_source']:'generated';
+        if(empty($item['item_no_source'])) $item['item_no_source']=$oldSource;
+        if(($item['item_no_source']??'generated')==='generated' && (string)($item['item_no']??'')===(string)($old['item_no']??'')) $item['item_no_preserve']=1;
+
+        $oldContents=json_decode((string)($old['shared_carton_contents']??''),true);
+        if(!is_array($oldContents)) $oldContents=[];
+        foreach(($item['shared_carton_contents']??[]) as $index=>&$content){
+            $oldContent=$oldContents[$index]??null;
+            if(!is_array($oldContent)) continue;
+            $oldContentSource=in_array((string)($oldContent['item_no_source']??''),['generated','manual','imported'],true)?(string)$oldContent['item_no_source']:'generated';
+            if(empty($content['item_no_source'])) $content['item_no_source']=$oldContentSource;
+            if(($content['item_no_source']??'generated')==='generated' && (string)($content['item_no']??'')===(string)($oldContent['item_no']??'')) $content['item_no_preserve']=1;
+        }
+        unset($content);
+    }
+    unset($item);
+    return $items;
+}
+
+function draftOrderCollectItemNumberAudit(PDO $pdo, int $orderId, array $items): array
+{
+    $sourceSelect = draftOrderTableHasColumn($pdo, 'order_items', 'item_no_source') ? 'item_no_source' : "'generated' AS item_no_source";
+    $stmt=$pdo->prepare("SELECT id,item_no,$sourceSelect,shared_carton_contents FROM order_items WHERE order_id=?");
+    $stmt->execute([$orderId]);
+    $existing=[];
+    foreach($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $existing[(int)$row['id']]=$row;
+    $changes=[];
+    foreach($items as $index=>$item){
+        $oldId=(int)($item['existing_item_id']??0);
+        $old=$existing[$oldId]??null;
+        if(!$old) continue;
+        $oldValue=(string)($old['item_no']??'');
+        $newValue=(string)($item['item_no']??'');
+        if(($item['item_no_source']??'generated')==='manual' && $oldValue!==$newValue){
+            $changes[]=['item_index'=>$index,'old_item_id'=>$oldId,'supplier_id'=>$item['supplier_id']??null,'old_value'=>$oldValue,'new_value'=>$newValue];
+        }
+        $oldContents=json_decode((string)($old['shared_carton_contents']??''),true);
+        if(!is_array($oldContents)) $oldContents=[];
+        foreach(($item['shared_carton_contents']??[]) as $contentIndex=>$content){
+            $oldValue=(string)($oldContents[$contentIndex]['item_no']??'');
+            $newValue=(string)($content['item_no']??'');
+            if(($content['item_no_source']??'generated')==='manual' && $oldValue!==$newValue){
+                $changes[]=['item_index'=>$index,'content_index'=>$contentIndex,'old_item_id'=>$oldId,'supplier_id'=>$content['supplier_id']??$item['supplier_id']??null,'old_value'=>$oldValue,'new_value'=>$newValue];
+            }
+        }
+    }
+    return $changes;
+}
+
+function draftOrderWriteItemNumberAudit(PDO $pdo, int $orderId, array $changes, array $insertedItems, int $userId): void
+{
+    if(!$changes) return;
+    $stmt=$pdo->prepare("INSERT INTO audit_log (entity_type,entity_id,action,old_value,new_value,user_id) VALUES ('order_item',?,'item_number_changed',?,?,?)");
+    foreach($changes as $change){
+        $newItemId=(int)($insertedItems[$change['item_index']]['id']??0);
+        $context=['draft_id'=>$orderId,'old_item_id'=>$change['old_item_id'],'new_item_id'=>$newItemId,'supplier_id'=>$change['supplier_id']??null];
+        if(isset($change['content_index'])) $context['shared_content_index']=$change['content_index'];
+        $stmt->execute([
+            $newItemId?:$change['old_item_id'],
+            json_encode($context+['item_no'=>$change['old_value']],JSON_UNESCAPED_UNICODE),
+            json_encode($context+['item_no'=>$change['new_value']],JSON_UNESCAPED_UNICODE),
+            $userId,
+        ]);
+    }
+}
+
+function draftOrderIdempotencyKey($value): ?string
+{
+    $key=trim((string)$value);if($key==='')return null;
+    if(!preg_match('/^[A-Za-z0-9._:-]{8,64}$/',$key))jsonError('Invalid draft idempotency key',400);
+    return $key;
+}
+
 function draftOrderInsertDesignAttachments(PDO $pdo, int $itemId, array $paths, ?string $note, ?int $userId): void
 {
     if (!$paths) {
@@ -1093,6 +1305,7 @@ function draftOrderInsertDesignAttachments(PDO $pdo, int $itemId, array $paths, 
 
 function draftOrderInsertItems(PDO $pdo, int $orderId, ?int $defaultSupplierId, array $items, ?int $userId): array
 {
+    $hasItemNoSource = draftOrderTableHasColumn($pdo, 'order_items', 'item_no_source');
     $hasItemSupplier = draftOrderTableHasColumn($pdo, 'order_items', 'supplier_id');
     $hasBuyPrice = draftOrderTableHasColumn($pdo, 'order_items', 'buy_price');
     $hasSellPrice = draftOrderTableHasColumn($pdo, 'order_items', 'sell_price');
@@ -1115,6 +1328,10 @@ function draftOrderInsertItems(PDO $pdo, int $orderId, ?int $defaultSupplierId, 
     $placeholders = "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?";
     foreach ($metadataColumns as $column) {
         $columns .= ", $column";
+        $placeholders .= ",?";
+    }
+    if ($hasItemNoSource) {
+        $columns .= ", item_no_source";
         $placeholders .= ",?";
     }
     if ($hasItemSupplier) {
@@ -1195,6 +1412,11 @@ function draftOrderInsertItems(PDO $pdo, int $orderId, ?int $defaultSupplierId, 
         foreach ($metadataColumns as $column) {
             $params[] = $item[$column] ?? null;
         }
+        if ($hasItemNoSource) {
+            $params[] = in_array((string) ($item['item_no_source'] ?? ''), ['generated', 'manual', 'imported'], true)
+                ? $item['item_no_source']
+                : 'generated';
+        }
         if ($hasItemSupplier) {
             $params[] = $itemSupplierId ?: null;
         }
@@ -1232,6 +1454,17 @@ function draftOrderInsertItems(PDO $pdo, int $orderId, ?int $defaultSupplierId, 
         }
         $insert->execute($params);
         $item['id'] = (int) $pdo->lastInsertId();
+        if (draftOrderTableHasColumn($pdo, 'item_classifications', 'item_type_code')) {
+            (new ItemClassificationService($pdo))->set(
+                'order_item',
+                $item['id'],
+                $item['item_type_code'] ?? 'unclassified',
+                isset($item['item_type_confidence']) ? (float) $item['item_type_confidence'] : null,
+                !empty($item['item_type_confirmed']),
+                $userId,
+                (string) ($item['item_type_source'] ?? 'suggested')
+            );
+        }
         draftOrderInsertDesignAttachments($pdo, $item['id'], $item['custom_design_paths'], $item['custom_design_note'], $userId);
     }
     unset($item);
@@ -1314,6 +1547,12 @@ function draftOrderFetchOrderItemRows(PDO $pdo, int $orderId): array
         $item['shared_carton_contents'] = ($hasSharedCartonEnabled && $hasSharedCartonContents && !empty($item['shared_carton_enabled']))
             ? draftOrderDecodeSharedCartonContents($pdo, $item)
             : [];
+        $classification = draftOrderTableHasColumn($pdo, 'item_classifications', 'item_type_code')
+            ? (new ItemClassificationService($pdo))->get('order_item', (int) $item['id'])
+            : null;
+        $item['item_type_code'] = $classification['item_type_code'] ?? ((new ItemClassificationService($pdo))->normalize($item['copy_normal_goods'] ?? ''));
+        $item['item_type_confidence'] = isset($classification['confidence']) ? (float) $classification['confidence'] : null;
+        $item['item_type_confirmed'] = !empty($classification['is_confirmed']) ? 1 : 0;
     }
     unset($item);
 
@@ -1331,18 +1570,24 @@ function draftOrderBuildSupplierSections(array $items): array
                 'supplier_id' => $supplierId ?: null,
                 'supplier_name' => $item['supplier_name'] ?? 'Unassigned supplier',
                 'items' => [],
-                'totals' => ['amount' => 0.0, 'cbm' => 0.0, 'weight' => 0.0],
+                'totals' => ['amount' => '0.0000', 'cbm' => 0.0, 'weight' => 0.0],
             ];
         }
         $sections[$key]['items'][] = [
             'id' => (int) $item['id'],
+            'existing_item_id' => (int) $item['id'],
             'product_id' => (!empty($item['shared_carton_enabled']) ? null : (!empty($item['product_id']) ? (int) $item['product_id'] : null)),
             'item_no' => !empty($item['shared_carton_enabled']) ? null : ($item['item_no'] ?: null),
+            'item_no_source' => in_array((string) ($item['item_no_source'] ?? ''), ['generated', 'manual', 'imported'], true) ? $item['item_no_source'] : 'generated',
+            'item_no_manual' => in_array((string) ($item['item_no_source'] ?? ''), ['manual', 'imported'], true) ? 1 : 0,
             'shipping_code' => $item['shipping_code'] ?: null,
             'what_brand' => $item['what_brand'] ?? null,
             'brand' => $item['brand'] ?? $item['what_brand'] ?? null,
             'materials' => $item['materials'] ?? null,
             'copy_normal_goods' => $item['copy_normal_goods'] ?? null,
+            'item_type_code' => $item['item_type_code'] ?? 'unclassified',
+            'item_type_confidence' => $item['item_type_confidence'] ?? null,
+            'item_type_confirmed' => !empty($item['item_type_confirmed']) ? 1 : 0,
             'code' => $item['code'] ?? null,
             'express_number' => $item['express_number'] ?? null,
             'size' => $item['size'] ?? null,
@@ -1350,9 +1595,9 @@ function draftOrderBuildSupplierSections(array $items): array
             'pieces_per_carton' => isset($item['qty_per_carton']) ? (float) $item['qty_per_carton'] : null,
             'quantity' => draftOrderGetQuantity($item),
             'unit' => draftOrderNormalizeUnit($item['unit'] ?? null),
-            'unit_price' => $item['unit_price'] !== null ? (float) $item['unit_price'] : null,
-            'sell_price' => isset($item['sell_price']) && $item['sell_price'] !== null ? (float) $item['sell_price'] : null,
-            'total_amount' => $item['total_amount'] !== null ? (float) $item['total_amount'] : null,
+            'unit_price' => $item['unit_price'] !== null ? DecimalMath::normalize($item['unit_price']) : null,
+            'sell_price' => isset($item['sell_price']) && $item['sell_price'] !== null ? DecimalMath::normalize($item['sell_price']) : null,
+            'total_amount' => $item['total_amount'] !== null ? DecimalMath::normalize($item['total_amount']) : null,
             'cbm_mode' => (!empty($item['item_length']) && !empty($item['item_width']) && !empty($item['item_height'])) ? 'dimensions' : 'direct',
             'cbm' => $item['cbm_per_unit'],
             'item_length' => $item['item_length'] !== null ? (float) $item['item_length'] : null,
@@ -1374,13 +1619,13 @@ function draftOrderBuildSupplierSections(array $items): array
             'shared_carton_code' => $item['shared_carton_code'] ?? null,
             'shared_carton_contents' => $item['shared_carton_contents'] ?? [],
         ];
-        $sections[$key]['totals']['amount'] += (float) ($item['total_amount'] ?? 0);
+        $sections[$key]['totals']['amount'] = DecimalMath::add($sections[$key]['totals']['amount'], $item['total_amount'] ?? '0');
         $sections[$key]['totals']['cbm'] += (float) ($item['declared_cbm'] ?? 0);
         $sections[$key]['totals']['weight'] += (float) ($item['declared_weight'] ?? 0);
     }
 
     foreach ($sections as &$section) {
-        $section['totals']['amount'] = round($section['totals']['amount'], 4);
+        $section['totals']['amount'] = DecimalMath::normalize($section['totals']['amount']);
         $section['totals']['cbm'] = round($section['totals']['cbm'], 6);
         $section['totals']['weight'] = round($section['totals']['weight'], 4);
     }
@@ -1414,6 +1659,9 @@ function draftOrderFetchOrderPayload(PDO $pdo, int $orderId): array
 
     $items = draftOrderFetchOrderItemRows($pdo, $orderId);
     $sections = draftOrderBuildSupplierSections($items);
+    $costs = draftOrderTableHasColumn($pdo, 'draft_order_costs', 'base_amount')
+        ? (new DraftOrderCostService($pdo))->summarize($orderId)
+        : ['lines' => [], 'totals_by_currency' => [], 'base_currency' => null, 'base_total' => '0.0000', 'accounting_treatment' => 'shipment_expense_customer_charge'];
 
     return [
         'id' => (int) $order['id'],
@@ -1434,8 +1682,9 @@ function draftOrderFetchOrderPayload(PDO $pdo, int $orderId): array
         'updated_at' => $order['updated_at'],
         'editable' => $order['status'] === 'Draft',
         'supplier_sections' => $sections,
+        'operational_costs' => $costs,
         'totals' => [
-            'amount' => round(array_reduce($items, static fn($sum, $item) => $sum + (float) ($item['total_amount'] ?? 0), 0.0), 4),
+            'amount' => DecimalMath::sum(array_map(static fn($item) => $item['total_amount'] ?? '0', $items)),
             'cbm' => round(array_reduce($items, static fn($sum, $item) => $sum + (float) ($item['declared_cbm'] ?? 0), 0.0), 6),
             'weight' => round(array_reduce($items, static fn($sum, $item) => $sum + (float) ($item['declared_weight'] ?? 0), 0.0), 4),
         ],
@@ -1533,7 +1782,9 @@ function draftOrderBuildExportRows(array $sections): array
                         'row_type' => 'shared_carton_content',
                         'supplier_id' => $content['supplier_id'] ?? ($section['supplier_id'] ?? null),
                         'supplier_name' => $content['supplier_name'] ?? ($section['supplier_name'] ?? ''),
-                        'item_no' => $content['item_no'] ? ('↳ ' . $content['item_no']) : '↳',
+                        // The row type already identifies shared-carton contents. Keep the
+                        // stored item number byte-for-byte visible in every export.
+                        'item_no' => $content['item_no'] ?? '',
                         'what_brand' => $content['what_brand'] ?? '',
                         'brand' => $content['brand'] ?? $content['what_brand'] ?? '',
                         'materials' => $content['materials'] ?? '',
@@ -1706,6 +1957,15 @@ function draftOrderExportCsv(PDO $pdo, int $orderId): void
     }
 
     fputcsv($out, ['', '', '', '', clmsT('Grand total'), '', '', '', '', '', '', '', '', $order['totals']['amount'], '', $order['totals']['cbm'], '', $order['totals']['weight'], '', '', '']);
+    if (!empty($order['operational_costs']['lines'])) {
+        fputcsv($out, ['']);
+        fputcsv($out, [clmsT('Shipment Charges')]);
+        fputcsv($out, array_map('clmsT', ['Type', 'Description', 'Amount', 'Currency', 'Exchange Rate', 'Base Amount', 'Base Currency', 'Responsible Payer', 'Allocation', 'Accounting Treatment']));
+        foreach ($order['operational_costs']['lines'] as $cost) {
+            fputcsv($out, [$cost['cost_type_label_en'] ?? $cost['cost_type_code'], $cost['description_en'] ?? $cost['description_zh'] ?? '', $cost['amount'], $cost['currency'], $cost['exchange_rate'], $cost['base_amount'], $cost['base_currency'], $cost['responsible_payer'], $cost['allocation_method'], $cost['accounting_treatment']]);
+        }
+        fputcsv($out, [clmsT('Shipment Charges Total'), '', '', '', '', $order['operational_costs']['base_total'], $order['operational_costs']['base_currency'], '', '', clmsT('Shipment-level; no item allocation')]);
+    }
     fclose($out);
     exit;
 }
@@ -1759,11 +2019,17 @@ function draftOrderExportXlsx(PDO $pdo, int $orderId): void
 
 function draftOrderImportCellString($value): string
 {
+    $value = str_replace("\xC2\xA0", ' ', draftOrderImportRawCellString($value));
+    $value = preg_replace('/^\xEF\xBB\xBF/', '', $value) ?? $value;
+    return trim($value);
+}
+
+function draftOrderImportRawCellString($value): string
+{
     if ($value === null) {
         return '';
     }
-    $value = trim(str_replace("\xC2\xA0", ' ', (string) $value));
-    return preg_replace('/^\xEF\xBB\xBF/', '', $value) ?? $value;
+    return (string) $value;
 }
 
 function draftOrderImportRowIsBlank(array $row): bool
@@ -2748,7 +3014,7 @@ function draftOrderImportReadRowsFromSpreadsheet($spreadsheet, int $maxRows, boo
         for ($rowNumber = 1; $rowNumber <= $highestRow; $rowNumber++) {
             $row = [];
             for ($col = 1; $col <= $highestColumnIndex; $col++) {
-                $row[] = draftOrderImportCellString(
+                $row[] = draftOrderImportRawCellString(
                     $sheet->getCellByColumnAndRow($col, $rowNumber)->getFormattedValue()
                 );
             }
@@ -2861,7 +3127,7 @@ function draftOrderImportReadRowsFromUpload(): array
         $rowNumber = 0;
         while (($row = fgetcsv($handle)) !== false) {
             $rowNumber++;
-            $cleanRow = array_map('draftOrderImportCellString', $row);
+            $cleanRow = array_map('draftOrderImportRawCellString', $row);
             $cleanRow['__row_number'] = $rowNumber;
             $rows[] = $cleanRow;
             if (count($rows) > $maxRows) {
@@ -2884,7 +3150,10 @@ function draftOrderImportReadRowsFromUpload(): array
         }
 
         $usedFastReader = false;
-        if ($ext === 'xlsx') {
+        // Use formatted spreadsheet values so item numbers such as ITEM-007
+        // retain their visible zero-padding exactly as supplied.
+        $preserveFormattedCellValues = true;
+        if ($ext === 'xlsx' && !$preserveFormattedCellValues) {
             $fastStarted = microtime(true);
             try {
                 $fastRows = draftOrderImportReadRowsFromXlsxFast($tmpName, $maxRows, $readWarnings, $readMeta);
@@ -2984,6 +3253,12 @@ function draftOrderImportField(array $row, array $map, string $field): string
         return '';
     }
     return draftOrderImportCellString($row[$map[$field]] ?? '');
+}
+
+function draftOrderImportRawField(array $row, array $map, string $field): string
+{
+    if (!array_key_exists($field, $map)) return '';
+    return draftOrderImportRawCellString($row[$map[$field]] ?? '');
 }
 
 function draftOrderImportFieldNumber(array $row, array $map, string $field): ?float
@@ -3331,7 +3606,7 @@ function draftOrderImportBuildItem(array $row, array $map, ?string &$skipReason 
         return null;
     }
 
-    $itemNo = draftOrderImportField($row, $map, 'item_no');
+    $itemNo = draftOrderImportRawField($row, $map, 'item_no');
     $brand = draftOrderNormalizeItemText(draftOrderImportField($row, $map, 'brand'), 150);
     $whatBrand = draftOrderNormalizeItemText(draftOrderImportField($row, $map, 'what_brand'), 150);
     if ($whatBrand === null && $brand !== null) {
@@ -3464,8 +3739,10 @@ function draftOrderImportBuildItem(array $row, array $map, ?string &$skipReason 
     $customRaw = draftOrderImportField($row, $map, 'custom_design_required');
     return [
         'product_id' => null,
-        'item_no' => draftOrderImportStripSharedContentPrefix($itemNo),
+        'item_no' => $itemNo,
         'item_no_manual' => $itemNo !== '' ? 1 : 0,
+        'item_no_source' => 'imported',
+        'import_row_number' => (int) draftOrderImportRowMeta($row, '__row_number', 0),
         'shipping_code' => null,
         'what_brand' => $whatBrand,
         'brand' => $brand,
@@ -3523,6 +3800,8 @@ function draftOrderImportBuildSharedContent(PDO $pdo, array $row, array $map, ar
         'product_id' => null,
         'item_no' => $item['item_no'],
         'item_no_manual' => $item['item_no'] !== '' ? 1 : 0,
+        'item_no_source' => 'imported',
+        'import_row_number' => $item['import_row_number'] ?? 0,
         'shipping_code' => null,
         'quantity_per_carton' => $item['pieces_per_carton'],
         'unit_price' => $item['unit_price'],
@@ -3814,6 +4093,36 @@ function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename, a
         }
     }
 
+    $itemNumberWarnings = [];
+    $seenImportedNumbers = [];
+    foreach ($sections as $section) {
+        foreach (($section['items'] ?? []) as $item) {
+            $candidates = [];
+            if (!empty($item['shared_carton_enabled'])) {
+                $candidates = $item['shared_carton_contents'] ?? [];
+            } else {
+                $candidates = [$item];
+            }
+            foreach ($candidates as $candidate) {
+                $display = (string) ($candidate['item_no'] ?? '');
+                $normalized = ItemNumberReservationService::normalize($display);
+                if ($normalized === '') continue;
+                $rowNumber = (int) ($candidate['import_row_number'] ?? $item['import_row_number'] ?? 0);
+                if (!preg_match('/\d+[^\d]*$/u', $display)) {
+                    $warning='Row '.($rowNumber?:'?').' item number "'.$display.'" has no final numeric sequence. It was preserved and will not drive automatic suggestions.';
+                    $warnings[]=$warning;$itemNumberWarnings[]=['row'=>$rowNumber,'item_no'=>$display,'warning'=>$warning];
+                }
+                if (isset($seenImportedNumbers[$normalized])) {
+                    $warning = 'Rows ' . $seenImportedNumbers[$normalized] . ' and ' . ($rowNumber ?: '?') . ' use duplicate item number "' . $display . '". The imported values were preserved.';
+                    $warnings[] = $warning;
+                    $itemNumberWarnings[] = ['row' => $rowNumber, 'item_no' => $display, 'warning' => $warning];
+                } else {
+                    $seenImportedNumbers[$normalized] = $rowNumber ?: '?';
+                }
+            }
+        }
+    }
+
     $customer = draftOrderImportResolveCustomer($pdo, $meta['customer_name']);
     $country = draftOrderImportResolveCountry($pdo, $meta['destination_country_name']);
 
@@ -3860,12 +4169,18 @@ function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename, a
             'import_seconds' => round(microtime(true) - $buildStartedAt, 3),
             'total_seconds' => round((float) ($readMeta['read_seconds'] ?? 0) + (microtime(true) - $buildStartedAt), 3),
             'warnings' => array_values(array_unique($warnings)),
+            'item_number_warnings' => $itemNumberWarnings,
         ],
     ];
 }
 
 function draftOrderDeleteExistingItems(PDO $pdo, int $orderId): void
 {
+    $reservationIds=[];
+    try{
+        $stmt=$pdo->prepare('SELECT reservation_id FROM item_number_references WHERE order_id=?');$stmt->execute([$orderId]);$reservationIds=array_map('intval',$stmt->fetchAll(PDO::FETCH_COLUMN));
+        $pdo->prepare('DELETE FROM item_number_references WHERE order_id=?')->execute([$orderId]);
+    }catch(Throwable $e){$reservationIds=[];}
     $stmt = $pdo->prepare("SELECT id FROM order_items WHERE order_id = ?");
     $stmt->execute([$orderId]);
     $itemIds = array_map(static fn($id) => (int) $id, $stmt->fetchAll(PDO::FETCH_COLUMN));
@@ -3873,8 +4188,16 @@ function draftOrderDeleteExistingItems(PDO $pdo, int $orderId): void
         $placeholders = implode(',', array_fill(0, count($itemIds), '?'));
         $delDesign = $pdo->prepare("DELETE FROM design_attachments WHERE entity_type = 'order_item' AND entity_id IN ($placeholders)");
         $delDesign->execute($itemIds);
+        if (draftOrderTableHasColumn($pdo, 'item_classifications', 'item_type_code')) {
+            $delClassifications = $pdo->prepare("DELETE FROM item_classifications WHERE entity_type = 'order_item' AND entity_id IN ($placeholders)");
+            $delClassifications->execute($itemIds);
+        }
     }
     $pdo->prepare("DELETE FROM order_items WHERE order_id = ?")->execute([$orderId]);
+    if($reservationIds){
+        $placeholders=implode(',',array_fill(0,count($reservationIds),'?'));
+        $pdo->prepare("DELETE r FROM item_number_reservations r LEFT JOIN item_number_references ref ON ref.reservation_id=r.id WHERE r.id IN ($placeholders) AND ref.id IS NULL")->execute($reservationIds);
+    }
 }
 
 return function (string $method, ?string $id, ?string $action, array $input) {
@@ -3885,6 +4208,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         jsonError('Unauthorized', 401);
     }
     clmsRequirePermission('page:procurement_drafts', ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'], $pdo, $userId);
+
+    if ($method === 'GET' && $id === 'numbering-history') {
+        $customerId = (int) ($_GET['customer_id'] ?? 0);
+        if ($customerId <= 0) jsonError('customer_id is required.', 400);
+        jsonResponse(['data' => OrderItemNumberingService::fetchNumberingHistory($pdo, $customerId)]);
+    }
 
     if ($method === 'POST' && $id === 'import' && $action === null) {
         [$rows, $filename, $readWarnings, $readMeta] = draftOrderImportReadRowsFromUpload();
@@ -3944,6 +4273,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $supplierId = !empty($legacy['supplier_id']) ? (int) $legacy['supplier_id'] : null;
         $pdo->beginTransaction();
         try {
+            draftOrderLockCustomerNumbering($pdo, $customerId);
             if (draftOrderTableHasColumn($pdo, 'orders', 'destination_country_id')) {
                 $pdo->prepare(
                     "INSERT INTO orders (customer_id, supplier_id, expected_ready_date, currency, status, order_type, created_by, destination_country_id)
@@ -4004,6 +4334,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
 
             $normalizedItems = draftOrderAssignCanonicalItemNumbers($pdo, $customerId, $normalizedItems, $supplierId, $destinationCountryId);
+            draftOrderAssertUniqueItemNumbers($pdo, $customerId, $normalizedItems);
             draftOrderInsertItems($pdo, $orderId, $supplierId, $normalizedItems, $userId);
             $previousStatus = $legacy['status'] ?? 'draft';
             $pdo->prepare("UPDATE procurement_drafts SET status = 'converted', converted_order_id = ? WHERE id = ?")->execute([$orderId, $legacyId]);
@@ -4056,12 +4387,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             jsonError('Invalid action', 400);
         }
         $customerId = (int) ($input['customer_id'] ?? 0);
+        $creationKey = draftOrderIdempotencyKey($input['idempotency_key'] ?? $input['creation_idempotency_key'] ?? null);
         $expectedDate = draftOrderNormalizeExpectedReadyDate($input['expected_ready_date'] ?? null);
         $currency = strtoupper(trim((string) ($input['currency'] ?? 'USD'))) ?: 'USD';
         $highAlertNotes = trim((string) ($input['high_alert_notes'] ?? '')) ?: null;
         if ($customerId <= 0) {
             jsonError('customer_id is required.', 400, ['customer_id' => 'Customer is required.']);
         }
+        if($creationKey!==null){$existing=$pdo->prepare("SELECT id FROM orders WHERE creation_idempotency_key=? AND order_type='draft_procurement'");$existing->execute([$creationKey]);$existingId=(int)$existing->fetchColumn();if($existingId>0)jsonResponse(['data'=>draftOrderFetchOrderPayload($pdo,$existingId),'idempotent_replay'=>true]);}
         if (!in_array($currency, ['USD', 'RMB'], true)) {
             jsonError('Currency must be USD or RMB', 400, ['currency' => 'Currency must be USD or RMB.']);
         }
@@ -4073,29 +4406,34 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $items
         ))));
         $defaultSupplierId = count($supplierIds) === 1 ? $supplierIds[0] : null;
-        $items = draftOrderAssignCanonicalItemNumbers($pdo, $customerId, $items, $defaultSupplierId, $destinationCountryId);
-        $dupWarn = draftOrderEnforceDuplicateShippingCodePolicy($pdo, $customerId, 0, $items);
+        $dupWarn = null;
 
         $pdo->beginTransaction();
         try {
+            draftOrderLockCustomerNumbering($pdo, $customerId);
+            $items = draftOrderAssignCanonicalItemNumbers($pdo, $customerId, $items, $defaultSupplierId, $destinationCountryId);
+            $itemNumberWarnings = draftOrderAssertUniqueItemNumbers($pdo, $customerId, $items);
+            $dupWarn = draftOrderEnforceDuplicateShippingCodePolicy($pdo, $customerId, 0, $items);
             if (draftOrderTableHasColumn($pdo, 'orders', 'destination_country_id')) {
                 $pdo->prepare(
-                    "INSERT INTO orders (customer_id, supplier_id, expected_ready_date, currency, status, order_type, high_alert_notes, created_by, destination_country_id)
-                     VALUES (?, ?, ?, ?, 'Draft', 'draft_procurement', ?, ?, ?)"
-                )->execute([$customerId, $defaultSupplierId, $expectedDate, $currency, $highAlertNotes, $userId, $destinationCountryId]);
+                    "INSERT INTO orders (customer_id, supplier_id, expected_ready_date, currency, status, order_type, high_alert_notes, created_by, destination_country_id, creation_idempotency_key)
+                     VALUES (?, ?, ?, ?, 'Draft', 'draft_procurement', ?, ?, ?, ?)"
+                )->execute([$customerId, $defaultSupplierId, $expectedDate, $currency, $highAlertNotes, $userId, $destinationCountryId, $creationKey]);
             } else {
                 $pdo->prepare(
-                    "INSERT INTO orders (customer_id, supplier_id, expected_ready_date, currency, status, order_type, high_alert_notes, created_by)
-                     VALUES (?, ?, ?, ?, 'Draft', 'draft_procurement', ?, ?)"
-                )->execute([$customerId, $defaultSupplierId, $expectedDate, $currency, $highAlertNotes, $userId]);
+                    "INSERT INTO orders (customer_id, supplier_id, expected_ready_date, currency, status, order_type, high_alert_notes, created_by, creation_idempotency_key)
+                     VALUES (?, ?, ?, ?, 'Draft', 'draft_procurement', ?, ?, ?)"
+                )->execute([$customerId, $defaultSupplierId, $expectedDate, $currency, $highAlertNotes, $userId, $creationKey]);
             }
             $orderId = (int) $pdo->lastInsertId();
             draftOrderInsertItems($pdo, $orderId, $defaultSupplierId, $items, $userId);
+            (new ItemNumberReservationService($pdo))->reservePersistedOrder($orderId,(int)$userId);
             $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order', ?, 'create', ?, ?)")
                 ->execute([$orderId, json_encode(['status' => 'Draft', 'order_type' => 'draft_procurement'], JSON_UNESCAPED_UNICODE), $userId]);
             (new NotificationService($pdo))->notifyOrderCreated($orderId, $userId);
             $pdo->commit();
-            jsonResponse(array_filter(['data' => draftOrderFetchOrderPayload($pdo, $orderId), 'warning' => $dupWarn]), 201);
+            $warnings=array_values(array_filter(array_merge($itemNumberWarnings,[$dupWarn])));
+            jsonResponse(array_filter(['data' => draftOrderFetchOrderPayload($pdo, $orderId), 'warning' => $warnings?implode(' ',array_unique($warnings)):null]), 201);
         } catch (Throwable $e) {
             $pdo->rollBack();
             throw $e;
@@ -4132,29 +4470,43 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $destinationCountryId = draftOrderResolveDestinationCountryId($pdo, $customerId, $input, $order);
 
         $items = draftOrderFlattenSections($pdo, $input['supplier_sections'] ?? []);
+        $items = draftOrderPreserveExistingNumbers($pdo, $orderId, $items);
         $supplierIds = array_values(array_unique(array_filter(array_map(
             static fn($item) => (int) ($item['supplier_id'] ?? 0),
             $items
         ))));
         $defaultSupplierId = count($supplierIds) === 1 ? $supplierIds[0] : null;
-        $items = draftOrderAssignCanonicalItemNumbers($pdo, $customerId, $items, $defaultSupplierId, $destinationCountryId, $orderId);
-        $dupWarn = draftOrderEnforceDuplicateShippingCodePolicy($pdo, $customerId, $orderId, $items);
+        $dupWarn = null;
 
         $pdo->beginTransaction();
         try {
+            draftOrderLockCustomerNumbering($pdo, $customerId);
+            $lockedOrder = $pdo->prepare("SELECT status,lock_version FROM orders WHERE id=? AND order_type='draft_procurement' FOR UPDATE");
+            $lockedOrder->execute([$orderId]);
+            $lockedRow=$lockedOrder->fetch(PDO::FETCH_ASSOC);
+            if (($lockedRow['status']??'') !== 'Draft') throw new RuntimeException('Draft order is no longer editable');
+            $expectedVersion=(int)($input['lock_version']??-1);
+            if($expectedVersion<0 || $expectedVersion!==(int)($lockedRow['lock_version']??0))throw new RuntimeException('Draft changed in another request; reload and try again');
+            $itemNumberChanges = draftOrderCollectItemNumberAudit($pdo, $orderId, $items);
+            $items = draftOrderAssignCanonicalItemNumbers($pdo, $customerId, $items, $defaultSupplierId, $destinationCountryId, $orderId);
+            $itemNumberWarnings = draftOrderAssertUniqueItemNumbers($pdo, $customerId, $items, $orderId);
+            $dupWarn = draftOrderEnforceDuplicateShippingCodePolicy($pdo, $customerId, $orderId, $items);
             if (draftOrderTableHasColumn($pdo, 'orders', 'destination_country_id')) {
-                $pdo->prepare("UPDATE orders SET customer_id = ?, supplier_id = ?, expected_ready_date = ?, currency = ?, high_alert_notes = ?, destination_country_id = ? WHERE id = ?")
+                $pdo->prepare("UPDATE orders SET customer_id = ?, supplier_id = ?, expected_ready_date = ?, currency = ?, high_alert_notes = ?, destination_country_id = ?, updated_at=NOW(), lock_version=lock_version+1 WHERE id = ?")
                     ->execute([$customerId, $defaultSupplierId, $expectedDate, $currency, $highAlertNotes, $destinationCountryId, $orderId]);
             } else {
-                $pdo->prepare("UPDATE orders SET customer_id = ?, supplier_id = ?, expected_ready_date = ?, currency = ?, high_alert_notes = ? WHERE id = ?")
+                $pdo->prepare("UPDATE orders SET customer_id = ?, supplier_id = ?, expected_ready_date = ?, currency = ?, high_alert_notes = ?, updated_at=NOW(), lock_version=lock_version+1 WHERE id = ?")
                     ->execute([$customerId, $defaultSupplierId, $expectedDate, $currency, $highAlertNotes, $orderId]);
             }
             draftOrderDeleteExistingItems($pdo, $orderId);
-            draftOrderInsertItems($pdo, $orderId, $defaultSupplierId, $items, $userId);
+            $insertedItems = draftOrderInsertItems($pdo, $orderId, $defaultSupplierId, $items, $userId);
+            draftOrderWriteItemNumberAudit($pdo,$orderId,$itemNumberChanges,$insertedItems,(int)$userId);
+            (new ItemNumberReservationService($pdo))->reservePersistedOrder($orderId,(int)$userId);
             $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order', ?, 'update', ?, ?)")
                 ->execute([$orderId, json_encode(['order_type' => 'draft_procurement'], JSON_UNESCAPED_UNICODE), $userId]);
             $pdo->commit();
-            jsonResponse(array_filter(['data' => draftOrderFetchOrderPayload($pdo, $orderId), 'warning' => $dupWarn]));
+            $warnings=array_values(array_filter(array_merge($itemNumberWarnings,[$dupWarn])));
+            jsonResponse(array_filter(['data' => draftOrderFetchOrderPayload($pdo, $orderId), 'warning' => $warnings?implode(' ',array_unique($warnings)):null]));
         } catch (Throwable $e) {
             $pdo->rollBack();
             throw $e;

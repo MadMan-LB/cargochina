@@ -3,12 +3,12 @@
 
 CREATE TABLE IF NOT EXISTS balance_transactions (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  party_type VARCHAR(20) NOT NULL,
+  party_type ENUM('customer', 'supplier') NOT NULL,
   party_id INT UNSIGNED NOT NULL,
-  transaction_type VARCHAR(40) NOT NULL,
-  direction VARCHAR(30) NOT NULL DEFAULT 'reduce_balance',
+  transaction_type ENUM('payment_received', 'payment_sent', 'deposit', 'invoice', 'adjustment', 'refund', 'other') NOT NULL,
+  direction ENUM('increase_balance', 'reduce_balance') NOT NULL DEFAULT 'reduce_balance',
   amount DECIMAL(12,4) NOT NULL,
-  currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+  currency ENUM('USD', 'RMB') NOT NULL DEFAULT 'USD',
   payment_method VARCHAR(50) NULL,
   payment_account_label VARCHAR(150) NULL,
   payment_account_value VARCHAR(255) NULL,
@@ -25,9 +25,5 @@ CREATE TABLE IF NOT EXISTS balance_transactions (
   INDEX idx_balance_tx_currency (currency),
   INDEX idx_balance_tx_reference (reference_number),
   INDEX idx_balance_tx_source (source_table, source_id),
-  CONSTRAINT chk_balance_tx_party_type CHECK (party_type IN ('customer', 'supplier')),
-  CONSTRAINT chk_balance_tx_type CHECK (transaction_type IN ('payment_received', 'payment_sent', 'adjustment', 'refund', 'other')),
-  CONSTRAINT chk_balance_tx_direction CHECK (direction IN ('increase_balance', 'reduce_balance')),
-  CONSTRAINT chk_balance_tx_currency CHECK (currency IN ('USD', 'RMB')),
   CONSTRAINT fk_balance_tx_created_by FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 );

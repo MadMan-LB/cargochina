@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/OrderCountryService.php';
+require_once __DIR__ . '/ItemNumberReservationService.php';
 
 final class OrderItemNumberingService
 {
@@ -22,6 +23,26 @@ final class OrderItemNumberingService
     {
         $defaultShippingCode = OrderCountryService::normalizeShippingCode($defaultShippingCode);
         $history = self::buildNumberingHistoryState($numberingHistory);
+        $lastNumberByScope = [];
+        $usedNumbers = [];
+        foreach ($numberingHistory as $historyRow) {
+            if (!is_array($historyRow)) continue;
+            $historyValue = (string) ($historyRow['item_no'] ?? '');
+            $normalized = ItemNumberReservationService::normalize($historyValue);
+            if ($normalized === '') continue;
+            $usedNumbers[$normalized] = true;
+            if (self::parseFinalNumericPortion($historyValue)) {
+                $historyShipping = OrderCountryService::normalizeShippingCode((string) ($historyRow['shipping_code'] ?? ''));
+                if ($historyShipping === null) {
+                    $structuredHistory = self::parseItemNumber($historyValue);
+                    $historyShipping = $structuredHistory
+                        ? OrderCountryService::normalizeShippingCode($structuredHistory['prefix'])
+                        : $defaultShippingCode;
+                }
+                $scope = self::scopeKey(self::prefixKey($historyShipping), self::buildSupplierKey($historyRow, $defaultSupplierId));
+                $lastNumberByScope[$scope] = $historyValue;
+            }
+        }
         $supplierOrderByPrefix = [];
         $supplierSequences = [];
         $currentManualSupplierSequences = [];
@@ -41,6 +62,14 @@ final class OrderItemNumberingService
             $items[$index]['shipping_code'] = $shippingCode;
             $prefixKey = self::prefixKey($shippingCode);
             $itemPrefixKeys[$index] = $prefixKey;
+            $currentValue = (string) ($item['item_no'] ?? '');
+            $normalizedCurrent = ItemNumberReservationService::normalize($currentValue);
+            if ($normalizedCurrent !== '') {
+                $usedNumbers[$normalizedCurrent] = true;
+                if (self::parseFinalNumericPortion($currentValue)) {
+                    $lastNumberByScope[self::scopeKey($prefixKey, $supplierKey)] = $currentValue;
+                }
+            }
 
             if (!isset($supplierOrderByPrefix[$prefixKey])) {
                 $supplierOrderByPrefix[$prefixKey] = [];
@@ -134,12 +163,30 @@ final class OrderItemNumberingService
             $supplierSequence = $supplierSequences[$prefixKey][$supplierKey] ?? 1;
             $shippingCode = $items[$index]['shipping_code'] ?? $defaultShippingCode;
 
-            if (self::itemHasManualNumber($item) && trim((string) ($item['item_no'] ?? '')) !== '') {
+            if (self::itemHasManualNumber($item)) {
+                $items[$index]['item_no'] = trim((string) ($item['item_no'] ?? '')) === ''
+                    ? null
+                    : (string) $item['item_no'];
                 continue;
             }
 
+            $scope = self::scopeKey($prefixKey, $supplierKey);
+            $lastNumber = $lastNumberByScope[$scope] ?? null;
+            if ($lastNumber !== null) {
+                $candidate = self::incrementFinalNumericPortion($lastNumber);
+                while ($candidate !== null && isset($usedNumbers[ItemNumberReservationService::normalize($candidate)])) {
+                    $candidate = self::incrementFinalNumericPortion($candidate);
+                }
+                if ($candidate !== null) {
+                    $items[$index]['item_no'] = $candidate;
+                    $lastNumberByScope[$scope] = $candidate;
+                    $usedNumbers[ItemNumberReservationService::normalize($candidate)] = true;
+                    continue;
+                }
+            }
+
             $supplierItemCounts[$prefixKey][$supplierKey] = ($supplierItemCounts[$prefixKey][$supplierKey] ?? 0) + 1;
-            $items[$index]['item_no'] = $shippingCode
+            $candidate = $shippingCode
                 ? sprintf(
                     '%s-%d-%d',
                     $shippingCode,
@@ -147,6 +194,15 @@ final class OrderItemNumberingService
                     $supplierItemCounts[$prefixKey][$supplierKey]
                 )
                 : null;
+            while ($candidate !== null && isset($usedNumbers[ItemNumberReservationService::normalize($candidate)])) {
+                $supplierItemCounts[$prefixKey][$supplierKey]++;
+                $candidate = sprintf('%s-%d-%d', $shippingCode, $supplierSequence, $supplierItemCounts[$prefixKey][$supplierKey]);
+            }
+            $items[$index]['item_no'] = $candidate;
+            if ($candidate !== null) {
+                $lastNumberByScope[$scope] = $candidate;
+                $usedNumbers[ItemNumberReservationService::normalize($candidate)] = true;
+            }
         }
 
         return $items;
@@ -182,6 +238,9 @@ final class OrderItemNumberingService
             $params[] = $excludeOrderId;
         }
 
+        // Draft updates replace their item rows, so the monotonic item id is the
+        // sequence event order even when an older draft was edited most recently.
+        $sql .= ' ORDER BY oi.id';
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -234,12 +293,42 @@ final class OrderItemNumberingService
 
     private static function itemHasManualNumber(array $item): bool
     {
-        return !empty($item['item_no_manual']);
+        return !empty($item['item_no_manual'])
+            || !empty($item['item_no_preserve'])
+            || in_array((string) ($item['item_no_source'] ?? ''), ['manual', 'imported'], true);
+    }
+
+    private static function parseFinalNumericPortion(string $value): ?array
+    {
+        if (!preg_match('/^(.*?)(\d+)([^\d]*)$/u', $value, $matches)) return null;
+        return [
+            'prefix' => $matches[1],
+            'digits' => $matches[2],
+            'suffix' => $matches[3],
+            'number' => (int) $matches[2],
+            'width' => strlen($matches[2]),
+        ];
+    }
+
+    private static function incrementFinalNumericPortion(string $value): ?string
+    {
+        $parsed = self::parseFinalNumericPortion($value);
+        if (!$parsed) return null;
+        $digits = (string) ($parsed['number'] + 1);
+        if (strlen($digits) < $parsed['width']) {
+            $digits = str_pad($digits, $parsed['width'], '0', STR_PAD_LEFT);
+        }
+        return $parsed['prefix'] . $digits . $parsed['suffix'];
+    }
+
+    private static function scopeKey(string $prefixKey, string $supplierKey): string
+    {
+        return $prefixKey . '|' . $supplierKey;
     }
 
     private static function parseItemNumber(string $itemNo): ?array
     {
-        $value = trim($itemNo);
+        $value = ItemNumberReservationService::formatControlled($itemNo);
         if ($value === '') {
             return null;
         }

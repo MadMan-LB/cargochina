@@ -12,8 +12,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         jsonError('Method not allowed', 405);
     }
 
-    $text = trim($input['text'] ?? '');
-    $sourceLang = $input['source_lang'] ?? 'zh';
+    $text = (string) ($input['text'] ?? '');
+    $sourceLang = $input['source_lang'] ?? 'auto';
     $targetLang = $input['target_lang'] ?? 'en';
 
     if ($text === '') {
@@ -22,7 +22,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
     $pdo = getDb();
     $svc = new TranslationService($pdo);
-    $translated = $svc->translate($text, $sourceLang, $targetLang);
-
-    jsonResponse(['data' => ['translated' => $translated]]);
+    $result = $svc->translateDetailed($text, $sourceLang, $targetLang);
+    jsonResponse(['data' => array_merge(['translated' => $result['translated_text']], $result)]);
 };

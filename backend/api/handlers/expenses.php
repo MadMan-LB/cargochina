@@ -282,7 +282,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         case 'POST':
             $categoryId = (int) ($input['category_id'] ?? 0);
             $categoryName = trim($input['category_name'] ?? '');
-            $amount = (float) ($input['amount'] ?? 0);
+            $amount = clmsFinancialDecimal($input['amount'] ?? null, 'Amount');
             $currency = trim($input['currency'] ?? 'USD');
             $expenseDate = trim($input['expense_date'] ?? date('Y-m-d'));
             $payee = trim($input['payee'] ?? '') ?: null;
@@ -298,7 +298,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 $categoryId = findOrCreateExpenseCategory($pdo, $categoryName, $userId);
             }
-            if (!$categoryId || $amount <= 0) {
+            if (!$categoryId) {
                 jsonError('Category and amount are required. Type a category name or select one from the search.', 400);
             }
             if (hasAnyRole(['WarehouseStaff']) && !hasAnyRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'])) {

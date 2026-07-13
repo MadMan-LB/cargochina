@@ -94,7 +94,7 @@ require 'includes/layout.php';
             <div class="filter-toolbar-subtext">Quickly focus on empty, partial, or nearly full containers.</div>
           </div>
         </div>
-        <select id="containerFillFilter" class="form-select form-select-sm" onchange="applyClientFilters()">
+        <select id="containerFillFilter" class="form-select form-select-sm" onchange="loadContainers()">
           <option value="">Any</option>
           <option value="empty">Empty (0%)</option>
           <option value="partial">Partial (1–84%)</option>
@@ -135,6 +135,7 @@ require 'includes/layout.php';
         <tbody id="containersTbody"></tbody>
       </table>
     </div>
+    <div class="d-flex justify-content-between align-items-center p-3"><button class="btn btn-outline-secondary btn-sm" id="containersPrevBtn" type="button">Previous</button><span class="small text-muted" id="containersPageSummary">Page 1</span><button class="btn btn-outline-secondary btn-sm" id="containersNextBtn" type="button">Next</button></div>
   </div>
 </div>
 

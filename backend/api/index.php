@@ -15,9 +15,36 @@ $GLOBALS['__clms_api_request_id'] = null;
 $GLOBALS['__clms_api_timing_finalized'] = false;
 
 header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *');
+$requestOrigin = trim((string) ($_SERVER['HTTP_ORIGIN'] ?? ''));
+$requestAuthority = strtolower(trim((string) ($_SERVER['HTTP_HOST'] ?? '')));
+$originHost = $requestOrigin !== '' ? strtolower((string) parse_url($requestOrigin, PHP_URL_HOST)) : '';
+$originPort = $requestOrigin !== '' ? parse_url($requestOrigin, PHP_URL_PORT) : null;
+$originScheme = $requestOrigin !== '' ? strtolower((string) parse_url($requestOrigin, PHP_URL_SCHEME)) : '';
+$originAuthority = $originHost . ($originPort ? ':' . $originPort : '');
+$forwardedProto = strtolower(trim(explode(',', (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))[0] ?? ''));
+$requestScheme = ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || $forwardedProto === 'https') ? 'https' : 'http';
+$sameOrigin = $requestOrigin === '' || ($requestAuthority !== ''
+    && hash_equals($requestAuthority, $originAuthority)
+    && hash_equals($requestScheme, $originScheme));
+if ($requestOrigin !== '' && $sameOrigin) {
+    header('Access-Control-Allow-Origin: ' . $requestOrigin);
+    header('Vary: Origin');
+}
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, X-CLMS-Debug-Timing');
+
+$fetchSite = strtolower((string) ($_SERVER['HTTP_SEC_FETCH_SITE'] ?? ''));
+if (!$sameOrigin || $fetchSite === 'cross-site') {
+    http_response_code(403);
+    echo json_encode(['error' => true, 'message' => 'Cross-site request rejected']);
+    exit;
+}
+
+@ini_set('session.cookie_httponly', '1');
+@ini_set('session.cookie_samesite', 'Lax');
+if ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https') {
+    @ini_set('session.cookie_secure', '1');
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
@@ -130,7 +157,7 @@ if (!in_array($resource, $publicResources)) {
     }
     if ($resource === 'customers' && $method === 'GET') {
         $userRoles = getUserRoles();
-        $isLookup = $id === 'lookup' || $action === 'lookup' || $id === 'search';
+        $isLookup = $id === 'lookup' || $action === 'lookup';
         $allowed = $isLookup
             ? true
             : (hasPermission('customers.read', $rbac['customers']['read'] ?? []) || clmsCanRolesAccessPage($userRoles, 'customers', null, $userId));

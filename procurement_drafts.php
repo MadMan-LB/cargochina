@@ -24,7 +24,7 @@ require 'includes/layout.php';
       <div class="fw-semibold">Draft Orders</div>
       <small class="text-muted">These are real orders saved with the draft-order workflow.</small>
     </div>
-    <div class="d-flex gap-2 flex-wrap">
+    <div class="draft-action-group draft-page-actions" role="group" aria-label="<?= htmlspecialchars(clmsT('Draft order actions')) ?>">
       <button class="btn btn-outline-primary btn-sm" type="button" id="draftOrderImportBtn">Import</button>
       <button class="btn btn-primary btn-sm" type="button" onclick="openDraftOrderBuilder()">+ Draft an Order</button>
     </div>
@@ -191,7 +191,7 @@ require 'includes/layout.php';
               <div class="fw-semibold text-dark">Supplier Sections</div>
               <small class="text-muted">Photo-first item cards, auto item numbers, compact fields, and supplier-level totals stay live while you build.</small>
             </div>
-            <div class="d-flex gap-2 flex-wrap">
+            <div class="draft-action-group" role="group" aria-label="<?= htmlspecialchars(clmsT('Supplier section actions')) ?>">
               <button type="button" class="btn btn-outline-primary btn-sm" id="draftOrderModalImportBtn">Import</button>
               <button type="button" class="btn btn-outline-primary btn-sm" id="draftOrderAddSectionBtn" onclick="addDraftOrderSection()">+ Add Supplier Section</button>
             </div>
@@ -215,7 +215,7 @@ require 'includes/layout.php';
           </div>
         </form>
       </div>
-      <div class="modal-footer">
+      <div class="modal-footer draft-modal-actions">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
         <button type="button" class="btn btn-primary" id="draftOrderSaveBtn" onclick="saveDraftOrder()">Save Draft Order</button>
       </div>
@@ -296,9 +296,32 @@ require 'includes/layout.php';
               <textarea class="form-control" id="draftQuickCustomerAddress" rows="2"></textarea>
             </div>
           </div>
+
+          <div class="card mt-3" id="draftOrderCostsCard">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+              <div><span class="fw-semibold"><?= clmsT('Shipment Charges') ?></span><small class="text-muted d-block"><?= clmsT('Charged to the customer and recorded as shipment expenses. Draft amounts remain pending until approval.') ?></small></div>
+              <span class="badge bg-light text-dark border" id="draftCostBaseTotal">0.0000</span>
+            </div>
+            <div class="card-body">
+              <div id="draftCostSaveFirst" class="alert alert-light border small mb-3">Save the draft once before adding cost lines.</div>
+              <div id="draftCostLines" class="table-responsive mb-3"></div>
+              <input type="hidden" id="draftCostId">
+              <div class="row g-2" id="draftCostEditor">
+                <div class="col-6 col-lg-2"><label class="form-label small">Type</label><select class="form-select form-select-sm" id="draftCostType"><option value="pallet">Pallet</option><option value="transportation">Transportation</option><option value="loading_unloading">Loading / unloading</option><option value="handling">Handling</option><option value="storage">Storage</option><option value="insurance">Insurance</option><option value="customs">Customs-related</option><option value="other">Other</option></select></div>
+                <div class="col-6 col-lg-2"><label class="form-label small">Amount</label><input type="number" min="0.0001" step="0.0001" class="form-control form-control-sm" id="draftCostAmount"></div>
+                <div class="col-6 col-lg-1"><label class="form-label small">Currency</label><select class="form-select form-select-sm" id="draftCostCurrency"><option>RMB</option><option>USD</option></select></div>
+                <div class="col-6 col-lg-2"><label class="form-label small">Exchange rate</label><input type="number" min="0.00000001" step="0.00000001" value="1" class="form-control form-control-sm" id="draftCostRate"></div>
+                <div class="col-6 col-lg-1"><label class="form-label small">Base</label><select class="form-select form-select-sm" id="draftCostBaseCurrency"><option>RMB</option><option>USD</option></select></div>
+                <div class="col-12 col-lg-4"><label class="form-label small">Description</label><input type="text" class="form-control form-control-sm" id="draftCostDescription"></div>
+                <div class="col-12 col-lg-4"><label class="form-label small">Service provider</label><input type="text" class="form-control form-control-sm" id="draftCostProvider"></div>
+                <div class="col-12 col-lg-4"><label class="form-label small">Notes</label><input type="text" class="form-control form-control-sm" id="draftCostNotes"></div>
+                <div class="col-12 d-flex gap-2"><button type="button" class="btn btn-outline-primary btn-sm" data-builder-action onclick="saveDraftOrderCost()">Save Cost</button><button type="button" class="btn btn-outline-secondary btn-sm" data-builder-action onclick="resetDraftOrderCostEditor()">Clear</button></div>
+              </div>
+            </div>
+          </div>
         </form>
       </div>
-      <div class="modal-footer">
+      <div class="modal-footer draft-modal-actions">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
         <button type="button" class="btn btn-primary" id="draftQuickCustomerSaveBtn" onclick="saveDraftQuickCustomer()">Save Customer</button>
       </div>

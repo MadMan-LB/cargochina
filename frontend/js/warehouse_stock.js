@@ -5,6 +5,9 @@
     const API = window.API_BASE || "/cargochina/api/v1";
     let stockCustomerAc = null;
     let stockSupplierAc = null;
+    let stockOffset = 0;
+    const stockPageSize = 100;
+    let lastStockFilterQuery = null;
 
     function stockT(text, replacements = null) {
         return typeof t === "function" ? t(text, replacements) : text;
@@ -42,11 +45,13 @@
         const statusMode =
             document.getElementById("filterStatusMode")?.value || "include";
         const q = document.getElementById("filterQ").value.trim();
+        const itemType = document.getElementById("filterStockItemType")?.value || "";
         if (cid) params.set("customer_id", cid);
         if (sid) params.set("supplier_id", sid);
         statuses.forEach((status) => params.append("status[]", status));
         if (statuses.length) params.set("status_mode", statusMode);
         if (q) params.set("q", q);
+        if (itemType) params.set("item_type", itemType);
         return params;
     }
 
@@ -108,9 +113,16 @@
 
     window.loadStock = async function () {
         const params = buildStockParams();
+        const filterQuery = params.toString();
+        if (lastStockFilterQuery !== null && lastStockFilterQuery !== filterQuery) stockOffset = 0;
+        lastStockFilterQuery = filterQuery;
+        params.set("limit", String(stockPageSize));
+        params.set("offset", String(stockOffset));
         try {
             const d = await api("/warehouse-stock?" + params.toString());
             renderStock(d.data);
+            const prev=document.getElementById("stockPrevPage"), next=document.getElementById("stockNextPage"), summary=document.getElementById("stockPageSummary");
+            if(prev)prev.disabled=stockOffset===0; if(next)next.disabled=!d.meta?.has_more; if(summary)summary.textContent=d.data?.length?`${stockOffset+1}–${stockOffset+d.data.length}`:"0 results";
         } catch (e) {
             alert(e.message || stockT("Failed to load stock"));
         }
@@ -140,7 +152,7 @@
                 <td>${escapeHtml(r.supplier_name || "—")}</td>
                 <td><span class="badge bg-secondary">${escapeHtml(stockStatusDisplay(r.status || ""))}</span></td>
                 <td>${escapeHtml(r.description_en || r.description_cn || r.product_desc_en || r.product_desc_cn || "—")}</td>
-                <td>${r.quantity || "—"}</td>
+                <td>${r.item_actual_quantity || r.quantity || "—"}</td>
                 <td>${r.declared_cbm != null ? formatStockCbm(r.declared_cbm, 2) : "—"}</td>
                 <td>${r.item_actual_cbm != null ? formatStockCbm(r.item_actual_cbm, 2) : r.order_actual_cbm != null ? formatStockCbm(r.order_actual_cbm, 2) : "—"}</td>
                 <td>${escapeHtml(stockDimensionText(r))}</td>
@@ -293,7 +305,7 @@
                 document.getElementById("filterCustomerSearch"),
                 {
                     resource: "customers",
-                    searchPath: "/search",
+                    searchPath: "/lookup",
                     placeholder: stockT("Type to search customer..."),
                     onSelect: (item) => {
                         document.getElementById("filterCustomerId").value =
@@ -324,6 +336,8 @@
                     document.getElementById("filterSupplierId").value = "";
                 });
         }
+        document.getElementById("stockPrevPage")?.addEventListener("click",()=>{stockOffset=Math.max(0,stockOffset-stockPageSize);window.loadStock();});
+        document.getElementById("stockNextPage")?.addEventListener("click",()=>{stockOffset+=stockPageSize;window.loadStock();});
         loadStock();
     });
 })();

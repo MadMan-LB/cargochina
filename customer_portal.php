@@ -6,6 +6,9 @@
  */
 require_once __DIR__ . '/includes/i18n.php';
 require_once __DIR__ . '/backend/config/database.php';
+header('Referrer-Policy: no-referrer');
+header('Cache-Control: no-store, private');
+header('X-Robots-Tag: noindex, nofollow');
 
 $uiLocale = clmsGetUiLocale();
 $clientTranslations = clmsGetClientTranslationPayload();
@@ -40,8 +43,10 @@ if ($token) {
       INNER JOIN (
         SELECT order_id, MAX(id) as max_id
         FROM warehouse_receipts
+        WHERE voided_at IS NULL
         GROUP BY order_id
-      ) wr2 ON wr1.order_id = wr2.order_id AND wr1.id = wr2.max_id";
+      ) wr2 ON wr1.order_id = wr2.order_id AND wr1.id = wr2.max_id
+      WHERE wr1.voided_at IS NULL";
 
     $latestConfirmationSql = "SELECT cc1.* FROM customer_confirmations cc1
       INNER JOIN (

@@ -11,19 +11,21 @@ require_once dirname(__DIR__, 2) . '/services/OrderReceiptWorkflowService.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
+    header('Cache-Control: no-store, private');
+    header('Referrer-Policy: no-referrer');
 
     if ($method === 'GET') {
         $token = trim($_GET['token'] ?? '');
         if (!$token) jsonError('Token required', 400);
 
         $stmt = $pdo->prepare(
-            "SELECT o.id, o.status, o.expected_ready_date, o.currency, o.confirmation_token,
+            "SELECT o.id, o.status, o.expected_ready_date, o.currency,
              c.name as customer_name, s.name as supplier_name,
              wr.actual_cbm, wr.actual_weight, wr.actual_cartons, wr.receipt_condition
              FROM orders o
              JOIN customers c ON o.customer_id = c.id
              LEFT JOIN suppliers s ON o.supplier_id = s.id
-             LEFT JOIN warehouse_receipts wr ON wr.order_id = o.id
+             LEFT JOIN warehouse_receipts wr ON wr.order_id = o.id AND wr.voided_at IS NULL
              WHERE o.confirmation_token = ?
              ORDER BY wr.received_at DESC
              LIMIT 1"
@@ -31,9 +33,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $stmt->execute([$token]);
         $order = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$order) jsonError('Invalid or expired review link', 404);
-        if (trim((string) ($order['confirmation_token'] ?? '')) === '') {
-            jsonError('This order no longer has a pending customer response', 400);
-        }
         if (($order['status'] ?? '') === 'FinalizedAndPushedToTracking') {
             jsonError('This order has already been finalized and can no longer be updated from the portal', 400);
         }
@@ -56,7 +55,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $photos = $pdo->prepare(
             "SELECT wrp.file_path FROM warehouse_receipt_photos wrp
              JOIN warehouse_receipts wr ON wrp.receipt_id = wr.id
-             WHERE wr.order_id = ? ORDER BY wrp.id LIMIT 10"
+             WHERE wr.order_id = ? AND wr.voided_at IS NULL ORDER BY wrp.id LIMIT 10"
         );
         $photos->execute([$order['id']]);
         $order['receipt_photos'] = array_column($photos->fetchAll(PDO::FETCH_ASSOC), 'file_path');

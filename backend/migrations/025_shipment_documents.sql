@@ -18,14 +18,10 @@ IF NOT EXISTS shipment_draft_documents
     shipment_draft_id INT UNSIGNED NOT NULL,
     file_path VARCHAR
 (500) NOT NULL,
-    doc_type VARCHAR
-(50) NOT NULL DEFAULT 'other',
+    doc_type ENUM('bol', 'booking_confirmation', 'invoice', 'other') NOT NULL DEFAULT 'other',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY
 (shipment_draft_id) REFERENCES shipment_drafts
 (id) ON
-DELETE CASCADE,
-    CONSTRAINT chk_sdd_type CHECK
-(doc_type IN
-('bol', 'booking_confirmation', 'invoice', 'other'))
+DELETE CASCADE
 );

@@ -5,6 +5,12 @@ let productFilterSupplierAutocomplete = null;
 let productFilterHsCodeAutocomplete = null;
 let productSearchAutocomplete = null;
 let productSearchTimer = null;
+let productsOffset = 0;
+const productsLimit = 50;
+
+function productItemTypeLabel(code) {
+    return ({normal:"Normal goods",replica:"Copy / replica goods",cosmetics:"Cosmetics",branded:"Branded goods",food:"Food",dangerous:"Dangerous goods",other:"Other",unclassified:"Needs classification"})[code] || "Needs classification";
+}
 
 document.addEventListener("DOMContentLoaded", () => {
     setupProductFilters();
@@ -16,6 +22,8 @@ document.addEventListener("DOMContentLoaded", () => {
     setupProductHsCodeAutocomplete();
     setupProductPricing();
     setupProductDesignAttachments();
+    document.getElementById("productsPrevBtn")?.addEventListener("click",()=>{productsOffset=Math.max(0,productsOffset-productsLimit);loadProducts(false);});
+    document.getElementById("productsNextBtn")?.addEventListener("click",()=>{productsOffset+=productsLimit;loadProducts(false);});
 });
 
 function setProductText(id, value) {
@@ -78,7 +86,7 @@ function setupProductFilters() {
         });
     }
 
-    [alertEl, imageEl].forEach((el) => {
+    [alertEl, imageEl, document.getElementById("productItemTypeFilter")].forEach((el) => {
         el?.addEventListener("change", loadProducts);
     });
 
@@ -539,6 +547,7 @@ function getProductFilters() {
             document.getElementById("productFilterHsCode")?.value.trim() || "",
         alertFilter: document.getElementById("productAlertFilter")?.value || "",
         imageFilter: document.getElementById("productImageFilter")?.value || "",
+        itemType: document.getElementById("productItemTypeFilter")?.value || "",
     };
 }
 
@@ -554,6 +563,7 @@ function updateProductsOverview(rows) {
     if (filters.alertFilter === "without") filterParts.push("Without alert");
     if (filters.imageFilter === "with") filterParts.push("With images");
     if (filters.imageFilter === "without") filterParts.push("Without images");
+    if (filters.itemType) filterParts.push(`Item type: ${productItemTypeLabel(filters.itemType)}`);
 
     const withAlert = list.filter((item) => !!productAlertText(item)).length;
     const withImages = list.filter(
@@ -611,7 +621,8 @@ function updateProductsOverview(rows) {
     );
 }
 
-async function loadProducts() {
+async function loadProducts(resetOffset = true) {
+    if (resetOffset) productsOffset = 0;
     try {
         const filters = getProductFilters();
         const params = new URLSearchParams();
@@ -622,16 +633,19 @@ async function loadProducts() {
             params.set("alert_filter", filters.alertFilter);
         if (filters.imageFilter)
             params.set("image_filter", filters.imageFilter);
+        if (filters.itemType) params.set("item_type",filters.itemType);
+        params.set("limit",String(productsLimit));params.set("offset",String(productsOffset));
         const tbody = document.querySelector("#productsTable tbody");
         if (tbody) {
             tbody.innerHTML =
-                '<tr><td colspan="11" class="text-center text-muted py-4">Loading products…</td></tr>';
+                '<tr><td colspan="12" class="text-center text-muted py-4">Loading products…</td></tr>';
         }
         const res = await api(
             "GET",
             "/products" + (params.toString() ? "?" + params.toString() : ""),
         );
         const rows = res.data || [];
+        const prev=document.getElementById("productsPrevBtn"),next=document.getElementById("productsNextBtn");if(prev)prev.disabled=productsOffset<=0;if(next)next.disabled=!res.meta?.has_more;setProductText("productsPageSummary",`Page ${Math.floor(productsOffset/productsLimit)+1}`);
         updateProductsOverview(rows);
         tbody.innerHTML =
             rows
@@ -645,6 +659,7 @@ async function loadProducts() {
           <div class="small text-muted text-truncate" style="max-width:260px">${escapeHtml(r.packaging || "No packaging note")}</div>
         </td>
         <td>${escapeHtml(r.supplier_name || "—")}</td>
+        <td><span class="badge ${r.item_type_code === "unclassified" ? "bg-warning text-dark" : "bg-secondary"}">${escapeHtml(productItemTypeLabel(r.item_type_code))}</span></td>
         <td>${renderProductAlertBadge(r)}</td>
         <td>${r.cbm}</td>
         <td>${r.weight}</td>
@@ -659,12 +674,12 @@ async function loadProducts() {
     `,
                 )
                 .join("") ||
-            '<tr><td colspan="11" class="text-center text-muted py-4">No products match the current filters.</td></tr>';
+            '<tr><td colspan="12" class="text-center text-muted py-4">No products match the current filters.</td></tr>';
     } catch (e) {
         updateProductsOverview([]);
         const tbody = document.querySelector("#productsTable tbody");
         if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="11" class="text-center text-danger py-4">${escapeHtml(e.message || "Failed to load products")}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="12" class="text-center text-danger py-4">${escapeHtml(e.message || "Failed to load products")}</td></tr>`;
         }
         showToast(e.message, "danger");
     }
@@ -676,6 +691,7 @@ window.clearProductFilters = function () {
     const hsCodeEl = document.getElementById("productFilterHsCode");
     const alertEl = document.getElementById("productAlertFilter");
     const imageEl = document.getElementById("productImageFilter");
+    const itemTypeEl=document.getElementById("productItemTypeFilter");
 
     if (searchEl) searchEl.value = "";
     productSearchAutocomplete?.setValue?.(null);
@@ -687,6 +703,7 @@ window.clearProductFilters = function () {
     }
     if (alertEl) alertEl.value = "";
     if (imageEl) imageEl.value = "";
+    if(itemTypeEl)itemTypeEl.value="";
     loadProducts();
 };
 
@@ -702,6 +719,7 @@ function openProductForm() {
     if (productSupplierAutocomplete && productSupplierAutocomplete.setValue)
         productSupplierAutocomplete.setValue(null);
     document.getElementById("productHighAlertNote").value = "";
+    document.getElementById("productItemType").value="";
     const pieceRadio = document.getElementById("productDimensionsPiece");
     const cartonRadio = document.getElementById("productDimensionsCarton");
     if (pieceRadio) pieceRadio.checked = false;
@@ -728,6 +746,7 @@ async function editProduct(id) {
         const res = await api("GET", "/products/" + id);
         const d = res.data;
         document.getElementById("productId").value = d.id;
+        document.getElementById("productItemType").value=d.item_type_code === "unclassified" ? "" : (d.item_type_code || "");
         productDescEntries = (d.description_entries || []).map((e) => ({
             id: Date.now() + Math.random(),
             text: e.description_text || e.description_cn || "",
@@ -881,6 +900,8 @@ async function saveProduct() {
             ? parseFloat(document.getElementById("productSellPrice").value)
             : null,
         image_paths: productImagePaths,
+        item_type_code: document.getElementById("productItemType")?.value || "",
+        item_type_confirmed: document.getElementById("productItemType")?.value ? 1 : 0,
     };
     if (payload.cbm <= 0) {
         showToast(
@@ -893,6 +914,7 @@ async function saveProduct() {
         showToast("Weight must be non-negative", "danger");
         return;
     }
+    if(!payload.item_type_code){showToast("Choose and confirm an item type before saving","danger");return;}
     try {
         setLoading(btn, true);
         if (id) {

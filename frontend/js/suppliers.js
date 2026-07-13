@@ -16,14 +16,18 @@ document.addEventListener("DOMContentLoaded", () => {
             ?.addEventListener("change", applySupplierFilters);
     });
     const supplierIdFromUrl = new URLSearchParams(window.location.search).get("supplier_id");
-    if (supplierIdFromUrl && isBuyer()) {
+    if (supplierIdFromUrl && /^\d+$/.test(supplierIdFromUrl)) {
         setTimeout(() => editSupplier(supplierIdFromUrl), 250);
     }
+    document.getElementById("supplierPrevPage")?.addEventListener("click", () => { supplierOffset = Math.max(0, supplierOffset - supplierPageSize); loadSuppliers(); });
+    document.getElementById("supplierNextPage")?.addEventListener("click", () => { supplierOffset += supplierPageSize; loadSuppliers(); });
 });
 
 let additionalIdIndex = 0;
 let supplierAttachments = [];
 let supplierPaymentLinkIndex = 0;
+let supplierOffset = 0;
+const supplierPageSize = 50;
 function supplierT(text, replacements = null) {
     return typeof t === "function" ? t(text, replacements) : text;
 }
@@ -53,10 +57,13 @@ function getSupplierParams() {
     if (payment) params.set("payment_status", payment);
     params.set("sort", sort);
     params.set("order", order);
+    params.set("limit", String(supplierPageSize));
+    params.set("offset", String(supplierOffset));
     return params.toString();
 }
 
 function applySupplierFilters() {
+    supplierOffset = 0;
     loadSuppliers();
 }
 
@@ -67,6 +74,7 @@ async function loadSuppliers() {
         const qs = getSupplierParams();
         const res = await api("GET", "/suppliers" + (qs ? "?" + qs : ""));
         const rows = res.data || [];
+        const meta = res.meta || {};
         const tbody = document.querySelector("#suppliersTable tbody");
         const buyer = isBuyer();
         tbody.innerHTML =
@@ -124,6 +132,12 @@ async function loadSuppliers() {
                 })
                 .join("") ||
             '<tr><td colspan="7" class="text-muted">No suppliers yet.</td></tr>';
+        const prev = document.getElementById("supplierPrevPage");
+        const next = document.getElementById("supplierNextPage");
+        if (prev) prev.disabled = supplierOffset === 0;
+        if (next) next.disabled = !meta.has_more;
+        const summary = document.getElementById("supplierPageSummary");
+        if (summary) summary.textContent = rows.length ? `${supplierOffset + 1}–${supplierOffset + rows.length}` : "0 results";
     } catch (e) {
         showToast(e.message, "danger");
     } finally {

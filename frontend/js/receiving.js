@@ -4,6 +4,7 @@ let receiveItemPhotos = {};
 let receiveItemRenderLimit = 80;
 let receiveCurrentOrderId = null;
 let receiveCurrentOrderCurrency = "USD";
+let receivingOperationId = null;
 let warehouseQueueData = [];
 let warehouseQueueSourceData = [];
 let receivingImportPreviewToken = null;
@@ -12,6 +13,8 @@ let receivingImportProgressTimer = null;
 let receivingImportLongTimer = null;
 let receivingImportStartedAt = 0;
 let receivingImportProgressState = null;
+let receivingQueueOffset = 0;
+const receivingQueueLimit = 50;
 let calMonth = new Date().getMonth();
 let calYear = new Date().getFullYear();
 const RECEIVING_DEFAULT_STATUSES = ["Approved", "InTransitToWarehouse"];
@@ -25,6 +28,11 @@ const RECEIVING_IMPORT_STEPS = [
     { key: "saving", label: "Saving receipts", target: 96 },
     { key: "done", label: "Done", target: 100 },
 ];
+
+function nextReceivingOperationId() {
+    if (!receivingOperationId) receivingOperationId = globalThis.crypto?.randomUUID?.() || `receive-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    return receivingOperationId;
+}
 
 function receivingT(text, replacements = null) {
     return typeof t === "function" ? t(text, replacements) : text;
@@ -405,6 +413,12 @@ document.addEventListener("DOMContentLoaded", () => {
     );
     setupReceiveOrderSearch();
     bindReceivingImportControls();
+    const exactOrderId = new URLSearchParams(window.location.search).get("order_id");
+    if (exactOrderId && /^\d+$/.test(exactOrderId)) {
+        receiveOrderById(parseInt(exactOrderId, 10));
+    }
+    document.getElementById("receivingPrevBtn")?.addEventListener("click",()=>{receivingQueueOffset=Math.max(0,receivingQueueOffset-receivingQueueLimit);applyFilters(false);});
+    document.getElementById("receivingNextBtn")?.addEventListener("click",()=>{receivingQueueOffset+=receivingQueueLimit;applyFilters(false);});
 });
 
 function setupReceivingFilterControls() {
@@ -644,6 +658,7 @@ function getFilterParams() {
     const df = document.getElementById("filterDateFrom")?.value;
     const dt = document.getElementById("filterDateTo")?.value;
     const sc = document.getElementById("filterShippingCode")?.value?.trim();
+    const itemType = document.getElementById("filterReceivingItemType")?.value?.trim();
     const statuses = getSelectedReceivingStatuses();
     if (statuses.length) {
         statuses.forEach((status) => params.append("status[]", status));
@@ -655,6 +670,7 @@ function getFilterParams() {
     if (df) params.set("date_from", df);
     if (dt) params.set("date_to", dt);
     if (sc) params.set("shipping_code", sc);
+    if (itemType) params.set("item_type", itemType);
     return params.toString();
 }
 
@@ -690,15 +706,17 @@ function applyLocalReceivingFilters() {
         ?.classList.toggle("d-none", warehouseQueueData.length > 0);
 }
 
-async function applyFilters() {
+async function applyFilters(resetOffset = true) {
+    if(resetOffset)receivingQueueOffset=0;
     const listEl = document.getElementById("warehouseList");
     const applyBtn = document.getElementById("applyFiltersBtn");
     try {
         if (listEl) listEl.classList.add("opacity-50");
         if (applyBtn) applyBtn.disabled = true;
-        const qs = getFilterParams();
+        const params=new URLSearchParams(getFilterParams());params.set("limit",String(receivingQueueLimit));params.set("offset",String(receivingQueueOffset));const qs=params.toString();
         const res = await api("GET", "/receiving/queue?" + qs);
         warehouseQueueSourceData = res.data || [];
+        const prev=document.getElementById("receivingPrevBtn"),next=document.getElementById("receivingNextBtn");if(prev)prev.disabled=receivingQueueOffset<=0;if(next)next.disabled=!res.meta?.has_more;const summary=document.getElementById("receivingPageSummary");if(summary)summary.textContent=receivingT("Page {page}",{page:Math.floor(receivingQueueOffset/receivingQueueLimit)+1});
         applyLocalReceivingFilters();
     } catch (e) {
         warehouseQueueSourceData = [];
@@ -724,6 +742,7 @@ function clearReceivingFilters() {
         "filterDateFrom",
         "filterDateTo",
         "filterShippingCode",
+        "filterReceivingItemType",
     ].forEach((id) => {
         const el = document.getElementById(id);
         if (el) el.value = "";
@@ -2335,6 +2354,7 @@ async function submitReceive() {
     }
 
     const payload = {
+        idempotency_key: nextReceivingOperationId(),
         actual_cartons: actualCartons,
         actual_cbm: actualCbm,
         actual_weight: actualWeight,
@@ -2353,6 +2373,7 @@ async function submitReceive() {
             "/orders/" + orderId + "/receive",
             payload,
         );
+        receivingOperationId = null;
         showToast(
             res.data.variance_detected
                 ? receivingT(

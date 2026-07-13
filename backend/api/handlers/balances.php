@@ -7,6 +7,8 @@
 
 require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__, 3) . '/includes/sidebar_permissions.php';
+require_once dirname(__DIR__, 2) . '/services/DecimalMath.php';
+require_once dirname(__DIR__, 2) . '/services/FinancialReconciliationService.php';
 
 function balancesCurrentUserCanAccess(): bool
 {
@@ -162,12 +164,12 @@ function balancesDateInRange(?string $date, ?string $from, ?string $to): bool
     return true;
 }
 
-function balancesStatusFor(float $currentBalance): string
+function balancesStatusFor(string $currentBalance): string
 {
-    if (abs($currentBalance) < 0.005) {
+    if (DecimalMath::compare($currentBalance, '0.0050') < 0 && DecimalMath::compare($currentBalance, '-0.0050') > 0) {
         return 'settled';
     }
-    return $currentBalance > 0 ? 'due' : 'credit';
+    return DecimalMath::compare($currentBalance, '0') > 0 ? 'due' : 'credit';
 }
 
 function balancesStatusLabel(string $status): string
@@ -223,10 +225,10 @@ function balancesSearchClause(string $alias, array $columns, string $q, array &$
     if ($q === '') {
         return '';
     }
-    $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+    $like = clmsSearchLike($q);
     $parts = [];
     foreach ($columns as $column) {
-        $parts[] = "($alias.$column IS NOT NULL AND $alias.$column COLLATE utf8mb4_unicode_ci LIKE ?)";
+        $parts[] = "($alias.$column IS NOT NULL AND " . clmsUtf8SearchExpr("$alias.$column") . " LIKE ?)";
         $params[] = $like;
     }
     return $parts ? (' AND (' . implode(' OR ', $parts) . ')') : '';
@@ -237,14 +239,10 @@ function balancesPartySearchClause(PDO $pdo, string $alias, string $table, array
     if ($q === '') {
         return '';
     }
-    $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+    $like = clmsSearchLike($q);
     $parts = [];
     foreach ($columns as $column) {
-        $parts[] = "($alias.$column IS NOT NULL AND $alias.$column COLLATE utf8mb4_unicode_ci LIKE ?)";
-        $params[] = $like;
-    }
-    if (balancesTableHasColumn($pdo, $table, 'payment_links')) {
-        $parts[] = "($alias.payment_links IS NOT NULL AND CONVERT($alias.payment_links USING utf8mb4) COLLATE utf8mb4_unicode_ci LIKE ?)";
+        $parts[] = "($alias.$column IS NOT NULL AND " . clmsUtf8SearchExpr("$alias.$column") . " LIKE ?)";
         $params[] = $like;
     }
     return $parts ? (' AND (' . implode(' OR ', $parts) . ')') : '';
@@ -414,9 +412,22 @@ function balancesFetchCustomerReceivables(PDO $pdo, array $customerIds): array
     $stmt->execute($params);
     $map = [];
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-        $map[(int) $row['customer_id']][(string) ($row['currency'] ?: 'USD')] = (float) $row['total_due'];
+        $map[(int) $row['customer_id']][(string) ($row['currency'] ?: 'USD')] = DecimalMath::normalize($row['total_due']);
+    }
+    if (balancesTableExists($pdo,'shipment_financial_entries')) {
+        $sql="SELECT customer_id,base_currency currency,CAST(COALESCE(SUM(base_amount),0) AS CHAR) total_due FROM shipment_financial_entries WHERE entry_role='customer_charge' AND posting_state='finalized' AND archived_at IS NULL AND customer_id IN (".balancesIdPlaceholders($customerIds).") GROUP BY customer_id,base_currency";
+        $charges=$pdo->prepare($sql);$charges->execute($customerIds);
+        foreach($charges->fetchAll(PDO::FETCH_ASSOC) as $row){$id=(int)$row['customer_id'];$currency=(string)$row['currency'];$map[$id][$currency]=DecimalMath::add($map[$id][$currency]??'0',$row['total_due']);}
     }
     return $map;
+}
+
+function balancesFetchPendingShipmentCharges(PDO $pdo,array $customerIds): array
+{
+    if(!$customerIds||!balancesTableExists($pdo,'shipment_financial_entries'))return [];
+    $sql="SELECT customer_id,base_currency currency,CAST(COALESCE(SUM(base_amount),0) AS CHAR) total FROM shipment_financial_entries WHERE entry_role='customer_charge' AND posting_state='provisional' AND archived_at IS NULL AND customer_id IN (".balancesIdPlaceholders($customerIds).") GROUP BY customer_id,base_currency";
+    $stmt=$pdo->prepare($sql);$stmt->execute($customerIds);$map=[];
+    foreach($stmt->fetchAll(PDO::FETCH_ASSOC) as $row)$map[(int)$row['customer_id']][(string)$row['currency']]=DecimalMath::normalize($row['total']);return $map;
 }
 
 function balancesFetchCustomerDeposits(PDO $pdo, array $customerIds): array
@@ -445,7 +456,7 @@ function balancesFetchCustomerDeposits(PDO $pdo, array $customerIds): array
     $map = [];
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $map[(int) $row['customer_id']][(string) ($row['currency'] ?: 'USD')] = [
-            'total_paid' => (float) $row['total_paid'],
+            'total_paid' => DecimalMath::normalize($row['total_paid']),
             'last_payment_date' => $row['last_payment_date'] ?: null,
         ];
     }
@@ -486,9 +497,9 @@ function balancesFetchSupplierPayments(PDO $pdo, array $supplierIds): array
     $map = [];
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $map[(int) $row['supplier_id']][(string) ($row['currency'] ?: 'USD')] = [
-            'total_paid' => (float) $row['total_paid'],
-            'total_due' => (float) $row['total_due'],
-            'total_settlement' => (float) $row['total_settlement'],
+            'total_paid' => DecimalMath::normalize($row['total_paid']),
+            'total_due' => DecimalMath::normalize($row['total_due']),
+            'total_settlement' => DecimalMath::normalize($row['total_settlement']),
             'last_payment_date' => $row['last_payment_date'] ?: null,
         ];
     }
@@ -515,8 +526,8 @@ function balancesFetchLedgerEffects(PDO $pdo, string $partyType, array $partyIds
     $map = [];
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $map[(int) $row['party_id']][(string) ($row['currency'] ?: 'USD')] = [
-            'due_delta' => (float) $row['due_delta'],
-            'paid_delta' => (float) $row['paid_delta'],
+            'due_delta' => DecimalMath::normalize($row['due_delta']),
+            'paid_delta' => DecimalMath::normalize($row['paid_delta']),
             'last_payment_date' => $row['last_payment_date'] ?: null,
         ];
     }
@@ -531,34 +542,34 @@ function balancesBuildRows(array $parties, array $dueMap, array $paidMap, array 
         $partyId = (int) $party['id'];
         $partyHadActivity = false;
         foreach ($currencies as $currency) {
-            $baseDue = 0.0;
-            $basePaid = 0.0;
-            $settlement = 0.0;
+            $baseDue = '0.0000';
+            $basePaid = '0.0000';
+            $settlement = '0.0000';
             $lastPaymentDate = null;
 
             if ($partyType === 'customer') {
-                $baseDue = (float) ($dueMap[$partyId][$currency] ?? 0);
-                $basePaid = (float) ($paidMap[$partyId][$currency]['total_paid'] ?? 0);
+                $baseDue = (string) ($dueMap[$partyId][$currency] ?? '0.0000');
+                $basePaid = (string) ($paidMap[$partyId][$currency]['total_paid'] ?? '0.0000');
                 $lastPaymentDate = $paidMap[$partyId][$currency]['last_payment_date'] ?? null;
             } else {
-                $baseDue = (float) ($paidMap[$partyId][$currency]['total_due'] ?? 0);
-                $basePaid = (float) ($paidMap[$partyId][$currency]['total_paid'] ?? 0);
-                $settlement = (float) ($paidMap[$partyId][$currency]['total_settlement'] ?? 0);
+                $baseDue = (string) ($paidMap[$partyId][$currency]['total_due'] ?? '0.0000');
+                $basePaid = (string) ($paidMap[$partyId][$currency]['total_paid'] ?? '0.0000');
+                $settlement = (string) ($paidMap[$partyId][$currency]['total_settlement'] ?? '0.0000');
                 $lastPaymentDate = $paidMap[$partyId][$currency]['last_payment_date'] ?? null;
             }
 
-            $ledgerDue = (float) ($ledgerMap[$partyId][$currency]['due_delta'] ?? 0);
-            $ledgerPaid = (float) ($ledgerMap[$partyId][$currency]['paid_delta'] ?? 0);
+            $ledgerDue = (string) ($ledgerMap[$partyId][$currency]['due_delta'] ?? '0.0000');
+            $ledgerPaid = (string) ($ledgerMap[$partyId][$currency]['paid_delta'] ?? '0.0000');
             $ledgerLast = $ledgerMap[$partyId][$currency]['last_payment_date'] ?? null;
             if ($ledgerLast && (!$lastPaymentDate || $ledgerLast > $lastPaymentDate)) {
                 $lastPaymentDate = $ledgerLast;
             }
 
-            $totalDue = round($baseDue + $ledgerDue, 4);
-            $totalPaid = round($basePaid + $ledgerPaid, 4);
-            $currentBalance = round($totalDue - $totalPaid - $settlement, 4);
+            $totalDue = DecimalMath::add($baseDue, $ledgerDue);
+            $totalPaid = DecimalMath::add($basePaid, $ledgerPaid);
+            $currentBalance = DecimalMath::subtract(DecimalMath::subtract($totalDue, $totalPaid), $settlement);
             $status = balancesStatusFor($currentBalance);
-            $hasActivity = abs($totalDue) >= 0.005 || abs($totalPaid) >= 0.005 || abs($currentBalance) >= 0.005;
+            $hasActivity = $status !== 'settled' || DecimalMath::compare($totalDue, '0.0050') >= 0 || DecimalMath::compare($totalPaid, '0.0050') >= 0;
             $partyHadActivity = $partyHadActivity || $hasActivity;
 
             if ($statusFilter && $statusFilter !== $status) {
@@ -595,9 +606,9 @@ function balancesBuildRows(array $parties, array $dueMap, array $paidMap, array 
                 'code' => (string) ($party['code'] ?? ''),
                 'phone' => (string) ($party['phone'] ?? ''),
                 'currency' => 'USD',
-                'current_balance' => 0,
-                'total_paid' => 0,
-                'total_due' => 0,
+                'current_balance' => '0.0000',
+                'total_paid' => '0.0000',
+                'total_due' => '0.0000',
                 'last_payment_date' => null,
                 'status' => 'settled',
                 'status_label' => balancesStatusLabel('settled'),
@@ -611,8 +622,8 @@ function balancesPaymentsTodaySummary(PDO $pdo): array
 {
     $today = date('Y-m-d');
     $summary = [
-        'payments_received_today' => ['USD' => 0.0, 'RMB' => 0.0],
-        'payments_sent_today' => ['USD' => 0.0, 'RMB' => 0.0],
+        'payments_received_today' => ['USD' => '0.0000', 'RMB' => '0.0000'],
+        'payments_sent_today' => ['USD' => '0.0000', 'RMB' => '0.0000'],
     ];
 
     if (balancesTableExists($pdo, 'balance_transactions')) {
@@ -626,10 +637,10 @@ function balancesPaymentsTodaySummary(PDO $pdo): array
             $currency = balancesNormalizeCurrency($row['currency'] ?? 'RMB');
             if (($row['transaction_type'] ?? '') === 'payment_received'
                 || (($row['transaction_type'] ?? '') === 'deposit' && ($row['party_type'] ?? '') === 'customer')) {
-                $summary['payments_received_today'][$currency] += (float) $row['total'];
+                $summary['payments_received_today'][$currency] = DecimalMath::add($summary['payments_received_today'][$currency], $row['total']);
             } elseif (($row['transaction_type'] ?? '') === 'payment_sent'
                 || (($row['transaction_type'] ?? '') === 'deposit' && ($row['party_type'] ?? '') === 'supplier')) {
-                $summary['payments_sent_today'][$currency] += (float) $row['total'];
+                $summary['payments_sent_today'][$currency] = DecimalMath::add($summary['payments_sent_today'][$currency], $row['total']);
             }
         }
     }
@@ -642,7 +653,7 @@ function balancesPaymentsTodaySummary(PDO $pdo): array
         $stmt->execute([$today]);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $currency = balancesNormalizeCurrency($row['currency'] ?? 'RMB');
-            $summary['payments_received_today'][$currency] += (float) $row['total'];
+            $summary['payments_received_today'][$currency] = DecimalMath::add($summary['payments_received_today'][$currency], $row['total']);
         }
     }
 
@@ -654,14 +665,14 @@ function balancesPaymentsTodaySummary(PDO $pdo): array
         $stmt->execute([$today]);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $currency = balancesNormalizeCurrency($row['currency'] ?? 'RMB');
-            $summary['payments_sent_today'][$currency] += (float) $row['total'];
+            $summary['payments_sent_today'][$currency] = DecimalMath::add($summary['payments_sent_today'][$currency], $row['total']);
         }
     }
 
     return $summary;
 }
 
-function balancesBuildOverview(PDO $pdo, array $filters): array
+function balancesBuildOverview(PDO $pdo, array $filters, bool $paginate = true): array
 {
     $q = trim((string) ($filters['q'] ?? ''));
     $partyType = balancesNormalizePartyType($filters['party_type'] ?? null);
@@ -688,6 +699,8 @@ function balancesBuildOverview(PDO $pdo, array $filters): array
             $dateTo,
             'customer'
         );
+        $pending=balancesFetchPendingShipmentCharges($pdo,$customerIds);
+        foreach($customers as &$row)$row['pending_shipment_charges']=$pending[(int)$row['id']][(string)$row['currency']]??'0.0000';unset($row);
     }
 
     if (!$partyType || $partyType === 'supplier') {
@@ -707,25 +720,35 @@ function balancesBuildOverview(PDO $pdo, array $filters): array
     }
 
     $summary = [
-        'customer_balances' => ['USD' => 0.0, 'RMB' => 0.0],
-        'supplier_balances' => ['USD' => 0.0, 'RMB' => 0.0],
+        'customer_balances' => ['USD' => '0.0000', 'RMB' => '0.0000'],
+        'supplier_balances' => ['USD' => '0.0000', 'RMB' => '0.0000'],
     ];
     foreach ($customers as $row) {
-        if ((float) $row['current_balance'] > 0) {
-            $summary['customer_balances'][$row['currency']] += (float) $row['current_balance'];
+        if (DecimalMath::compare($row['current_balance'], '0') > 0) {
+            $summary['customer_balances'][$row['currency']] = DecimalMath::add($summary['customer_balances'][$row['currency']], $row['current_balance']);
         }
     }
     foreach ($suppliers as $row) {
-        if ((float) $row['current_balance'] > 0) {
-            $summary['supplier_balances'][$row['currency']] += (float) $row['current_balance'];
+        if (DecimalMath::compare($row['current_balance'], '0') > 0) {
+            $summary['supplier_balances'][$row['currency']] = DecimalMath::add($summary['supplier_balances'][$row['currency']], $row['current_balance']);
         }
     }
     $summary = array_merge($summary, balancesPaymentsTodaySummary($pdo));
+
+    $meta=[];
+    if($paginate){
+        $limit=clmsQueryLimit($filters['limit']??null,50,200);
+        $customerOffset=clmsQueryOffset($filters['customer_offset']??null);$supplierOffset=clmsQueryOffset($filters['supplier_offset']??null);
+        $customerTotal=count($customers);$supplierTotal=count($suppliers);
+        $customers=array_slice($customers,$customerOffset,$limit);$suppliers=array_slice($suppliers,$supplierOffset,$limit);
+        $meta=['limit'=>$limit,'customers'=>['offset'=>$customerOffset,'total_count'=>$customerTotal,'has_more'=>$customerOffset+$limit<$customerTotal],'suppliers'=>['offset'=>$supplierOffset,'total_count'=>$supplierTotal,'has_more'=>$supplierOffset+$limit<$supplierTotal]];
+    }
 
     return [
         'customers' => $customers,
         'suppliers' => $suppliers,
         'summary' => $summary,
+        'meta'=>$meta,
     ];
 }
 
@@ -836,7 +859,7 @@ function balancesTransactionUnionSql(PDO $pdo): string
     return implode(' UNION ALL ', $selects);
 }
 
-function balancesListTransactions(PDO $pdo, array $filters): array
+function balancesListTransactions(PDO $pdo, array $filters, bool $paginate = true, ?array &$meta = null): array
 {
     $union = balancesTransactionUnionSql($pdo);
     if ($union === '') {
@@ -905,10 +928,13 @@ function balancesListTransactions(PDO $pdo, array $filters): array
         )";
         array_push($params, $like, $like, $like, $like, $like, $like, $like, $like);
     }
-    $sql .= ' ORDER BY tx.transaction_date DESC, tx.created_at DESC, tx.id DESC LIMIT 500';
+    $limit=clmsQueryLimit($filters['limit']??null,100,500);$offset=clmsQueryOffset($filters['offset']??null);
+    $sql .= ' ORDER BY tx.transaction_date DESC, tx.created_at DESC, tx.id DESC';
+    if($paginate)$sql.=' LIMIT '.($limit+1).' OFFSET '.$offset;
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $hasMore=$paginate&&count($rows)>$limit;if($hasMore)$rows=array_slice($rows,0,$limit);$meta=['limit'=>$limit,'offset'=>$offset,'has_more'=>$hasMore];
     foreach ($rows as &$row) {
         $row['document_type'] = balancesDocumentTypeForRow($row);
         $row['document_number'] = balancesDocumentNumberForRow($row);
@@ -990,7 +1016,7 @@ function balancesValidateOrderLink(PDO $pdo, ?int $orderId, string $partyType, i
     return $order;
 }
 
-function balancesInsertCustomerDeposit(PDO $pdo, int $customerId, float $amount, string $currency, ?string $paymentMethod, ?string $referenceNumber, ?string $notes, int $userId, ?int $orderId = null): int
+function balancesInsertCustomerDeposit(PDO $pdo, int $customerId, string $amount, string $currency, ?string $paymentMethod, ?string $referenceNumber, ?string $notes, int $userId, ?int $orderId = null): int
 {
     $hasOrderId = balancesTableHasColumn($pdo, 'customer_deposits', 'order_id');
     if ($hasOrderId) {
@@ -1003,7 +1029,7 @@ function balancesInsertCustomerDeposit(PDO $pdo, int $customerId, float $amount,
     return (int) $pdo->lastInsertId();
 }
 
-function balancesInsertSupplierPayment(PDO $pdo, int $supplierId, float $amount, string $currency, ?string $paymentMethod, ?string $paymentAccountLabel, ?string $paymentAccountValue, ?string $paymentAccountQrPath, ?string $notes, int $userId, ?int $orderId = null): int
+function balancesInsertSupplierPayment(PDO $pdo, int $supplierId, string $amount, string $currency, ?string $paymentMethod, ?string $paymentAccountLabel, ?string $paymentAccountValue, ?string $paymentAccountQrPath, ?string $notes, int $userId, ?int $orderId = null): int
 {
     $columns = ['supplier_id', 'order_id', 'amount', 'currency', 'payment_type', 'notes'];
     $values = ['?', '?', '?', '?', '?', '?'];
@@ -1092,8 +1118,12 @@ function balancesCreateTransaction(PDO $pdo, array $input): array
 
     $transactionType = balancesNormalizeTransactionType($input['transaction_type'] ?? null);
     $direction = balancesNormalizeDirection($partyType, $transactionType, $input['direction'] ?? null);
-    $amount = (float) ($input['amount'] ?? 0);
-    if ($amount <= 0) {
+    try {
+        $amount = DecimalMath::round($input['amount'] ?? '0');
+    } catch (InvalidArgumentException $e) {
+        $amount = '0.0000';
+    }
+    if (DecimalMath::compare($amount, '0') <= 0) {
         $errors['amount'] = 'Amount must be positive';
     }
     $currency = balancesNormalizeCurrency($input['currency'] ?? 'RMB');
@@ -1227,7 +1257,7 @@ function balancesCreateTransaction(PDO $pdo, array $input): array
         throw $e;
     }
 
-    $rows = balancesListTransactions($pdo, ['transaction_id' => $newId]);
+    $rows = balancesListTransactions($pdo, ['transaction_id' => $newId], false);
     if ($rows) {
         return $rows[0];
     }
@@ -1262,6 +1292,18 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     }
 
     if ($method === 'GET') {
+        if ($id === 'reconciliation') {
+            if (!hasAnyRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'])) {
+                jsonError('You do not have permission', 403);
+            }
+            $orderId = (int) ($_GET['order_id'] ?? 0);
+            if ($orderId <= 0) jsonError('Order is required', 400);
+            try {
+                jsonResponse(['data' => (new FinancialReconciliationService($pdo))->reconcileOrder($orderId)]);
+            } catch (RuntimeException $e) {
+                jsonError($e->getMessage(), $e->getMessage() === 'Order not found' ? 404 : 500);
+            }
+        }
         if ($id === 'order-context') {
             jsonResponse(['data' => balancesFetchOrderContext($pdo, (int) ($_GET['order_id'] ?? 0))]);
         }
@@ -1277,7 +1319,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         }
 
         if ($id === 'transactions') {
-            jsonResponse(['data' => balancesListTransactions($pdo, $_GET)]);
+            $txMeta=[];$txRows=balancesListTransactions($pdo,$_GET,true,$txMeta);jsonResponse(['data'=>$txRows,'meta'=>$txMeta]);
         }
 
         if ($id === 'party-search') {
@@ -1293,7 +1335,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if ($id === 'export') {
             $dataset = strtolower(trim((string) ($_GET['dataset'] ?? 'transactions')));
             if (in_array($dataset, ['customers', 'suppliers'], true)) {
-                $overview = balancesBuildOverview($pdo, $_GET);
+                $overview = balancesBuildOverview($pdo, $_GET, false);
                 $rows = [];
                 foreach ($overview[$dataset] as $row) {
                     $rows[] = [
@@ -1316,7 +1358,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
             if ($dataset === 'documents') {
                 $rows = [];
-                foreach (balancesListTransactions($pdo, $_GET) as $row) {
+                foreach (balancesListTransactions($pdo, $_GET, false) as $row) {
                     $rows[] = [
                         $row['document_number'],
                         clmsT($row['document_type']),
@@ -1339,7 +1381,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
 
             $rows = [];
-            foreach (balancesListTransactions($pdo, $_GET) as $row) {
+            foreach (balancesListTransactions($pdo, $_GET, false) as $row) {
                 $rows[] = [
                     $row['transaction_date'],
                     clmsT($row['party_type'] === 'customer' ? 'Customer' : 'Supplier'),

@@ -8,6 +8,11 @@
     let activeDataset = "customers";
     let balanceTxnAccounts = [];
     let balanceAccountSuggestionIndex = -1;
+    let customerBalanceOffset=0;
+    let supplierBalanceOffset=0;
+    const balancePageLimit=50;
+    let balanceTxOffset=0;
+    const balanceTxLimit=100;
     const balanceDocumentRows = new Map();
 
     function balancesT(text, replacements = null) {
@@ -419,7 +424,7 @@
                         <td>${escapeHtml(row.currency || "")}</td>
                         <td><span class="balance-amount ${balanceClass}">${escapeHtml(formatMoney(row.currency, row.current_balance))}</span></td>
                         <td>${escapeHtml(formatMoney(row.currency, row.total_paid))}</td>
-                        <td>${escapeHtml(formatMoney(row.currency, row.total_due))}</td>
+                        <td>${escapeHtml(formatMoney(row.currency, row.total_due))}${partyType === "customer" && Number(row.pending_shipment_charges || 0) !== 0 ? `<div class="small"><span class="badge bg-warning text-dark">${escapeHtml(balancesT("Pending"))}: ${escapeHtml(formatMoney(row.currency, row.pending_shipment_charges))}</span></div>` : ""}</td>
                         <td>${escapeHtml(row.last_payment_date || "-")}</td>
                         <td>${statusBadge(row.status, row.status_label)}</td>
                         <td>
@@ -454,13 +459,19 @@
             balancesT("No supplier balances found."),
             "supplier",
         );
+        const meta=data?.meta||{};
+        const cp=el("customerBalancesPrevBtn"),cn=el("customerBalancesNextBtn"),sp=el("supplierBalancesPrevBtn"),sn=el("supplierBalancesNextBtn");
+        if(cp)cp.disabled=customerBalanceOffset<=0;if(cn)cn.disabled=!meta.customers?.has_more;if(sp)sp.disabled=supplierBalanceOffset<=0;if(sn)sn.disabled=!meta.suppliers?.has_more;
+        setText("customerBalancesPageSummary",balancesT("Showing {from}-{to} of {total}",{from:(meta.customers?.total_count||0)?customerBalanceOffset+1:0,to:customerBalanceOffset+(data?.customers?.length||0),total:meta.customers?.total_count||0}));
+        setText("supplierBalancesPageSummary",balancesT("Showing {from}-{to} of {total}",{from:(meta.suppliers?.total_count||0)?supplierBalanceOffset+1:0,to:supplierBalanceOffset+(data?.suppliers?.length||0),total:meta.suppliers?.total_count||0}));
     }
 
-    function renderTransactions(rows) {
+    function renderTransactions(rows, meta = null) {
         const body = el("transactionsBody");
         const safeRows = Array.isArray(rows) ? rows : [];
         balanceDocumentRows.clear();
         safeRows.forEach((row) => balanceDocumentRows.set(documentKey(row), row));
+        document.querySelectorAll(".balanceTxPrevBtn").forEach(btn=>btn.disabled=balanceTxOffset<=0);document.querySelectorAll(".balanceTxNextBtn").forEach(btn=>btn.disabled=!meta?.has_more);document.querySelectorAll(".balanceTxPageSummary").forEach(node=>node.textContent=balancesT("Page {page}",{page:Math.floor(balanceTxOffset/balanceTxLimit)+1}));
         setText(
             "transactionsSummary",
             safeRows.length
@@ -729,19 +740,24 @@
 
     async function loadOverview() {
         const params = buildParams(false);
+        params.set("limit",String(balancePageLimit));params.set("customer_offset",String(customerBalanceOffset));params.set("supplier_offset",String(supplierBalanceOffset));
         const response = await api("/balances" + (params.toString() ? "?" + params.toString() : ""));
         renderOverview(response.data || {});
     }
 
     async function loadTransactions() {
         const params = buildParams(true);
+        const exactTransactionId = new URLSearchParams(window.location.search).get("transaction_id");
+        if (exactTransactionId && /^\d+$/.test(exactTransactionId)) params.set("transaction_id", exactTransactionId);
+        params.set("limit",String(balanceTxLimit));params.set("offset",String(balanceTxOffset));
         const response = await api(
             "/balances/transactions" + (params.toString() ? "?" + params.toString() : ""),
         );
-        renderTransactions(response.data || []);
+        renderTransactions(response.data || [],response.meta || null);
     }
 
-    window.loadBalancePageData = async function () {
+    window.loadBalancePageData = async function (resetOffsets = true) {
+        if(resetOffsets){customerBalanceOffset=0;supplierBalanceOffset=0;balanceTxOffset=0;}
         updateFilterSummary();
         renderLoading();
         try {
@@ -1172,6 +1188,12 @@
             showToast(balancesT("Choose Save as PDF in the print dialog."));
             printBalanceDocument(el("balanceDocumentPdfBtn").dataset.documentKey || "");
         });
+        el("customerBalancesPrevBtn")?.addEventListener("click",()=>{customerBalanceOffset=Math.max(0,customerBalanceOffset-balancePageLimit);loadBalancePageData(false);});
+        el("customerBalancesNextBtn")?.addEventListener("click",()=>{customerBalanceOffset+=balancePageLimit;loadBalancePageData(false);});
+        el("supplierBalancesPrevBtn")?.addEventListener("click",()=>{supplierBalanceOffset=Math.max(0,supplierBalanceOffset-balancePageLimit);loadBalancePageData(false);});
+        el("supplierBalancesNextBtn")?.addEventListener("click",()=>{supplierBalanceOffset+=balancePageLimit;loadBalancePageData(false);});
+        document.querySelectorAll(".balanceTxPrevBtn").forEach(btn=>btn.addEventListener("click",()=>{balanceTxOffset=Math.max(0,balanceTxOffset-balanceTxLimit);loadBalancePageData(false);}));
+        document.querySelectorAll(".balanceTxNextBtn").forEach(btn=>btn.addEventListener("click",()=>{balanceTxOffset+=balanceTxLimit;loadBalancePageData(false);}));
 
         const hash = (window.location.hash || "").replace("#", "");
         if (hash === "suppliers") {

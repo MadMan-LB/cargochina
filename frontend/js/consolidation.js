@@ -66,6 +66,10 @@ document.addEventListener("DOMContentLoaded", () => {
         loadShipmentDrafts();
         loadReadyTotals();
         loadContainerPresets();
+        const exactDraftId = new URLSearchParams(window.location.search).get("shipment_draft_id");
+        if (exactDraftId && /^\d+$/.test(exactDraftId)) {
+            openDraftModal(parseInt(exactDraftId, 10));
+        }
         const docInput = document.getElementById("draftDocInput");
         if (docInput)
             docInput.onchange = () => handleDraftDocUpload(docInput.files);

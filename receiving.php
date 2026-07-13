@@ -124,6 +124,10 @@ require 'includes/layout.php';
         <label class="form-label small mb-0"><?= clmsT('Shipping Code') ?></label>
         <input type="text" class="form-control form-control-sm" id="filterShippingCode" placeholder="<?= clmsT('e.g. DUM_C003') ?>">
       </div>
+      <div class="col-12 col-md-6 col-xl-2">
+        <label class="form-label small mb-0"><?= clmsT('Item Type') ?></label>
+        <select class="form-select form-select-sm" id="filterReceivingItemType"><option value=""><?= clmsT('All item types') ?></option><option value="normal"><?= clmsT('Normal Goods') ?></option><option value="replica"><?= clmsT('Copy Goods') ?></option><option value="cosmetics"><?= clmsT('Cosmetics') ?></option><option value="branded"><?= clmsT('Branded Goods') ?></option><option value="food"><?= clmsT('Food') ?></option><option value="dangerous"><?= clmsT('Dangerous Goods') ?></option><option value="other"><?= clmsT('Other') ?></option><option value="unclassified"><?= clmsT('Needs classification') ?></option></select>
+      </div>
       <div class="col-12 col-md-6 col-xl-2 d-grid gap-2">
         <button type="button" class="btn btn-primary btn-sm" id="applyFiltersBtn" onclick="applyFilters()"><?= clmsT('Apply') ?></button>
         <button type="button" class="btn btn-outline-success btn-sm" onclick="exportReceivingXlsx()" title="<?= clmsT('Export queue to XLSX') ?>"><?= clmsT('Export XLSX') ?></button>
@@ -147,6 +151,7 @@ require 'includes/layout.php';
   <div class="tab-pane fade show active" id="tabList">
     <div id="warehouseList" class="row g-3"></div>
     <div id="warehouseListEmpty" class="text-muted text-center py-5 d-none"><?= clmsT('No orders match filters.') ?></div>
+    <div class="d-flex justify-content-between align-items-center mt-3"><button class="btn btn-outline-secondary btn-sm" id="receivingPrevBtn" type="button"><?= clmsT('Previous') ?></button><span class="small text-muted" id="receivingPageSummary"><?= clmsT('Page 1') ?></span><button class="btn btn-outline-secondary btn-sm" id="receivingNextBtn" type="button"><?= clmsT('Next') ?></button></div>
   </div>
   <div class="tab-pane fade" id="tabCalendar">
     <div class="card">

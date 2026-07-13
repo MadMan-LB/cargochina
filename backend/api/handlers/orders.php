@@ -12,6 +12,9 @@ require_once dirname(__DIR__, 2) . '/services/OrderItemNumberingService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderReceiptWorkflowService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderReceivingService.php';
+require_once dirname(__DIR__, 2) . '/services/DraftOrderCostService.php';
+require_once dirname(__DIR__, 2) . '/services/ShipmentAccountingService.php';
+require_once dirname(__DIR__, 2) . '/services/ItemNumberReservationService.php';
 
 function orderSupportsSharedCartons(PDO $pdo): bool
 {
@@ -439,9 +442,24 @@ function validateOrderItemSupplierIds(PDO $pdo, array $items): void
 
 function normalizeOrderItemsForPersistence(PDO $pdo, int $customerId, ?int $destinationCountryId, ?int $defaultSupplierId, array $items, ?string $currentStatus = 'Draft', ?int $excludeOrderId = null): array
 {
+    if (!hasPermission('item_numbers.override', ['SuperAdmin'])) {
+        $preserved=[];
+        if($excludeOrderId){$stmt=$pdo->prepare('SELECT item_no FROM order_items WHERE order_id=?');$stmt->execute([$excludeOrderId]);foreach($stmt->fetchAll(PDO::FETCH_COLUMN) as $value){$key=ItemNumberReservationService::normalize((string)$value);if($key!=='')$preserved[$key]=true;}}
+        foreach($items as &$item){$key=ItemNumberReservationService::normalize((string)($item['item_no']??''));if($key!==''&&isset($preserved[$key])){$item['item_no_manual']=1;}else{$item['item_no']=null;$item['item_no_manual']=0;}}unset($item);
+    }
     $shippingCode = OrderCountryService::resolveShippingCode($pdo, $customerId, $destinationCountryId);
     $history = OrderItemNumberingService::fetchNumberingHistory($pdo, $customerId, $excludeOrderId);
     return OrderItemNumberingService::prepareItemsForPersistence($items, $currentStatus, $shippingCode, $defaultSupplierId, $history);
+}
+
+function orderCreationIdempotencyKey($value): ?string
+{
+    $key = trim((string) $value);
+    if ($key === '') return null;
+    if (!preg_match('/^[A-Za-z0-9._:-]{8,64}$/', $key)) {
+        jsonError('Invalid order idempotency key', 400);
+    }
+    return $key;
 }
 
 function orderHandleLifecycleTransition(string $action, string $currentStatus, string $targetStatus): void
@@ -506,7 +524,7 @@ function buildOrderSearchSql(PDO $pdo, string $query, array &$params, string $or
     foreach ($terms as $term) {
         $like = '%' . $term . '%';
         $termClauses = [
-            "CAST($orderAlias.id AS CHAR) COLLATE utf8mb4_unicode_ci LIKE ?",
+            orderUtf8LikeExpr("CAST($orderAlias.id AS CHAR)") . " LIKE ?",
             orderUtf8LikeExpr("$customerAlias.name") . " LIKE ?",
             orderUtf8LikeExpr("COALESCE($supplierAlias.name, '')") . " LIKE ?",
         ];
@@ -523,7 +541,8 @@ function buildOrderSearchSql(PDO $pdo, string $query, array &$params, string $or
         if ($hasSupplierCode) {
             $termClauses[] = orderUtf8LikeExpr("COALESCE($supplierAlias.code, '')") . " LIKE ?";
             $params[] = $like;
-        } elseif ($hasSupplierStoreId) {
+        }
+        if ($hasSupplierStoreId) {
             $termClauses[] = orderUtf8LikeExpr("COALESCE($supplierAlias.store_id, '')") . " LIKE ?";
             $params[] = $like;
         }
@@ -587,7 +606,8 @@ function buildOrderSearchSql(PDO $pdo, string $query, array &$params, string $or
             if ($hasSupplierCode) {
                 $itemClauses[] = orderUtf8LikeExpr("COALESCE(sis.code, '')") . " LIKE ?";
                 $params[] = $like;
-            } elseif ($hasSupplierStoreId) {
+            }
+            if ($hasSupplierStoreId) {
                 $itemClauses[] = orderUtf8LikeExpr("COALESCE(sis.store_id, '')") . " LIKE ?";
                 $params[] = $like;
             }
@@ -663,10 +683,16 @@ function fetchOrderItemsForOrders(PDO $pdo, array $orderIds): array
     $supplierJoinTarget = $hasProductSupplier
         ? 'COALESCE(oi.supplier_id, p.supplier_id)'
         : 'oi.supplier_id';
+    $classificationCols = '';
+    $classificationJoin = '';
+    if (orderTableExists($pdo, 'item_classifications')) {
+        $classificationCols = ', ic.item_type_code, ic.confidence AS item_type_confidence, ic.is_confirmed AS item_type_confirmed';
+        $classificationJoin = " LEFT JOIN item_classifications ic ON ic.entity_type='order_item' AND ic.entity_id=oi.id";
+    }
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
     $sql = $hasSupplier
-        ? "SELECT oi.*$supplierCols$productAlertCol FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id LEFT JOIN suppliers s ON $supplierJoinTarget = s.id WHERE oi.order_id IN ($placeholders) ORDER BY oi.order_id ASC, oi.id ASC"
-        : "SELECT oi.*$productAlertCol FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id IN ($placeholders) ORDER BY oi.order_id ASC, oi.id ASC";
+        ? "SELECT oi.*$supplierCols$productAlertCol$classificationCols FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id LEFT JOIN suppliers s ON $supplierJoinTarget = s.id$classificationJoin WHERE oi.order_id IN ($placeholders) ORDER BY oi.order_id ASC, oi.id ASC"
+        : "SELECT oi.*$productAlertCol$classificationCols FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id$classificationJoin WHERE oi.order_id IN ($placeholders) ORDER BY oi.order_id ASC, oi.id ASC";
     $stmt = $pdo->prepare($sql);
     $stmt->execute($ids);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -751,7 +777,7 @@ function orderRowMatchesSupplierFilter(array $row, int $supplierId): bool
     return false;
 }
 
-function fetchOrdersListRowsForRequest(PDO $pdo): array
+function fetchOrdersListRowsForRequest(PDO $pdo, bool $paginate = false, ?array &$meta = null): array
 {
     $statusParam = $_GET['status'] ?? null;
     $statuses = is_array($statusParam) ? array_filter($statusParam) : ($statusParam ? [$statusParam] : []);
@@ -766,6 +792,7 @@ function fetchOrdersListRowsForRequest(PDO $pdo): array
     $shippingCode = trim($_GET['shipping_code'] ?? '');
     $q = trim($_GET['q'] ?? '');
     $orderType = trim((string) ($_GET['order_type'] ?? ''));
+    $itemType = clmsNormalizeItemTypeFilter($_GET['item_type'] ?? null);
     $custCols = 'c.name as customer_name';
     $chkPrio = @$pdo->query("SHOW COLUMNS FROM customers LIKE 'priority_level'");
     if ($chkPrio && $chkPrio->rowCount() > 0) {
@@ -810,6 +837,10 @@ function fetchOrdersListRowsForRequest(PDO $pdo): array
         $sql .= " AND o.order_type = ?";
         $params[] = $orderType;
     }
+    if ($itemType !== null && orderTableExists($pdo, 'item_classifications')) {
+        $sql .= " AND EXISTS (SELECT 1 FROM order_items oit JOIN item_classifications ict ON ict.entity_type='order_item' AND ict.entity_id=oit.id WHERE oit.order_id=o.id AND ict.item_type_code=?)";
+        $params[] = $itemType;
+    }
     if ($dateFrom) {
         $sql .= " AND o.expected_ready_date >= ?";
         $params[] = $dateFrom;
@@ -836,7 +867,13 @@ function fetchOrdersListRowsForRequest(PDO $pdo): array
             $sql .= " AND o.status = 'CustomerDeclinedAfterAutoConfirm'";
         }
     }
-    $sql .= " ORDER BY o.expected_ready_date IS NULL ASC, o.expected_ready_date ASC, o.created_at DESC";
+    $sql .= " ORDER BY o.expected_ready_date IS NULL ASC, o.expected_ready_date ASC, o.created_at DESC, o.id DESC";
+    $limit = clmsQueryLimit($_GET['limit'] ?? null, 50, 100);
+    $offset = clmsQueryOffset($_GET['offset'] ?? null);
+    $requiresPostFilterPagination = $paginate && $supplierId && orderSupportsSharedCartons($pdo);
+    if ($paginate && !$requiresPostFilterPagination) {
+        $sql .= ' LIMIT ' . ($limit + 1) . ' OFFSET ' . $offset;
+    }
     $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
     if ($params) {
         $stmt->execute($params);
@@ -862,9 +899,67 @@ function fetchOrdersListRowsForRequest(PDO $pdo): array
         $rows = array_values(array_filter($rows, static fn(array $row): bool => orderRowMatchesSupplierFilter($row, $filterSupplierId)));
     }
 
+    if ($paginate) {
+        $hasMore = count($rows) > ($requiresPostFilterPagination ? $offset + $limit : $limit);
+        $rows = $requiresPostFilterPagination ? array_slice($rows, $offset, $limit) : array_slice($rows, 0, $limit);
+        $meta = ['limit' => $limit, 'offset' => $offset, 'has_more' => $hasMore];
+    }
+
     orderAttachDepositSummaries($pdo, $rows);
+    orderAttachOperationalCostSummaries($pdo, $rows);
 
     return $rows;
+}
+
+function orderAttachOperationalCostSummaries(PDO $pdo, array &$rows): void
+{
+    if (!$rows || !orderTableExists($pdo, 'draft_order_costs')) {
+        return;
+    }
+
+    $orderIds = array_values(array_unique(array_filter(array_map(
+        static fn(array $row): int => (int) ($row['id'] ?? 0),
+        $rows
+    ))));
+    if (!$orderIds) {
+        return;
+    }
+
+    $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
+    $stmt = $pdo->prepare(
+        "SELECT order_id, base_currency, SUM(base_amount) AS base_total, COUNT(*) AS line_count
+         FROM draft_order_costs
+         WHERE is_deleted=0 AND order_id IN ($placeholders)
+         GROUP BY order_id, base_currency
+         ORDER BY order_id, base_currency"
+    );
+    $stmt->execute($orderIds);
+    $summaries = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $costRow) {
+        $orderId = (int) $costRow['order_id'];
+        $summaries[$orderId]['line_count'] = ($summaries[$orderId]['line_count'] ?? 0) + (int) $costRow['line_count'];
+        $summaries[$orderId]['totals'][] = [
+            'amount' => (string) $costRow['base_total'],
+            'currency' => (string) $costRow['base_currency'],
+        ];
+    }
+
+    foreach ($rows as &$row) {
+        $row['operational_cost_summary'] = $summaries[(int) ($row['id'] ?? 0)] ?? [
+            'line_count' => 0,
+            'totals' => [],
+        ];
+    }
+    unset($row);
+}
+
+function orderFormatOperationalCostSummary(array $row): string
+{
+    $parts = [];
+    foreach (($row['operational_cost_summary']['totals'] ?? []) as $total) {
+        $parts[] = format_display_amount($total['amount'] ?? '0', 4) . ' ' . (string) ($total['currency'] ?? '');
+    }
+    return implode(' + ', $parts);
 }
 
 function orderPaymentStatusFor(float $paid, float $due): string
@@ -896,7 +991,7 @@ function orderAttachDepositSummaries(PDO $pdo, array &$rows): void
         return;
     }
 
-    $paidByOrder = array_fill_keys($orderIds, 0.0);
+    $paidByOrder = array_fill_keys($orderIds, '0.0000');
     $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
 
     if (orderTableExists($pdo, 'balance_transactions') && orderTableHasColumn($pdo, 'balance_transactions', 'order_id')) {
@@ -910,7 +1005,8 @@ function orderAttachDepositSummaries(PDO $pdo, array &$rows): void
         $stmt = $pdo->prepare($sql);
         $stmt->execute($orderIds);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $paidByOrder[(int) $row['order_id']] += (float) $row['paid_amount'];
+            $orderId = (int) $row['order_id'];
+            $paidByOrder[$orderId] = DecimalMath::add($paidByOrder[$orderId], $row['paid_amount'] ?? '0');
         }
     }
 
@@ -926,36 +1022,46 @@ function orderAttachDepositSummaries(PDO $pdo, array &$rows): void
         $stmt = $pdo->prepare($sql);
         $stmt->execute($orderIds);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $paidByOrder[(int) $row['order_id']] += (float) $row['paid_amount'];
+            $orderId = (int) $row['order_id'];
+            $paidByOrder[$orderId] = DecimalMath::add($paidByOrder[$orderId], $row['paid_amount'] ?? '0');
         }
     }
 
     foreach ($rows as &$row) {
-        $due = 0.0;
+        $due = '0.0000';
         foreach (($row['items'] ?? []) as $item) {
             if (isset($item['total_amount']) && $item['total_amount'] !== null && $item['total_amount'] !== '') {
-                $due += (float) $item['total_amount'];
+                $due = DecimalMath::add($due, $item['total_amount']);
                 continue;
             }
-            $quantity = (float) ($item['quantity'] ?? 0);
-            if ($quantity <= 0) {
-                $cartons = (float) ($item['cartons'] ?? 0);
-                $qtyPerCarton = (float) ($item['qty_per_carton'] ?? 0);
-                $quantity = $cartons > 0 && $qtyPerCarton > 0 ? $cartons * $qtyPerCarton : 0;
+            $quantity = DecimalMath::normalize($item['quantity'] ?? '0');
+            if (DecimalMath::compare($quantity, '0') <= 0) {
+                $cartons = DecimalMath::normalize($item['cartons'] ?? '0');
+                $qtyPerCarton = DecimalMath::normalize($item['qty_per_carton'] ?? '0');
+                $quantity = DecimalMath::compare($cartons, '0') > 0 && DecimalMath::compare($qtyPerCarton, '0') > 0
+                    ? DecimalMath::multiply($cartons, $qtyPerCarton)
+                    : '0.0000';
             }
             $unitPrice = isset($item['sell_price']) && $item['sell_price'] !== null && $item['sell_price'] !== ''
-                ? (float) $item['sell_price']
-                : (float) ($item['unit_price'] ?? 0);
-            $due += $quantity * $unitPrice;
+                ? DecimalMath::normalize($item['sell_price'])
+                : DecimalMath::normalize($item['unit_price'] ?? '0');
+            $due = DecimalMath::add($due, DecimalMath::multiply($quantity, $unitPrice));
         }
-        $paid = round((float) ($paidByOrder[(int) ($row['id'] ?? 0)] ?? 0), 4);
-        $due = round($due, 4);
+        $paid = $paidByOrder[(int) ($row['id'] ?? 0)] ?? '0.0000';
         $row['order_total_amount'] = $due;
         $row['deposit_paid_amount'] = $paid;
-        $row['remaining_balance'] = round($due - $paid, 4);
-        $row['deposit_status'] = orderPaymentStatusFor($paid, $due);
+        $row['remaining_balance'] = DecimalMath::subtract($due, $paid);
+        $row['deposit_status'] = orderPaymentStatusForExact($paid, $due);
     }
     unset($row);
+}
+
+function orderPaymentStatusForExact(string $paid, string $due): string
+{
+    if (DecimalMath::compare($paid, '0.004') <= 0) return 'No Deposit';
+    if (DecimalMath::compare($due, '0') > 0 && DecimalMath::compare($paid, DecimalMath::add($due, '0.004')) > 0) return 'Overpaid';
+    if (DecimalMath::compare($due, '0') > 0 && DecimalMath::compare($paid, DecimalMath::subtract($due, '0.004')) >= 0 && DecimalMath::compare($paid, DecimalMath::add($due, '0.004')) <= 0) return 'Paid';
+    return 'Partial Deposit';
 }
 
 function outputOrdersListCsv(array $rows, ?string $filename = null): void
@@ -965,7 +1071,7 @@ function outputOrdersListCsv(array $rows, ?string $filename = null): void
     header('Cache-Control: no-cache, no-store, must-revalidate');
 
     $out = fopen('php://output', 'w');
-    fputcsv($out, array_map('clmsT', ['ID', 'Order Type', 'Customer', 'Supplier', 'Expected Ready', 'Status', 'Deposit Status', 'Paid Amount', 'Remaining Balance', 'Total CBM', 'Total Weight']));
+    fputcsv($out, array_map('clmsT', ['ID', 'Order Type', 'Customer', 'Supplier', 'Expected Ready', 'Status', 'Deposit Status', 'Paid Amount', 'Remaining Balance', 'Shipment Charges', 'Total CBM', 'Total Weight']));
     foreach ($rows as $row) {
         $cbm = 0.0;
         $weight = 0.0;
@@ -994,6 +1100,7 @@ function outputOrdersListCsv(array $rows, ?string $filename = null): void
             clmsT((string) ($row['deposit_status'] ?? 'No Deposit')),
             format_display_amount($row['deposit_paid_amount'] ?? 0, 2),
             format_display_amount($row['remaining_balance'] ?? 0, 2),
+            orderFormatOperationalCostSummary($row),
             round($cbm, 4),
             round($weight, 2),
         ]);
@@ -1082,6 +1189,29 @@ function outputOrderCsv(array $order, array $items, ?string $filename = null): v
                 (string) ($fee['notes'] ?? ''),
             ]);
         }
+    }
+    $costs = $order['operational_costs'] ?? [];
+    if (!empty($costs['lines']) && is_array($costs['lines'])) {
+        fputcsv($out, ['']);
+        fputcsv($out, [clmsT('Shipment Charges')]);
+        fputcsv($out, array_map('clmsT', ['Type', 'Description', 'Amount', 'Currency', 'Exchange Rate', 'Base Amount', 'Base Currency', 'Supplier / Provider', 'Responsible Payer', 'Allocation', 'Notes', 'Accounting Treatment']));
+        foreach ($costs['lines'] as $cost) {
+            fputcsv($out, [
+                (string) ($cost['cost_type_label_en'] ?? $cost['cost_type_code'] ?? ''),
+                (string) ($cost['description_en'] ?? $cost['description_zh'] ?? ''),
+                (string) ($cost['amount'] ?? ''),
+                (string) ($cost['currency'] ?? ''),
+                (string) ($cost['exchange_rate'] ?? ''),
+                (string) ($cost['base_amount'] ?? ''),
+                (string) ($cost['base_currency'] ?? ''),
+                (string) ($cost['supplier_name'] ?? $cost['service_provider'] ?? ''),
+                (string) ($cost['responsible_payer'] ?? ''),
+                (string) ($cost['allocation_method'] ?? ''),
+                (string) ($cost['notes'] ?? ''),
+                clmsT(ucfirst((string)($cost['posting_status'] ?? 'pending'))),
+            ]);
+        }
+        fputcsv($out, [clmsT('Shipment Charges Total'), '', '', '', '', (string) ($costs['base_total'] ?? '0.0000'), (string) ($costs['base_currency'] ?? ''), '', '', '', '', clmsT('Shipment-level; no item allocation')]);
     }
     fclose($out);
     exit;
@@ -1451,6 +1581,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $order['receipt'] = $latestReceipt;
                     $order['receipt_fees'] = $latestReceipt['fees'] ?? [];
                 }
+                if (orderTableExists($pdo, 'draft_order_costs')) {
+                    $order['operational_costs'] = (new DraftOrderCostService($pdo))->summarize((int) $id);
+                }
                 $format = strtolower(trim((string) ($_GET['format'] ?? 'xlsx')));
                 if ($format === 'csv') {
                     outputOrderCsv($order, $items, 'order_' . (int) $id . '.csv');
@@ -1459,7 +1592,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 (new OrderExcelService())->exportOrder($order, $items, 'order_' . (int) $id . '_goods_details.xlsx');
             }
             if ($id === null) {
-                jsonResponse(['data' => fetchOrdersListRowsForRequest($pdo)]);
+                $meta = [];
+                jsonResponse(['data' => fetchOrdersListRowsForRequest($pdo, true, $meta), 'meta' => $meta]);
             }
             $custCols = 'c.name as customer_name';
             $chkPrio = @$pdo->query("SHOW COLUMNS FROM customers LIKE 'priority_level'");
@@ -1561,7 +1695,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $dupWarn = enforceDuplicateShippingCodePolicy($pdo, $customerId, (int) $id, $items);
             $pdo->beginTransaction();
             try {
-                $updSets = "customer_id=?, supplier_id=?, expected_ready_date=?, high_alert_notes=?";
+                $lockedOrderStmt = $pdo->prepare("SELECT lock_version FROM orders WHERE id=? FOR UPDATE");
+                $lockedOrderStmt->execute([(int) $id]);
+                $lockedVersion = $lockedOrderStmt->fetchColumn();
+                if ($lockedVersion === false) throw new RuntimeException('Order not found');
+                if (array_key_exists('lock_version', $input) && (int) $input['lock_version'] !== (int) $lockedVersion) {
+                    throw new RuntimeException('This order was changed by another request. Reload it before saving.');
+                }
+                $updSets = "customer_id=?, supplier_id=?, expected_ready_date=?, high_alert_notes=?, lock_version=lock_version+1";
                 $updParams = [$customerId, $supplierId, $expectedDate, $highAlertNotes];
                 if (orderTableHasColumn($pdo, 'orders', 'destination_country_id')) {
                     $updSets .= ", destination_country_id=?";
@@ -1681,6 +1822,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $insItem->execute($params);
                     syncProductFromOrderItem($pdo, $it);
                 }
+                (new ItemNumberReservationService($pdo))->reservePersistedOrder((int)$id,(int)$userId);
                 $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order',?,?,?,?)")
                     ->execute([$id, 'update', json_encode($input), $userId]);
                 $pdo->commit();
@@ -1703,11 +1845,24 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         case 'POST':
             if ($id === null) {
                 $customerId = (int) ($input['customer_id'] ?? 0);
+                $creationKey = orderCreationIdempotencyKey($input['idempotency_key'] ?? $input['creation_idempotency_key'] ?? null);
                 $supplierId = normalizeExistingSupplierId($pdo, $input['supplier_id'] ?? null, 'supplier_id');
                 $expectedDate = normalizeOptionalExpectedReadyDate($input['expected_ready_date'] ?? null);
                 $currency = trim($input['currency'] ?? 'USD');
                 if (!$customerId) {
                     jsonError('Missing required: customer_id', 400);
+                }
+                if ($creationKey !== null) {
+                    $existing = $pdo->prepare("SELECT id FROM orders WHERE creation_idempotency_key=? AND COALESCE(order_type,'standard')<>'draft_procurement'");
+                    $existing->execute([$creationKey]);
+                    $existingId = (int) $existing->fetchColumn();
+                    if ($existingId > 0) {
+                        $stmt = $pdo->prepare("SELECT o.*,c.name customer_name,s.name supplier_name FROM orders o JOIN customers c ON c.id=o.customer_id LEFT JOIN suppliers s ON s.id=o.supplier_id WHERE o.id=?");
+                        $stmt->execute([$existingId]);
+                        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                        $row['items'] = normalizeOrderItems($pdo, fetchOrderItems($pdo, $existingId));
+                        jsonResponse(['data' => $row, 'idempotent_replay' => true]);
+                    }
                 }
                 if (!in_array($currency, ['USD', 'RMB'], true)) {
                     jsonError('Currency must be USD or RMB', 400);
@@ -1736,10 +1891,29 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 $pdo->beginTransaction();
                 try {
+                    $customerLock = $pdo->prepare("SELECT id FROM customers WHERE id=? FOR UPDATE");
+                    $customerLock->execute([$customerId]);
+                    if (!$customerLock->fetchColumn()) throw new RuntimeException('Customer not found');
+                    if ($creationKey !== null) {
+                        $existing = $pdo->prepare("SELECT id FROM orders WHERE creation_idempotency_key=? FOR UPDATE");
+                        $existing->execute([$creationKey]);
+                        $existingId = (int) $existing->fetchColumn();
+                        if ($existingId > 0) {
+                            $pdo->commit();
+                            $stmt = $pdo->prepare("SELECT o.*,c.name customer_name,s.name supplier_name FROM orders o JOIN customers c ON c.id=o.customer_id LEFT JOIN suppliers s ON s.id=o.supplier_id WHERE o.id=?");
+                            $stmt->execute([$existingId]);
+                            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                            $row['items'] = normalizeOrderItems($pdo, fetchOrderItems($pdo, $existingId));
+                            jsonResponse(['data' => $row, 'idempotent_replay' => true]);
+                        }
+                    }
+                    $items = normalizeOrderItemsForPersistence($pdo, $customerId, $destinationCountryId, $supplierId ?: null, $input['items'] ?? [], 'Draft');
+                    validateOrderItemSupplierIds($pdo, $items);
+                    $dupWarn = enforceDuplicateShippingCodePolicy($pdo, $customerId, 0, $items);
                     $hasDestCountry = orderTableHasColumn($pdo, 'orders', 'destination_country_id');
-                    $insCols = "customer_id, supplier_id, expected_ready_date, currency, status, high_alert_notes, created_by";
-                    $insVals = "?,?,?,?,'Draft',?,?";
-                    $insParams = [$customerId, $supplierId ?: null, $expectedDate, $currency, $highAlertNotes, $userId];
+                    $insCols = "customer_id, supplier_id, expected_ready_date, currency, status, high_alert_notes, created_by, creation_idempotency_key";
+                    $insVals = "?,?,?,?,'Draft',?,?,?";
+                    $insParams = [$customerId, $supplierId ?: null, $expectedDate, $currency, $highAlertNotes, $userId, $creationKey];
                     if ($hasDestCountry) {
                         $insCols .= ", destination_country_id";
                         $insVals .= ",?";
@@ -1855,6 +2029,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         $insItem->execute($params);
                         syncProductFromOrderItem($pdo, $it);
                     }
+                    (new ItemNumberReservationService($pdo))->reservePersistedOrder($orderId,(int)$userId);
                     $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order',?,?,?,?)")
                         ->execute([$orderId, 'create', json_encode(['status' => 'Draft']), $userId]);
                     (new NotificationService($pdo))->notifyOrderCreated($orderId, $userId);
@@ -1884,263 +2059,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     jsonResponse(['data' => $result]);
                 } catch (OrderReceivingValidationException $e) {
                     jsonError($e->getMessage(), $e->getStatusCode(), $e->getFieldErrors());
-                }
-            }
-            if (false && $id && $action === 'receive') {
-                $stmt = $pdo->prepare("SELECT * FROM orders WHERE id = ?");
-                $stmt->execute([$id]);
-                $order = $stmt->fetch(PDO::FETCH_ASSOC);
-                if (!$order) jsonError('Order not found', 404);
-                $allowed = ['Approved', 'InTransitToWarehouse'];
-                if (!in_array($order['status'], $allowed, true)) {
-                    jsonError('Order must be Approved or InTransitToWarehouse to receive', 400);
-                }
-                $actualCartons = (int) ($input['actual_cartons'] ?? 0);
-                $actualCbm = (float) ($input['actual_cbm'] ?? 0);
-                $actualWeight = (float) ($input['actual_weight'] ?? 0);
-                if ($actualCartons < 0 || $actualCbm < 0 || $actualWeight < 0) {
-                    jsonError('Actual cartons, CBM, and weight must be zero or positive', 400);
-                }
-                $condition = $input['condition'] ?? 'good';
-                if (!in_array($condition, ['good', 'damaged', 'partial'])) $condition = 'good';
-                $photoPaths = normalizeStoredUploadPathList($input['photo_paths'] ?? []);
-                $itemsInput = $input['items'] ?? [];
-                $config = require dirname(__DIR__, 2) . '/config/config.php';
-                $thresholdPct = $config['variance_threshold_percent'] ?? 10;
-                $thresholdAbs = $config['variance_threshold_abs_cbm'] ?? 0.1;
-                $photoEvidencePerItem = (int) ($config['photo_evidence_per_item'] ?? 0);
-                $itemLevelEnabled = (int) ($config['item_level_receiving_enabled'] ?? 0);
-
-                $orderItems = $pdo->prepare("SELECT id, declared_cbm, declared_weight FROM order_items WHERE order_id = ?");
-                $orderItems->execute([$id]);
-                $orderItemsRows = $orderItems->fetchAll(PDO::FETCH_ASSOC);
-                $declaredCbm = array_sum(array_column($orderItemsRows, 'declared_cbm'));
-                $declaredWeight = array_sum(array_column($orderItemsRows, 'declared_weight'));
-
-                $orderVariancePct = $declaredCbm > 0 ? abs($actualCbm - $declaredCbm) / $declaredCbm * 100 : 0;
-                $orderVarianceAbs = abs($actualCbm - $declaredCbm);
-                $hasVariance = $orderVariancePct >= $thresholdPct || $orderVarianceAbs >= $thresholdAbs || $condition !== 'good';
-                $itemVariances = [];
-                $normalizedReceiptSplitsByItem = [];
-                if (!empty($itemsInput)) {
-                    $sumCbm = 0;
-                    $sumWeight = 0;
-                    $sumCartons = 0;
-                    $hasItemCbm = false;
-                    $hasItemWeight = false;
-                    $errors = [];
-                    foreach ($itemsInput as $idx => $it) {
-                        $oiId = (int) ($it['order_item_id'] ?? 0);
-                        $oi = null;
-                        foreach ($orderItemsRows as $o) {
-                            if ((int) $o['id'] === $oiId) {
-                                $oi = $o;
-                                break;
-                            }
-                        }
-                        if (!$oi) {
-                            $errors["items.$idx.order_item_id"] = 'Invalid order_item_id';
-                            continue;
-                        }
-                        $packagingSplits = orderNormalizeReceiptPackagingSplits($it);
-                        if ($packagingSplits) {
-                            $splitTotals = orderAggregateReceiptPackagingSplits($packagingSplits);
-                            $normalizedReceiptSplitsByItem[$oiId] = $packagingSplits;
-                            foreach ($splitTotals as $field => $value) {
-                                if ($value !== null) {
-                                    $it[$field] = $value;
-                                }
-                            }
-                        }
-                        $aCbm = isset($it['actual_cbm']) ? (float) $it['actual_cbm'] : null;
-                        $aWeight = isset($it['actual_weight']) ? (float) $it['actual_weight'] : null;
-                        $aCartons = isset($it['actual_cartons']) ? (int) $it['actual_cartons'] : null;
-                        $aPiecesPerCarton = isset($it['actual_pieces_per_carton']) && $it['actual_pieces_per_carton'] !== ''
-                            ? (float) $it['actual_pieces_per_carton']
-                            : null;
-                        $aQuantity = isset($it['actual_quantity']) && $it['actual_quantity'] !== ''
-                            ? (float) $it['actual_quantity']
-                            : null;
-                        $aUnitPrice = isset($it['unit_price']) && $it['unit_price'] !== ''
-                            ? (float) $it['unit_price']
-                            : null;
-                        $aTotalAmount = isset($it['total_amount']) && $it['total_amount'] !== ''
-                            ? (float) $it['total_amount']
-                            : null;
-                        if (($aQuantity === null || $aQuantity <= 0) && $aCartons !== null && $aPiecesPerCarton !== null && $aCartons > 0 && $aPiecesPerCarton > 0) {
-                            $aQuantity = round($aCartons * $aPiecesPerCarton, 4);
-                        }
-                        if (($aTotalAmount === null || $aTotalAmount <= 0) && $aQuantity !== null && $aUnitPrice !== null && $aQuantity > 0 && $aUnitPrice >= 0) {
-                            $aTotalAmount = round($aQuantity * $aUnitPrice, 4);
-                        }
-                        if (($aPiecesPerCarton !== null && $aPiecesPerCarton < 0)
-                            || ($aQuantity !== null && $aQuantity < 0)
-                            || ($aUnitPrice !== null && $aUnitPrice < 0)
-                            || ($aTotalAmount !== null && $aTotalAmount < 0)) {
-                            $errors["items.$idx.quantity_price"] = 'Quantity and price fields must be zero or positive';
-                        }
-                        foreach ($packagingSplits as $splitIndex => $split) {
-                            if (($split['cartons'] !== null && $split['cartons'] < 0)
-                                || ($split['pieces_per_carton'] !== null && $split['pieces_per_carton'] < 0)
-                                || ($split['quantity'] !== null && $split['quantity'] < 0)
-                                || ($split['unit_price'] !== null && $split['unit_price'] < 0)
-                                || ($split['total_amount'] !== null && $split['total_amount'] < 0)) {
-                                $errors["items.$idx.packaging_splits.$splitIndex"] = 'Packaging split quantity and price fields must be zero or positive';
-                            }
-                        }
-                        if (($aCartons !== null && $aCartons < 0)
-                            || ($aCbm !== null && $aCbm < 0)
-                            || ($aWeight !== null && $aWeight < 0)) {
-                            $errors["items.$idx.actuals"] = 'Actual cartons, CBM, and weight must be zero or positive';
-                        }
-                        $itCond = $it['condition'] ?? 'good';
-                        if (!in_array($itCond, ['good', 'damaged', 'partial'])) $itCond = 'good';
-                        $itPhotos = normalizeStoredUploadPathList($it['photo_paths'] ?? []);
-                        $decCbm = (float) $oi['declared_cbm'];
-                        $decWeight = (float) $oi['declared_weight'];
-                        $itemVar = $itCond !== 'good';
-                        if ($aCbm !== null) {
-                            $varPct = $decCbm > 0 ? abs($aCbm - $decCbm) / $decCbm * 100 : 0;
-                            $varAbs = abs($aCbm - $decCbm);
-                            $itemVar = $itemVar || $varPct >= $thresholdPct || $varAbs >= $thresholdAbs;
-                        }
-                        $itemVariances[$oiId] = $itemVar;
-                        if ($itemVar) $hasVariance = true;
-                        if ($aCbm !== null) {
-                            $sumCbm += $aCbm;
-                            $hasItemCbm = true;
-                        }
-                        if ($aWeight !== null) {
-                            $sumWeight += $aWeight;
-                            $hasItemWeight = true;
-                        }
-                        if ($aCartons !== null) $sumCartons += $aCartons;
-                        if ($photoEvidencePerItem && $itemVar && empty($itPhotos)) {
-                            $errors["items.$idx.photo_paths"] = 'Photo evidence required for item with variance';
-                        }
-                    }
-                    if (!empty($errors)) jsonError('Validation failed', 400, $errors);
-                    $tolerance = 0.01;
-                    if (($hasItemCbm && abs($sumCbm - $actualCbm) > $tolerance)
-                        || ($hasItemWeight && abs($sumWeight - $actualWeight) > $tolerance)) {
-                        jsonError('Item-level totals must match order-level actuals (CBM/weight)', 400);
-                    }
-                } else {
-                    $hasVariance = $orderVariancePct >= $thresholdPct || $orderVarianceAbs >= $thresholdAbs || $condition !== 'good';
-                }
-                if ($hasVariance && empty($photoPaths)) {
-                    jsonError('Evidence photos required when variance or damage is present', 400);
-                }
-                if ($itemLevelEnabled && empty($itemsInput)) {
-                    jsonError('Item-level receiving is required; provide items array', 400);
-                }
-
-                $pdo->beginTransaction();
-                try {
-                    $pdo->prepare("INSERT INTO warehouse_receipts (order_id, actual_cartons, actual_cbm, actual_weight, receipt_condition, notes, received_by) VALUES (?,?,?,?,?,?,?)")
-                        ->execute([$id, $actualCartons, $actualCbm, $actualWeight, $condition, $input['notes'] ?? null, $userId]);
-                    $receiptId = (int) $pdo->lastInsertId();
-                    $insPhoto = $pdo->prepare("INSERT INTO warehouse_receipt_photos (receipt_id, file_path) VALUES (?,?)");
-                    foreach ($photoPaths as $path) {
-                        $insPhoto->execute([$receiptId, $path]);
-                    }
-                    if (!empty($itemsInput)) {
-                        $receiptItemCols = "receipt_id, order_item_id, actual_cartons, actual_cbm, actual_weight, receipt_condition, variance_detected, notes";
-                        $receiptItemVals = "?,?,?,?,?,?,?,?";
-                        $receiptExtraCols = [];
-                        foreach (['actual_pieces_per_carton', 'actual_quantity', 'unit_price', 'total_amount'] as $column) {
-                            if (orderTableHasColumn($pdo, 'warehouse_receipt_items', $column)) {
-                                $receiptExtraCols[] = $column;
-                                $receiptItemCols .= ", $column";
-                                $receiptItemVals .= ",?";
-                            }
-                        }
-                        $insItem = $pdo->prepare("INSERT INTO warehouse_receipt_items ($receiptItemCols) VALUES ($receiptItemVals)");
-                        $insItemPhoto = $pdo->prepare("INSERT INTO warehouse_receipt_item_photos (receipt_item_id, file_path) VALUES (?,?)");
-                        $insSplit = orderTableExists($pdo, 'warehouse_receipt_item_splits')
-                            ? $pdo->prepare("INSERT INTO warehouse_receipt_item_splits (receipt_item_id, line_no, cartons, pieces_per_carton, quantity, unit_price, total_amount) VALUES (?,?,?,?,?,?,?)")
-                            : null;
-                        foreach ($itemsInput as $it) {
-                            $oiId = (int) ($it['order_item_id'] ?? 0);
-                            $packagingSplits = $normalizedReceiptSplitsByItem[$oiId] ?? orderNormalizeReceiptPackagingSplits($it);
-                            if ($packagingSplits) {
-                                $splitTotals = orderAggregateReceiptPackagingSplits($packagingSplits);
-                                foreach ($splitTotals as $field => $value) {
-                                    if ($value !== null) {
-                                        $it[$field] = $value;
-                                    }
-                                }
-                            }
-                            $aCbm = isset($it['actual_cbm']) ? (float) $it['actual_cbm'] : null;
-                            $aWeight = isset($it['actual_weight']) ? (float) $it['actual_weight'] : null;
-                            $aCartons = isset($it['actual_cartons']) ? (int) $it['actual_cartons'] : null;
-                            $aPiecesPerCarton = isset($it['actual_pieces_per_carton']) && $it['actual_pieces_per_carton'] !== ''
-                                ? (float) $it['actual_pieces_per_carton']
-                                : null;
-                            $aQuantity = isset($it['actual_quantity']) && $it['actual_quantity'] !== ''
-                                ? (float) $it['actual_quantity']
-                                : null;
-                            $aUnitPrice = isset($it['unit_price']) && $it['unit_price'] !== ''
-                                ? (float) $it['unit_price']
-                                : null;
-                            $aTotalAmount = isset($it['total_amount']) && $it['total_amount'] !== ''
-                                ? (float) $it['total_amount']
-                                : null;
-                            if (($aQuantity === null || $aQuantity <= 0) && $aCartons !== null && $aPiecesPerCarton !== null && $aCartons > 0 && $aPiecesPerCarton > 0) {
-                                $aQuantity = round($aCartons * $aPiecesPerCarton, 4);
-                            }
-                            if (($aTotalAmount === null || $aTotalAmount <= 0) && $aQuantity !== null && $aUnitPrice !== null && $aQuantity > 0 && $aUnitPrice >= 0) {
-                                $aTotalAmount = round($aQuantity * $aUnitPrice, 4);
-                            }
-                            $itCond = in_array($it['condition'] ?? 'good', ['good', 'damaged', 'partial']) ? ($it['condition'] ?? 'good') : 'good';
-                            $varDet = $itemVariances[$oiId] ?? 0;
-                            $receiptParams = [$receiptId, $oiId, $aCartons, $aCbm, $aWeight, $itCond, $varDet ? 1 : 0, $it['notes'] ?? null];
-                            foreach ($receiptExtraCols as $column) {
-                                $receiptParams[] = match ($column) {
-                                    'actual_pieces_per_carton' => $aPiecesPerCarton,
-                                    'actual_quantity' => $aQuantity,
-                                    'unit_price' => $aUnitPrice,
-                                    'total_amount' => $aTotalAmount,
-                                    default => null,
-                                };
-                            }
-                            $insItem->execute($receiptParams);
-                            $riId = (int) $pdo->lastInsertId();
-                            if ($insSplit && $packagingSplits) {
-                                foreach (array_values($packagingSplits) as $splitIndex => $split) {
-                                    $insSplit->execute([
-                                        $riId,
-                                        $splitIndex + 1,
-                                        $split['cartons'],
-                                        $split['pieces_per_carton'],
-                                        $split['quantity'],
-                                        $split['unit_price'],
-                                        $split['total_amount'],
-                                    ]);
-                                }
-                            }
-                            foreach (normalizeStoredUploadPathList($it['photo_paths'] ?? []) as $p) {
-                                $insItemPhoto->execute([$riId, $p]);
-                            }
-                        }
-                    }
-                    $newStatus = $hasVariance ? 'Confirmed' : 'ReadyForConsolidation';
-                    $confirmToken = null;
-                    if ($hasVariance) {
-                        $confirmToken = bin2hex(random_bytes(24));
-                        $pdo->prepare("UPDATE orders SET status=?, confirmation_token=? WHERE id=?")->execute([$newStatus, $confirmToken, $id]);
-                    } else {
-                        $pdo->prepare("UPDATE orders SET status=? WHERE id=?")->execute([$newStatus, $id]);
-                    }
-                    $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order',?,?,?,?)")
-                        ->execute([$id, 'receive', json_encode(['actual_cbm' => $actualCbm, 'actual_weight' => $actualWeight, 'status' => $newStatus, 'receipt_id' => $receiptId]), $userId]);
-                    logClms('order_received', ['order_id' => (int) $id, 'receipt_id' => $receiptId, 'user_id' => $userId, 'item_level' => !empty($itemsInput), 'variance_detected' => $hasVariance]);
-                    (new NotificationService($pdo))->notifyOrderReceived((int) $id, $userId, $hasVariance, $confirmToken);
-                    $pdo->commit();
-                    jsonResponse(['data' => ['status' => $newStatus, 'receipt_id' => $receiptId, 'variance_detected' => $hasVariance]]);
-                } catch (Exception $e) {
-                    $pdo->rollBack();
-                    throw $e;
                 }
             }
             if ($id && $action === 'confirm') {
@@ -2209,11 +2127,26 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     jsonResponse($response);
                 }
                 if ($action === 'approve') {
-                    orderHandleLifecycleTransition('approve', (string) ($order['status'] ?? ''), 'Approved');
-                    $pdo->prepare("UPDATE orders SET status='Approved' WHERE id=?")->execute([$id]);
-                    $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, user_id) VALUES ('order',?,'approve',?)")->execute([$id, $userId]);
-                    (new NotificationService($pdo))->notifyOrderApproved((int) $id);
-                    jsonResponse(['data' => ['status' => 'Approved']]);
+                    $pdo->beginTransaction();
+                    try {
+                        $locked=$pdo->prepare('SELECT status FROM orders WHERE id=? FOR UPDATE');$locked->execute([(int)$id]);$lockedStatus=(string)$locked->fetchColumn();
+                        if($lockedStatus==='Approved'){
+                            $accounting=(new ShipmentAccountingService($pdo))->summarizeOrder((int)$id);
+                            $pdo->commit();
+                            jsonResponse(['data'=>['status'=>'Approved','already_applied'=>true,'accounting'=>$accounting],'message'=>'Order already approved']);
+                        }
+                        orderHandleLifecycleTransition('approve',$lockedStatus,'Approved');
+                        $accounting=(new ShipmentAccountingService($pdo))->finalizeOrder((int)$id,(int)$userId);
+                        $pdo->prepare("UPDATE orders SET status='Approved', lock_version=lock_version+1 WHERE id=?")->execute([$id]);
+                        $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order',?,'approve',?,?)")
+                            ->execute([$id,json_encode(['accounting_finalized'=>true],JSON_UNESCAPED_UNICODE),$userId]);
+                        (new NotificationService($pdo))->notifyOrderApproved((int)$id);
+                        $pdo->commit();
+                        jsonResponse(['data'=>['status'=>'Approved','accounting'=>$accounting]]);
+                    } catch(Throwable $e) {
+                        if($pdo->inTransaction())$pdo->rollBack();
+                        throw $e;
+                    }
                 }
             }
             jsonError('Invalid action', 400);

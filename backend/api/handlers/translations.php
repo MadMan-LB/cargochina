@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Translations API - POST lookup (cache or mock translate)
+ * Translations API - cached lookup/queue and authorized manual correction.
  */
 
 require_once __DIR__ . '/../helpers.php';
@@ -13,8 +13,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     }
 
     $pdo = getDb();
-    $text = trim($input['text'] ?? '');
-    $sourceLang = $input['source_lang'] ?? 'zh';
+    $text = (string) ($input['text'] ?? '');
+    $sourceLang = $input['source_lang'] ?? 'auto';
     $targetLang = $input['target_lang'] ?? 'en';
 
     if (!$text) {
@@ -22,7 +22,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     }
 
     $svc = new TranslationService($pdo);
-    $translated = $svc->translate($text, $sourceLang, $targetLang);
+    if ($id === 'manual') {
+        requirePermission('translations.correct', ['ChinaAdmin', 'SuperAdmin']);
+        $translated = (string) ($input['translated'] ?? $input['translated_text'] ?? '');
+        if (trim($translated) === '') jsonError('Missing required field: translated', 400);
+        $svc->saveManualCorrection($text, $sourceLang, $targetLang, $translated, getAuthUserId());
+        jsonResponse(['data' => ['translated' => $translated, 'status' => 'manual', 'provenance' => 'manual']]);
+    }
 
-    jsonResponse(['data' => ['translated' => $translated]]);
+    $result = $svc->translateDetailed($text, $sourceLang, $targetLang);
+    jsonResponse(['data' => array_merge(['translated' => $result['translated_text']], $result)]);
 };

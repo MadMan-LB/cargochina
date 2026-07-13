@@ -49,9 +49,9 @@ require 'includes/layout.php';
         <div class="detail" id="profitNetDetail">After commission. Expenses listed below.</div>
       </div>
       <div class="metric-card">
-        <div class="eyebrow">Commission</div>
+        <div class="eyebrow"><?= clmsT('Shipment Expenses') ?></div>
         <div class="value" id="profitCommissionCount">0.00</div>
-        <div class="detail" id="profitCommissionDetail">Supplier commission impact on visible orders.</div>
+        <div class="detail" id="profitCommissionDetail"><?= clmsT('Shipment expenses are counted once and are never allocated to items.') ?></div>
       </div>
     </div>
 
@@ -117,6 +117,16 @@ require 'includes/layout.php';
             <input type="text" class="form-control form-control-sm" id="profitSupplierSearch" placeholder="Type to search supplier..." autocomplete="off">
             <input type="hidden" id="profitSupplierId">
           </div>
+          <div class="col-md-3">
+            <label class="form-label small" for="profitItemType">Item type</label>
+            <select class="form-select form-select-sm" id="profitItemType">
+              <option value="">All item types</option>
+              <option value="normal">Normal goods</option><option value="replica">Copy / replica goods</option>
+              <option value="cosmetics">Cosmetics</option><option value="branded">Branded goods</option>
+              <option value="food">Food</option><option value="dangerous">Dangerous goods</option>
+              <option value="other">Other</option><option value="unclassified">Unclassified</option>
+            </select>
+          </div>
         </div>
         <div class="filter-summary-row">
           <div class="summary-text" id="profitFilterSummary">Showing all non-draft orders in the profit view.</div>
@@ -163,14 +173,21 @@ require 'includes/layout.php';
                 <th>Customer</th>
                 <th>Supplier</th>
                 <th>Status</th>
-                <th>Sell</th>
-                <th>Buy</th>
-                <th>Commission</th>
-                <th>Margin</th>
+                <th><?= clmsT('Sales') ?></th>
+                <th><?= clmsT('Shipment Charges') ?></th>
+                <th><?= clmsT('Supplier Purchase Cost') ?></th>
+                <th><?= clmsT('Shipment Expenses') ?></th>
+                <th><?= clmsT('Gross Result') ?></th>
+                <th><?= clmsT('Net Shipment Result') ?></th>
               </tr>
             </thead>
             <tbody id="profitTableBody"></tbody>
           </table>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mt-3">
+          <button class="btn btn-outline-secondary btn-sm" id="profitPrevBtn" type="button">Previous</button>
+          <span class="small text-muted" id="profitPageSummary">Page 1</span>
+          <button class="btn btn-outline-secondary btn-sm" id="profitNextBtn" type="button">Next</button>
         </div>
       </div>
     </div>

@@ -30,6 +30,7 @@ require 'includes/layout.php';
         </div>
         <div class="filter-chip-grid" id="filterStatusList">
           <?php foreach ([
+            'InTransitToWarehouse' => 'Partially Received / In Transit',
             'ReceivedAtWarehouse' => 'Received',
             'AwaitingCustomerConfirmation' => 'Legacy Awaiting Confirmation',
             'Confirmed' => 'Confirmed',
@@ -54,10 +55,8 @@ require 'includes/layout.php';
         </div>
       </div>
       <div class="col-md-2"><label class="form-label small">Search</label><input type="text" class="form-control form-control-sm" id="filterQ" placeholder="Description..."></div>
-      <div class="col-md-2 d-flex align-items-end gap-2">
-        <button class="btn btn-primary btn-sm" onclick="loadStock()">Apply</button>
-        <button class="btn btn-outline-success btn-sm" onclick="exportWarehouseStockXlsx()">Export XLSX</button>
-      </div>
+      <div class="col-md-2"><label class="form-label small">Item Type</label><select class="form-select form-select-sm" id="filterStockItemType"><option value="">All types</option><option value="normal">Normal</option><option value="replica">Copy / replica</option><option value="cosmetics">Cosmetics</option><option value="branded">Branded</option><option value="food">Food</option><option value="dangerous">Dangerous</option><option value="other">Other</option><option value="unclassified">Needs classification</option></select></div>
+      <div class="col-md-2 d-flex align-items-end gap-2"><button class="btn btn-primary btn-sm" onclick="loadStock()">Apply</button><button class="btn btn-outline-success btn-sm" onclick="exportWarehouseStockXlsx()">Export XLSX</button></div>
     </div>
     <div class="table-responsive">
       <table class="table table-hover table-sm">
@@ -71,13 +70,13 @@ require 'includes/layout.php';
             <th>Qty</th>
             <th>Declared CBM</th>
             <th>Actual CBM</th>
-            <th>Dims H/W/L</th>
             <th>Actions</th>
           </tr>
         </thead>
         <tbody id="stockTableBody"></tbody>
       </table>
     </div>
+    <div class="d-flex justify-content-between align-items-center mt-3"><small class="text-muted" id="stockPageSummary"></small><div class="btn-group btn-group-sm"><button type="button" class="btn btn-outline-secondary" id="stockPrevPage">Previous</button><button type="button" class="btn btn-outline-secondary" id="stockNextPage">Next</button></div></div>
   </div>
 </div>
 

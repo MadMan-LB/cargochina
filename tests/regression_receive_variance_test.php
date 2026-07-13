@@ -11,6 +11,8 @@ require_once $root . '/backend/config/database.php';
 require_once $root . '/backend/api/helpers.php';
 require_once $root . '/backend/services/NotificationService.php';
 require_once $root . '/backend/services/OrderReceivingService.php';
+require_once $root . '/backend/services/OrderReceiptWorkflowService.php';
+require_once $root . '/backend/services/FinancialReconciliationService.php';
 
 $pdo = getDb();
 $passed = 0;
@@ -29,10 +31,26 @@ function test(string $name, callable $fn): void
     }
 }
 
+function startConcurrentReceiveWorker(string $root,int $orderId,int $itemId,int $userId,string $key): array
+{
+    $rootEsc=addslashes(str_replace('\\','/',$root));
+    $input=var_export(['idempotency_key'=>$key,'actual_cartons'=>4,'actual_cbm'=>0.4,'actual_weight'=>4,'condition'=>'partial','items'=>[['order_item_id'=>$itemId,'actual_cartons'=>4,'actual_cbm'=>0.4,'actual_weight'=>4,'condition'=>'partial']]],true);
+    $code="<?php\nrequire '$rootEsc/backend/config/database.php';\nrequire '$rootEsc/backend/api/helpers.php';\nrequire '$rootEsc/backend/services/OrderReceivingService.php';\ntry{echo json_encode((new OrderReceivingService())->receive(getDb(),$orderId,$input,$userId));}catch(Throwable \$e){fwrite(STDERR,\$e->getMessage());exit(1);}";
+    $tmp=tempnam(sys_get_temp_dir(),'receive_concurrency_').'.php';file_put_contents($tmp,$code);
+    $pipes=[];$process=proc_open([PHP_BINARY,$tmp],[0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']],$pipes);if(!is_resource($process)){@unlink($tmp);throw new RuntimeException('Could not start receive worker');}fclose($pipes[0]);return compact('process','pipes','tmp');
+}
+function finishConcurrentReceiveWorker(array $worker): array
+{
+    $out=stream_get_contents($worker['pipes'][1]);$err=stream_get_contents($worker['pipes'][2]);fclose($worker['pipes'][1]);fclose($worker['pipes'][2]);$exit=proc_close($worker['process']);@unlink($worker['tmp']);if($exit!==0)throw new RuntimeException('Receive worker failed: '.$err);$json=json_decode($out,true);if(!is_array($json))throw new RuntimeException('Invalid receive worker output: '.$out);return $json;
+}
+
 $orderId = null;
 $receiptId = null;
 $itemIds = [];
 $calcOrderId = null;
+$partialOrderId = null;
+$resetOrderId = null;
+$concurrentOrderId = null;
 
 try {
     $cust = $pdo->query("SELECT id FROM customers LIMIT 1")->fetch(PDO::FETCH_ASSOC);
@@ -141,7 +159,130 @@ try {
         if (abs((float) $row['actual_cbm'] - 6.0) > 0.00001) throw new Exception('Expected derived CBM 6.0, got ' . $row['actual_cbm']);
         if (abs((float) $row['actual_weight'] - 25.0) > 0.0001) throw new Exception('Expected derived weight 25.0, got ' . $row['actual_weight']);
     });
+
+    test('Partial receipts reconcile cumulatively and idempotent replay does not duplicate stock', function () use ($pdo, $cust, $supp, $user, &$partialOrderId) {
+        $pdo->prepare("INSERT INTO orders (customer_id, supplier_id, expected_ready_date, status, created_by) VALUES (?,?,CURDATE(),'Approved',?)")
+            ->execute([$cust['id'], $supp['id'], $user['id']]);
+        $partialOrderId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO order_items (order_id, quantity, unit, cartons, declared_cbm, declared_weight, description_en) VALUES (?,10,'cartons',10,1.0,10,'Partial Item')")
+            ->execute([$partialOrderId]);
+        $partialItemId = (int) $pdo->lastInsertId();
+
+        $service = new OrderReceivingService();
+        $first = $service->receive($pdo, $partialOrderId, [
+            'idempotency_key' => 'audit-partial-first-' . $partialOrderId,
+            'actual_cartons' => 4,
+            'actual_cbm' => 0.4,
+            'actual_weight' => 4,
+            'condition' => 'partial',
+            'items' => [[
+                'order_item_id' => $partialItemId,
+                'actual_cartons' => 4,
+                'actual_cbm' => 0.4,
+                'actual_weight' => 4,
+                'condition' => 'partial',
+            ]],
+        ], (int) $user['id']);
+        if ($first['status'] !== 'InTransitToWarehouse') {
+            throw new Exception('First partial receipt did not preserve in-transit state');
+        }
+
+        $secondKey = 'audit-partial-final-' . $partialOrderId;
+        $second = $service->receive($pdo, $partialOrderId, [
+            'idempotency_key' => $secondKey,
+            'actual_cartons' => 6,
+            'actual_cbm' => 0.6,
+            'actual_weight' => 6,
+            'condition' => 'good',
+            'items' => [[
+                'order_item_id' => $partialItemId,
+                'actual_cartons' => 6,
+                'actual_cbm' => 0.6,
+                'actual_weight' => 6,
+                'condition' => 'good',
+            ]],
+        ], (int) $user['id']);
+        if ($second['status'] !== 'ReadyForConsolidation' || !empty($second['variance_detected'])) {
+            throw new Exception('Cumulative final receipt was incorrectly treated as a variance');
+        }
+
+        $replay = $service->receive($pdo, $partialOrderId, [
+            'idempotency_key' => $secondKey,
+        ], (int) $user['id']);
+        if (empty($replay['idempotent_replay']) || (int) $replay['receipt_id'] !== (int) $second['receipt_id']) {
+            throw new Exception('Idempotent replay did not return the original receipt');
+        }
+
+        $stmt = $pdo->prepare("SELECT COUNT(*) receipt_count, SUM(actual_cartons) cartons, SUM(actual_cbm) cbm, SUM(actual_weight) weight FROM warehouse_receipts WHERE order_id=? AND voided_at IS NULL");
+        $stmt->execute([$partialOrderId]);
+        $totals = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ((int) $totals['receipt_count'] !== 2 || (int) $totals['cartons'] !== 10 || abs((float) $totals['cbm'] - 1.0) > 0.000001 || abs((float) $totals['weight'] - 10.0) > 0.0001) {
+            throw new Exception('Cumulative inventory totals are incorrect after partial receiving');
+        }
+    });
+
+    test('Reset after customer decline atomically voids inventory receipts', function () use ($pdo, $cust, $supp, $user, &$resetOrderId) {
+        $pdo->prepare("INSERT INTO orders (customer_id,supplier_id,expected_ready_date,status,created_by) VALUES (?,?,CURDATE(),'CustomerDeclinedAfterAutoConfirm',?)")
+            ->execute([$cust['id'],$supp['id'],$user['id']]);
+        $resetOrderId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO order_items (order_id,quantity,unit,declared_cbm,declared_weight,description_en) VALUES (?,2,'cartons',0.2,5,'Reset receipt item')")
+            ->execute([$resetOrderId]);
+        $pdo->prepare("INSERT INTO warehouse_receipts (order_id,actual_cartons,actual_cbm,actual_weight,receipt_condition,received_by,receiving_operation_id) VALUES (?,2,0.2,5,'good',?,?)")
+            ->execute([$resetOrderId,$user['id'],'audit-reset-' . $resetOrderId]);
+
+        OrderReceiptWorkflowService::resetDeclinedOrder($pdo,$resetOrderId,(int)$user['id'],'Regression reversal');
+        $stmt=$pdo->prepare('SELECT status FROM orders WHERE id=?'); $stmt->execute([$resetOrderId]);
+        if ($stmt->fetchColumn() !== 'Submitted') throw new Exception('Declined order was not reset to Submitted');
+        $stmt=$pdo->prepare('SELECT COUNT(*) FROM warehouse_receipts WHERE order_id=? AND voided_at IS NULL'); $stmt->execute([$resetOrderId]);
+        if ((int)$stmt->fetchColumn() !== 0) throw new Exception('Active receipt remained after reset');
+        $report=(new FinancialReconciliationService($pdo))->reconcileOrder($resetOrderId);
+        if ((int)($report['inventory']['active_receipts']['receipt_count'] ?? -1) !== 0) throw new Exception('Reconciliation still counted voided inventory');
+    });
+
+    test('concurrent retry key produces one receiving operation', function () use ($pdo,$root,$cust,$supp,$user,&$concurrentOrderId) {
+        $pdo->prepare("INSERT INTO orders(customer_id,supplier_id,expected_ready_date,status,created_by) VALUES (?,?,CURDATE(),'Approved',?)")->execute([$cust['id'],$supp['id'],$user['id']]);
+        $concurrentOrderId=(int)$pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO order_items(order_id,quantity,unit,cartons,declared_cbm,declared_weight,description_en) VALUES (?,10,'cartons',10,1,10,'Concurrent receipt')")->execute([$concurrentOrderId]);
+        $itemId=(int)$pdo->lastInsertId();$key='audit-concurrent-receive-'.$concurrentOrderId;
+        $workers=[startConcurrentReceiveWorker($root,$concurrentOrderId,$itemId,(int)$user['id'],$key),startConcurrentReceiveWorker($root,$concurrentOrderId,$itemId,(int)$user['id'],$key)];
+        $results=[finishConcurrentReceiveWorker($workers[0]),finishConcurrentReceiveWorker($workers[1])];
+        if((int)$results[0]['receipt_id']!==(int)$results[1]['receipt_id'])throw new Exception('Concurrent retry returned different receipt IDs');
+        $stmt=$pdo->prepare('SELECT COUNT(*) FROM warehouse_receipts WHERE order_id=? AND receiving_operation_id=?');$stmt->execute([$concurrentOrderId,$key]);
+        if((int)$stmt->fetchColumn()!==1)throw new Exception('Concurrent retry created duplicate receipts');
+    });
 } finally {
+    if ($concurrentOrderId) {
+        $receipts=$pdo->query("SELECT id FROM warehouse_receipts WHERE order_id=$concurrentOrderId")->fetchAll(PDO::FETCH_COLUMN);
+        foreach($receipts as $rid){$pdo->exec("DELETE FROM warehouse_receipt_items WHERE receipt_id=$rid");$pdo->exec("DELETE FROM warehouse_receipt_photos WHERE receipt_id=$rid");$pdo->exec("DELETE FROM warehouse_receipts WHERE id=$rid");}
+        $nIds=$pdo->query("SELECT id FROM notifications WHERE title LIKE 'Order #$concurrentOrderId%'")->fetchAll(PDO::FETCH_COLUMN);foreach($nIds as $nid)$pdo->exec("DELETE FROM notification_delivery_log WHERE notification_id=$nid");foreach($nIds as $nid)$pdo->exec("DELETE FROM notifications WHERE id=$nid");
+        $pdo->exec("DELETE FROM audit_log WHERE entity_type='order' AND entity_id=$concurrentOrderId");$pdo->exec("DELETE FROM order_items WHERE order_id=$concurrentOrderId");$pdo->exec("DELETE FROM orders WHERE id=$concurrentOrderId");
+    }
+    if ($resetOrderId) {
+        $pdo->exec("DELETE FROM audit_log WHERE entity_type='order' AND entity_id=$resetOrderId");
+        $pdo->exec("DELETE FROM warehouse_receipts WHERE order_id=$resetOrderId");
+        $pdo->exec("DELETE FROM order_items WHERE order_id=$resetOrderId");
+        $pdo->exec("DELETE FROM orders WHERE id=$resetOrderId");
+    }
+    if ($partialOrderId) {
+        $receipts = $pdo->query("SELECT id FROM warehouse_receipts WHERE order_id=$partialOrderId")->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($receipts as $rid) {
+            $riIds = $pdo->query("SELECT id FROM warehouse_receipt_items WHERE receipt_id=$rid")->fetchAll(PDO::FETCH_COLUMN);
+            foreach ($riIds as $riid) {
+                $pdo->exec("DELETE FROM warehouse_receipt_item_splits WHERE receipt_item_id=$riid");
+                $pdo->exec("DELETE FROM warehouse_receipt_item_photos WHERE receipt_item_id=$riid");
+            }
+            $pdo->exec("DELETE FROM warehouse_receipt_items WHERE receipt_id=$rid");
+            $pdo->exec("DELETE FROM warehouse_receipt_photos WHERE receipt_id=$rid");
+            $pdo->exec("DELETE FROM warehouse_receipt_fees WHERE receipt_id=$rid");
+            $pdo->exec("DELETE FROM warehouse_receipts WHERE id=$rid");
+        }
+        $nIds = $pdo->query("SELECT id FROM notifications WHERE type IN ('variance_confirmation','order_received') AND title LIKE 'Order #$partialOrderId%'")->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($nIds as $nid) $pdo->exec("DELETE FROM notification_delivery_log WHERE notification_id=$nid");
+        foreach ($nIds as $nid) $pdo->exec("DELETE FROM notifications WHERE id=$nid");
+        $pdo->exec("DELETE FROM audit_log WHERE entity_type='order' AND entity_id=$partialOrderId");
+        $pdo->exec("DELETE FROM order_items WHERE order_id=$partialOrderId");
+        $pdo->exec("DELETE FROM orders WHERE id=$partialOrderId");
+    }
     if ($calcOrderId) {
         $receipts = $pdo->query("SELECT id FROM warehouse_receipts WHERE order_id=$calcOrderId")->fetchAll(PDO::FETCH_COLUMN);
         foreach ($receipts as $rid) {

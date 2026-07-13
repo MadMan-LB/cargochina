@@ -2247,6 +2247,56 @@ body.d-flex {
   background: #fff;
 }
 
+.draft-action-group,
+#draftOrderModal .draft-section-actions,
+#draftOrderModal .draft-modal-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.draft-action-group .btn,
+#draftOrderModal .draft-section-actions .btn,
+#draftOrderModal .draft-modal-actions .btn {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.draft-row-actions {
+  min-width: 250px;
+}
+
+#draftOrderModal .draft-section-actions {
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+#draftOrderModal .draft-section-actions small {
+  flex: 1 1 100%;
+  text-align: right;
+}
+
+#draftOrderModal .draft-icon-action {
+  min-width: 36px;
+  padding-inline: 0.5rem;
+}
+
+.notification-card-link {
+  cursor: pointer;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+
+.notification-card-link:hover,
+.notification-card-link:focus-visible {
+  border-color: #86b7fe !important;
+  box-shadow: 0 0 0 3px rgba(13, 110, 253, .14);
+  outline: 0;
+}
+
 #draftOrderModal .modal-body {
   padding-top: 0.85rem;
   padding-bottom: 1rem;
@@ -2682,6 +2732,35 @@ body.d-flex {
 }
 
 @media (max-width: 768px) {
+  .draft-action-group,
+  #draftOrderModal .draft-section-actions,
+  #draftOrderModal .draft-modal-actions {
+    width: 100%;
+  }
+
+  .draft-action-group .btn,
+  .draft-action-group a.btn,
+  #draftOrderModal .draft-section-actions .btn,
+  #draftOrderModal .draft-modal-actions .btn {
+    flex: 1 1 auto;
+    min-height: 42px;
+  }
+
+  .draft-row-actions {
+    min-width: 0;
+  }
+
+  #draftOrderModal .draft-section-actions {
+    justify-content: flex-start;
+  }
+
+  #draftOrderModal .draft-section-actions small {
+    text-align: left;
+  }
+
+  .notification-actions .btn {
+    min-height: 40px;
+  }
   #draftOrderModal .modal-body {
     padding-left: 0.75rem;
     padding-right: 0.75rem;

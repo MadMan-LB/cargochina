@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS customer_pors (
     por_value VARCHAR(120) NOT NULL,
     sort_order INT NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_at DATETIME NULL,
     CONSTRAINT fk_customer_pors_customer
         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
     CONSTRAINT uq_customer_pors_value UNIQUE (customer_id, por_value),

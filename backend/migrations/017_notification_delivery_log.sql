@@ -21,8 +21,7 @@ CREATE TABLE notification_delivery_log
   external_id VARCHAR
   (255) NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON
-  UPDATE CURRENT_TIMESTAMP,
+  updated_at DATETIME NULL,
   FOREIGN KEY
   (notification_id) REFERENCES notifications
   (id) ON

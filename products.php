@@ -83,6 +83,7 @@ require 'includes/layout.php';
           <option value="without">Without images</option>
         </select>
       </div>
+      <div class="col-md-3"><label class="form-label small">Item type</label><select class="form-select form-select-sm" id="productItemTypeFilter"><option value="">All item types</option><option value="normal">Normal goods</option><option value="replica">Copy / replica goods</option><option value="cosmetics">Cosmetics</option><option value="branded">Branded goods</option><option value="food">Food</option><option value="dangerous">Dangerous goods</option><option value="other">Other</option><option value="unclassified">Needs classification</option></select></div>
       <div class="col-md-3 d-flex align-items-end">
         <button class="btn btn-primary btn-sm w-100" type="button" onclick="loadProducts()">Apply Filters</button>
       </div>
@@ -133,6 +134,7 @@ require 'includes/layout.php';
             <th>ID</th>
             <th>Description</th>
             <th>Supplier</th>
+            <th>Item type</th>
             <th>Alert</th>
             <th>CBM</th>
             <th>Weight</th>
@@ -145,6 +147,7 @@ require 'includes/layout.php';
         <tbody></tbody>
       </table>
     </div>
+    <div class="d-flex justify-content-between align-items-center mt-3"><button class="btn btn-outline-secondary btn-sm" id="productsPrevBtn" type="button">Previous</button><span class="small text-muted" id="productsPageSummary">Page 1</span><button class="btn btn-outline-secondary btn-sm" id="productsNextBtn" type="button">Next</button></div>
   </div>
 </div>
 
@@ -169,6 +172,7 @@ require 'includes/layout.php';
               <div id="productDescFields" class="mb-1"></div>
               <button type="button" class="btn btn-outline-secondary btn-sm" id="productDescAddBtn" title="Add another description field" onclick="addProductDescField&&addProductDescField()">+</button>
             </div>
+            <div class="col-12 col-md-6 mb-1"><label class="form-label form-label-sm" for="productItemType">Item type *</label><select class="form-select form-select-sm" id="productItemType" required><option value="">Choose and confirm</option><option value="normal">Normal goods</option><option value="replica">Copy / replica goods</option><option value="cosmetics">Cosmetics</option><option value="branded">Branded goods</option><option value="food">Food</option><option value="dangerous">Dangerous goods</option><option value="other">Other</option></select><div class="form-text">Uncertain products cannot be silently saved as normal.</div></div>
             <div class="col-6 col-md-3 mb-1">
               <label class="form-label form-label-sm">CBM</label>
               <input type="number" step="0.0001" class="form-control form-control-sm" id="productCbm" placeholder="CBM">

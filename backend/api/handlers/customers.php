@@ -28,7 +28,7 @@ function customerTableHas(PDO $pdo, string $table, string $column): bool
 
 function customerUtf8LikeExpr(string $expr): string
 {
-    return "CONVERT($expr USING utf8mb4) COLLATE utf8mb4_unicode_ci";
+    return clmsUtf8SearchExpr($expr);
 }
 
 function normalizeCustomerPriority(array $input): array
@@ -255,12 +255,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     switch ($method) {
         case 'GET':
             if ($id === 'lookup') {
-                $q = trim($_GET['q'] ?? '');
+                $q = clmsNormalizeSearchQuery($_GET['q'] ?? '');
                 if (strlen($q) < 1) {
                     jsonResponse(['data' => []]);
                 }
 
-                $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+                $like = clmsSearchLike($q);
                 $where = '(' . customerUtf8LikeExpr('name') . ' LIKE ?) OR (' . customerUtf8LikeExpr('code') . ' LIKE ?)';
                 $params = [$like, $like];
                 if (customerTableHas($pdo, 'customers', 'default_shipping_code')) {
@@ -272,17 +272,17 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $params[] = $like;
                 }
 
-                $limit = isset($_GET['limit']) ? max(1, min(50, (int) $_GET['limit'])) : 20;
+                $limit = clmsQueryLimit($_GET['limit'] ?? null, 20, 50);
                 $stmt = $pdo->prepare("SELECT " . customerLookupSelectColumns($pdo) . " FROM customers WHERE ($where) ORDER BY name LIMIT " . $limit);
                 $stmt->execute($params);
                 jsonResponse(['data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
             }
             if ($id === 'search') {
-                $q = trim($_GET['q'] ?? '');
+                $q = clmsNormalizeSearchQuery($_GET['q'] ?? '');
                 if (strlen($q) < 1) {
                     jsonResponse(['data' => []]);
                 }
-                $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+                $like = clmsSearchLike($q);
                 $cols = ['id', 'code', 'name'];
                 $hasDefaultShippingCode = customerTableHas($pdo, 'customers', 'default_shipping_code');
                 if ($hasDefaultShippingCode) {
@@ -313,9 +313,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 if ($hasPhone) { $where .= " OR (" . customerUtf8LikeExpr('phone') . " LIKE ?)"; $params[] = $like; }
                 if ($hasEmail) { $where .= " OR (" . customerUtf8LikeExpr('email') . " LIKE ?)"; $params[] = $like; }
-                $limit = isset($_GET['limit']) ? max(1, min(50, (int) $_GET['limit'])) : 20;
-                $stmt = $pdo->prepare("SELECT $sel FROM customers WHERE ($where) ORDER BY name LIMIT " . $limit);
-                $stmt->execute($params);
+                $scope = clmsCustomerVisibilityClause($pdo, 'customers');
+                $limit = clmsQueryLimit($_GET['limit'] ?? null, 20, 50);
+                $stmt = $pdo->prepare("SELECT $sel FROM customers WHERE ($where) AND {$scope['sql']} ORDER BY name LIMIT " . $limit);
+                $stmt->execute(array_merge($params, $scope['params']));
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 foreach ($rows as &$row) {
                     $row['por'] = loadCustomerPorValues($pdo, (int) ($row['id'] ?? 0));
@@ -324,12 +325,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 jsonResponse(['data' => $rows]);
             }
             if ($id === null) {
-                $q = trim($_GET['q'] ?? '');
+                $q = clmsNormalizeSearchQuery($_GET['q'] ?? '');
                 $scope = clmsCustomerVisibilityClause($pdo, 'customers');
                 $sql = "SELECT * FROM customers";
                 $params = [];
                 if (strlen($q) >= 1) {
-                    $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+                    $like = clmsSearchLike($q);
                     $hasPhone = false;
                     $hasEmail = false;
                     $hasDefaultShippingCode = false;
@@ -359,10 +360,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $sql .= " WHERE {$scope['sql']}";
                     $params = $scope['params'];
                 }
-                $sql .= " ORDER BY name";
+                $limit = clmsQueryLimit($_GET['limit'] ?? null, 50, 100);
+                $offset = clmsQueryOffset($_GET['offset'] ?? null);
+                $sql .= " ORDER BY name LIMIT " . ($limit + 1) . " OFFSET " . $offset;
                 $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
                 if ($params) $stmt->execute($params);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                $hasMore = count($rows) > $limit;
+                if ($hasMore) $rows = array_slice($rows, 0, $limit);
                 foreach ($rows as &$r) {
                     $r['contacts'] = $r['contacts'] ? json_decode($r['contacts'], true) : [];
                     $r['addresses'] = $r['addresses'] ? json_decode($r['addresses'], true) : [];
@@ -370,7 +375,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $r['country_shipping'] = loadCountryShipping($pdo, (int) $r['id']);
                     $r['por'] = loadCustomerPorValues($pdo, (int) $r['id']);
                 }
-                jsonResponse(['data' => $rows]);
+                jsonResponse(['data' => $rows, 'meta' => ['limit' => $limit, 'offset' => $offset, 'has_more' => $hasMore]]);
             }
             if ($action === 'lookup') {
                 $row = customerLookupRow($pdo, (int) $id);
@@ -501,8 +506,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             if ($id && $action === 'deposits') {
                 clmsRequireCustomerAccess($pdo, (int) $id);
-                $amount = (float) ($input['amount'] ?? 0);
-                if ($amount <= 0) jsonError('Amount must be positive', 400);
+                $amount = clmsFinancialDecimal($input['amount'] ?? null, 'Amount');
                 $currency = trim($input['currency'] ?? 'RMB');
                 if (!in_array($currency, ['USD', 'RMB'], true)) jsonError('Currency must be USD or RMB', 400);
                 $paymentMethod = $input['payment_method'] ?? null;

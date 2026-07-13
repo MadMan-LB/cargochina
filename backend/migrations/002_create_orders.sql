@@ -13,8 +13,7 @@ IF NOT EXISTS orders
 (50) NOT NULL DEFAULT 'Draft',
     created_by INT UNSIGNED,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON
-UPDATE CURRENT_TIMESTAMP,
+    updated_at DATETIME NULL,
     FOREIGN KEY
 (customer_id) REFERENCES customers
 (id) ON
@@ -45,8 +44,7 @@ IF NOT EXISTS order_items
     product_id INT UNSIGNED NULL,
     quantity DECIMAL
 (12,4) NOT NULL,
-    unit VARCHAR
-(20) NOT NULL,
+    unit ENUM('cartons', 'pieces') NOT NULL,
     declared_cbm DECIMAL
 (10,4) NOT NULL,
     declared_weight DECIMAL
@@ -65,10 +63,6 @@ REFERENCES products
 (id) ON
 DELETE
 SET NULL
-,
-    CONSTRAINT chk_unit CHECK
-(unit IN
-('cartons', 'pieces'))
 );
 
 CREATE TABLE
@@ -78,16 +72,12 @@ IF NOT EXISTS order_attachments
     order_id INT UNSIGNED NOT NULL,
     file_path VARCHAR
 (500) NOT NULL,
-    type VARCHAR
-(50) NOT NULL,
+    type ENUM('invoice', 'packing_list', 'photo') NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY
 (order_id) REFERENCES orders
 (id) ON
-DELETE CASCADE,
-    CONSTRAINT chk_attachment_type CHECK
-(type IN
-('invoice', 'packing_list', 'photo'))
+DELETE CASCADE
 );
 
 CREATE TABLE

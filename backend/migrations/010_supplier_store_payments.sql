@@ -17,8 +17,7 @@ IF NOT EXISTS supplier_payments
 (12,4) NOT NULL,
   currency VARCHAR
 (10) NOT NULL DEFAULT 'USD',
-  payment_type VARCHAR
-(20) NOT NULL DEFAULT 'partial',
+  payment_type ENUM('partial', 'full') NOT NULL DEFAULT 'partial',
   notes TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY
@@ -30,10 +29,6 @@ REFERENCES orders
 (id) ON
 DELETE
 SET NULL
-,
-  CONSTRAINT chk_payment_type CHECK
-(payment_type IN
-('partial', 'full'))
 );
 
 CREATE TABLE
@@ -41,8 +36,7 @@ IF NOT EXISTS supplier_interactions
 (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   supplier_id INT UNSIGNED NOT NULL,
-  interaction_type VARCHAR
-(50) NOT NULL DEFAULT 'visit',
+  interaction_type ENUM('visit', 'quote', 'note') NOT NULL DEFAULT 'visit',
   content JSON,
   created_by INT UNSIGNED NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -55,10 +49,6 @@ REFERENCES users
 (id) ON
 DELETE
 SET NULL
-,
-  CONSTRAINT chk_interaction_type CHECK
-(interaction_type IN
-('visit', 'quote', 'note'))
 );
 
 INSERT IGNORE

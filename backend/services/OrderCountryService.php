@@ -56,9 +56,11 @@ final class OrderCountryService
     {
         $fallbackDefault = self::normalizeShippingCode($fallbackDefault);
 
-        $stmt = $pdo->prepare("SELECT default_shipping_code FROM customers WHERE id = ? LIMIT 1");
+        $stmt = $pdo->prepare("SELECT default_shipping_code, code FROM customers WHERE id = ? LIMIT 1");
         $stmt->execute([$customerId]);
-        $customerDefault = self::normalizeShippingCode((string) ($stmt->fetchColumn() ?: ''));
+        $customer = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $customerDefault = self::normalizeShippingCode((string) ($customer['default_shipping_code'] ?? ''));
+        $legacyCustomerCode = self::normalizeShippingCode((string) ($customer['code'] ?? ''));
 
         foreach (self::fetchCustomerCountries($pdo, $customerId) as $countryRow) {
             if ((int) ($countryRow['country_id'] ?? 0) === (int) ($destinationCountryId ?? 0)) {
@@ -69,7 +71,10 @@ final class OrderCountryService
             }
         }
 
-        return $customerDefault ?: $fallbackDefault;
+        // New customer records require a shipping code. The stable customer code
+        // is a safe legacy fallback so historical rows can still receive a
+        // non-blank number without being renumbered.
+        return $customerDefault ?: $fallbackDefault ?: $legacyCustomerCode;
     }
 
     public static function resolveContainerDestinationCountryId(PDO $pdo, array $container): ?int

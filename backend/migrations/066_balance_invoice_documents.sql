@@ -1,7 +1,6 @@
 -- Migration 066: Allow invoice ledger transactions for printable balance documents.
--- Rollback: ALTER TABLE balance_transactions DROP CONSTRAINT chk_balance_tx_type;
---   ALTER TABLE balance_transactions ADD CONSTRAINT chk_balance_tx_type
---   CHECK (transaction_type IN ('payment_received', 'payment_sent', 'deposit', 'adjustment', 'refund', 'other'));
+-- Rollback: ALTER TABLE balance_transactions MODIFY COLUMN transaction_type
+--   ENUM('payment_received', 'payment_sent', 'deposit', 'adjustment', 'refund', 'other') NOT NULL;
 
 SET @m066_has_balance_transactions := (
   SELECT COUNT(*)
@@ -21,7 +20,11 @@ SET @m066_has_type_check := (
 
 SET @m066_sql := IF(
   @m066_has_balance_transactions > 0 AND @m066_has_type_check > 0,
-  'ALTER TABLE balance_transactions DROP CONSTRAINT chk_balance_tx_type',
+  IF(
+    LOCATE('MariaDB', VERSION()) > 0,
+    'ALTER TABLE balance_transactions DROP CONSTRAINT chk_balance_tx_type',
+    'ALTER TABLE balance_transactions DROP CHECK chk_balance_tx_type'
+  ),
   'SELECT 1'
 );
 PREPARE m066_stmt FROM @m066_sql;
@@ -30,7 +33,7 @@ DEALLOCATE PREPARE m066_stmt;
 
 SET @m066_sql := IF(
   @m066_has_balance_transactions > 0,
-  'ALTER TABLE balance_transactions ADD CONSTRAINT chk_balance_tx_type CHECK (transaction_type IN (''payment_received'', ''payment_sent'', ''deposit'', ''invoice'', ''adjustment'', ''refund'', ''other''))',
+  'ALTER TABLE balance_transactions MODIFY COLUMN transaction_type ENUM(''payment_received'', ''payment_sent'', ''deposit'', ''invoice'', ''adjustment'', ''refund'', ''other'') NOT NULL',
   'SELECT 1'
 );
 PREPARE m066_stmt FROM @m066_sql;

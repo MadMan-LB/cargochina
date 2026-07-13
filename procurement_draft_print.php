@@ -159,7 +159,7 @@ function printDraftEntryRows(array $sections): string
                       <td><?= htmlspecialchars($content['what_brand'] ?: '—') ?></td>
                       <td><?= htmlspecialchars(printDraftCopyNormalGoodsDisplay($content['copy_normal_goods'] ?? null)) ?></td>
                       <td><?= htmlspecialchars($content['code'] ?: '—') ?></td>
-                      <td><?= htmlspecialchars($content['item_no'] ? ('↳ ' . $content['item_no']) : '↳') ?></td>
+                      <td><?= htmlspecialchars((string) ($content['item_no'] ?? '')) ?></td>
                       <td><?= htmlspecialchars($descLabel ?: '—') ?></td>
                       <td><?= htmlspecialchars($content['hs_code'] ?? '—') ?></td>
                       <td><?= htmlspecialchars(format_display_number($content['quantity_per_carton'] ?? null, 4) ?: '—') ?></td>

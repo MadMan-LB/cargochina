@@ -27,6 +27,11 @@ if (!function_exists('clmsLoadEnvFile')) {
                 continue;
             }
             $value = trim($value, " \t\n\r\0\x0B\"'");
+            $processValue = getenv($key);
+            if ($processValue !== false) {
+                $_ENV[$key] = $processValue;
+                continue;
+            }
             if (!array_key_exists($key, $_ENV)) {
                 $_ENV[$key] = $value;
                 putenv($key . '=' . $value);

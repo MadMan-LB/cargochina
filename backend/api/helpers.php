@@ -1,5 +1,7 @@
 <?php
 
+require_once dirname(__DIR__) . '/services/DecimalMath.php';
+
 /**
  * API response helpers
  */
@@ -93,6 +95,61 @@ function jsonError(string $message, int $status = 400, array $errors = [], ?stri
         );
     }
     jsonResponse($body, $status);
+}
+
+/** Normalize human-entered search text while preserving English/Chinese content. */
+function clmsNormalizeSearchQuery($value, int $maxLength = 200): string
+{
+    $query = preg_replace('/\s+/u', ' ', trim((string) $value)) ?? '';
+    return mb_substr($query, 0, max(1, $maxLength));
+}
+
+/** Build a contains pattern where spaces may match intervening words. */
+function clmsSearchLike(string $query): string
+{
+    $query = clmsNormalizeSearchQuery($query);
+    return '%' . preg_replace('/\s+/u', '%', $query) . '%';
+}
+
+/**
+ * Force legacy utf8 and utf8mb4 columns to one safe comparison character set.
+ * Applying an utf8mb4 collation directly to an utf8 column raises MySQL 1253.
+ */
+function clmsUtf8SearchExpr(string $sqlExpression): string
+{
+    return "CONVERT($sqlExpression USING utf8mb4) COLLATE utf8mb4_unicode_ci";
+}
+
+function clmsQueryLimit($value, int $default = 50, int $maximum = 200): int
+{
+    if ($value === null || $value === '') {
+        return max(1, min($maximum, $default));
+    }
+    return max(1, min($maximum, (int) $value));
+}
+
+function clmsQueryOffset($value, int $maximum = 10000000): int
+{
+    return max(0, min($maximum, (int) ($value ?? 0)));
+}
+
+function clmsQuerySort($value, array $allowed, string $default): string
+{
+    $candidate = (string) ($value ?? '');
+    return in_array($candidate, $allowed, true) ? $candidate : $default;
+}
+
+function clmsQueryDirection($value, string $default = 'ASC'): string
+{
+    $direction = strtoupper((string) ($value ?? $default));
+    return $direction === 'DESC' ? 'DESC' : 'ASC';
+}
+
+function clmsNormalizeItemTypeFilter($value): ?string
+{
+    $code = strtolower(trim((string) $value));
+    $allowed = ['normal', 'replica', 'cosmetics', 'branded', 'food', 'dangerous', 'other', 'unclassified'];
+    return in_array($code, $allowed, true) ? $code : null;
 }
 
 function format_display_number($value, int $maxDecimals, int $minDecimals = 0): string
@@ -424,4 +481,17 @@ function logClms(string $event, array $context = []): void
     }
     $line = date('Y-m-d H:i:s') . ' ' . json_encode(array_merge(['event' => $event], $context), JSON_UNESCAPED_UNICODE) . "\n";
     @error_log($line, 3, $logDir . '/clms.log');
+}
+function clmsFinancialDecimal($value, string $label = 'Amount', bool $allowZero = false, int $scale = 4): string
+{
+    try {
+        $normalized = DecimalMath::round($value, $scale);
+    } catch (Throwable $e) {
+        jsonError($label . ' must be a valid decimal value', 400);
+    }
+    $comparison = DecimalMath::compare($normalized, '0', $scale);
+    if ($comparison < 0 || (!$allowZero && $comparison === 0)) {
+        jsonError($label . ($allowZero ? ' cannot be negative' : ' must be positive'), 400);
+    }
+    return $normalized;
 }

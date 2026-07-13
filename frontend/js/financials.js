@@ -13,6 +13,8 @@
     let finDepOrderAc = null;
     let finPayOrderAc = null;
     let balancesLoadedOnce = false;
+    let profitOffset = 0;
+    const profitLimit = 50;
     const PROFIT_DEFAULT_EXCLUDED_STATUSES = [
         "Draft",
         "CustomerDeclined",
@@ -229,22 +231,19 @@
             return '<div class="text-muted small">No summary available.</div>';
         }
         const items = [
-            { label: "Total Sell", value: formatNum(summary.total_sell) },
-            { label: "Total Buy", value: formatNum(summary.total_buy) },
+            { label: financialsT("Total Customer Charges"), value: formatNum(summary.total_customer_charges) },
+            { label: financialsT("Supplier Purchase Cost"), value: formatNum(summary.total_buy) },
             {
-                label: "Gross Profit",
+                label: financialsT("Gross Result"),
                 value: formatNum(summary.gross_profit),
                 className:
                     parseFloat(summary.gross_profit || 0) >= 0
                         ? "positive"
                         : "negative",
             },
+            { label: financialsT("Shipment Expenses"), value: formatNum(summary.shipment_operational_expenses) },
             {
-                label: "Commission",
-                value: formatNum(summary.total_commission),
-            },
-            {
-                label: "Net Profit",
+                label: financialsT("Net Shipment Result"),
                 value: formatNum(summary.net_profit),
                 className:
                     parseFloat(summary.net_profit || 0) >= 0
@@ -267,7 +266,7 @@
         `;
     }
 
-    function updateProfitOverview(rows, summary) {
+    function updateProfitOverview(rows, summary, meta = null) {
         const df = document.getElementById("profitDateFrom").value;
         const dt = document.getElementById("profitDateTo").value;
         const customerText = document
@@ -276,6 +275,7 @@
         const supplierText = document
             .getElementById("profitSupplierSearch")
             .value.trim();
+        const itemTypeText = document.getElementById("profitItemType")?.selectedOptions?.[0]?.textContent?.trim() || "";
         const statuses = getSelectedProfitStatuses();
         const filters = [];
         if (df || dt) {
@@ -300,6 +300,9 @@
                 }),
             );
         }
+        if (document.getElementById("profitItemType")?.value) {
+            filters.push(financialsT("Item type: {type}", { type: itemTypeText }));
+        }
         if (statuses.length) {
             filters.push(
                 getProfitStatusMode() === "exclude"
@@ -312,45 +315,40 @@
             );
         }
 
-        setText("profitOrderCount", String(rows.length));
+        const totalCount = Number(meta?.total_count ?? rows.length);
+        setText("profitOrderCount", String(totalCount));
         setText(
             "profitOrderDetail",
-            rows.length === 1
+            totalCount === 1
                 ? financialsT("{count} order matches the current filters.", {
-                      count: rows.length,
+                      count: totalCount,
                   })
                 : financialsT("{count} orders match the current filters.", {
-                      count: rows.length,
+                      count: totalCount,
                   }),
         );
         setText("profitGrossCount", formatNum(summary?.gross_profit || 0));
         setText(
             "profitGrossDetail",
-            financialsT("Sell {sell} minus buy {buy}.", {
-                sell: formatNum(summary?.total_sell || 0),
+            financialsT("Customer charges {sell} minus supplier purchase cost {buy}.", {
+                sell: formatNum(summary?.total_customer_charges || 0),
                 buy: formatNum(summary?.total_buy || 0),
             }),
         );
         setText("profitNetCount", formatNum(summary?.net_profit || 0));
         setText(
             "profitNetDetail",
-            financialsT("After {commission} commission.", {
-                commission: formatNum(summary?.total_commission || 0),
+            financialsT("After {commission} shipment expenses.", {
+                commission: formatNum(summary?.shipment_operational_expenses || 0),
             }),
         );
         setText(
             "profitCommissionCount",
-            formatNum(summary?.total_commission || 0),
+            formatNum(summary?.shipment_operational_expenses || 0),
         );
         setText(
             "profitCommissionDetail",
-            summary?.total_commission
-                ? financialsT(
-                      "Commission is being deducted from the visible margin.",
-                  )
-                : financialsT(
-                      "No commission impact in the current result set.",
-                  ),
+            financialsT("Shipment expenses are counted once and are never allocated to items."),
         );
         setText(
             "profitFilterSummary",
@@ -385,17 +383,22 @@
         );
     }
 
-    window.loadProfit = async function () {
+    window.loadProfit = async function (resetOffset = true) {
+        if (resetOffset) profitOffset = 0;
         const params = new URLSearchParams();
         const df = document.getElementById("profitDateFrom").value;
         const dt = document.getElementById("profitDateTo").value;
         const cid = document.getElementById("profitCustomerId").value;
         const sid = document.getElementById("profitSupplierId").value;
+        const itemType = document.getElementById("profitItemType")?.value || "";
         const statuses = getSelectedProfitStatuses();
         if (df) params.set("date_from", df);
         if (dt) params.set("date_to", dt);
         if (cid) params.set("customer_id", cid);
         if (sid) params.set("supplier_id", sid);
+        if (itemType) params.set("item_type", itemType);
+        params.set("limit", String(profitLimit));
+        params.set("offset", String(profitOffset));
         if (statuses.length) {
             statuses.forEach((status) => params.append("status[]", status));
             params.set("status_mode", getProfitStatusMode());
@@ -407,23 +410,26 @@
                 `<div class="text-muted small">${escapeHtml(financialsT("Refreshing the profit summary…"))}</div>`,
             );
             const d = await api("/financials/profit?" + params.toString());
-            renderProfit(d.data, d.summary);
+            renderProfit(d.data, d.summary, d.meta);
         } catch (e) {
             alert(e.message || financialsT("Failed to load profit data"));
             renderProfit([], null);
         }
     };
 
-    function renderProfit(rows, summary) {
+    function renderProfit(rows, summary, meta = null) {
+        const prev=document.getElementById("profitPrevBtn"),next=document.getElementById("profitNextBtn");
+        if(prev)prev.disabled=profitOffset<=0;if(next)next.disabled=!meta?.has_more;
+        setText("profitPageSummary", financialsT("Showing {from}-{to} of {total}",{from:(meta?.total_count??0)?profitOffset+1:0,to:profitOffset+(rows?.length||0),total:meta?.total_count??rows?.length??0}));
         const tbody = document.getElementById("profitTableBody");
         if (!rows || rows.length === 0) {
             tbody.innerHTML =
-                `<tr><td colspan="8" class="text-center text-muted py-4">${escapeHtml(financialsT("No orders in range."))}</td></tr>`;
+                `<tr><td colspan="10" class="text-center text-muted py-4">${escapeHtml(financialsT("No orders in range."))}</td></tr>`;
             setHtml(
                 "profitSummary",
                 `<div class="text-muted small">${escapeHtml(financialsT("No profit data for the selected filters."))}</div>`,
             );
-            updateProfitOverview([], summary);
+            updateProfitOverview([], summary, meta);
             return;
         }
         tbody.innerHTML = rows
@@ -435,15 +441,17 @@
                 <td>${escapeHtml(getFinancialSupplierDisplay(r))}</td>
                 <td>${getStatusBadge(r.status || "")}</td>
                 <td>${formatNum(r.order_total)}</td>
+                <td>${formatNum(r.shipment_customer_charges)}</td>
                 <td>${formatNum(r.buy_total)}</td>
-                <td>${formatNum(r.commission)}</td>
-                <td class="${r.margin >= 0 ? "text-success" : "text-danger"}">${formatNum(r.margin)}</td>
+                <td>${formatNum(r.shipment_operational_expenses)}</td>
+                <td class="${Number(r.gross_result) >= 0 ? "text-success" : "text-danger"}">${formatNum(r.gross_result)}</td>
+                <td class="${Number(r.net_shipment_result) >= 0 ? "text-success" : "text-danger"}">${formatNum(r.net_shipment_result)}</td>
             </tr>
         `,
             )
             .join("");
         setHtml("profitSummary", buildProfitSummary(summary));
-        updateProfitOverview(rows, summary);
+        updateProfitOverview(rows, summary, meta);
     }
 
     window.loadBalances = async function () {
@@ -480,6 +488,7 @@
         document.getElementById("profitDateTo").value = "";
         document.getElementById("profitCustomerId").value = "";
         document.getElementById("profitSupplierId").value = "";
+        const itemType=document.getElementById("profitItemType"); if(itemType)itemType.value="";
         document
             .querySelectorAll(".profit-status-filter")
             .forEach((el) => (el.checked = false));
@@ -1192,6 +1201,9 @@
         attachSubmitOnEnter("profitDateTo", loadProfit);
         attachSubmitOnEnter("profitCustomerSearch", loadProfit);
         attachSubmitOnEnter("profitSupplierSearch", loadProfit);
+        document.getElementById("profitItemType")?.addEventListener("change",loadProfit);
+        document.getElementById("profitPrevBtn")?.addEventListener("click",()=>{profitOffset=Math.max(0,profitOffset-profitLimit);loadProfit(false);});
+        document.getElementById("profitNextBtn")?.addEventListener("click",()=>{profitOffset+=profitLimit;loadProfit(false);});
         attachSubmitOnEnter("balanceCustomerSearch", loadBalances);
         attachSubmitOnEnter("balanceSupplierSearch", loadBalances);
         document.querySelectorAll(".profit-status-filter").forEach((el) => {

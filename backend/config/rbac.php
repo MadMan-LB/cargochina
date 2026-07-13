@@ -12,10 +12,10 @@ return [
     'public' => ['auth', 'confirm'],
     'orders' => [
         'read' => $operationalRoles,
-        'write' => $operationalRoles,
-        'approve' => $operationalRoles,
-        'receive' => $operationalRoles,
-        'confirm' => $operationalRoles,
+        'write' => ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'],
+        'approve' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'],
+        'receive' => ['WarehouseStaff', 'SuperAdmin'],
+        'confirm' => ['ChinaAdmin', 'LebanonAdmin', 'WarehouseStaff', 'SuperAdmin'],
     ],
     'customers' => [
         'read' => $operationalRoles,

@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS customer_visibility_exceptions
   created_by INT UNSIGNED NULL,
   updated_by INT UNSIGNED NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  updated_at DATETIME NULL,
   CONSTRAINT fk_customer_visibility_user
     FOREIGN KEY (user_id) REFERENCES users(id)
     ON DELETE CASCADE,

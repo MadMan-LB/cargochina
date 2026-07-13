@@ -31,7 +31,9 @@ PREPARE stmt FROM @s; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 6. Containers: Destination
 SET @c = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema=DATABASE() AND table_name='containers' AND column_name='destination_country');
-SET @s = IF(@c=0, 'ALTER TABLE containers ADD COLUMN destination_country VARCHAR(100) NULL AFTER notes, ADD COLUMN destination VARCHAR(255) NULL AFTER destination_country', 'DO 0');
+-- Older clean schemas do not have containers.notes. Avoid an AFTER dependency so
+-- the full migration chain remains runnable from an empty database.
+SET @s = IF(@c=0, 'ALTER TABLE containers ADD COLUMN destination_country VARCHAR(100) NULL, ADD COLUMN destination VARCHAR(255) NULL AFTER destination_country', 'DO 0');
 PREPARE stmt FROM @s; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 7. Customer Confirmations: Decline
@@ -51,10 +53,9 @@ CREATE TABLE IF NOT EXISTS expense_categories (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     code VARCHAR(50) NOT NULL UNIQUE,
     name VARCHAR(255) NOT NULL,
-    category_type VARCHAR(30) NOT NULL DEFAULT 'operational',
+    category_type ENUM('operational','salary','fixed','variable','order','container','customs','warehouse','admin') NOT NULL DEFAULT 'operational',
     is_active TINYINT(1) NOT NULL DEFAULT 1,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT chk_exp_cat_type CHECK (category_type IN ('operational','salary','fixed','variable','order','container','customs','warehouse','admin'))
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 10. Expenses
@@ -100,15 +101,14 @@ CREATE TABLE IF NOT EXISTS procurement_drafts (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     supplier_id INT UNSIGNED NULL,
-    status VARCHAR(30) NOT NULL DEFAULT 'draft',
+    status ENUM('draft','pending_review','sent_to_supplier','converted','cancelled') NOT NULL DEFAULT 'draft',
     created_by INT UNSIGNED NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_at DATETIME NULL,
     converted_order_id INT UNSIGNED NULL,
     FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL,
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
-    FOREIGN KEY (converted_order_id) REFERENCES orders(id) ON DELETE SET NULL,
-    CONSTRAINT chk_proc_status CHECK (status IN ('draft','pending_review','sent_to_supplier','converted','cancelled'))
+    FOREIGN KEY (converted_order_id) REFERENCES orders(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS procurement_draft_items (
@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS customer_portal_tokens (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     customer_id INT UNSIGNED NOT NULL,
     token_hash VARCHAR(64) NOT NULL,
-    expires_at TIMESTAMP NOT NULL,
+    expires_at DATETIME NOT NULL,
     used_at TIMESTAMP NULL,
     created_by INT UNSIGNED NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

@@ -179,7 +179,6 @@ function containerCopyNormalGoodsDisplay($value): string
     $raw = trim((string) ($value ?? ''));
     return match (strtolower($raw)) {
         'copy' => clmsT('Copy Goods'),
-        'dangerous' => clmsT('Dangerous Goods'),
         'normal' => clmsT('Normal Goods'),
         default => $raw,
     };
@@ -195,7 +194,7 @@ function outputContainerOrdersCsv(array $container, array $ordersWithItems): voi
     $out = fopen('php://output', 'w');
     fputcsv($out, [clmsT('Container'), (string) ($container['code'] ?? '')]);
     fputcsv($out, ['']);
-    fputcsv($out, array_map('clmsT', ['What Brand', 'Good Type', 'Code', 'Order ID', 'Customer', 'Supplier', 'Item No', 'Shipping Code', 'Description', 'Cartons', 'Qty/Carton', 'Total Qty', 'Unit Price', 'Total Amount', 'Declared CBM', 'Declared Weight', 'Express Number', 'Size', 'Photo Count']));
+    fputcsv($out, array_map('clmsT', ['What Brand', 'Copy / Normal Goods', 'Code', 'Order ID', 'Customer', 'Supplier', 'Item No', 'Shipping Code', 'Description', 'Cartons', 'Qty/Carton', 'Total Qty', 'Unit Price', 'Total Amount', 'Declared CBM', 'Declared Weight', 'Express Number', 'Size', 'Photo Count']));
     foreach ($ordersWithItems as $data) {
         $order = $data['order'] ?? [];
         foreach (($data['items'] ?? []) as $item) {
@@ -482,10 +481,18 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         : " AND c.status IN ($placeholders)";
                     $params = array_merge($params, $statusFilter);
                 }
-                $sql .= " ORDER BY c.id DESC";
+                $fillFilter=strtolower(trim((string)($_GET['fill']??'')));
+                if($fillFilter==='empty')$sql.=' AND COALESCE(cu.used_cbm,0)=0';
+                elseif($fillFilter==='partial')$sql.=' AND COALESCE(cu.used_cbm,0)>0 AND (COALESCE(cu.used_cbm,0)/NULLIF(c.max_cbm,0))*100<85';
+                elseif($fillFilter==='almost')$sql.=' AND (COALESCE(cu.used_cbm,0)/NULLIF(c.max_cbm,0))*100>=85 AND (COALESCE(cu.used_cbm,0)/NULLIF(c.max_cbm,0))*100<100';
+                elseif($fillFilter==='full')$sql.=' AND (COALESCE(cu.used_cbm,0)/NULLIF(c.max_cbm,0))*100>=100';
+                elseif($fillFilter==='launching_soon')$sql.=' AND c.expected_ship_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(),INTERVAL 7 DAY)';
+                $limit=clmsQueryLimit($_GET['limit']??null,50,200);$offset=clmsQueryOffset($_GET['offset']??null);
+                $sql .= " ORDER BY c.id DESC LIMIT ".($limit+1)." OFFSET ".$offset;
                 $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
                 if ($params) $stmt->execute($params);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                $hasMore=count($rows)>$limit;if($hasMore)$rows=array_slice($rows,0,$limit);
                 foreach ($rows as &$r) {
                     $r['used_cbm']    = (float) $r['used_cbm'];
                     $r['used_weight'] = (float) $r['used_weight'];
@@ -495,7 +502,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $r = enrichContainerDestination($pdo, $r);
                 }
                 unset($r);
-                jsonResponse(['data' => $rows]);
+                jsonResponse(['data' => $rows,'meta'=>['limit'=>$limit,'offset'=>$offset,'has_more'=>$hasMore]]);
             }
 
             $stmt = $pdo->prepare("SELECT * FROM containers WHERE id = ?");

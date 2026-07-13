@@ -4,14 +4,14 @@
 
 CREATE TABLE IF NOT EXISTS balance_transactions (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  party_type VARCHAR(20) NOT NULL,
+  party_type ENUM('customer', 'supplier') NOT NULL,
   party_id INT UNSIGNED NOT NULL,
   order_id INT UNSIGNED NULL,
   order_reference VARCHAR(100) NULL,
-  transaction_type VARCHAR(40) NOT NULL,
-  direction VARCHAR(30) NOT NULL DEFAULT 'reduce_balance',
+  transaction_type ENUM('payment_received', 'payment_sent', 'deposit', 'invoice', 'adjustment', 'refund', 'other') NOT NULL,
+  direction ENUM('increase_balance', 'reduce_balance') NOT NULL DEFAULT 'reduce_balance',
   amount DECIMAL(12,4) NOT NULL,
-  currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+  currency ENUM('USD', 'RMB') NOT NULL DEFAULT 'USD',
   payment_method VARCHAR(50) NULL,
   payment_account_label VARCHAR(150) NULL,
   payment_account_value VARCHAR(255) NULL,
@@ -92,10 +92,24 @@ SET @m065_type_check_count := (
     AND CONSTRAINT_NAME = 'chk_balance_tx_type'
     AND CONSTRAINT_TYPE = 'CHECK'
 );
-SET @m065_sql := IF(@m065_type_check_count > 0, 'ALTER TABLE balance_transactions DROP CONSTRAINT chk_balance_tx_type', 'SELECT 1');
+SET @m065_sql := IF(
+  @m065_type_check_count > 0,
+  IF(
+    LOCATE('MariaDB', VERSION()) > 0,
+    'ALTER TABLE balance_transactions DROP CONSTRAINT chk_balance_tx_type',
+    'ALTER TABLE balance_transactions DROP CHECK chk_balance_tx_type'
+  ),
+  'SELECT 1'
+);
 PREPARE m065_stmt FROM @m065_sql;
 EXECUTE m065_stmt;
 DEALLOCATE PREPARE m065_stmt;
+
+ALTER TABLE balance_transactions
+  MODIFY COLUMN party_type ENUM('customer', 'supplier') NOT NULL,
+  MODIFY COLUMN transaction_type ENUM('payment_received', 'payment_sent', 'deposit', 'invoice', 'adjustment', 'refund', 'other') NOT NULL,
+  MODIFY COLUMN direction ENUM('increase_balance', 'reduce_balance') NOT NULL DEFAULT 'reduce_balance',
+  MODIFY COLUMN currency ENUM('USD', 'RMB') NOT NULL DEFAULT 'USD';
 
 SET @m065_sidebar_defaults := JSON_OBJECT(
   'ChinaAdmin', JSON_ARRAY('dashboard', 'orders', 'pipeline', 'consolidation', 'containers', 'assign_container', 'expenses', 'financials', 'balances', 'hs_code_tax', 'calendar', 'warehouse_stock', 'procurement_drafts', 'downloads', 'suppliers', 'customers', 'products', 'notifications', 'notification_preferences'),

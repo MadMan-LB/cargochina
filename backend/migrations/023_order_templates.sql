@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS order_template_items (
     cartons INT UNSIGNED NULL,
     qty_per_carton DECIMAL(12,4) NULL,
     quantity DECIMAL(12,4) NULL,
-    unit VARCHAR(20) NOT NULL DEFAULT 'cartons',
+    unit ENUM('cartons', 'pieces') NOT NULL DEFAULT 'cartons',
     declared_cbm DECIMAL(10,4) NULL,
     declared_weight DECIMAL(10,4) NULL,
     item_length DECIMAL(10,4) NULL,
@@ -32,6 +32,5 @@ CREATE TABLE IF NOT EXISTS order_template_items (
     total_amount DECIMAL(12,4) NULL,
     notes TEXT NULL,
     FOREIGN KEY (template_id) REFERENCES order_templates(id) ON DELETE CASCADE,
-    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL,
-    CONSTRAINT chk_template_item_unit CHECK (unit IN ('cartons', 'pieces'))
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
 );

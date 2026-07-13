@@ -12,6 +12,12 @@ let declaredCbm = 0,
     declaredWeight = 0;
 let pendingUploads = 0;
 let receiveCurrentOrderCurrency = "USD";
+let receivingOperationId = null;
+
+function nextReceivingOperationId() {
+    if (!receivingOperationId) receivingOperationId = globalThis.crypto?.randomUUID?.() || `receive-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    return receivingOperationId;
+}
 
 function receiveT(text, replacements = null) {
     return typeof window.t === "function" ? window.t(text, replacements) : text;
@@ -792,6 +798,7 @@ document.getElementById("submitReceiveBtn").onclick = async () => {
         return;
     }
     const payload = {
+        idempotency_key: nextReceivingOperationId(),
         actual_cartons: actualCartons,
         actual_cbm: actualCbm,
         actual_weight: actualWeight,
@@ -809,6 +816,7 @@ document.getElementById("submitReceiveBtn").onclick = async () => {
             "/orders/" + ORDER_ID + "/receive",
             payload,
         );
+        receivingOperationId = null;
         showToast(
             res.data.variance_detected
                 ? receiveT("Received — auto-confirmed, customer follow-up sent")

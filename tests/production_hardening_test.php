@@ -9,6 +9,7 @@ $root = dirname(__DIR__);
 require_once $root . '/backend/config/database.php';
 require_once $root . '/backend/config/config.php';
 require_once $root . '/backend/services/NotificationService.php';
+require_once $root . '/backend/services/AuthenticationService.php';
 
 $pdo = getDb();
 $passed = 0;
@@ -105,6 +106,52 @@ test('WhatsApp Twilio provider builds form payload', function () use ($pdo) {
     parse_str($req['body'], $params);
     if (($params['To'] ?? '') !== 'whatsapp:+9611234567' || ($params['From'] ?? '') !== 'whatsapp:+14155238886') {
         throw new Exception('Twilio payload shape wrong');
+    }
+});
+
+test('Authentication rotates through the shared service and blocks seeded password in production', function () use ($pdo) {
+    $email='seed-guard-'.bin2hex(random_bytes(4)).'@example.invalid';
+    $roleId=(int)$pdo->query("SELECT id FROM roles WHERE code='SuperAdmin' LIMIT 1")->fetchColumn();
+    if($roleId<=0)throw new Exception('SuperAdmin role is missing');
+    $pdo->prepare('INSERT INTO users(email,password_hash,full_name,is_active) VALUES (?,?,?,1)')->execute([$email,password_hash('password',PASSWORD_DEFAULT),'Seed Guard Fixture']);
+    $userId=(int)$pdo->lastInsertId();
+    $pdo->prepare('INSERT INTO user_roles(user_id,role_id) VALUES (?,?)')->execute([$userId,$roleId]);
+    try {
+        $service=new AuthenticationService($pdo);
+        $user=$service->login($email,'password','audit-auth-success','testing');
+        if (($user['user_id'] ?? 0) !== $userId || !in_array('SuperAdmin',$user['roles'] ?? [],true)) throw new Exception('Shared authentication did not return the isolated SuperAdmin fixture in testing');
+        try {
+            $service->login($email,'password','audit-auth-production','production');
+            throw new Exception('Seeded password was accepted in production mode');
+        } catch(AuthenticationException $e) {
+            if ($e->httpStatus !== 403) throw $e;
+        }
+    } finally {
+        foreach(['audit-auth-success','audit-auth-production'] as $ip){
+            $key=hash('sha256',mb_strtolower($email,'UTF-8').'|'.$ip);
+            $pdo->prepare('DELETE FROM auth_login_attempts WHERE identity_hash=?')->execute([$key]);
+        }
+        $pdo->prepare('DELETE FROM user_roles WHERE user_id=?')->execute([$userId]);
+        $pdo->prepare('DELETE FROM users WHERE id=?')->execute([$userId]);
+    }
+});
+
+test('Authentication throttles repeated failures without storing email or IP', function () use ($pdo) {
+    $email='missing-audit-user@example.invalid'; $ip='audit-auth-throttle';
+    $key=hash('sha256',mb_strtolower($email,'UTF-8').'|'.$ip);
+    $pdo->prepare('DELETE FROM auth_login_attempts WHERE identity_hash=?')->execute([$key]);
+    $service=new AuthenticationService($pdo);
+    try {
+        for($i=0;$i<5;$i++) {
+            try { $service->login($email,'wrong',$ip,'testing'); }
+            catch(AuthenticationException $e) { if($e->httpStatus!==401) throw $e; }
+        }
+        try { $service->login($email,'wrong',$ip,'testing'); throw new Exception('Sixth failed login was not throttled'); }
+        catch(AuthenticationException $e) { if($e->httpStatus!==429) throw $e; }
+        $row=$pdo->prepare('SELECT identity_hash,attempt_count,blocked_until FROM auth_login_attempts WHERE identity_hash=?'); $row->execute([$key]); $stored=$row->fetch(PDO::FETCH_ASSOC);
+        if(!$stored || (int)$stored['attempt_count']!==5 || empty($stored['blocked_until'])) throw new Exception('Throttle state was not persisted correctly');
+    } finally {
+        $pdo->prepare('DELETE FROM auth_login_attempts WHERE identity_hash=?')->execute([$key]);
     }
 });
 

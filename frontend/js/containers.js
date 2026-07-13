@@ -11,6 +11,8 @@ const CONTAINER_STATUS = {
 
 let _allContainers = [];
 let _searchTimer = null;
+let containersOffset = 0;
+const containersLimit = 50;
 const fmtContainerAmount = (value) =>
     typeof window.formatDisplayAmount === "function"
         ? window.formatDisplayAmount(value)
@@ -171,7 +173,8 @@ window.clearContainerStatusFilter = function () {
     loadContainers();
 };
 
-async function loadContainers() {
+async function loadContainers(resetOffset = true) {
+    if(resetOffset)containersOffset=0;
     const tbody = document.getElementById("containersTbody");
     const label = document.getElementById("containerCountLabel");
     if (!tbody) return;
@@ -187,6 +190,8 @@ async function loadContainers() {
     if (q) params.set("q", q);
     statuses.forEach((status) => params.append("status[]", status));
     if (statuses.length) params.set("status_mode", statusMode);
+    const fill=document.getElementById("containerFillFilter")?.value||"";if(fill)params.set("fill",fill);
+    params.set("limit",String(containersLimit));params.set("offset",String(containersOffset));
     const qs = params.toString();
     if (qs) url += "?" + qs;
 
@@ -200,6 +205,7 @@ async function loadContainers() {
             );
         const data = await res.json();
         _allContainers = data.data || [];
+        const prev=document.getElementById("containersPrevBtn"),next=document.getElementById("containersNextBtn");if(prev)prev.disabled=containersOffset<=0;if(next)next.disabled=!data.meta?.has_more;const summary=document.getElementById("containersPageSummary");if(summary)summary.textContent=`${typeof t==="function"?t("Page"):"Page"} ${Math.floor(containersOffset/containersLimit)+1}`;
         applyClientFilters();
     } catch (e) {
         updateContainerOverview([]);
@@ -209,6 +215,10 @@ async function loadContainers() {
 
 document.addEventListener("DOMContentLoaded", () => {
     const urlParams = new URLSearchParams(window.location.search);
+    const exactContainerId = urlParams.get("container_id");
+    if (exactContainerId && /^\d+$/.test(exactContainerId)) {
+        viewContainer(parseInt(exactContainerId, 10), `#${exactContainerId}`);
+    }
     const statusFromUrl = urlParams.getAll("status[]");
     const legacyStatus = urlParams.get("status");
     const statusMode = urlParams.get("status_mode") || "include";
@@ -236,6 +246,8 @@ document.addEventListener("DOMContentLoaded", () => {
             onSelect: () => loadContainers(),
         });
     }
+    document.getElementById("containersPrevBtn")?.addEventListener("click",()=>{containersOffset=Math.max(0,containersOffset-containersLimit);loadContainers(false);});
+    document.getElementById("containersNextBtn")?.addEventListener("click",()=>{containersOffset+=containersLimit;loadContainers(false);});
 });
 
 function applyClientFilters() {

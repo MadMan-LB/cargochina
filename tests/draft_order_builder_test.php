@@ -8,6 +8,7 @@
 $root = dirname(__DIR__);
 require_once $root . '/backend/config/database.php';
 require_once $root . '/backend/services/ReceivingExcelImportService.php';
+require_once $root . '/backend/services/DraftOrderCostService.php';
 require_once $root . '/vendor/autoload.php';
 
 try {
@@ -80,6 +81,9 @@ function runHandlerScriptWithUploadedFile(string $root, string $handlerPath, str
 
 function cleanupCreatedOrder(PDO $pdo, int $orderId, ?string $createdProductDescription = null): void
 {
+    $pdo->prepare("DELETE FROM shipment_financial_entries WHERE order_id = ?")->execute([$orderId]);
+    $pdo->prepare("DELETE FROM item_number_references WHERE order_id = ?")->execute([$orderId]);
+    $pdo->exec("DELETE r FROM item_number_reservations r LEFT JOIN item_number_references ref ON ref.reservation_id=r.id WHERE ref.id IS NULL");
     $itemStmt = $pdo->prepare("SELECT id FROM order_items WHERE order_id = ?");
     $itemStmt->execute([$orderId]);
     $itemIds = array_map('intval', $itemStmt->fetchAll(PDO::FETCH_COLUMN));
@@ -101,6 +105,32 @@ function cleanupCreatedOrder(PDO $pdo, int $orderId, ?string $createdProductDesc
             $pdo->prepare("DELETE FROM products WHERE id = ?")->execute([$productId]);
         }
     }
+}
+
+function startDraftCreateProcess(string $root, array $body): array
+{
+    $rootEsc=addslashes(str_replace('\\','/',$root));
+    $bodyCode=var_export($body,true);
+    $code="<?php\nsession_start();\n\$_SESSION['user_id']=1;\n\$_SESSION['user_roles']=['ChinaAdmin'];\nrequire '$rootEsc/backend/config/database.php';\nrequire '$rootEsc/backend/api/helpers.php';\n\$h=require '$rootEsc/backend/api/handlers/draft-orders.php';\n\$h('POST',null,null,$bodyCode);\n";
+    $tmp=tempnam(sys_get_temp_dir(),'draft_concurrency_').'.php';
+    file_put_contents($tmp,$code);
+    $php=(defined('PHP_BINARY')&&file_exists(PHP_BINARY))?PHP_BINARY:'php';
+    $pipes=[];
+    $process=proc_open([$php,$tmp],[0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']],$pipes);
+    if(!is_resource($process)){@unlink($tmp);throw new RuntimeException('Could not start concurrent draft worker');}
+    fclose($pipes[0]);
+    return ['process'=>$process,'pipes'=>$pipes,'tmp'=>$tmp];
+}
+
+function finishDraftCreateProcess(array $worker): string
+{
+    $stdout=stream_get_contents($worker['pipes'][1]);
+    $stderr=stream_get_contents($worker['pipes'][2]);
+    fclose($worker['pipes'][1]); fclose($worker['pipes'][2]);
+    $exit=proc_close($worker['process']);
+    @unlink($worker['tmp']);
+    if($exit!==0) throw new RuntimeException('Concurrent draft worker failed: '.trim($stderr));
+    return (string)$stdout;
 }
 
 function createProcurementImportTemplateFixture(?array $itemRow = null, array $metadata = [], ?string $photoPath = null): string
@@ -704,11 +734,53 @@ test('draft-orders handler allows create without expected_ready_date and auto-fi
             throw new Exception('Expected English-side description to keep the source text');
         }
         if (trim((string) ($row['description_cn'] ?? '')) === '') {
-            throw new Exception('Expected Chinese-side description to be auto-filled');
+            $job = $pdo->prepare("SELECT status FROM translation_jobs WHERE source_hash=? AND source_lang='en' AND target_lang='zh'");
+            $job->execute([hash('sha256', $label)]);
+            if (!in_array((string) $job->fetchColumn(), ['pending', 'failed'], true)) {
+                throw new Exception('Missing translation must be queued without blocking draft creation');
+            }
         }
         if (!empty($row['required_design'])) {
             throw new Exception('Auto-created product should not default required_design to on');
         }
+    } finally {
+        cleanupCreatedOrder($pdo, $orderId, $label);
+    }
+});
+
+test('standard order creation key replays the first committed result', function () use ($pdo, $root) {
+    $customerId = (int) $pdo->query("SELECT id FROM customers ORDER BY id LIMIT 1")->fetchColumn();
+    $supplierId = (int) $pdo->query("SELECT id FROM suppliers ORDER BY id LIMIT 1")->fetchColumn();
+    if ($customerId <= 0 || $supplierId <= 0) throw new Exception('Missing customer or supplier seed data');
+    $key = 'standard-order-test:' . bin2hex(random_bytes(8));
+    $label = 'Standard idempotency ' . bin2hex(random_bytes(4));
+    $payload = [
+        'idempotency_key' => $key,
+        'customer_id' => $customerId,
+        'supplier_id' => $supplierId,
+        'currency' => 'USD',
+        'items' => [[
+            'description_cn' => $label,
+            'description_en' => $label,
+            'quantity' => 1,
+            'unit' => 'pieces',
+            'declared_cbm' => 0.01,
+            'declared_weight' => 0.1,
+            'unit_price' => 1,
+            'total_amount' => 1,
+        ]],
+    ];
+    $first = json_decode(runHandlerScript($root, 'backend/api/handlers/orders.php', 'POST', null, null, [], $payload), true);
+    $orderId = (int) ($first['data']['id'] ?? 0);
+    if ($orderId <= 0) throw new Exception('First standard create failed');
+    try {
+        $second = json_decode(runHandlerScript($root, 'backend/api/handlers/orders.php', 'POST', null, null, [], $payload), true);
+        if ((int) ($second['data']['id'] ?? 0) !== $orderId || empty($second['idempotent_replay'])) {
+            throw new Exception('Retry did not return the first committed order');
+        }
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM orders WHERE creation_idempotency_key=?');
+        $stmt->execute([$key]);
+        if ((int) $stmt->fetchColumn() !== 1) throw new Exception('Creation key produced duplicate orders');
     } finally {
         cleanupCreatedOrder($pdo, $orderId, $label);
     }
@@ -792,19 +864,44 @@ test('draft-order create continues item numbers from previous saved order', func
     }
 });
 
-test('translations endpoint returns translated text for zh and en targets', function () use ($root) {
+test('two concurrent draft creates serialize item-number allocation', function () use ($pdo,$root) {
+    $customer=$pdo->query("SELECT c.id,ccs.country_id FROM customers c LEFT JOIN customer_country_shipping ccs ON ccs.customer_id=c.id AND TRIM(COALESCE(ccs.shipping_code,''))<>'' WHERE TRIM(COALESCE(c.default_shipping_code,''))<>'' OR ccs.country_id IS NOT NULL ORDER BY c.id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    $supplierId=(int)$pdo->query('SELECT id FROM suppliers ORDER BY id LIMIT 1')->fetchColumn();
+    if(!$customer||$supplierId<=0)return;
+    $labels=['Concurrent numbering A '.bin2hex(random_bytes(4)),'Concurrent numbering B '.bin2hex(random_bytes(4))];
+    $payload=function(string $label)use($customer,$supplierId){return ['customer_id'=>(int)$customer['id'],'destination_country_id'=>!empty($customer['country_id'])?(int)$customer['country_id']:null,'currency'=>'USD','supplier_sections'=>[['supplier_id'=>$supplierId,'items'=>[['description_entries'=>[['description_text'=>$label]],'pieces_per_carton'=>1,'cartons'=>1,'unit_price'=>1,'cbm_mode'=>'direct','cbm'=>0.01,'weight'=>0.1,'photo_paths'=>[],'custom_design_required'=>0,'custom_design_paths'=>[],'dimensions_scope'=>'carton']]]]];};
+    $created=[];
+    try {
+        $workers=[startDraftCreateProcess($root,$payload($labels[0])),startDraftCreateProcess($root,$payload($labels[1]))];
+        foreach($workers as $worker){$json=json_decode(finishDraftCreateProcess($worker),true);if(empty($json['data']['id']))throw new Exception('Concurrent create returned invalid payload');$created[]=(int)$json['data']['id'];}
+        $ph=implode(',',array_fill(0,count($created),'?'));$stmt=$pdo->prepare("SELECT order_id,item_no FROM order_items WHERE order_id IN ($ph) ORDER BY order_id");$stmt->execute($created);$rows=$stmt->fetchAll(PDO::FETCH_ASSOC);
+        if(count($rows)!==2)throw new Exception('Concurrent drafts did not each create exactly one item');
+        $numbers=array_column($rows,'item_no');
+        if(count(array_unique($numbers))!==2)throw new Exception('Concurrent drafts generated a duplicate item number: '.implode(',',$numbers));
+        preg_match('/^(.*)-(\d+)-(\d+)$/',$numbers[0],$a);preg_match('/^(.*)-(\d+)-(\d+)$/',$numbers[1],$b);
+        if(!$a||!$b||$a[1]!==$b[1]||$a[2]!==$b[2]||abs((int)$a[3]-(int)$b[3])!==1)throw new Exception('Concurrent item numbers were not consecutive: '.implode(',',$numbers));
+    } finally {
+        foreach($created as $index=>$orderId)cleanupCreatedOrder($pdo,$orderId,$labels[$index]??null);
+    }
+});
+
+test('translations endpoint translates or safely queues unavailable provider work', function () use ($root) {
     $out = runHandlerScript($root, 'backend/api/handlers/translations.php', 'POST', null, null, [], [
         'text' => 'draft builder translation test',
         'source_lang' => 'en',
         'target_lang' => 'zh',
     ]);
     $json = json_decode($out, true);
-    if (!is_array($json) || trim((string) ($json['data']['translated'] ?? '')) === '') {
-        throw new Exception('Expected translated text payload, got: ' . substr($out, 0, 200));
+    $status = (string) ($json['data']['status'] ?? '');
+    if (!is_array($json) || !in_array($status, ['translated', 'manual', 'pending', 'failed'], true)) {
+        throw new Exception('Expected translated or queued status payload, got: ' . substr($out, 0, 200));
+    }
+    if (in_array($status, ['pending', 'failed'], true) && trim((string) ($json['data']['translated'] ?? '')) !== '') {
+        throw new Exception('Unavailable provider must not fabricate a translation');
     }
 });
 
-test('translate endpoint uses TranslationService target language handling', function () use ($root) {
+test('translate endpoint reports target language and never returns placeholder text', function () use ($root) {
     $out = runHandlerScript($root, 'backend/api/handlers/translate.php', 'POST', null, null, [], [
         'text' => 'draft builder translate endpoint test',
         'source_lang' => 'en',
@@ -812,24 +909,105 @@ test('translate endpoint uses TranslationService target language handling', func
     ]);
     $json = json_decode($out, true);
     $translated = trim((string) ($json['data']['translated'] ?? ''));
-    if (!is_array($json) || $translated === '') {
-        throw new Exception('Expected translated text payload, got: ' . substr($out, 0, 200));
+    if (!is_array($json) || ($json['data']['target_lang'] ?? '') !== 'zh') {
+        throw new Exception('Expected target-language status payload, got: ' . substr($out, 0, 200));
     }
-    if (strpos($translated, '[ZH]') !== 0) {
-        throw new Exception('Expected target-language-aware translation tag, got: ' . $translated);
+    if (preg_match('/^\[(?:EN|ZH)\]\s/', $translated)) {
+        throw new Exception('Placeholder translation leaked from the service: ' . $translated);
     }
 });
 
-test('draft-orders export endpoint responds for an existing draft order', function () use ($pdo, $root) {
-    $orderId = (int) $pdo->query("SELECT id FROM orders WHERE order_type = 'draft_procurement' ORDER BY id DESC LIMIT 1")->fetchColumn();
+test('draft and confirmed-order exports preserve shipment charges', function () use ($pdo, $root) {
+    $orderId = (int) $pdo->query("SELECT id FROM orders WHERE order_type = 'draft_procurement' AND status='Draft' ORDER BY id DESC LIMIT 1")->fetchColumn();
     if ($orderId <= 0) {
         return;
     }
 
-    $out = runHandlerScript($root, 'backend/api/handlers/draft-orders.php', 'GET', (string) $orderId, 'export');
-    if (strpos($out, 'Draft Order') === false || strpos($out, 'Supplier') === false) {
-        throw new Exception('Expected grouped draft order CSV output');
+    $userId = (int) $pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn();
+    $originalStatus = (string) $pdo->query("SELECT status FROM orders WHERE id = $orderId")->fetchColumn();
+    $costId = 0;
+    try {
+        $cost = (new DraftOrderCostService($pdo))->create($orderId, [
+            'cost_type_code' => 'handling',
+            'description_en' => 'Export preservation check',
+            'amount' => '12.3400',
+            'currency' => 'USD',
+            'exchange_rate' => '1.00000000',
+            'base_currency' => 'USD',
+            'responsible_payer' => 'company',
+            'allocation_method' => 'none',
+        ], $userId);
+        $costId = (int) $cost['id'];
+
+        $draftOut = runHandlerScript($root, 'backend/api/handlers/draft-orders.php', 'GET', (string) $orderId, 'export', ['format' => 'csv']);
+        if (strpos($draftOut, 'Draft Order') === false || strpos($draftOut, 'Export preservation check') === false || strpos($draftOut, '12.3400') === false) {
+            throw new Exception('Draft CSV did not contain its shipment charge');
+        }
+
+        $pdo->prepare("UPDATE orders SET status='Approved' WHERE id=?")->execute([$orderId]);
+        $orderOut = runHandlerScript($root, 'backend/api/handlers/orders.php', 'GET', (string) $orderId, 'export', ['format' => 'csv']);
+        if (strpos($orderOut, 'Shipment Charges') === false || strpos($orderOut, 'Export preservation check') === false || strpos($orderOut, '12.3400') === false) {
+            throw new Exception('Confirmed-order CSV did not preserve its shipment charge');
+        }
+    } finally {
+        $pdo->prepare('UPDATE orders SET status=? WHERE id=?')->execute([$originalStatus, $orderId]);
+        if ($costId > 0) {
+            $pdo->prepare("DELETE FROM shipment_financial_entries WHERE source_type='draft_order_cost' AND source_id=?")->execute([$costId]);
+            $pdo->prepare('DELETE FROM draft_order_cost_history WHERE cost_id=?')->execute([$costId]);
+            $pdo->prepare('DELETE FROM draft_order_costs WHERE id=?')->execute([$costId]);
+        }
     }
+});
+
+test('manual draft item numbers persist, drive the next value, and create audit history', function () use ($pdo,$root) {
+    $customerId=(int)$pdo->query('SELECT id FROM customers ORDER BY id LIMIT 1')->fetchColumn();
+    $supplierId=(int)$pdo->query('SELECT id FROM suppliers ORDER BY id LIMIT 1')->fetchColumn();
+    if($customerId<=0||$supplierId<=0)throw new Exception('Missing fixtures');
+    $label='Manual item number '.bin2hex(random_bytes(4));$orderId=0;
+    $itemPayload=static fn(string $description,$number,string $source,?int $existingId=null)=>[
+        'existing_item_id'=>$existingId,'item_no'=>$number,'item_no_source'=>$source,'item_no_manual'=>$source!=='generated'?1:0,
+        'description_entries'=>[['description_text'=>$description]],'pieces_per_carton'=>1,'cartons'=>1,'unit_price'=>1,
+        'cbm_mode'=>'direct','cbm'=>0.01,'weight'=>0.1,'photo_paths'=>[],'custom_design_required'=>0,'custom_design_paths'=>[],'dimensions_scope'=>'carton'
+    ];
+    try{
+        $create=['customer_id'=>$customerId,'currency'=>'USD','supplier_sections'=>[['supplier_id'=>$supplierId,'items'=>[$itemPayload($label,'ITEM-008','manual')]]]];
+        $json=json_decode(runHandlerScript($root,'backend/api/handlers/draft-orders.php','POST',null,null,[],$create),true);$orderId=(int)($json['data']['id']??0);
+        if($orderId<=0)throw new Exception('Manual create failed');
+        $first=$pdo->query("SELECT id,item_no,item_no_source FROM order_items WHERE order_id=$orderId ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+        if(($first['item_no']??'')!=='ITEM-008'||($first['item_no_source']??'')!=='manual')throw new Exception('Manual value/provenance did not persist');
+        $update=['customer_id'=>$customerId,'currency'=>'USD','lock_version'=>(int)($json['data']['lock_version']??0),'supplier_sections'=>[['supplier_id'=>$supplierId,'items'=>[
+            $itemPayload($label,'ITEM-015','manual',(int)$first['id']),$itemPayload($label.' next','', 'generated')
+        ]]]];
+        $updated=json_decode(runHandlerScript($root,'backend/api/handlers/draft-orders.php','PUT',(string)$orderId,null,[],$update),true);
+        if(empty($updated['data']['id']))throw new Exception('Manual update failed: '.json_encode($updated));
+        $numbers=$pdo->query("SELECT item_no,item_no_source FROM order_items WHERE order_id=$orderId ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
+        if(array_column($numbers,'item_no')!==['ITEM-015','ITEM-016'])throw new Exception('Manual 15 did not drive next 16: '.json_encode($numbers));
+        $audit=$pdo->query("SELECT old_value,new_value,user_id,created_at FROM audit_log WHERE action='item_number_changed' AND JSON_EXTRACT(new_value,'$.draft_id')=$orderId ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+        if(!$audit||strpos((string)$audit['old_value'],'ITEM-008')===false||strpos((string)$audit['new_value'],'ITEM-015')===false||empty($audit['user_id'])||empty($audit['created_at']))throw new Exception('Manual change audit is incomplete');
+        $submit=json_decode(runHandlerScript($root,'backend/api/handlers/orders.php','POST',(string)$orderId,'submit',[],[]),true);
+        if(($submit['data']['status']??'')!=='Submitted')throw new Exception('Draft submit failed: '.json_encode($submit));
+        $approve=json_decode(runHandlerScript($root,'backend/api/handlers/orders.php','POST',(string)$orderId,'approve',[],[]),true);
+        if(($approve['data']['status']??'')!=='Approved')throw new Exception('Draft approval failed: '.json_encode($approve));
+        $afterApproval=$pdo->query("SELECT GROUP_CONCAT(item_no ORDER BY id SEPARATOR ',') FROM order_items WHERE order_id=$orderId")->fetchColumn();
+        if($afterApproval!=='ITEM-015,ITEM-016')throw new Exception('Approval changed item numbers: '.$afterApproval);
+    }finally{
+        if($orderId>0){$pdo->prepare("DELETE FROM audit_log WHERE action='item_number_changed' AND JSON_EXTRACT(new_value,'$.draft_id')=?")->execute([$orderId]);$pdo->prepare('DELETE FROM notifications WHERE target_type=\'order\' AND target_id=?')->execute([$orderId]);cleanupCreatedOrder($pdo,$orderId);}
+        $pdo->prepare('DELETE FROM product_description_entries WHERE product_id IN (SELECT id FROM products WHERE description_en IN (?,?))')->execute([$label,$label.' next']);
+        $pdo->prepare('DELETE FROM products WHERE description_en IN (?,?)')->execute([$label,$label.' next']);
+    }
+});
+
+test('duplicate imported item numbers retain exact display values and provenance with a warning', function () use ($pdo,$root) {
+    $customerId=(int)$pdo->query('SELECT id FROM customers ORDER BY id LIMIT 1')->fetchColumn();$supplierId=(int)$pdo->query('SELECT id FROM suppliers ORDER BY id LIMIT 1')->fetchColumn();
+    $label='Imported duplicate '.bin2hex(random_bytes(4));$orderId=0;$value=" MiXeD-ITEM-007\xC2\xA0";
+    $item=static fn(string $description)=>['item_no'=>$value,'item_no_source'=>'imported','item_no_manual'=>1,'description_entries'=>[['description_text'=>$description]],'pieces_per_carton'=>1,'cartons'=>1,'unit_price'=>1,'cbm_mode'=>'direct','cbm'=>0.01,'weight'=>0.1,'photo_paths'=>[],'custom_design_required'=>0,'custom_design_paths'=>[],'dimensions_scope'=>'carton'];
+    try{
+        $json=json_decode(runHandlerScript($root,'backend/api/handlers/draft-orders.php','POST',null,null,[],['customer_id'=>$customerId,'currency'=>'USD','supplier_sections'=>[['supplier_id'=>$supplierId,'items'=>[$item($label.' A'),$item($label.' B')]]]]),true);$orderId=(int)($json['data']['id']??0);
+        if($orderId<=0)throw new Exception('Imported duplicate save failed: '.json_encode($json));
+        $rows=$pdo->query("SELECT item_no,item_no_source FROM order_items WHERE order_id=$orderId ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
+        if(array_column($rows,'item_no')!==[$value,$value]||array_unique(array_column($rows,'item_no_source'))!==['imported'])throw new Exception('Imported display/provenance changed');
+        if(stripos((string)($json['warning']??''),'preserved')===false)throw new Exception('Duplicate import warning missing');
+    }finally{if($orderId>0)cleanupCreatedOrder($pdo,$orderId);$pdo->prepare('DELETE FROM product_description_entries WHERE product_id IN (SELECT id FROM products WHERE description_en IN (?,?))')->execute([$label.' A',$label.' B']);$pdo->prepare('DELETE FROM products WHERE description_en IN (?,?)')->execute([$label.' A',$label.' B']);}
 });
 
 echo "\nTotal: $passed passed, $failed failed\n";

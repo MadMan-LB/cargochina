@@ -20,8 +20,7 @@ IF NOT EXISTS tracking_push_log
   attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
   last_error TEXT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON
-UPDATE CURRENT_TIMESTAMP,
+  updated_at DATETIME NULL,
   UNIQUE KEY uk_idempotency (idempotency_key),
   INDEX idx_entity
 (entity_type, entity_id),

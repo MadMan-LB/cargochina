@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/NotificationService.php';
+require_once __DIR__ . '/ShipmentAccountingService.php';
 
 final class OrderReceiptWorkflowService
 {
@@ -8,7 +9,9 @@ final class OrderReceiptWorkflowService
 
     public static function acceptAutoConfirmedOrder(PDO $pdo, int $orderId, ?int $userId = null, string $auditAction = 'confirm_by_token'): void
     {
-        $order = self::fetchOrder($pdo, $orderId);
+        $started = self::beginTransaction($pdo);
+        try {
+        $order = self::fetchOrder($pdo, $orderId, true);
         if (!$order) {
             jsonError('Order not found', 404);
         }
@@ -28,11 +31,18 @@ final class OrderReceiptWorkflowService
         self::insertCustomerConfirmation($pdo, $orderId, $userId, $accepted, null);
         $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order',?,?,?,?)")
             ->execute([$orderId, $auditAction, json_encode(['accepted_actuals' => $accepted], JSON_UNESCAPED_UNICODE), $userId]);
+        if ($started) $pdo->commit();
+        } catch (Throwable $e) {
+            if ($started && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
     }
 
     public static function declineAutoConfirmedOrder(PDO $pdo, int $orderId, string $reason, ?int $userId = null, string $auditAction = 'decline_by_token'): void
     {
-        $order = self::fetchOrder($pdo, $orderId);
+        $started = self::beginTransaction($pdo);
+        try {
+        $order = self::fetchOrder($pdo, $orderId, true);
         if (!$order) {
             jsonError('Order not found', 404);
         }
@@ -44,17 +54,25 @@ final class OrderReceiptWorkflowService
         }
 
         self::detachOrderFromShipmentDrafts($pdo, $orderId);
+        (new ShipmentAccountingService($pdo))->reverseOrder($orderId, $userId, $reason ?: 'Customer declined');
         $pdo->prepare("UPDATE orders SET status='CustomerDeclinedAfterAutoConfirm', confirmation_token=NULL WHERE id=?")
             ->execute([$orderId]);
         self::insertCustomerConfirmation($pdo, $orderId, null, null, $reason);
         $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order',?,?,?,?)")
             ->execute([$orderId, $auditAction, json_encode(['decline_reason' => $reason], JSON_UNESCAPED_UNICODE), $userId]);
         NotificationService::notifyOrderDeclined($orderId, $reason);
+        if ($started) $pdo->commit();
+        } catch (Throwable $e) {
+            if ($started && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
     }
 
     public static function resetDeclinedOrder(PDO $pdo, int $orderId, int $userId, ?string $reason = null): void
     {
-        $order = self::fetchOrder($pdo, $orderId);
+        $started = self::beginTransaction($pdo);
+        try {
+        $order = self::fetchOrder($pdo, $orderId, true);
         if (!$order) {
             jsonError('Order not found', 404);
         }
@@ -65,8 +83,14 @@ final class OrderReceiptWorkflowService
         self::detachOrderFromShipmentDrafts($pdo, $orderId);
         self::voidActiveReceipts($pdo, $orderId, $userId, $reason ?: 'Reset after customer decline');
         $pdo->prepare("UPDATE orders SET status='Submitted', confirmation_token=NULL WHERE id=?")->execute([$orderId]);
+        (new ShipmentAccountingService($pdo))->restoreOrderCostsAsProvisional($orderId, $userId);
         $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order',?,?,?,?)")
             ->execute([$orderId, 'reset_after_customer_decline', json_encode(['status' => 'Submitted', 'reason' => $reason], JSON_UNESCAPED_UNICODE), $userId]);
+        if ($started) $pdo->commit();
+        } catch (Throwable $e) {
+            if ($started && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
     }
 
     public static function fetchLatestReceipt(PDO $pdo, int $orderId): ?array
@@ -82,12 +106,19 @@ final class OrderReceiptWorkflowService
         return $row ?: null;
     }
 
-    private static function fetchOrder(PDO $pdo, int $orderId): ?array
+    private static function fetchOrder(PDO $pdo, int $orderId, bool $lock = false): ?array
     {
-        $stmt = $pdo->prepare("SELECT * FROM orders WHERE id = ? LIMIT 1");
+        $stmt = $pdo->prepare("SELECT * FROM orders WHERE id = ? LIMIT 1" . ($lock ? ' FOR UPDATE' : ''));
         $stmt->execute([$orderId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row ?: null;
+    }
+
+    private static function beginTransaction(PDO $pdo): bool
+    {
+        if ($pdo->inTransaction()) return false;
+        $pdo->beginTransaction();
+        return true;
     }
 
     private static function detachOrderFromShipmentDrafts(PDO $pdo, int $orderId): void

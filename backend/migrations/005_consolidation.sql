@@ -21,18 +21,13 @@ IF NOT EXISTS shipment_drafts
 (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     container_id INT UNSIGNED NULL,
-    status VARCHAR
-(50) NOT NULL DEFAULT 'draft',
+    status ENUM('draft', 'finalized') NOT NULL DEFAULT 'draft',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY
 (container_id) REFERENCES containers
 (id) ON
 DELETE
 SET NULL
-,
-    CONSTRAINT chk_sd_status CHECK
-(status IN
-('draft', 'finalized'))
 );
 
 CREATE TABLE

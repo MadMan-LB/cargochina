@@ -45,6 +45,10 @@ require 'includes/layout.php';
         <tbody></tbody>
       </table>
     </div>
+    <div class="d-flex justify-content-between align-items-center mt-3">
+      <small class="text-muted" id="customerPageSummary"></small>
+      <div class="btn-group btn-group-sm"><button type="button" class="btn btn-outline-secondary" id="customerPrevPage">Previous</button><button type="button" class="btn btn-outline-secondary" id="customerNextPage">Next</button></div>
+    </div>
   </div>
 </div>
 

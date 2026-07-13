@@ -110,6 +110,10 @@ $canUseBalancesFromRole = $isSuperAdmin
               <option value="draft_procurement">Draft an Order</option>
             </select>
           </div>
+          <div class="col-12 col-md-5">
+            <label class="form-label small mb-1">Item Type</label>
+            <select class="form-select form-select-sm" id="filterItemType" onchange="loadOrders()"><option value="">All item types</option><option value="normal">Normal goods</option><option value="replica">Copy / replica</option><option value="cosmetics">Cosmetics</option><option value="branded">Branded goods</option><option value="food">Food</option><option value="dangerous">Dangerous goods</option><option value="other">Other</option><option value="unclassified">Needs classification</option></select>
+          </div>
           <div class="col-12 col-md-7">
             <label class="form-label small mb-1">Customer Follow-Up</label>
             <select class="form-select form-select-sm" id="filterCustomerFeedback" onchange="loadOrders()">
@@ -139,6 +143,10 @@ $canUseBalancesFromRole = $isSuperAdmin
         </thead>
         <tbody></tbody>
       </table>
+    </div>
+    <div class="d-flex justify-content-between align-items-center mt-3">
+      <small class="text-muted" id="ordersPageSummary"></small>
+      <div class="btn-group btn-group-sm"><button type="button" class="btn btn-outline-secondary" id="ordersPrevPage">Previous</button><button type="button" class="btn btn-outline-secondary" id="ordersNextPage">Next</button></div>
     </div>
   </div>
 </div>

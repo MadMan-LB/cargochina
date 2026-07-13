@@ -57,7 +57,8 @@ class OrderExcelService
         $this->writeStandardColumnHeaders($sheet, $row);
         $row++;
         $row = $this->writeStandardItems($sheet, $items, $row, $order);
-        $this->writeStandardReceiptFees($sheet, $row, $order, $items);
+        $row = $this->writeStandardReceiptFees($sheet, $row, $order, $items);
+        $this->writeStandardOperationalCosts($sheet, $row, $order);
 
         $outName = $filename ?? ('order_' . (int) ($order['id'] ?? 0) . '_goods_details.xlsx');
         $this->outputXlsx($spreadsheet, $outName);
@@ -147,6 +148,7 @@ class OrderExcelService
             'Deposit Status',
             'Paid Amount',
             'Remaining Balance',
+            'Shipment Charges',
             'Total CBM',
             'Total Weight (kg)',
         ];
@@ -181,6 +183,7 @@ class OrderExcelService
                 $this->tr((string) ($row['deposit_status'] ?? 'No Deposit')),
                 round((float) ($row['deposit_paid_amount'] ?? 0), 2),
                 round((float) ($row['remaining_balance'] ?? 0), 2),
+                $this->formatOperationalCostSummary($row),
                 round($cbm, 4),
                 round($weight, 2),
             ];
@@ -275,7 +278,10 @@ class OrderExcelService
             'Item',
             'Shipping Code',
             'Item No',
+            'Item Type',
             'Quantity',
+            'Actual Quantity',
+            'Actual Cartons',
             'Declared CBM',
             'Actual CBM',
             'Actual Weight',
@@ -293,7 +299,10 @@ class OrderExcelService
                 (string) (($row['description_en'] ?? '') ?: ($row['description_cn'] ?? '') ?: ($row['product_desc_en'] ?? '') ?: ($row['product_desc_cn'] ?? '')),
                 (string) ($row['shipping_code'] ?? ''),
                 (string) ($row['item_no'] ?? ''),
+                $this->itemTypeText((string) ($row['item_type_code'] ?? 'unclassified')),
                 $row['quantity'] ?? null,
+                $row['item_actual_quantity'] ?? null,
+                $row['item_actual_cartons'] ?? $row['order_actual_cartons'] ?? null,
                 $row['declared_cbm'] ?? null,
                 $row['item_actual_cbm'] ?? $row['order_actual_cbm'] ?? null,
                 $row['item_actual_weight'] ?? $row['order_actual_weight'] ?? null,
@@ -614,6 +623,70 @@ class OrderExcelService
         }
 
         return $row;
+    }
+
+    private function writeStandardOperationalCosts($sheet, int $startRow, array $order): int
+    {
+        $costs = is_array($order['operational_costs'] ?? null) ? $order['operational_costs'] : [];
+        $lines = is_array($costs['lines'] ?? null) ? $costs['lines'] : [];
+        if (!$lines) {
+            return $startRow;
+        }
+
+        $row = $startRow + 1;
+        $sheet->setCellValue('A' . $row, $this->tr('Shipment Charges'));
+        $sheet->mergeCells('A' . $row . ':' . self::STANDARD_LAST_COL . $row);
+        $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
+            'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true, 'color' => ['rgb' => self::HEADER_BLUE]],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT, 'vertical' => Alignment::VERTICAL_CENTER],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_YELLOW]],
+            'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
+        ]);
+        $row++;
+
+        foreach ($lines as $cost) {
+            $type = (string) ($cost['cost_type_label_en'] ?? $cost['cost_type_code'] ?? '');
+            $description = (string) ($cost['description_en'] ?? $cost['description_zh'] ?? '');
+            $provider = (string) ($cost['supplier_name'] ?? $cost['service_provider'] ?? '');
+            $detail = trim(implode(' | ', array_filter([$description, $provider, (string) ($cost['responsible_payer'] ?? ''), (string) ($cost['allocation_method'] ?? '')])));
+            $sheet->setCellValue('A' . $row, $type);
+            $sheet->setCellValue('R' . $row, (float) ($cost['base_amount'] ?? 0));
+            $sheet->setCellValue('S' . $row, (string) ($cost['base_currency'] ?? ''));
+            $sheet->setCellValue('T' . $row, $detail);
+            $sheet->mergeCells('A' . $row . ':Q' . $row);
+            $sheet->mergeCells('T' . $row . ':' . self::STANDARD_LAST_COL . $row);
+            $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
+                'font' => ['name' => 'Arial', 'size' => 10],
+                'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT, 'vertical' => Alignment::VERTICAL_CENTER, 'wrapText' => true],
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FFFFFF']],
+                'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
+            ]);
+            $sheet->getStyle('R' . $row)->getNumberFormat()->setFormatCode('#,##0.0000');
+            $row++;
+        }
+
+        $sheet->setCellValue('A' . $row, $this->tr('Shipment Charges Total'));
+        $sheet->setCellValue('R' . $row, (float) ($costs['base_total'] ?? 0));
+        $sheet->setCellValue('S' . $row, (string) ($costs['base_currency'] ?? ''));
+        $sheet->mergeCells('A' . $row . ':Q' . $row);
+        $sheet->mergeCells('S' . $row . ':' . self::STANDARD_LAST_COL . $row);
+        $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
+            'font' => ['name' => 'Arial', 'size' => 10, 'bold' => true],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_YELLOW]],
+            'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
+        ]);
+        $sheet->getStyle('R' . $row)->getNumberFormat()->setFormatCode('#,##0.0000');
+        return $row + 1;
+    }
+
+    private function formatOperationalCostSummary(array $row): string
+    {
+        $parts = [];
+        foreach (($row['operational_cost_summary']['totals'] ?? []) as $total) {
+            $amount = rtrim(rtrim(number_format((float) ($total['amount'] ?? 0), 4, '.', ''), '0'), '.');
+            $parts[] = ($amount === '' ? '0' : $amount) . ' ' . (string) ($total['currency'] ?? '');
+        }
+        return implode(' + ', $parts);
     }
 
     private function writeContainerColumnHeaders($sheet, int $row): void
@@ -1144,12 +1217,29 @@ class OrderExcelService
 
     private function copyNormalGoodsText(array $item): string
     {
+        if (!empty($item['item_type_code'])) {
+            return $this->itemTypeText((string) $item['item_type_code']);
+        }
         $value = $this->itemText($item, 'copy_normal_goods');
         return match (strtolower($value)) {
             'copy' => $this->tr('Copy Goods'),
             'dangerous' => $this->tr('Dangerous Goods'),
             'normal' => $this->tr('Normal Goods'),
             default => $value,
+        };
+    }
+
+    private function itemTypeText(string $code): string
+    {
+        return match (strtolower(trim($code))) {
+            'normal' => $this->tr('Normal Goods'),
+            'replica' => $this->tr('Replica Goods'),
+            'cosmetics' => $this->tr('Cosmetics'),
+            'branded' => $this->tr('Branded Goods'),
+            'food' => $this->tr('Food'),
+            'dangerous' => $this->tr('Dangerous Goods'),
+            'other' => $this->tr('Other'),
+            default => $this->tr('Unclassified'),
         };
     }
 

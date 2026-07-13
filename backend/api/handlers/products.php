@@ -5,6 +5,20 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
+require_once dirname(__DIR__, 2) . '/services/ItemClassificationService.php';
+
+function productConfirmedClassification(PDO $pdo,array $input,?string $descriptionEn,?string $descriptionCn,?int $supplierId): array
+{
+    $service=new ItemClassificationService($pdo);
+    $code=trim((string)($input['item_type_code']??''));
+    if($code===''){
+        $suggestion=$service->suggest(['description_en'=>$descriptionEn,'description_cn'=>$descriptionCn,'supplier_id'=>$supplierId]);
+        jsonError('Item type confirmation is required before saving this product',422,['item_type_code'=>$suggestion['item_type_code'],'confidence'=>$suggestion['confidence'],'reason'=>$suggestion['reason']]);
+    }
+    $code=$service->normalize($code);
+    if($code==='unclassified'||empty($input['item_type_confirmed']))jsonError('Choose and confirm a specific item type before saving',422,['item_type_code'=>$code]);
+    return ['item_type_code'=>$code,'confidence'=>isset($input['item_type_confidence'])?(float)$input['item_type_confidence']:1.0,'source'=>'manual','is_confirmed'=>true];
+}
 
 function hasProductDescEntries(PDO $pdo): bool
 {
@@ -139,6 +153,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $hsCode = trim($_GET['hs_code'] ?? '');
                 $alertFilter = trim($_GET['alert_filter'] ?? '');
                 $imageFilter = trim($_GET['image_filter'] ?? '');
+                $itemType=clmsNormalizeItemTypeFilter($_GET['item_type']??null);
 
                 $where = [];
                 $params = [];
@@ -180,23 +195,27 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $where[] = "(p.image_paths IS NULL OR p.image_paths = '' OR p.image_paths = '[]')";
                 }
 
-                $sql = "SELECT p.*, s.name as supplier_name FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id";
+                if($itemType!==null){$where[]="COALESCE(ic.item_type_code,'unclassified')=?";$params[]=$itemType;}
+
+                $sql = "SELECT p.*, s.name as supplier_name, COALESCE(ic.item_type_code,'unclassified') item_type_code, ic.confidence item_type_confidence, COALESCE(ic.is_confirmed,0) item_type_confirmed FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id LEFT JOIN item_classifications ic ON ic.entity_type='product' AND ic.entity_id=p.id";
                 if ($where) {
                     $sql .= ' WHERE ' . implode(' AND ', $where);
                 }
-                $sql .= " ORDER BY p.id DESC";
+                $limit=clmsQueryLimit($_GET['limit']??null,50,200);$offset=clmsQueryOffset($_GET['offset']??null);
+                $sql .= " ORDER BY p.id DESC LIMIT ".($limit+1)." OFFSET ".$offset;
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute($params);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                $hasMore=count($rows)>$limit;if($hasMore)$rows=array_slice($rows,0,$limit);
                 foreach ($rows as &$r) {
                     $r['image_paths'] = $r['image_paths'] ? json_decode($r['image_paths'], true) : [];
                     $r['thumbnail_url'] = !empty($r['image_paths'][0])
                         ? '/cargochina/backend/thumb.php?path=' . rawurlencode($r['image_paths'][0]) . '&w=96&h=96&fit=cover'
                         : null;
                 }
-                jsonResponse(['data' => $rows]);
+                jsonResponse(['data' => $rows,'meta'=>['limit'=>$limit,'offset'=>$offset,'has_more'=>$hasMore]]);
             }
-            $stmt = $pdo->prepare("SELECT p.*, s.name as supplier_name FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id WHERE p.id = ?");
+            $stmt = $pdo->prepare("SELECT p.*, s.name as supplier_name, COALESCE(ic.item_type_code,'unclassified') item_type_code, ic.confidence item_type_confidence, COALESCE(ic.is_confirmed,0) item_type_confirmed FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id LEFT JOIN item_classifications ic ON ic.entity_type='product' AND ic.entity_id=p.id WHERE p.id = ?");
             $stmt->execute([$id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$row) {
@@ -309,7 +328,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $packaging = $input['packaging'] ?? null;
             $hsCode = $input['hs_code'] ?? null;
             $piecesPerCarton = isset($input['pieces_per_carton']) ? (int) $input['pieces_per_carton'] : null;
-            $unitPrice = isset($input['unit_price']) ? (float) $input['unit_price'] : null;
+            $unitPrice = isset($input['unit_price']) && $input['unit_price'] !== ''
+                ? clmsFinancialDecimal($input['unit_price'], 'Unit price', true)
+                : null;
             $descriptionEntries = $input['description_entries'] ?? null;
             $descriptionCn = $input['description_cn'] ?? null;
             $descriptionEn = $input['description_en'] ?? null;
@@ -326,6 +347,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $descriptionCn = implode(' | ', $cnParts) ?: null;
                 $descriptionEn = implode(' | ', $enParts) ?: null;
             }
+            $classification=productConfirmedClassification($pdo,$input,$descriptionEn,$descriptionCn,$supplierId);
             $imagePaths = isset($input['image_paths']) ? json_encode($input['image_paths']) : null;
             if (!$forceCreate && ($descriptionCn || $descriptionEn || $hsCode)) {
                 $search = trim($descriptionCn ?: $descriptionEn ?: $hsCode ?: '');
@@ -357,8 +379,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $hasSell = in_array('sell_price', $dbCols, true);
             } catch (Throwable $e) {
             }
-            $buyPrice = isset($input['buy_price']) ? (float) $input['buy_price'] : null;
-            $sellPrice = isset($input['sell_price']) ? (float) $input['sell_price'] : null;
+            $buyPrice = isset($input['buy_price']) && $input['buy_price'] !== ''
+                ? clmsFinancialDecimal($input['buy_price'], 'Buy price', true)
+                : null;
+            $sellPrice = isset($input['sell_price']) && $input['sell_price'] !== ''
+                ? clmsFinancialDecimal($input['sell_price'], 'Sell price', true)
+                : null;
             $highAlertNote = isset($input['high_alert_note']) ? trim((string) $input['high_alert_note']) : null;
             $dimensionsScope = in_array($input['dimensions_scope'] ?? '', ['piece', 'carton'], true) ? $input['dimensions_scope'] : 'piece';
             $requiredDesign = isset($input['required_design']) ? (int) (bool) $input['required_design'] : 0;
@@ -394,19 +420,27 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             $ph = implode(',', array_fill(0, count($vals), '?'));
             $colStr = implode(', ', $cols);
-            $stmt = $pdo->prepare("INSERT INTO products ($colStr) VALUES ($ph)");
-            $stmt->execute($vals);
-            $newId = (int) $pdo->lastInsertId();
-            if (hasProductDescEntries($pdo) && is_array($descriptionEntries) && count($descriptionEntries) > 0) {
-                $ins = $pdo->prepare("INSERT INTO product_description_entries (product_id, description_text, description_translated, sort_order) VALUES (?, ?, ?, ?)");
-                foreach ($descriptionEntries as $i => $e) {
-                    $text = trim($e['description_text'] ?? $e['text'] ?? '');
-                    if ($text === '') continue;
-                    $translated = trim($e['description_translated'] ?? $e['translated'] ?? '');
-                    $ins->execute([$newId, $text, $translated ?: null, $i]);
+            $pdo->beginTransaction();
+            try {
+                $stmt = $pdo->prepare("INSERT INTO products ($colStr) VALUES ($ph)");
+                $stmt->execute($vals);
+                $newId = (int) $pdo->lastInsertId();
+                (new ItemClassificationService($pdo))->set('product',$newId,$classification['item_type_code'],$classification['confidence'],true,getAuthUserId(),'manual');
+                if (hasProductDescEntries($pdo) && is_array($descriptionEntries) && count($descriptionEntries) > 0) {
+                    $ins = $pdo->prepare("INSERT INTO product_description_entries (product_id, description_text, description_translated, sort_order) VALUES (?, ?, ?, ?)");
+                    foreach ($descriptionEntries as $i => $e) {
+                        $text = trim($e['description_text'] ?? $e['text'] ?? '');
+                        if ($text === '') continue;
+                        $translated = trim($e['description_translated'] ?? $e['translated'] ?? '');
+                        $ins->execute([$newId, $text, $translated ?: null, $i]);
+                    }
                 }
+                $pdo->commit();
+            } catch(Throwable $e) {
+                if($pdo->inTransaction())$pdo->rollBack();
+                throw $e;
             }
-            $stmt = $pdo->prepare("SELECT p.*, s.name as supplier_name FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id WHERE p.id = ?");
+            $stmt = $pdo->prepare("SELECT p.*, s.name as supplier_name, ic.item_type_code, ic.confidence item_type_confidence, ic.is_confirmed item_type_confirmed FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id LEFT JOIN item_classifications ic ON ic.entity_type='product' AND ic.entity_id=p.id WHERE p.id = ?");
             $stmt->execute([$newId]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             $row['image_paths'] = $row['image_paths'] ? json_decode($row['image_paths'], true) : [];
@@ -446,7 +480,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $packaging = $input['packaging'] ?? null;
             $hsCode = $input['hs_code'] ?? null;
             $piecesPerCarton = isset($input['pieces_per_carton']) ? (int) $input['pieces_per_carton'] : null;
-            $unitPrice = isset($input['unit_price']) ? (float) $input['unit_price'] : null;
+            $unitPrice = isset($input['unit_price']) && $input['unit_price'] !== ''
+                ? clmsFinancialDecimal($input['unit_price'], 'Unit price', true)
+                : null;
             $descriptionEntries = $input['description_entries'] ?? null;
             $descriptionCn = $input['description_cn'] ?? null;
             $descriptionEn = $input['description_en'] ?? null;
@@ -463,6 +499,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $descriptionCn = implode(' | ', $cnParts) ?: null;
                 $descriptionEn = implode(' | ', $enParts) ?: null;
             }
+            $classification=productConfirmedClassification($pdo,$input,$descriptionEn,$descriptionCn,$supplierId);
             $imagePaths = isset($input['image_paths']) ? json_encode($input['image_paths']) : null;
             $hasPpc = false;
             $hasUp = false;
@@ -478,8 +515,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $hasSell = in_array('sell_price', $dbCols, true);
             } catch (Throwable $e) {
             }
-            $buyPrice = isset($input['buy_price']) ? (float) $input['buy_price'] : null;
-            $sellPrice = isset($input['sell_price']) ? (float) $input['sell_price'] : null;
+            $buyPrice = isset($input['buy_price']) && $input['buy_price'] !== ''
+                ? clmsFinancialDecimal($input['buy_price'], 'Buy price', true)
+                : null;
+            $sellPrice = isset($input['sell_price']) && $input['sell_price'] !== ''
+                ? clmsFinancialDecimal($input['sell_price'], 'Sell price', true)
+                : null;
             $highAlertNote = isset($input['high_alert_note']) ? trim((string) $input['high_alert_note']) : null;
             $dimensionsScope = in_array($input['dimensions_scope'] ?? '', ['piece', 'carton'], true) ? $input['dimensions_scope'] : 'piece';
             $requiredDesign = isset($input['required_design']) ? (int) (bool) $input['required_design'] : 0;
@@ -514,20 +555,28 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $vals[] = $highAlertNote ?: null;
             }
             $vals[] = $id;
-            $pdo->prepare("UPDATE products SET " . implode(', ', $sets) . " WHERE id=?")->execute($vals);
-            if (hasProductDescEntries($pdo) && is_array($descriptionEntries)) {
-                $pdo->prepare("DELETE FROM product_description_entries WHERE product_id = ?")->execute([$id]);
-                if (count($descriptionEntries) > 0) {
-                    $ins = $pdo->prepare("INSERT INTO product_description_entries (product_id, description_text, description_translated, sort_order) VALUES (?, ?, ?, ?)");
-                    foreach ($descriptionEntries as $i => $e) {
-                        $text = trim($e['description_text'] ?? $e['text'] ?? '');
-                        if ($text === '') continue;
-                        $translated = trim($e['description_translated'] ?? $e['translated'] ?? '');
-                        $ins->execute([$id, $text, $translated ?: null, $i]);
+            $pdo->beginTransaction();
+            try {
+                $pdo->prepare("UPDATE products SET " . implode(', ', $sets) . " WHERE id=?")->execute($vals);
+                (new ItemClassificationService($pdo))->set('product',(int)$id,$classification['item_type_code'],$classification['confidence'],true,getAuthUserId(),'manual');
+                if (hasProductDescEntries($pdo) && is_array($descriptionEntries)) {
+                    $pdo->prepare("DELETE FROM product_description_entries WHERE product_id = ?")->execute([$id]);
+                    if (count($descriptionEntries) > 0) {
+                        $ins = $pdo->prepare("INSERT INTO product_description_entries (product_id, description_text, description_translated, sort_order) VALUES (?, ?, ?, ?)");
+                        foreach ($descriptionEntries as $i => $e) {
+                            $text = trim($e['description_text'] ?? $e['text'] ?? '');
+                            if ($text === '') continue;
+                            $translated = trim($e['description_translated'] ?? $e['translated'] ?? '');
+                            $ins->execute([$id, $text, $translated ?: null, $i]);
+                        }
                     }
                 }
+                $pdo->commit();
+            } catch(Throwable $e) {
+                if($pdo->inTransaction())$pdo->rollBack();
+                throw $e;
             }
-            $stmt = $pdo->prepare("SELECT p.*, s.name as supplier_name FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id WHERE p.id = ?");
+            $stmt = $pdo->prepare("SELECT p.*, s.name as supplier_name, ic.item_type_code, ic.confidence item_type_confidence, ic.is_confirmed item_type_confirmed FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id LEFT JOIN item_classifications ic ON ic.entity_type='product' AND ic.entity_id=p.id WHERE p.id = ?");
             $stmt->execute([$id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             $row['image_paths'] = $row['image_paths'] ? json_decode($row['image_paths'], true) : [];
@@ -544,8 +593,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if (!$id) {
                 jsonError('ID required', 400);
             }
-            $stmt = $pdo->prepare("DELETE FROM products WHERE id = ?");
-            $stmt->execute([$id]);
+            $pdo->beginTransaction();
+            try {
+                $stmt = $pdo->prepare("DELETE FROM products WHERE id = ?");
+                $pdo->prepare("DELETE FROM item_classifications WHERE entity_type='product' AND entity_id=?")->execute([$id]);
+                $stmt->execute([$id]);
+                if($stmt->rowCount()===0){$pdo->rollBack();jsonError('Product not found',404);}
+                $pdo->commit();
+            } catch(Throwable $e) { if($pdo->inTransaction())$pdo->rollBack(); throw $e; }
             if ($stmt->rowCount() === 0) {
                 jsonError('Product not found', 404);
             }

@@ -18,11 +18,33 @@ class NotificationService
         $this->config = require dirname(__DIR__, 2) . '/backend/config/config.php';
     }
 
-    public function notify(int $userId, string $type, string $title, ?string $body = null, string $channel = 'dashboard'): int
+    public function notify(int $userId, string $type, string $title, ?string $body = null, string $channel = 'dashboard', ?string $targetType = null, ?int $targetId = null): int
     {
-        $this->pdo->prepare("INSERT INTO notifications (user_id, type, channel, title, body) VALUES (?,?,?,?,?)")
-            ->execute([$userId, $type, $channel, $title, $body]);
+        if ($this->tableHasColumn('notifications', 'target_type') && $this->tableHasColumn('notifications', 'target_id')) {
+            $this->pdo->prepare("INSERT INTO notifications (user_id, type, channel, title, body, target_type, target_id) VALUES (?,?,?,?,?,?,?)")
+                ->execute([$userId, $type, $channel, $title, $body, $targetType, $targetId]);
+        } else {
+            $this->pdo->prepare("INSERT INTO notifications (user_id, type, channel, title, body) VALUES (?,?,?,?,?)")
+                ->execute([$userId, $type, $channel, $title, $body]);
+        }
         return (int) $this->pdo->lastInsertId();
+    }
+
+    private function tableHasColumn(string $table, string $column): bool
+    {
+        static $cache=[];$key=$table.'.'.$column;if(array_key_exists($key,$cache))return $cache[$key];
+        if(!preg_match('/^[A-Za-z0-9_]+$/',$table)||!preg_match('/^[A-Za-z0-9_]+$/',$column))return false;
+        try{$stmt=$this->pdo->prepare("SHOW COLUMNS FROM `$table` LIKE ?");$stmt->execute([$column]);return $cache[$key]=(bool)$stmt->fetch();}catch(Throwable $e){return $cache[$key]=false;}
+    }
+
+    private function targetFromContext(array $context): array
+    {
+        $type=trim((string)($context['target_type']??''));$id=(int)($context['target_id']??0);
+        if($type!==''&&$id>0)return[$type,$id];
+        foreach(['order_id'=>'order','receipt_id'=>'receiving_record','shipment_draft_id'=>'shipment_draft','container_id'=>'container','customer_id'=>'customer','supplier_id'=>'supplier','supplier_payment_id'=>'supplier_payment','balance_transaction_id'=>'balance_transaction'] as $key=>$mapped){
+            if(!empty($context[$key]))return[$mapped,(int)$context[$key]];
+        }
+        return[null,null];
     }
 
     /** Check if user has channel+event enabled (default true when no pref) */
@@ -121,6 +143,7 @@ class NotificationService
     /** Notify all admins with channel dispatch (dashboard, email, whatsapp) */
     public function notifyAdmins(string $eventType, string $title, ?string $body = null, array $context = []): void
     {
+        [$targetType,$targetId]=$this->targetFromContext($context);
         $channels = $this->config['notification_channels'] ?? ['dashboard'];
         $stmt = $this->pdo->query("SELECT DISTINCT u.id, u.email FROM users u
             JOIN user_roles ur ON u.id = ur.user_id
@@ -129,7 +152,7 @@ class NotificationService
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
             $uid = (int) $row['id'];
             $email = $row['email'] ?? '';
-            $nid = $this->notify($uid, $eventType, $title, $body, 'dashboard');
+            $nid = $this->notify($uid, $eventType, $title, $body, 'dashboard', $targetType, $targetId);
             $payload = json_encode(['title' => $title, 'body' => $body, 'event' => $eventType]);
             $payloadHash = hash('sha256', $payload . $uid);
 
@@ -192,7 +215,7 @@ class NotificationService
 
     public function notifyOrderCreated(int $orderId, int $userId): void
     {
-        $this->notify($userId, 'order_created', 'Order #' . $orderId . ' created', 'New order has been created.');
+        $this->notify($userId, 'order_created', 'Order #' . $orderId . ' created', 'New order has been created.', 'dashboard', 'order', $orderId);
     }
 
     public function notifyOrderSubmitted(int $orderId): void

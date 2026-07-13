@@ -2,6 +2,7 @@
 require_once __DIR__ . '/includes/i18n.php';
 require 'backend/config/database.php';
 require_once __DIR__ . '/includes/sidebar_permissions.php';
+require_once __DIR__ . '/backend/services/AuthenticationService.php';
 
 function normalizeLoginIdentifier(string $value): string
 {
@@ -20,21 +21,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $pass = $_POST['password'] ?? '';
   if ($email && $pass) {
     $pdo = getDb();
-    $stmt = $pdo->prepare("SELECT id, email, password_hash, full_name FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM(?)) AND is_active = 1 LIMIT 1");
-    $stmt->execute([$email]);
-    $user = $stmt->fetch(PDO::FETCH_ASSOC);
-    if ($user && password_verify($pass, $user['password_hash'])) {
-      $_SESSION['user_id'] = (int) $user['id'];
-      $_SESSION['user_name'] = $user['full_name'];
-      $roleStmt = $pdo->prepare("SELECT r.code FROM roles r JOIN user_roles ur ON r.id = ur.role_id WHERE ur.user_id = ?");
-      $roleStmt->execute([$user['id']]);
-      $_SESSION['user_roles'] = array_column($roleStmt->fetchAll(PDO::FETCH_ASSOC), 'code');
+    $appEnv = strtolower(trim((string) (getenv('APP_ENV') ?: ($_ENV['APP_ENV'] ?? 'production'))));
+    try {
+      $user = (new AuthenticationService($pdo))->login($email, (string) $pass, (string) ($_SERVER['REMOTE_ADDR'] ?? ''), $appEnv);
+      session_regenerate_id(true);
+      $_SESSION['user_id'] = $user['user_id'];
+      $_SESSION['user_name'] = $user['name'];
+      $_SESSION['user_roles'] = $user['roles'];
       $roles = $_SESSION['user_roles'];
       header('Location: ' . clmsGetAccessibleHomeUrl($roles, $pdo));
       exit;
+    } catch (AuthenticationException $e) {
+      $error = clmsT($e->getMessage());
     }
   }
-  $error = clmsT('Invalid email/username or password');
+  if (empty($error)) $error = clmsT('Invalid email/username or password');
 }
 ?>
 <!DOCTYPE html>

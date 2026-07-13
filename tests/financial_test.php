@@ -8,6 +8,8 @@
 $root = dirname(__DIR__);
 require_once $root . '/backend/config/database.php';
 require_once $root . '/backend/api/helpers.php';
+require_once $root . '/backend/services/DecimalMath.php';
+require_once $root . '/backend/services/FinancialReconciliationService.php';
 
 try {
     $pdo = getDb();
@@ -87,6 +89,56 @@ test('CBM calculation: L*W*H/1000000', function () {
     if (abs($cbm - 0.06) > 0.001) throw new Exception("CBM should be 0.06, got $cbm");
     $totalCbm = $cbm * 10;
     if (abs($totalCbm - 0.6) > 0.01) throw new Exception("Total CBM should be 0.6, got $totalCbm");
+});
+
+test('DecimalMath preserves exact financial precision', function () {
+    $line = DecimalMath::multiply('3.0000', '0.1000');
+    $remaining = DecimalMath::subtract($line, '0.1000');
+    $roundedPositive = DecimalMath::multiply('12.3456', '0.1400');
+    $roundedNegative = DecimalMath::round('-1.23455');
+    if ($line !== '0.3000' || $remaining !== '0.2000' || $roundedPositive !== '1.7284' || $roundedNegative !== '-1.2346') {
+        throw new Exception("Unexpected exact decimal result: $line / $remaining");
+    }
+});
+
+test('Order financial reconciliation traces customer, supplier, and inventory sources', function () use ($pdo) {
+    $customerId = (int) $pdo->query('SELECT id FROM customers ORDER BY id LIMIT 1')->fetchColumn();
+    $supplierId = (int) $pdo->query('SELECT id FROM suppliers ORDER BY id LIMIT 1')->fetchColumn();
+    $userId = (int) $pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn();
+    if (!$customerId || !$supplierId || !$userId) throw new Exception('Seed customer, supplier, or user is missing');
+    $orderId = 0;
+    try {
+        $pdo->prepare("INSERT INTO orders (customer_id,supplier_id,expected_ready_date,status,currency,created_by) VALUES (?,?,CURDATE(),'Approved','USD',?)")
+            ->execute([$customerId,$supplierId,$userId]);
+        $orderId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO order_items (order_id,supplier_id,quantity,unit,sell_price,buy_price,description_en) VALUES (?,?,3,'pieces',0.1000,0.0700,'Exact reconciliation item')")
+            ->execute([$orderId,$supplierId]);
+        $pdo->prepare("INSERT INTO customer_deposits (customer_id,order_id,amount,currency,payment_method,created_by) VALUES (?,?,0.1000,'USD','Cash',?)")
+            ->execute([$customerId,$orderId,$userId]);
+        $depositId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO supplier_payments (supplier_id,order_id,amount,currency,payment_type,invoice_amount,discount_amount) VALUES (?,?,0.1000,'USD','partial',0.2100,0.0000)")
+            ->execute([$supplierId,$orderId]);
+        $supplierPaymentId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO warehouse_receipts (order_id,actual_cartons,actual_cbm,actual_weight,receipt_condition,received_by,receiving_operation_id) VALUES (?,3,0.0300,2.5000,'good',?,?)")
+            ->execute([$orderId,$userId,'financial-reconcile-' . $orderId]);
+        $receiptId = (int) $pdo->lastInsertId();
+
+        $report = (new FinancialReconciliationService($pdo))->reconcileOrder($orderId);
+        if (($report['customer']['order_sell_value'] ?? '') !== '0.3000') throw new Exception('Customer order value did not reconcile to 0.3000');
+        if (($report['customer']['reconciled_due_in_order_currency'] ?? '') !== '0.2000') throw new Exception('Customer remaining due did not reconcile to 0.2000');
+        $supplier = $report['suppliers']['linked_payment_ledger'][0] ?? [];
+        if (($supplier['balance'] ?? '') !== '0.1100') throw new Exception('Supplier remaining balance did not reconcile to 0.1100');
+        if (($report['inventory']['active_receipts']['actual_cbm'] ?? '') !== '0.0300') throw new Exception('Receipt source was not traced');
+    } finally {
+        if ($orderId) {
+            $pdo->exec("DELETE FROM warehouse_receipts WHERE order_id=$orderId");
+            $pdo->exec("DELETE FROM supplier_payments WHERE order_id=$orderId");
+            $pdo->exec("DELETE FROM customer_deposits WHERE order_id=$orderId");
+            $pdo->exec("DELETE FROM balance_transactions WHERE order_id=$orderId");
+            $pdo->exec("DELETE FROM order_items WHERE order_id=$orderId");
+            $pdo->exec("DELETE FROM orders WHERE id=$orderId");
+        }
+    }
 });
 
 echo "\nTotal: $passed passed, $failed failed\n";

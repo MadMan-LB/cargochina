@@ -1,4 +1,6 @@
 let searchTimeout = null;
+let customerOffset = 0;
+const customerPageSize = 50;
 let customerPaymentLinks = [];
 let customerCountryShipping = [];
 let customerPorValues = [];
@@ -64,15 +66,22 @@ function updateCustomerAttachmentUi() {
 
 document.addEventListener("DOMContentLoaded", () => {
     loadCustomers();
+    const exactCustomerId = new URLSearchParams(window.location.search).get("customer_id");
+    if (exactCustomerId && /^\d+$/.test(exactCustomerId) && canManageCustomers()) {
+        editCustomer(parseInt(exactCustomerId, 10));
+    }
     setCustomerSaveState(false);
     updateCustomerAttachmentUi();
     const searchInput = document.getElementById("customerSearch");
     if (searchInput) {
         searchInput.addEventListener("input", () => {
             clearTimeout(searchTimeout);
+            customerOffset = 0;
             searchTimeout = setTimeout(loadCustomers, 250);
         });
     }
+    document.getElementById("customerPrevPage")?.addEventListener("click", () => { customerOffset = Math.max(0, customerOffset - customerPageSize); loadCustomers(); });
+    document.getElementById("customerNextPage")?.addEventListener("click", () => { customerOffset += customerPageSize; loadCustomers(); });
 });
 
 function esc(s) {
@@ -88,9 +97,12 @@ async function loadCustomers() {
     try {
         const q =
             document.getElementById("customerSearch")?.value?.trim() || "";
-        const path = q ? "/customers?q=" + encodeURIComponent(q) : "/customers";
+        const params = new URLSearchParams({ limit: String(customerPageSize), offset: String(customerOffset) });
+        if (q) params.set("q", q);
+        const path = "/customers?" + params.toString();
         const res = await api("GET", path);
         const rows = res.data || [];
+        const meta = res.meta || {};
         const manageActionsEnabled = canManageCustomers();
         const messageActionsEnabled = canMessageCustomers();
         const portalActionsEnabled = canGeneratePortalLinks();
@@ -118,6 +130,12 @@ async function loadCustomers() {
                 )
                 .join("") ||
             '<tr><td colspan="6" class="text-muted py-4">No customers found. Add one or search differently.</td></tr>';
+        const prev = document.getElementById("customerPrevPage");
+        const next = document.getElementById("customerNextPage");
+        if (prev) prev.disabled = customerOffset === 0;
+        if (next) next.disabled = !meta.has_more;
+        const summary = document.getElementById("customerPageSummary");
+        if (summary) summary.textContent = rows.length ? `${customerOffset + 1}–${customerOffset + rows.length}` : "0 results";
     } catch (e) {
         showToast(e.message, "danger");
     }

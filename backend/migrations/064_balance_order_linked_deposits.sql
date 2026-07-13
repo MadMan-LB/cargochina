@@ -76,7 +76,11 @@ SET @has_type_check := (
 );
 SET @sql := IF(
   @has_type_check > 0,
-  'ALTER TABLE balance_transactions DROP CONSTRAINT chk_balance_tx_type',
+  IF(
+    LOCATE('MariaDB', VERSION()) > 0,
+    'ALTER TABLE balance_transactions DROP CONSTRAINT chk_balance_tx_type',
+    'ALTER TABLE balance_transactions DROP CHECK chk_balance_tx_type'
+  ),
   'DO 0'
 );
 PREPARE stmt FROM @sql;
@@ -84,5 +88,4 @@ EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
 ALTER TABLE balance_transactions
-  ADD CONSTRAINT chk_balance_tx_type
-  CHECK (transaction_type IN ('payment_received', 'payment_sent', 'deposit', 'invoice', 'adjustment', 'refund', 'other'));
+  MODIFY COLUMN transaction_type ENUM('payment_received', 'payment_sent', 'deposit', 'invoice', 'adjustment', 'refund', 'other') NOT NULL;

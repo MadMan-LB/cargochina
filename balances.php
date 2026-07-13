@@ -152,6 +152,7 @@ require 'includes/layout.php';
             <tbody id="customerBalancesBody"></tbody>
           </table>
         </div>
+        <div class="d-flex justify-content-between align-items-center mt-3"><button class="btn btn-outline-secondary btn-sm" id="customerBalancesPrevBtn" type="button"><?= htmlspecialchars(clmsT('Previous')) ?></button><span class="small text-muted" id="customerBalancesPageSummary"><?= htmlspecialchars(clmsT('Page 1')) ?></span><button class="btn btn-outline-secondary btn-sm" id="customerBalancesNextBtn" type="button"><?= htmlspecialchars(clmsT('Next')) ?></button></div>
       </div>
     </div>
   </div>
@@ -181,6 +182,7 @@ require 'includes/layout.php';
             <tbody id="supplierBalancesBody"></tbody>
           </table>
         </div>
+        <div class="d-flex justify-content-between align-items-center mt-3"><button class="btn btn-outline-secondary btn-sm" id="supplierBalancesPrevBtn" type="button"><?= htmlspecialchars(clmsT('Previous')) ?></button><span class="small text-muted" id="supplierBalancesPageSummary"><?= htmlspecialchars(clmsT('Page 1')) ?></span><button class="btn btn-outline-secondary btn-sm" id="supplierBalancesNextBtn" type="button"><?= htmlspecialchars(clmsT('Next')) ?></button></div>
       </div>
     </div>
   </div>
@@ -213,6 +215,7 @@ require 'includes/layout.php';
             <tbody id="transactionsBody"></tbody>
           </table>
         </div>
+        <div class="d-flex justify-content-between align-items-center mt-3"><button class="btn btn-outline-secondary btn-sm balanceTxPrevBtn" type="button"><?= htmlspecialchars(clmsT('Previous')) ?></button><span class="small text-muted balanceTxPageSummary"><?= htmlspecialchars(clmsT('Page 1')) ?></span><button class="btn btn-outline-secondary btn-sm balanceTxNextBtn" type="button"><?= htmlspecialchars(clmsT('Next')) ?></button></div>
       </div>
     </div>
   </div>
@@ -274,6 +277,7 @@ require 'includes/layout.php';
         </div>
       </div>
     </div>
+    <div class="d-flex justify-content-between align-items-center"><button class="btn btn-outline-secondary btn-sm balanceTxPrevBtn" type="button"><?= htmlspecialchars(clmsT('Previous')) ?></button><span class="small text-muted balanceTxPageSummary"><?= htmlspecialchars(clmsT('Page 1')) ?></span><button class="btn btn-outline-secondary btn-sm balanceTxNextBtn" type="button"><?= htmlspecialchars(clmsT('Next')) ?></button></div>
   </div>
 </div>
 

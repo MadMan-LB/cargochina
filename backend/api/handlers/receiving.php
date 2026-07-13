@@ -72,7 +72,7 @@ function receivingUtf8LikeExpr(string $expr): string
     return "CONVERT($expr USING utf8mb4) COLLATE utf8mb4_unicode_ci";
 }
 
-function receivingFetchQueueRowsForRequest(PDO $pdo): array
+function receivingFetchQueueRowsForRequest(PDO $pdo, bool $paginate = true, ?array &$meta = null): array
 {
     $statuses = $_GET['status'] ?? null;
     if (!$statuses) {
@@ -86,6 +86,7 @@ function receivingFetchQueueRowsForRequest(PDO $pdo): array
     $dateFrom = $_GET['date_from'] ?? null;
     $dateTo = $_GET['date_to'] ?? null;
     $shippingCode = trim($_GET['shipping_code'] ?? '');
+    $itemType = clmsNormalizeItemTypeFilter($_GET['item_type'] ?? null);
 
     $placeholders = implode(',', array_fill(0, count($statuses), '?'));
     $custCols = 'c.name as customer_name';
@@ -132,11 +133,19 @@ function receivingFetchQueueRowsForRequest(PDO $pdo): array
         $sql .= " AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND (" . implode(' OR ', $queueItemClauses) . "))";
         array_push($params, ...$queueItemParams);
     }
-    $sql .= " ORDER BY o.expected_ready_date IS NULL ASC, o.expected_ready_date ASC, o.id ASC LIMIT 200";
+    if ($itemType !== null && receivingTableExists($pdo, 'item_classifications')) {
+        $sql .= " AND EXISTS (SELECT 1 FROM order_items oit JOIN item_classifications ict ON ict.entity_type='order_item' AND ict.entity_id=oit.id WHERE oit.order_id=o.id AND ict.item_type_code=?)";
+        $params[] = $itemType;
+    }
+    $limit=clmsQueryLimit($_GET['limit']??null,50,200);$offset=clmsQueryOffset($_GET['offset']??null);
+    $sql .= " ORDER BY o.expected_ready_date IS NULL ASC, o.expected_ready_date ASC, o.id ASC";
+    if($paginate)$sql.=' LIMIT '.($limit+1).' OFFSET '.$offset;
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $hasMore=$paginate&&count($rows)>$limit;if($hasMore)$rows=array_slice($rows,0,$limit);
+    $meta=['limit'=>$limit,'offset'=>$offset,'has_more'=>$hasMore];
     if (!$rows) {
         return [];
     }
@@ -161,7 +170,9 @@ function receivingFetchQueueRowsForRequest(PDO $pdo): array
     $itemsByOrder = [];
     if ($orderIds) {
         $itemPlaceholders = implode(',', array_fill(0, count($orderIds), '?'));
-        $items = $pdo->prepare("SELECT oi.order_id, oi.id, oi.shipping_code$itemMetaCols, oi.cartons, oi.qty_per_carton, oi.quantity, oi.unit_price, oi.total_amount, oi.declared_cbm, oi.declared_weight, oi.item_length, oi.item_width, oi.item_height, oi.description_cn, oi.description_en$itemHsCol$itemAlertCol FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id IN ($itemPlaceholders) ORDER BY oi.order_id ASC, oi.id ASC");
+        $classificationSelect = receivingTableExists($pdo, 'item_classifications') ? ', ic.item_type_code, ic.confidence as item_type_confidence, ic.is_confirmed as item_type_confirmed' : '';
+        $classificationJoin = receivingTableExists($pdo, 'item_classifications') ? " LEFT JOIN item_classifications ic ON ic.entity_type='order_item' AND ic.entity_id=oi.id" : '';
+        $items = $pdo->prepare("SELECT oi.order_id, oi.id, oi.shipping_code$itemMetaCols, oi.cartons, oi.qty_per_carton, oi.quantity, oi.unit_price, oi.total_amount, oi.declared_cbm, oi.declared_weight, oi.item_length, oi.item_width, oi.item_height, oi.description_cn, oi.description_en$itemHsCol$itemAlertCol$classificationSelect FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id$classificationJoin WHERE oi.order_id IN ($itemPlaceholders) ORDER BY oi.order_id ASC, oi.id ASC");
         $items->execute($orderIds);
         foreach ($items->fetchAll(PDO::FETCH_ASSOC) as $item) {
             $oid = (int) ($item['order_id'] ?? 0);
@@ -546,7 +557,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     }
 
     if ($id === 'export' && $action === 'queue') {
-        $rows = receivingFetchQueueRowsForRequest($pdo);
+        $rows = receivingFetchQueueRowsForRequest($pdo,false);
         $format = strtolower(trim((string) ($_GET['format'] ?? 'xlsx')));
         if ($format === 'csv') {
             receivingOutputQueueCsv($rows);
@@ -559,7 +570,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     }
 
     if ($id === 'queue') {
-        jsonResponse(['data' => receivingFetchQueueRowsForRequest($pdo)]);
+        $queueMeta=[];$queueRows=receivingFetchQueueRowsForRequest($pdo,true,$queueMeta);
+        jsonResponse(['data' => $queueRows,'meta'=>$queueMeta]);
     }
 
     if ($id === 'receipts') {

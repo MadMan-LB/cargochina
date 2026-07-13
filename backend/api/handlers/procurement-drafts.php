@@ -12,29 +12,9 @@ function procurementDraftCopyNormalGoodsDisplay($value): string
     $raw = trim((string) ($value ?? ''));
     return match (strtolower($raw)) {
         'copy' => clmsT('Copy Goods'),
-        'dangerous' => clmsT('Dangerous Goods'),
         'normal' => clmsT('Normal Goods'),
         default => $raw,
     };
-}
-
-function procurementDraftNormalizeGoodType($value): ?string
-{
-    $raw = trim((string) ($value ?? ''));
-    if ($raw === '') {
-        return null;
-    }
-    $normalized = strtolower(preg_replace('/[\s_\-\/]+/u', '', $raw) ?? '');
-    if (in_array($normalized, ['copy', 'copygoods', 'replica', '仿牌', '仿货'], true)) {
-        return 'Copy';
-    }
-    if (in_array($normalized, ['dangerous', 'dangerousgoods', 'hazmat', 'hazardous', 'hazardousgoods', 'dg', '危险品', '危险货'], true)) {
-        return 'Dangerous';
-    }
-    if (in_array($normalized, ['normal', 'normalgoods', 'regular', '普通货', '常规货'], true)) {
-        return 'Normal';
-    }
-    return substr($raw, 0, 60);
 }
 
 function procurementDraftOutputCsv(array $draft, array $items, string $filename): void
@@ -49,7 +29,7 @@ function procurementDraftOutputCsv(array $draft, array $items, string $filename)
     fputcsv($out, [clmsT('Supplier'), (string) ($draft['supplier_name'] ?? '')]);
     fputcsv($out, [clmsT('Status'), clmsStatusLabel((string) ($draft['status'] ?? ''))]);
     fputcsv($out, ['']);
-    fputcsv($out, array_map('clmsT', ['What Brand', 'Good Type', 'Code', 'Line', 'Product / Names', 'Notes', 'Quantity', 'Factory Price', 'Customer Price', 'Total Amount', 'CBM Total', 'Weight Total', 'Express Number', 'Size', 'Photo Count']));
+    fputcsv($out, array_map('clmsT', ['What Brand', 'Copy / Normal Goods', 'Code', 'Line', 'Product / Names', 'Notes', 'Quantity', 'Factory Price', 'Customer Price', 'Total Amount', 'CBM Total', 'Weight Total', 'Express Number', 'Size', 'Photo Count']));
     foreach ($items as $index => $item) {
         $qty = (float) ($item['quantity'] ?? 0);
         $cbm = (float) ($item['cbm'] ?? 0);
@@ -145,9 +125,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 foreach ($itemMetadataCols as $column) {
                     $limit = $column === 'copy_normal_goods' ? 60 : ($column === 'code' ? 100 : 150);
                     $value = trim((string) ($it[$column] ?? ''));
-                    $params[] = $column === 'copy_normal_goods'
-                        ? procurementDraftNormalizeGoodType($value)
-                        : ($value !== '' ? substr($value, 0, $limit) : null);
+                    $params[] = $value !== '' ? substr($value, 0, $limit) : null;
                 }
                 if ($hasItemSupplier) $params[] = $supplierId;
                 $insItem->execute($params);

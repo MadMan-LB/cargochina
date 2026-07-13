@@ -3,8 +3,11 @@ import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 
 const baseUrl = process.env.CLMS_BASE_URL || "http://localhost/cargochina";
-const email = process.env.CLMS_EMAIL || "admin@salameh.com";
-const password = process.env.CLMS_PASSWORD || "password";
+const email = process.env.CLMS_EMAIL;
+const password = process.env.CLMS_PASSWORD;
+if (!email || !password) {
+    throw new Error("CLMS_EMAIL and CLMS_PASSWORD are required for UI smoke checks");
+}
 const headed = process.env.CLMS_HEADED === "1";
 
 mkdirSync("output/playwright", { recursive: true });
@@ -220,16 +223,20 @@ async function checkContainers(page) {
         "Container view action missing",
     );
     await page.locator(".js-view-container").first().click();
-    await expectVisible(
-        page,
-        "#containerViewModal .order-info-stat-card",
-        "Container totals summary missing from view modal",
-    );
-    await expectVisible(
-        page,
-        "#containerViewModal table tfoot",
-        "Container totals footer missing from view modal",
-    );
+    await expectVisible(page, "#containerViewModal", "Container view modal missing");
+    const modalText = (await page.locator("#containerViewModal .modal-body").textContent()) || "";
+    if (!modalText.includes("No orders are assigned")) {
+        await expectVisible(
+            page,
+            "#containerViewModal .order-info-stat-card",
+            "Container totals summary missing from populated view modal",
+        );
+        await expectVisible(
+            page,
+            "#containerViewModal table tfoot",
+            "Container totals footer missing from populated view modal",
+        );
+    }
     await page.locator("#containerViewModal .btn-close").click();
     await page.waitForSelector("#containerViewModal", {
         state: "hidden",
@@ -281,12 +288,82 @@ async function checkProcurementDrafts(page) {
         "#draftOrderSections",
         "Draft order supplier sections missing",
     );
+    const itemNumber = page.locator(".draft-item-item-no").first();
+    await expectVisible(page, ".draft-item-item-no", "Draft item number field missing");
+    assert.equal(await itemNumber.isEditable(), true, "Draft item number is not editable");
+    await itemNumber.focus();
+    assert.equal(await itemNumber.evaluate((el) => el === document.activeElement), true, "Draft item number cannot receive keyboard focus");
+    await itemNumber.fill("ITEM-015");
+    assert.equal(await itemNumber.inputValue(), "ITEM-015", "Typing/replacing item number failed");
+    await itemNumber.evaluate((el) => {
+        el.value = "PASTED-007";
+        el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertFromPaste", data: "PASTED-007" }));
+    });
+    assert.equal(await itemNumber.inputValue(), "PASTED-007", "Pasting item number failed");
+    await itemNumber.fill("");
+    assert.equal(await itemNumber.inputValue(), "", "Clearing item number failed");
+    const removeItem = page.locator('#draftOrderModal [data-builder-action="remove-item"]').first();
+    if (await removeItem.count()) {
+        page.once("dialog", (dialog) => dialog.dismiss());
+        await removeItem.click();
+        assert.ok(await page.locator("#draftOrderModal .draft-order-item-card").count(), "Dismissed destructive confirmation removed the item");
+    }
+    for (const viewport of [
+        { width: 1366, height: 768, label: "laptop" },
+        { width: 1024, height: 768, label: "tablet landscape" },
+        { width: 768, height: 900, label: "tablet" },
+        { width: 390, height: 844, label: "mobile" },
+        { width: 320, height: 568, label: "narrow mobile" },
+    ]) {
+        await page.setViewportSize(viewport);
+        const actionOverflow = await page.locator("#draftOrderModal .draft-section-actions").first().evaluate((el) => el.scrollWidth > el.clientWidth + 1);
+        assert.equal(actionOverflow, false, `Draft section actions overflow on ${viewport.label}`);
+        const footerButtonsUsable = await page.locator("#draftOrderModal .draft-modal-actions").evaluate((footer) => {
+            const bounds = footer.getBoundingClientRect();
+            return Array.from(footer.querySelectorAll("button")).every((button) => {
+                const rect = button.getBoundingClientRect();
+                return rect.width >= 44 && rect.height >= 34 && rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1;
+            });
+        });
+        assert.equal(footerButtonsUsable, true, `Draft footer actions are inaccessible on ${viewport.label}`);
+    }
+    await page.setViewportSize({ width: 1440, height: 1100 });
     await page.locator("#draftOrderModal .btn-close").click();
     await page.waitForSelector("#draftOrderModal", {
         state: "hidden",
         timeout: 15000,
     });
     log("PASS procurement_drafts");
+}
+
+async function checkNotifications(page) {
+    await openPage(page, "/notifications.php");
+    await expectVisible(page, "#notificationsList", "Notifications list missing");
+    const cards = page.locator(".notification-card");
+    if (await cards.count()) {
+        const viewButtons = page.getByRole("button", { name: "View" });
+        const unavailableButtons = page.getByRole("button", { name: "Unavailable" });
+        assert.ok((await viewButtons.count()) + (await unavailableButtons.count()) > 0, "Notification target action missing");
+        if (await viewButtons.count()) {
+            const notificationId = await viewButtons.first().evaluate((el) => el.closest(".notification-card")?.dataset.notificationId || "");
+            const before = page.url();
+            await viewButtons.first().click();
+            await page.waitForFunction((url) => window.location.href !== url, before, { timeout: 15000 });
+            assert.match(page.url(), /\?(?:[^#]*&)?(?:order_id|legacy_draft_id|shipment_draft_id|container_id|receipt_id|customer_id|supplier_id|transaction_id)=\d+/, "Notification View did not open an exact internal target");
+            await openPage(page, "/notifications.php");
+            if (notificationId) {
+                const targetCard = page.locator(`.notification-card[data-notification-id="${notificationId}"]`);
+                await expectVisible(page, `.notification-card[data-notification-id="${notificationId}"]`, "Opened notification disappeared from history");
+                assert.equal(await targetCard.evaluate((el) => el.classList.contains("bg-light")), false, "Opening a notification did not update its read state");
+                const rowStart = page.url();
+                await targetCard.locator("strong").click();
+                await page.waitForFunction((url) => window.location.href !== url, rowStart, { timeout: 15000 });
+                assert.match(page.url(), /\?(?:[^#]*&)?(?:order_id|legacy_draft_id|shipment_draft_id|container_id|receipt_id|customer_id|supplier_id|transaction_id)=\d+/, "Clickable notification row did not open the exact target");
+                await openPage(page, "/notifications.php");
+            }
+        }
+    }
+    log("PASS notifications");
 }
 
 async function checkCustomers(page) {
@@ -501,7 +578,42 @@ async function checkPageLoads(page, path, selector, label) {
     log(`PASS ${label}`);
 }
 
-const browser = await chromium.launch({ headless: !headed });
+async function checkChineseParity(page) {
+    for (const [path, selector, label] of [
+        ["/orders.php?ui_lang=zh-CN", "#ordersTable", "orders"],
+        ["/customers.php?ui_lang=zh-CN", "#customersTable", "customers"],
+        ["/suppliers.php?ui_lang=zh-CN", "#suppliersTable", "suppliers"],
+        ["/receiving.php?ui_lang=zh-CN", "#receivingPage", "receiving"],
+        ["/warehouse_stock.php?ui_lang=zh-CN", "#stockTableBody", "warehouse stock"],
+        ["/balances.php?ui_lang=zh-CN", "#customerBalancesBody", "balances"],
+        ["/procurement_drafts.php?ui_lang=zh-CN", "#draftOrdersTable", "procurement drafts"],
+        ["/notifications.php?ui_lang=zh-CN", "#notificationsList", "notifications"],
+    ]) {
+        await openPage(page, path);
+        assert.equal(await page.locator("html").getAttribute("lang"), "zh-CN", `${label} did not retain Chinese locale`);
+        await expectVisible(page, selector, `${label} feature surface missing in Chinese locale`);
+    }
+    await openPage(page, "/procurement_drafts.php?ui_lang=zh-CN");
+    await page.evaluate(() => window.openDraftOrderBuilder());
+    await expectVisible(page, ".draft-item-item-no", "Chinese draft item number field missing");
+    assert.equal(await page.locator(".draft-item-item-no").first().isEditable(), true, "Chinese draft item number is not editable");
+    const chineseGuidance = ((await page.locator(".draft-item-item-no + .form-text").first().textContent()) || "").trim();
+    assert.ok(chineseGuidance && !chineseGuidance.includes("Suggested automatically"), "Chinese item-number guidance was not localized");
+    await page.locator("#draftOrderModal .btn-close").click();
+    await openPage(page, "/notifications.php?ui_lang=zh-CN");
+    const chineseView = page.locator(".notification-card-link .notification-actions .btn-primary");
+    if (await page.locator(".notification-card-link").count()) {
+        assert.ok(await chineseView.count(), "Chinese notification View label missing");
+        assert.notEqual(((await chineseView.first().textContent()) || "").trim(), "View", "Chinese notification View label remained English");
+    }
+    await openPage(page, "/orders.php?ui_lang=en");
+    log("PASS chinese_parity");
+}
+
+const browser = await chromium.launch({
+    headless: !headed,
+    executablePath: process.env.CLMS_BROWSER_PATH || undefined,
+});
 const page = await browser.newPage({
     viewport: { width: 1440, height: 1100 },
 });
@@ -517,6 +629,7 @@ try {
     await checkContainers(page);
     await checkAssignContainer(page);
     await checkProcurementDrafts(page);
+    await checkNotifications(page);
     await checkProducts(page);
     await checkHsCodeTax(page);
     await checkReceiving(page);
@@ -526,6 +639,7 @@ try {
     await checkPageLoads(page, "/admin_tracking_push.php", "text=Tracking Push Log", "tracking_push_log");
     await checkPageLoads(page, "/buyers/index.php", "text=Buyers Dashboard", "buyers_dashboard");
     await checkPageLoads(page, "/warehouse/index.php", "text=Warehouse Dashboard", "warehouse_dashboard");
+    await checkChineseParity(page);
     await checkPageLoads(page, "/balances.php", "text=Balances", "balances_accounting");
     await checkPageLoads(page, "/customer_portal.php", "text=Customer Portal", "public_customer_portal");
     log("PASS ui smoke");

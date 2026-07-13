@@ -98,5 +98,54 @@ test('history for another prefix does not change the active shipping code sequen
     assertItemNo($numbered, 0, 'SC-1-1');
 });
 
+test('plain final number increments from 7 to 8', function () {
+    $items=[['supplier_id'=>10,'shipping_code'=>'SC','item_no'=>'7','item_no_source'=>'manual'],['supplier_id'=>10,'shipping_code'=>'SC']];
+    $numbered=OrderItemNumberingService::assignItemNumbers($items,'SC');
+    assertItemNo($numbered,0,'7');assertItemNo($numbered,1,'8');
+});
+
+test('manual change from 8 to 15 drives the following suggestion to 16', function () {
+    $items=[['supplier_id'=>10,'shipping_code'=>'SC','item_no'=>'15','item_no_source'=>'manual'],['supplier_id'=>10,'shipping_code'=>'SC']];
+    $numbered=OrderItemNumberingService::assignItemNumbers($items,'SC');
+    assertItemNo($numbered,0,'15');assertItemNo($numbered,1,'16');
+});
+
+test('prefix and zero padding are retained', function () {
+    $items=[['supplier_id'=>10,'shipping_code'=>'SC','item_no'=>'ITEM-007','item_no_source'=>'manual'],['supplier_id'=>10,'shipping_code'=>'SC']];
+    $numbered=OrderItemNumberingService::assignItemNumbers($items,'SC');
+    assertItemNo($numbered,1,'ITEM-008');
+});
+
+test('manual clearing is preserved and does not regenerate the current row', function () {
+    $items=[['supplier_id'=>10,'shipping_code'=>'SC','item_no'=>null,'item_no_source'=>'manual']];
+    $numbered=OrderItemNumberingService::assignItemNumbers($items,'SC');
+    if(($numbered[0]['item_no']??null)!==null)throw new Exception('Cleared manual value was regenerated');
+});
+
+test('imported formatting is preserved byte for byte', function () {
+    $value='MiXeD_ITEM-007';
+    $items=[['supplier_id'=>10,'shipping_code'=>'SC','item_no'=>$value,'item_no_source'=>'imported']];
+    $numbered=OrderItemNumberingService::assignItemNumbers($items,'SC');
+    assertItemNo($numbered,0,$value);
+});
+
+test('supplier scopes continue independently when returning to a prior supplier', function () {
+    $items=[
+        ['supplier_id'=>10,'shipping_code'=>'SC','item_no'=>'SC-1-7','item_no_source'=>'manual'],
+        ['supplier_id'=>20,'shipping_code'=>'SC','item_no'=>'SC-2-3','item_no_source'=>'manual'],
+        ['supplier_id'=>10,'shipping_code'=>'SC'],
+        ['supplier_id'=>20,'shipping_code'=>'SC'],
+    ];
+    $numbered=OrderItemNumberingService::assignItemNumbers($items,'SC');
+    assertItemNo($numbered,2,'SC-1-8');assertItemNo($numbered,3,'SC-2-4');
+});
+
+test('collision advances until an available suggestion is found', function () {
+    $history=[['supplier_id'=>10,'shipping_code'=>'SC','item_no'=>'ITEM-008']];
+    $items=[['supplier_id'=>10,'shipping_code'=>'SC','item_no'=>'ITEM-007','item_no_source'=>'manual'],['supplier_id'=>10,'shipping_code'=>'SC']];
+    $numbered=OrderItemNumberingService::assignItemNumbers($items,'SC',null,$history);
+    assertItemNo($numbered,1,'ITEM-009');
+});
+
 echo "\nTotal: $passed passed, $failed failed\n";
 exit($failed > 0 ? 1 : 0);

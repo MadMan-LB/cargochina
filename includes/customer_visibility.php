@@ -157,7 +157,10 @@ function clmsCustomerVisibilityClause(PDO $pdo, string $customerAlias = 'c', ?in
     }
     $placeholders = implode(',', array_fill(0, count($creatorIds), '?'));
     return [
-        'sql' => "($customerAlias.created_by IN ($placeholders) OR $customerAlias.created_by IS NULL OR $customerAlias.created_by = 0)",
+        // Legacy rows without an attributable creator are intentionally not
+        // exposed through customer management. Operational lookup has a
+        // separate minimal-data policy and remains available to authorized roles.
+        'sql' => "$customerAlias.created_by IN ($placeholders)",
         'params' => $creatorIds,
         'is_all' => false,
     ];

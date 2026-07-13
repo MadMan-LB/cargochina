@@ -6,6 +6,7 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
+require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
 
 function warehouseStockHasColumn(PDO $pdo, string $table, string $column): bool
 {
@@ -24,43 +25,12 @@ function warehouseStockHasColumn(PDO $pdo, string $table, string $column): bool
     return $cache[$key];
 }
 
-function warehouseStockOutputCsv(array $rows, ?string $filename = null): void
-{
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename="' . ($filename ?: ('warehouse_stock_' . date('Y-m-d') . '.csv')) . '"');
-    header('Cache-Control: no-cache, no-store, must-revalidate');
-
-    $out = fopen('php://output', 'w');
-    fputcsv($out, ['Order ID', 'Customer', 'Supplier', 'Status', 'Item', 'Shipping Code', 'Item No', 'Quantity', 'Declared CBM', 'Actual CBM', 'Actual Weight', 'Actual Height', 'Actual Width', 'Actual Length']);
-    foreach ($rows as $row) {
-        fputcsv($out, [
-            (int) ($row['order_id'] ?? 0),
-            (string) ($row['customer_name'] ?? ''),
-            (string) ($row['supplier_name'] ?? ''),
-            function_exists('clmsStatusLabel') ? clmsStatusLabel((string) ($row['status'] ?? '')) : (string) ($row['status'] ?? ''),
-            (string) (($row['description_en'] ?? '') ?: ($row['description_cn'] ?? '') ?: ($row['product_desc_en'] ?? '') ?: ($row['product_desc_cn'] ?? '')),
-            (string) ($row['shipping_code'] ?? ''),
-            (string) ($row['item_no'] ?? ''),
-            $row['quantity'] ?? null,
-            $row['declared_cbm'] ?? null,
-            $row['item_actual_cbm'] ?? $row['order_actual_cbm'] ?? null,
-            $row['item_actual_weight'] ?? $row['order_actual_weight'] ?? null,
-            $row['item_actual_height'] ?? $row['height'] ?? $row['item_height'] ?? null,
-            $row['item_actual_width'] ?? $row['width'] ?? $row['item_width'] ?? null,
-            $row['item_actual_length'] ?? $row['length'] ?? $row['item_length'] ?? null,
-        ]);
-    }
-    fclose($out);
-    exit;
-}
-
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
     if (!getAuthUserId()) jsonError('Unauthorized', 401);
     if (!hasAnyRole(['WarehouseStaff', 'ChinaAdmin', 'LebanonAdmin', 'ContainersStaff', 'SuperAdmin'])) jsonError('Forbidden', 403);
 
     if ($method !== 'GET') jsonError('Method not allowed', 405);
-    if ($id !== null && $id !== 'export') jsonError('Not found', 404);
 
     $customerId = $_GET['customer_id'] ?? null;
     $supplierId = $_GET['supplier_id'] ?? null;
@@ -72,64 +42,38 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $statusMode = strtolower(trim((string) ($_GET['status_mode'] ?? 'include')));
     $statusMode = $statusMode === 'exclude' ? 'exclude' : 'include';
     $q = trim($_GET['q'] ?? '');
+    $itemType = clmsNormalizeItemTypeFilter($_GET['item_type'] ?? null);
 
     $receiptHasVoidedAt = warehouseStockHasColumn($pdo, 'warehouse_receipts', 'voided_at');
-    $latestReceiptInnerWhere = $receiptHasVoidedAt
-        ? " WHERE voided_at IS NULL"
-        : "";
-    $latestReceiptOuterWhere = $receiptHasVoidedAt
-        ? " WHERE w.voided_at IS NULL"
-        : "";
-
-    $orderItemDimensionCols = '';
-    foreach (['item_length', 'item_width', 'item_height'] as $column) {
-        $orderItemDimensionCols .= warehouseStockHasColumn($pdo, 'order_items', $column)
-            ? ", oi.$column"
-            : ", NULL as $column";
+    $activeReceiptWhere = $receiptHasVoidedAt ? ' WHERE w.voided_at IS NULL' : '';
+    $activeReceiptItemWhere = $receiptHasVoidedAt ? ' WHERE rw.voided_at IS NULL' : '';
+    $classificationSelect = warehouseStockHasColumn($pdo, 'item_classifications', 'item_type_code') ? ', ic.item_type_code, ic.confidence AS item_type_confidence, ic.is_confirmed AS item_type_confirmed' : '';
+    $classificationJoin = warehouseStockHasColumn($pdo, 'item_classifications', 'item_type_code') ? " LEFT JOIN item_classifications ic ON ic.entity_type='order_item' AND ic.entity_id=oi.id" : '';
+    $actualDimensionSelect = '';
+    foreach (['actual_height','actual_width','actual_length'] as $dimensionColumn) {
+        if (warehouseStockHasColumn($pdo, 'warehouse_receipt_items', $dimensionColumn)) $actualDimensionSelect .= ", MAX(wri.$dimensionColumn) AS $dimensionColumn";
     }
-    foreach (['height', 'width', 'length'] as $column) {
-        $orderItemDimensionCols .= warehouseStockHasColumn($pdo, 'order_items', $column)
-            ? ", oi.$column"
-            : ", NULL as $column";
-    }
-    $orderItemMetaCols = '';
-    foreach (['shipping_code', 'item_no'] as $column) {
-        $orderItemMetaCols .= warehouseStockHasColumn($pdo, 'order_items', $column)
-            ? ", oi.$column"
-            : ", NULL as $column";
-    }
-    $hasReceiptItems = warehouseStockHasColumn($pdo, 'warehouse_receipt_items', 'order_item_id');
-    $receiptItemCols = '';
-    foreach (['actual_cbm', 'actual_weight', 'actual_height', 'actual_width', 'actual_length'] as $column) {
-        $receiptItemCols .= ($hasReceiptItems && warehouseStockHasColumn($pdo, 'warehouse_receipt_items', $column))
-            ? ", wri.$column as item_$column"
-            : ", NULL as item_$column";
-    }
-    $receiptItemJoin = $hasReceiptItems
-        ? " LEFT JOIN warehouse_receipt_items wri ON wri.receipt_id = wr.receipt_id AND wri.order_item_id = oi.id"
-        : "";
 
     $sql = "SELECT o.id as order_id, o.customer_id, o.supplier_id, o.status, o.expected_ready_date,
         c.name as customer_name, s.name as supplier_name,
-        oi.id as item_id, oi.product_id, oi.quantity, oi.unit, oi.declared_cbm, oi.declared_weight, oi.description_cn, oi.description_en$orderItemMetaCols$orderItemDimensionCols$receiptItemCols,
+        oi.id as item_id, oi.product_id, oi.item_no, oi.shipping_code, oi.quantity, oi.unit, oi.declared_cbm, oi.declared_weight, oi.item_length, oi.item_width, oi.item_height, oi.description_cn, oi.description_en,
         p.description_cn as product_desc_cn, p.description_en as product_desc_en,
-        wr.actual_cbm as order_actual_cbm, wr.actual_weight as order_actual_weight, wr.actual_cartons as order_actual_cartons
+        wr.actual_cbm as order_actual_cbm, wr.actual_weight as order_actual_weight, wr.actual_cartons as order_actual_cartons,
+        ria.item_actual_cbm, ria.item_actual_weight, ria.item_actual_cartons, ria.item_actual_quantity, ria.actual_height AS item_actual_height, ria.actual_width AS item_actual_width, ria.actual_length AS item_actual_length$classificationSelect
         FROM orders o
         JOIN customers c ON o.customer_id = c.id
         LEFT JOIN suppliers s ON o.supplier_id = s.id
         JOIN order_items oi ON oi.order_id = o.id
-        LEFT JOIN products p ON oi.product_id = p.id
+        LEFT JOIN products p ON oi.product_id = p.id$classificationJoin
         LEFT JOIN (
-            SELECT w.id as receipt_id, w.order_id, w.actual_cbm, w.actual_weight, w.actual_cartons
-            FROM warehouse_receipts w
-            INNER JOIN (
-                SELECT order_id, MAX(id) as mid
-                FROM warehouse_receipts" . $latestReceiptInnerWhere . "
-                GROUP BY order_id
-            ) x ON w.order_id = x.order_id AND w.id = x.mid" . $latestReceiptOuterWhere . "
+            SELECT w.order_id, SUM(w.actual_cbm) actual_cbm, SUM(w.actual_weight) actual_weight, SUM(w.actual_cartons) actual_cartons
+            FROM warehouse_receipts w$activeReceiptWhere GROUP BY w.order_id
         ) wr ON wr.order_id = o.id
-        $receiptItemJoin
-        WHERE o.status IN ('ReceivedAtWarehouse','AwaitingCustomerConfirmation','Confirmed','ReadyForConsolidation')";
+        LEFT JOIN (
+            SELECT wri.order_item_id, SUM(wri.actual_cbm) item_actual_cbm, SUM(wri.actual_weight) item_actual_weight, SUM(wri.actual_cartons) item_actual_cartons, SUM(wri.actual_quantity) item_actual_quantity$actualDimensionSelect
+            FROM warehouse_receipt_items wri JOIN warehouse_receipts rw ON rw.id=wri.receipt_id$activeReceiptItemWhere GROUP BY wri.order_item_id
+        ) ria ON ria.order_item_id=oi.id
+        WHERE o.status IN ('InTransitToWarehouse','ReceivedAtWarehouse','AwaitingCustomerConfirmation','Confirmed','ReadyForConsolidation')";
     $params = [];
     if ($customerId) {
         $sql .= " AND o.customer_id = ?";
@@ -151,24 +95,31 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $params = array_merge($params, $statuses);
     }
     if ($q) {
-        $like = '%' . $q . '%';
-        $sql .= " AND (oi.description_cn LIKE ? OR oi.description_en LIKE ? OR c.name LIKE ? OR s.name LIKE ?)";
+        $like = clmsSearchLike($q);
+        $sql .= " AND (" . clmsUtf8SearchExpr('oi.description_cn') . " LIKE ? OR " . clmsUtf8SearchExpr('oi.description_en') . " LIKE ? OR " . clmsUtf8SearchExpr('c.name') . " LIKE ? OR " . clmsUtf8SearchExpr("COALESCE(s.name,'')") . " LIKE ?)";
         $params = array_merge($params, [$like, $like, $like, $like]);
     }
+    if ($itemType !== null && warehouseStockHasColumn($pdo, 'item_classifications', 'item_type_code')) {
+        $sql .= ' AND ic.item_type_code=?'; $params[] = $itemType;
+    }
     $sql .= " ORDER BY o.expected_ready_date IS NULL, o.expected_ready_date, o.id, oi.id";
+    $limit = clmsQueryLimit($_GET['limit'] ?? null, 100, 200);
+    $offset = clmsQueryOffset($_GET['offset'] ?? null);
+    if ($id !== 'export') $sql .= ' LIMIT ' . ($limit + 1) . ' OFFSET ' . $offset;
     $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
     if ($params) $stmt->execute($params);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
     if ($id === 'export') {
         $format = strtolower(trim((string) ($_GET['format'] ?? 'xlsx')));
         if ($format === 'csv') {
-            warehouseStockOutputCsv($rows);
+            header('Content-Type: text/csv; charset=utf-8');
+            header('Content-Disposition: attachment; filename="warehouse_stock_' . date('Y-m-d') . '.csv"');
+            $out=fopen('php://output','w'); fputcsv($out,['Order','Customer','Supplier','Status','Item','Description EN','Description ZH','Item Type','Quantity','Actual Quantity','Actual Cartons','Actual CBM','Actual Weight','Height','Width','Length']);
+            foreach($rows as $row) fputcsv($out,[$row['order_id'],$row['customer_name'],$row['supplier_name'],$row['status'],$row['item_id'],$row['description_en'],$row['description_cn'],$row['item_type_code']??'unclassified',$row['quantity'],$row['item_actual_quantity'],$row['item_actual_cartons'],$row['item_actual_cbm'],$row['item_actual_weight'],$row['item_actual_height'],$row['item_actual_width'],$row['item_actual_length']]);
+            fclose($out); exit;
         }
-        require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
-        (new OrderExcelService())->exportWarehouseStockSummary(
-            $rows,
-            'warehouse_stock_' . date('Y-m-d') . '.xlsx'
-        );
+        (new OrderExcelService())->exportWarehouseStockSummary($rows, 'warehouse_stock_' . date('Y-m-d') . '.xlsx');
     }
-    jsonResponse(['data' => $rows]);
+    $hasMore=count($rows)>$limit; if($hasMore)$rows=array_slice($rows,0,$limit);
+    jsonResponse(['data' => $rows, 'meta'=>['limit'=>$limit,'offset'=>$offset,'has_more'=>$hasMore]]);
 };

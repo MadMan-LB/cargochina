@@ -462,6 +462,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
     $readRoles = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'];
     $buyerRoles = ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'];
+    $managementReadRoles = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'FieldStaff', 'SuperAdmin'];
     $financeRoles = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'SuperAdmin'];
     $interactionRoles = ['ChinaAdmin', 'ChinaEmployee', 'FieldStaff', 'SuperAdmin'];
     $canViewFinancials = hasAnyRole($financeRoles);
@@ -494,54 +495,39 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 jsonResponse(['data' => ['duplicate' => findSupplierByPaymentQrContent($pdo, $content, $excludeId)]]);
             }
             if ($id === 'search') {
-                $q = trim($_GET['q'] ?? '');
+                $q = clmsNormalizeSearchQuery($_GET['q'] ?? '');
                 if (strlen($q) < 1) {
                     jsonResponse(['data' => []]);
                 }
-                $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
-                $chkAddr = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'address'");
-                $chkFactory = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'factory_location'");
-                $extra = '';
-                $extraParams = [];
-                if ($chkAddr && $chkAddr->rowCount() > 0) {
-                    $extra .= ' OR (address IS NOT NULL AND address LIKE ?)';
-                    $extraParams[] = $like;
-                }
-                if ($chkFactory && $chkFactory->rowCount() > 0) {
-                    $extra .= ' OR (factory_location IS NOT NULL AND factory_location LIKE ?)';
-                    $extraParams[] = $like;
-                }
-                if (supplierTableHasColumn($pdo, 'suppliers', 'payment_links')) {
-                    $extra .= ' OR (payment_links IS NOT NULL AND CONVERT(payment_links USING utf8mb4) COLLATE utf8mb4_unicode_ci LIKE ?)';
-                    $extraParams[] = $like;
-                }
-                $selectPaymentLinks = supplierTableHasColumn($pdo, 'suppliers', 'payment_links') ? ', payment_links' : '';
-                $stmt = $pdo->prepare("SELECT id, code, name, phone, store_id$selectPaymentLinks FROM suppliers WHERE name LIKE ? OR code LIKE ? OR (phone IS NOT NULL AND phone LIKE ?) OR (store_id IS NOT NULL AND store_id LIKE ?)$extra ORDER BY name LIMIT 15");
-                $stmt->execute(array_merge([$like, $like, $like, $like], $extraParams));
+                $like = clmsSearchLike($q);
+                // Operational selectors intentionally exclude payment accounts,
+                // notes, commissions, addresses, and interaction history.
+                $stmt = $pdo->prepare("SELECT id, code, name, phone, store_id FROM suppliers
+                    WHERE " . clmsUtf8SearchExpr('name') . " LIKE ?
+                       OR " . clmsUtf8SearchExpr('code') . " LIKE ?
+                       OR (phone IS NOT NULL AND " . clmsUtf8SearchExpr('phone') . " LIKE ?)
+                       OR (store_id IS NOT NULL AND " . clmsUtf8SearchExpr('store_id') . " LIKE ?)
+                    ORDER BY name LIMIT 15");
+                $stmt->execute([$like, $like, $like, $like]);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                foreach ($rows as &$row) {
-                    if (array_key_exists('payment_links', $row)) {
-                        $row['payment_links'] = decodeSupplierPaymentLinks($row['payment_links'] ?? null);
-                    }
-                }
-                unset($row);
                 jsonResponse(['data' => $rows]);
             }
+            requirePermission('suppliers.manage.read', $managementReadRoles);
             if ($id === null) {
-                $q = trim($_GET['q'] ?? '');
+                $q = clmsNormalizeSearchQuery($_GET['q'] ?? '');
                 $paymentStatus = trim($_GET['payment_status'] ?? '');
                 $hasAddress = supplierTableHasColumn($pdo, 'suppliers', 'address');
                 $sortOptions = ['name', 'code', 'store_id', 'phone', 'factory_location'];
                 if ($hasAddress) {
                     $sortOptions[] = 'address';
                 }
-                $sort = in_array($_GET['sort'] ?? '', $sortOptions, true) ? $_GET['sort'] : 'name';
-                $order = strtolower($_GET['order'] ?? '') === 'desc' ? 'DESC' : 'ASC';
+                $sort = clmsQuerySort($_GET['sort'] ?? null, $sortOptions, 'name');
+                $order = clmsQueryDirection($_GET['order'] ?? null, 'ASC');
 
                 $where = [];
                 $params = [];
                 if (strlen($q) >= 1) {
-                    $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+                    $like = clmsSearchLike($q);
                     $addressSearch = $hasAddress ? " OR (s.address IS NOT NULL AND s.address LIKE ?)" : "";
                     $where[] = "(s.name LIKE ? OR s.code LIKE ? OR (s.phone IS NOT NULL AND s.phone LIKE ?) OR (s.store_id IS NOT NULL AND s.store_id LIKE ?) OR (s.factory_location IS NOT NULL AND s.factory_location LIKE ?)$addressSearch)";
                     $params = array_merge($params, [$like, $like, $like, $like, $like]);
@@ -559,11 +545,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if (!empty($where)) {
                     $sql .= " WHERE " . implode(" AND ", $where);
                 }
-                $sql .= " ORDER BY s." . $sort . " " . $order;
+                $limit = clmsQueryLimit($_GET['limit'] ?? null, 50, 100);
+                $offset = clmsQueryOffset($_GET['offset'] ?? null);
+                $sql .= " ORDER BY s." . $sort . " " . $order . ", s.id ASC LIMIT " . ($limit + 1) . " OFFSET " . $offset;
 
                 $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
                 if ($params) $stmt->execute($params);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                $hasMore = count($rows) > $limit;
+                if ($hasMore) $rows = array_slice($rows, 0, $limit);
 
                 foreach ($rows as &$r) {
                     $r['contacts'] = $r['contacts'] ? json_decode($r['contacts'], true) : [];
@@ -574,7 +564,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         unset($r['commission_rate'], $r['commission_type'], $r['commission_applied_on']);
                     }
                 }
-                jsonResponse(['data' => $rows]);
+                jsonResponse(['data' => $rows, 'meta' => ['limit' => $limit, 'offset' => $offset, 'has_more' => $hasMore]]);
             }
             $stmt = $pdo->prepare("SELECT * FROM suppliers WHERE id = ?");
             $stmt->execute([$id]);
@@ -595,11 +585,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 $balance = [];
                 foreach ($rows as $r) {
+                    $totalPaid = DecimalMath::normalize($r['total_paid'] ?? '0');
+                    $totalInvoiced = DecimalMath::normalize($r['total_invoiced'] ?? '0');
+                    $totalDiscount = DecimalMath::normalize($r['total_discount'] ?? '0');
                     $balance[$r['currency']] = [
-                        'total_paid' => (float) $r['total_paid'],
-                        'total_invoiced' => (float) $r['total_invoiced'],
-                        'total_discount' => (float) $r['total_discount'],
-                        'outstanding' => round((float) $r['total_invoiced'] - (float) $r['total_paid'] - (float) $r['total_discount'], 4),
+                        'total_paid' => $totalPaid,
+                        'total_invoiced' => $totalInvoiced,
+                        'total_discount' => $totalDiscount,
+                        'outstanding' => DecimalMath::subtract(DecimalMath::subtract($totalInvoiced, $totalPaid), $totalDiscount),
                     ];
                 }
                 jsonResponse(['data' => $balance]);
@@ -682,7 +675,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt = $pdo->prepare("SELECT id FROM suppliers WHERE id = ?");
                 $stmt->execute([$id]);
                 if (!$stmt->fetch()) jsonError('Supplier not found', 404);
-                $amount = (float) ($input['amount'] ?? 0);
+                $amount = clmsFinancialDecimal($input['amount'] ?? null, 'Amount');
                 $currency = trim($input['currency'] ?? 'RMB');
                 if (!in_array($currency, ['USD', 'RMB'], true)) jsonError('Currency must be USD or RMB', 400);
                 $paymentType = in_array($input['payment_type'] ?? '', ['partial', 'full']) ? $input['payment_type'] : 'partial';
@@ -698,15 +691,17 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 $notes = $input['notes'] ?? null;
                 $orderId = !empty($input['order_id']) ? (int) $input['order_id'] : null;
-                if ($amount <= 0) jsonError('Amount must be positive', 400);
-                $invoiceAmount = isset($input['invoice_amount']) ? (float) $input['invoice_amount'] : null;
+                $invoiceAmount = isset($input['invoice_amount']) && $input['invoice_amount'] !== ''
+                    ? clmsFinancialDecimal($input['invoice_amount'], 'Invoice amount')
+                    : null;
                 $markedFull = !empty($input['marked_full_payment']) ? 1 : 0;
                 $settlementMode = trim((string) ($input['settlement_mode'] ?? ''));
                 $settlementNote = trim((string) ($input['settlement_note'] ?? '')) ?: null;
-                $settlementDelta = ($invoiceAmount !== null && $invoiceAmount > $amount && $markedFull)
-                    ? round($invoiceAmount - $amount, 4)
-                    : 0;
-                $discountAmount = ($invoiceAmount !== null && $invoiceAmount > $amount) ? round($invoiceAmount - $amount, 4) : 0;
+                $invoiceExceedsPayment = $invoiceAmount !== null && DecimalMath::compare($invoiceAmount, $amount) > 0;
+                $settlementDelta = ($invoiceExceedsPayment && $markedFull)
+                    ? DecimalMath::subtract($invoiceAmount, $amount)
+                    : '0.0000';
+                $discountAmount = $invoiceExceedsPayment ? DecimalMath::subtract($invoiceAmount, $amount) : '0.0000';
                 $userId = getAuthUserId() ?? 1;
                 $markedBy = $markedFull ? $userId : null;
                 if ($orderId) {
@@ -716,7 +711,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         jsonError('Selected order does not belong to this supplier', 400);
                     }
                 }
-                if ($markedFull && $settlementDelta > 0 && $settlementMode === '') {
+                if ($markedFull && DecimalMath::compare($settlementDelta, '0') > 0 && $settlementMode === '') {
                     $settlementMode = 'fully_settled_by_agreement';
                 }
 
@@ -776,11 +771,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 $balance = [];
                 foreach ($rows as $r) {
+                    $totalPaid = DecimalMath::normalize($r['total_paid'] ?? '0');
+                    $totalInvoiced = DecimalMath::normalize($r['total_invoiced'] ?? '0');
+                    $totalDiscount = DecimalMath::normalize($r['total_discount'] ?? '0');
                     $balance[$r['currency']] = [
-                        'total_paid' => (float)$r['total_paid'],
-                        'total_invoiced' => (float)$r['total_invoiced'],
-                        'total_discount' => (float)$r['total_discount'],
-                        'outstanding' => round((float)$r['total_invoiced'] - (float)$r['total_paid'] - (float)$r['total_discount'], 4),
+                        'total_paid' => $totalPaid,
+                        'total_invoiced' => $totalInvoiced,
+                        'total_discount' => $totalDiscount,
+                        'outstanding' => DecimalMath::subtract(DecimalMath::subtract($totalInvoiced, $totalPaid), $totalDiscount),
                     ];
                 }
                 jsonResponse(['data' => $balance]);

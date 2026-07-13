@@ -13,8 +13,7 @@ CREATE TABLE warehouse_receipt_items
   (10,4) NULL,
   actual_weight DECIMAL
   (10,4) NULL,
-  receipt_condition VARCHAR
-  (20) NOT NULL DEFAULT 'good',
+  receipt_condition ENUM('good','damaged','partial') NOT NULL DEFAULT 'good',
   variance_detected TINYINT
   (1) NOT NULL DEFAULT 0,
   notes TEXT NULL,
@@ -26,10 +25,7 @@ CREATE TABLE warehouse_receipt_items
   FOREIGN KEY (order_item_id)
   REFERENCES order_items
   (id) ON
-  DELETE CASCADE,
-  CONSTRAINT chk_receipt_item_condition CHECK
-  (receipt_condition IN
-  ('good','damaged','partial'))
+  DELETE CASCADE
 );
 
   CREATE TABLE warehouse_receipt_item_photos

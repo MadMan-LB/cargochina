@@ -12,6 +12,7 @@
     let sharedCartonContentIndex = 0;
     let quickSupplierPaymentLinkIndex = 0;
     let draftOrderCustomerCountryShipping = [];
+    window.draftOrderNumberingHistory = [];
     let draftOrderImportTrigger = null;
     let draftOrderImportGuideModal = null;
     let draftOrderImportNeedsReplaceConfirm = false;
@@ -127,10 +128,14 @@
         const raw = String(value || "").trim();
         if (!raw) return "";
         const normalized = raw.toLowerCase().replace(/[\s_\/\\-]+/g, "");
-        if (["copy", "copygoods", "replica", "仿牌", "仿货"].includes(normalized)) return "Copy";
-        if (["dangerous", "dangerousgoods", "hazmat", "hazardous", "hazardousgoods", "dg", "危险品", "危险货"].includes(normalized)) return "Dangerous";
-        if (["normal", "normalgoods", "regular", "普通货", "常规货"].includes(normalized)) return "Normal";
-        return raw;
+        if (["copy", "copygoods", "replica", "仿牌", "仿货"].includes(normalized)) return "replica";
+        if (["dangerous", "dangerousgoods", "hazmat", "hazardous", "hazardousgoods", "dg", "危险品", "危险货"].includes(normalized)) return "dangerous";
+        if (["normal", "normalgoods", "regular", "普通货", "常规货"].includes(normalized)) return "normal";
+        if (["cosmetic", "cosmetics", "化妆品", "美妆"].includes(normalized)) return "cosmetics";
+        if (["branded", "brandedgoods", "brand", "品牌", "品牌货物"].includes(normalized)) return "branded";
+        if (["food", "foods", "食品"].includes(normalized)) return "food";
+        if (["other", "其他"].includes(normalized)) return "other";
+        return "";
     }
 
     function getDraftQuickSupplierPaymentMethods() {
@@ -417,12 +422,15 @@
     ) {
         resetDraftDestinationCountry();
         if (!customerId) {
+            window.draftOrderNumberingHistory = [];
             setShippingHint(fallbackDefaultShip || "");
             renumberDraftItems();
             return;
         }
 
         try {
+            const historyRes = await api("GET", `/draft-orders/numbering-history?customer_id=${encodeURIComponent(customerId)}`);
+            window.draftOrderNumberingHistory = historyRes.data || [];
             const res = await api("GET", `/customers/${customerId}/lookup`);
             const customer = res.data || {};
             draftOrderCustomerCountryShipping = customer.country_shipping || [];
@@ -483,6 +491,7 @@
             setShippingHint(defaultShip || "");
             renumberDraftItems();
         } catch (_) {
+            window.draftOrderNumberingHistory = [];
             showDraftDestinationSelect(false);
             setDraftDestinationInputReadOnly(false);
             if (preferredCountry?.id || preferredCountry?.name) {
@@ -528,7 +537,7 @@
         );
     }
 
-    function renumberDraftItems() {
+    function legacyRenumberDraftItems() {
         const prefix = getCustomerShipCode();
         setShippingHint(prefix);
         const targets = [];
@@ -665,6 +674,73 @@
         });
     }
 
+    // Fill only untouched, empty fields. Existing generated, manual, imported,
+    // or deliberately cleared values are never rewritten by this pass.
+    function renumberDraftItems() {
+        const prefix = getCustomerShipCode();
+        setShippingHint(prefix);
+        const targets = [];
+        const supplierOrder = [];
+        const supplierSequenceByKey = new Map();
+        const usedSupplierSequences = new Set();
+        const lastValidBySupplier = new Map();
+        const usedNumbers = new Set();
+        const remember = (supplierKey, value) => {
+            if (!String(value ?? "").trim()) return;
+            usedNumbers.add(normalizedItemNumber(value));
+            if (parseFinalItemNumber(value)) lastValidBySupplier.set(supplierKey, String(value));
+            const structured = parseStructuredItemNo(value);
+            if (structured) {
+                supplierSequenceByKey.set(supplierKey, structured.supplierSequence);
+                usedSupplierSequences.add(structured.supplierSequence);
+            }
+        };
+
+        (window.draftOrderNumberingHistory || []).forEach((row) => {
+            remember(row.supplier_id ? String(row.supplier_id) : "supplier:none", row.item_no);
+        });
+        document.querySelectorAll(".draft-order-section").forEach((section) => {
+            const supplierId = section.querySelector(".draft-section-supplier-id")?.value?.trim() || "";
+            const sectionKey = supplierId || `section-${section.dataset.sectionId || ""}`;
+            section.querySelectorAll(".draft-order-item-card").forEach((card) => {
+                const shipping = card.querySelector(".draft-item-shipping-code");
+                if (shipping && !shipping.value) shipping.value = prefix || "";
+                if (card.dataset.sharedCartonEnabled === "1") {
+                    getDraftSharedCartonRows(card).forEach((row) => {
+                        const key = row.querySelector(".draft-shared-content-supplier-id")?.value?.trim() || supplierId || `${sectionKey}-shared-${row.dataset.contentId || ""}`;
+                        if (!supplierOrder.includes(key)) supplierOrder.push(key);
+                        const input = row.querySelector(".draft-shared-content-item-no");
+                        remember(key, input?.value);
+                        targets.push({ key, input, source: row.dataset.itemNoSource || "generated" });
+                    });
+                    return;
+                }
+                if (!supplierOrder.includes(sectionKey)) supplierOrder.push(sectionKey);
+                const input = card.querySelector(".draft-item-item-no");
+                remember(sectionKey, input?.value);
+                targets.push({ key: sectionKey, input, source: card.dataset.itemNoSource || "generated" });
+            });
+        });
+        let nextSupplierSequence = usedSupplierSequences.size ? Math.max(...usedSupplierSequences) + 1 : 1;
+        supplierOrder.forEach((key) => {
+            if (supplierSequenceByKey.has(key)) return;
+            while (usedSupplierSequences.has(nextSupplierSequence)) nextSupplierSequence++;
+            supplierSequenceByKey.set(key, nextSupplierSequence);
+            usedSupplierSequences.add(nextSupplierSequence++);
+        });
+        targets.forEach((target) => {
+            if (!target.input || target.source !== "generated" || target.input.value !== "") return;
+            let candidate = lastValidBySupplier.has(target.key)
+                ? incrementFinalItemNumber(lastValidBySupplier.get(target.key))
+                : prefix ? `${prefix}-${supplierSequenceByKey.get(target.key) || 1}-1` : "";
+            while (candidate && usedNumbers.has(normalizedItemNumber(candidate))) candidate = incrementFinalItemNumber(candidate) || "";
+            if (!candidate) return;
+            target.input.value = candidate;
+            target.input.dataset.suggested = "1";
+            remember(target.key, candidate);
+        });
+    }
+
     function buildDraftSupplierSectionLabel(section, collapsed = false) {
         const supplierName =
             section._supplierAc?.getSelected?.()?.name ||
@@ -748,13 +824,13 @@
                         <div>${fmtAmount(row.totals?.amount)} ${escapeHtml(row.currency || "USD")}</div>
                         <small class="text-muted">${fmtCbm(row.totals?.cbm)} CBM · ${fmtWeight(row.totals?.weight)} kg</small>
                       </td>
-                      <td class="table-actions">
+                      <td class="table-actions"><div class="draft-action-group draft-row-actions" role="group" aria-label="${escapeHtml(draftT("Actions for draft order {id}", { id: row.id }))}">
                         <button class="btn btn-sm btn-outline-primary" type="button" onclick="openDraftOrderBuilder(${row.id})">${escapeHtml(draftT(row.editable ? "Open" : "View"))}</button>
                         ${row.status === "Draft" ? `<button class="btn btn-sm btn-success" type="button" onclick="submitDraftOrder(${row.id})">${escapeHtml(draftT("Submit"))}</button>` : ""}
                         <a class="btn btn-sm btn-outline-success" href="${API}/draft-orders/${row.id}/export?format=xlsx" download>XLSX</a>
                         <a class="btn btn-sm btn-outline-secondary" href="/cargochina/procurement_draft_print.php?order_id=${row.id}" target="_blank" rel="noopener">${escapeHtml(draftT("Print"))}</a>
                         <a class="btn btn-sm btn-outline-info" href="/cargochina/orders.php?order_type=draft_procurement">${escapeHtml(draftT("Orders"))}</a>
-                      </td>
+                      </div></td>
                     </tr>
                 `;
             })
@@ -785,10 +861,10 @@
                       <td>${escapeHtml(row.supplier_name || "—")}</td>
                       <td><span class="badge ${migrated ? "bg-success" : "bg-secondary"}">${escapeHtml(migrated ? draftT("Migrated") : row.status || "draft")}</span></td>
                       <td>${(row.items || []).length}</td>
-                      <td class="table-actions">
+                      <td class="table-actions"><div class="draft-action-group draft-row-actions" role="group" aria-label="${escapeHtml(draftT("Actions for legacy draft {id}", { id: row.id }))}">
                         ${migrated && row.converted_order_id ? `<button class="btn btn-sm btn-outline-success" type="button" onclick="openDraftOrderBuilder(${row.converted_order_id})">${escapeHtml(draftT("Open Order"))}</button>` : `<button class="btn btn-sm btn-outline-primary" type="button" onclick="openLegacyMigration(${row.id})">${escapeHtml(draftT("Migrate"))}</button>`}
                         <a class="btn btn-sm btn-outline-secondary" href="/cargochina/procurement_draft_print.php?id=${row.id}" target="_blank" rel="noopener">${escapeHtml(draftT("Print"))}</a>
-                      </td>
+                      </div></td>
                     </tr>
                 `;
             })
@@ -799,6 +875,8 @@
         clearDraftSaveValidation();
         document.getElementById("draftOrderForm")?.reset();
         document.getElementById("draftOrderId").value = "";
+        draftOrderRequestKey = newDraftRequestKey("draft");
+        draftOrderLockVersion = 0;
         document.getElementById("draftOrderEditable").value = "1";
         document.getElementById("draftOrderModalTitle").textContent =
             draftT("Draft an Order");
@@ -813,6 +891,7 @@
         document.getElementById("draftOrderTotalQty").textContent = "0";
         document.getElementById("draftOrderTotalCbm").textContent = "0";
         document.getElementById("draftOrderTotalWeight").textContent = "0";
+        renderDraftOrderCosts({ lines: [], base_total: "0.0000", base_currency: null });
         draftOrderCustomerAc?.setValue(null);
         sectionIndex = 0;
         itemIndex = 0;
@@ -852,6 +931,7 @@
         const order = res.data;
         resetDraftOrderBuilder();
         document.getElementById("draftOrderId").value = order.id;
+        draftOrderLockVersion = Number(order.lock_version || 0);
         document.getElementById("draftOrderModalTitle").textContent =
             order.editable
                 ? draftT("Edit Draft Order #{id}", { id: order.id })
@@ -883,6 +963,7 @@
         );
         document.getElementById("draftOrderTotalCurrency").textContent =
             order.currency || "RMB";
+        renderDraftOrderCosts(order.operational_costs || { lines: [] });
         updateDraftOrderTotals();
         setBuilderEditable(!!order.editable);
         renumberDraftItems();
@@ -1239,6 +1320,66 @@
         builderModal.show();
     }
 
+    let currentDraftCosts = [];
+    let draftCostRequestKey = null;
+    let draftOrderRequestKey = null;
+    let draftOrderLockVersion = 0;
+    const newDraftRequestKey = (prefix) => `${prefix}:${globalThis.crypto?.randomUUID?.() || (Date.now().toString(36) + Math.random().toString(36).slice(2))}`.slice(0, 64);
+
+    function renderDraftOrderCosts(summary = {}) {
+        currentDraftCosts = Array.isArray(summary.lines) ? summary.lines : [];
+        const orderId = document.getElementById("draftOrderId")?.value || "";
+        const saveFirst = document.getElementById("draftCostSaveFirst");
+        const editor = document.getElementById("draftCostEditor");
+        if (saveFirst) saveFirst.classList.toggle("d-none", !!orderId);
+        if (editor) editor.classList.toggle("d-none", !orderId);
+        const total = document.getElementById("draftCostBaseTotal");
+        if (total) total.textContent = `${summary.base_total || "0.0000"} ${summary.base_currency || ""}`.trim();
+        const container = document.getElementById("draftCostLines");
+        if (!container) return;
+        container.innerHTML = currentDraftCosts.length
+            ? `<table class="table table-sm align-middle mb-0"><thead><tr><th>${escapeHtml(draftT("Type"))}</th><th>${escapeHtml(draftT("Description"))}</th><th>${escapeHtml(draftT("Amount"))}</th><th>${escapeHtml(draftT("Base Amount"))}</th><th>${escapeHtml(draftT("Status"))}</th><th></th></tr></thead><tbody>${currentDraftCosts.map((row) => `<tr><td>${escapeHtml(row.cost_type_label_en || row.cost_type_code)}</td><td>${escapeHtml(row.description_en || row.description_zh || "-")}</td><td>${escapeHtml(row.amount)} ${escapeHtml(row.currency)}</td><td>${escapeHtml(row.base_amount)} ${escapeHtml(row.base_currency)}</td><td><span class="badge ${row.posting_status === "finalized" ? "bg-success" : row.posting_status === "reversed" || row.posting_status === "archived" ? "bg-secondary" : "bg-warning text-dark"}">${escapeHtml(draftT(row.posting_status === "finalized" ? "Finalized" : row.posting_status === "reversed" ? "Reversed" : row.posting_status === "archived" ? "Archived" : "Pending"))}</span></td><td class="text-end"><button type="button" class="btn btn-outline-primary btn-sm" onclick="editDraftOrderCost(${Number(row.id)})">${escapeHtml(draftT("Edit"))}</button> <button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteDraftOrderCost(${Number(row.id)})">${escapeHtml(draftT("Delete"))}</button></td></tr>`).join("")}</tbody></table>`
+            : `<div class="text-muted small">${escapeHtml(draftT("No operational costs added."))}</div>`;
+    }
+
+    function resetDraftOrderCostEditor() {
+        ["draftCostId", "draftCostAmount", "draftCostDescription", "draftCostProvider", "draftCostNotes"].forEach((id) => { const el = document.getElementById(id); if (el) el.value = ""; });
+        const rate = document.getElementById("draftCostRate"); if (rate) rate.value = "1";
+        draftCostRequestKey = newDraftRequestKey("cost");
+    }
+
+    function editDraftOrderCost(id) {
+        const row = currentDraftCosts.find((cost) => Number(cost.id) === Number(id));
+        if (!row) return;
+        const values = { draftCostId: row.id, draftCostType: row.cost_type_code, draftCostAmount: row.amount, draftCostCurrency: row.currency, draftCostRate: row.exchange_rate, draftCostBaseCurrency: row.base_currency, draftCostDescription: row.description_en || row.description_zh || "", draftCostProvider: row.service_provider || "", draftCostNotes: row.notes || "" };
+        Object.entries(values).forEach(([idKey, value]) => { const el = document.getElementById(idKey); if (el) el.value = value; });
+    }
+
+    async function reloadDraftOrderCosts() {
+        const orderId = document.getElementById("draftOrderId")?.value;
+        if (!orderId) return;
+        const res = await api("GET", `/draft-order-costs?order_id=${encodeURIComponent(orderId)}`);
+        renderDraftOrderCosts(res.data || {});
+    }
+
+    async function saveDraftOrderCost() {
+        const orderId = document.getElementById("draftOrderId")?.value;
+        if (!orderId) return showToast(draftT("Save the draft before adding costs."), "warning");
+        const id = document.getElementById("draftCostId")?.value;
+        const row = currentDraftCosts.find((cost) => Number(cost.id) === Number(id));
+        const payload = { order_id: Number(orderId), cost_type_code: document.getElementById("draftCostType")?.value, description_en: document.getElementById("draftCostDescription")?.value?.trim() || null, amount: document.getElementById("draftCostAmount")?.value, currency: document.getElementById("draftCostCurrency")?.value, exchange_rate: document.getElementById("draftCostRate")?.value, base_currency: document.getElementById("draftCostBaseCurrency")?.value, service_provider: document.getElementById("draftCostProvider")?.value?.trim() || null, responsible_payer: "customer", allocation_method: "none", lock_version: row?.lock_version ?? 0, idempotency_key: draftCostRequestKey || (draftCostRequestKey = newDraftRequestKey("cost")), notes: document.getElementById("draftCostNotes")?.value?.trim() || null };
+        await api(id ? "PUT" : "POST", id ? `/draft-order-costs/${id}` : "/draft-order-costs", payload);
+        resetDraftOrderCostEditor();
+        await reloadDraftOrderCosts();
+        showToast(draftT("Cost line saved."), "success");
+    }
+
+    async function deleteDraftOrderCost(id) {
+        if (!confirm(draftT("Delete this cost line?"))) return;
+        await api("DELETE", `/draft-order-costs/${id}`);
+        await reloadDraftOrderCosts();
+    }
+
     function draftOrderImportUi() {
         return {
             status: document.getElementById("draftOrderImportStatus"),
@@ -1248,6 +1389,24 @@
             dropBtn: document.getElementById("draftOrderImportDropBtn"),
             plusBtn: document.getElementById("draftOrderImportPlusBtn"),
         };
+    }
+
+    function parseFinalItemNumber(value) {
+        const match = String(value ?? "").match(/^(.*?)(\d+)([^\d]*)$/u);
+        if (!match) return null;
+        return { prefix: match[1], digits: match[2], suffix: match[3], number: parseInt(match[2], 10), width: match[2].length };
+    }
+
+    function incrementFinalItemNumber(value) {
+        const parsed = parseFinalItemNumber(value);
+        if (!parsed) return null;
+        let digits = String(parsed.number + 1);
+        if (digits.length < parsed.width) digits = digits.padStart(parsed.width, "0");
+        return `${parsed.prefix}${digits}${parsed.suffix}`;
+    }
+
+    function normalizedItemNumber(value) {
+        return String(value ?? "").trim().toLocaleUpperCase();
     }
 
     function resetDraftOrderImportUi() {
@@ -1669,11 +1828,11 @@
                   <input type="hidden" class="draft-section-supplier-id">
                   <button type="button" class="btn btn-outline-primary btn-sm draft-item-action" data-builder-action="quick-add-supplier" title="${escapeHtml(draftT("Quick add supplier"))}">+</button>
                 </div>
-                <div class="d-flex gap-2 align-items-center flex-wrap">
+                <div class="draft-section-actions">
                   <small class="text-muted"><span class="draft-section-amount">0</span> <span class="draft-section-currency">USD</span> · <span class="draft-section-qty">0</span> qty · <span class="draft-section-cbm">0</span> CBM · <span class="draft-section-weight">0</span> kg</small>
                   <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="collapse-section">${escapeHtml(draftT("Collapse"))}</button>
-                  <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="move-up">↑</button>
-                  <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="move-down">↓</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action draft-icon-action" data-builder-action="move-up" title="${escapeHtml(draftT("Move section up"))}" aria-label="${escapeHtml(draftT("Move section up"))}">↑</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action draft-icon-action" data-builder-action="move-down" title="${escapeHtml(draftT("Move section down"))}" aria-label="${escapeHtml(draftT("Move section down"))}">↓</button>
                   <button type="button" class="btn btn-outline-danger btn-sm draft-item-action" data-builder-action="remove-section">${escapeHtml(draftT("Remove Section"))}</button>
                 </div>
               </div>
@@ -1743,6 +1902,7 @@
         section
             .querySelector('[data-builder-action="remove-section"]')
             ?.addEventListener("click", () => {
+                if (!window.confirm(draftT("Remove this supplier section and all of its items?"))) return;
                 section.remove();
                 renumberDraftItems();
                 updateDraftOrderTotals();
@@ -1979,7 +2139,7 @@
                 </div>
                 <div class="col-12 col-sm-6 col-xl-2">
                   <label class="form-label draft-item-label">Item No</label>
-                  <input type="text" class="form-control form-control-sm draft-shared-content-item-no" placeholder="${escapeHtml(draftT("Auto"))}">
+                  <input type="text" maxlength="150" class="form-control form-control-sm draft-shared-content-item-no" placeholder="${escapeHtml(draftT("Auto"))}" autocomplete="off">
                 </div>
                 <div class="col-12 col-sm-6 col-xl-2">
                   <label class="form-label draft-item-label">Qty / Carton</label>
@@ -2027,9 +2187,13 @@
                   <label class="form-label draft-item-label">${escapeHtml(draftT("Good Type"))}</label>
                   <select class="form-select form-select-sm draft-shared-content-copy-normal-goods">
                     <option value=""></option>
-                    <option value="Normal">${escapeHtml(draftT("Normal Goods"))}</option>
-                    <option value="Dangerous">${escapeHtml(draftT("Dangerous Goods"))}</option>
-                    <option value="Copy">${escapeHtml(draftT("Copy Goods"))}</option>
+                    <option value="normal">${escapeHtml(draftT("Normal Goods"))}</option>
+                    <option value="replica">${escapeHtml(draftT("Copy Goods"))}</option>
+                    <option value="cosmetics">${escapeHtml(draftT("Cosmetics"))}</option>
+                    <option value="branded">${escapeHtml(draftT("Branded Goods"))}</option>
+                    <option value="food">${escapeHtml(draftT("Food"))}</option>
+                    <option value="dangerous">${escapeHtml(draftT("Dangerous Goods"))}</option>
+                    <option value="other">${escapeHtml(draftT("Other"))}</option>
                   </select>
                 </div>
                 <div class="col-12 col-sm-6 col-xl-2">
@@ -2244,11 +2408,8 @@
             initial.product_id || "";
         row.querySelector(".draft-shared-content-item-no").value =
             initial.item_no || "";
-        if (initial.item_no_manual || initial.item_no) {
-            row.dataset.manualItemNo = initial.item_no_manual || initial.item_no
-                ? "1"
-                : "";
-        }
+        row.dataset.itemNoSource = initial.item_no_source || (initial.item_no_manual ? "manual" : "generated");
+        row.dataset.manualItemNo = row.dataset.itemNoSource !== "generated" ? "1" : "";
         row.querySelector(".draft-shared-content-qty-per-carton").value =
             initial.quantity_per_carton ?? "";
         row.querySelector(".draft-shared-content-unit-price").value =
@@ -2264,7 +2425,7 @@
         row.querySelector(".draft-shared-content-materials").value =
             initial.materials || "";
         row.querySelector(".draft-shared-content-copy-normal-goods").value =
-            normalizeDraftGoodType(initial.copy_normal_goods);
+            normalizeDraftGoodType(initial.item_type_code || initial.copy_normal_goods);
         row.querySelector(".draft-shared-content-express-number").value =
             initial.express_number || "";
         row.querySelector(".draft-shared-content-height").value =
@@ -2318,12 +2479,9 @@
         row.querySelector(".draft-shared-content-item-no")?.addEventListener(
             "input",
             () => {
-                row.dataset.manualItemNo = row
-                    .querySelector(".draft-shared-content-item-no")
-                    ?.value?.trim()
-                    ? "1"
-                    : "";
-                renumberDraftItems();
+                row.dataset.itemNoSource = "manual";
+                row.dataset.manualItemNo = "1";
+                delete row.querySelector(".draft-shared-content-item-no")?.dataset.suggested;
             },
         );
         row.querySelector(".draft-shared-content-remove")?.addEventListener(
@@ -2557,7 +2715,8 @@
                           <label class="form-check-label small fw-semibold" for="draftItemSharedCarton${idx}">${escapeHtml(draftT("This carton contains multiple items"))}</label>
                         </div>
                         <label class="form-label form-label-sm draft-item-identity-label">Item No</label>
-                        <input type="text" class="form-control form-control-sm draft-item-item-no" placeholder="Auto">
+                        <input type="text" maxlength="150" class="form-control form-control-sm draft-item-item-no" placeholder="Auto" autocomplete="off">
+                        <div class="form-text">${escapeHtml(draftT("Suggested automatically; you can type, paste, replace, or clear it."))}</div>
                         <input type="hidden" class="draft-item-shipping-code">
                         <div class="draft-item-identity-hs-wrap">
                           <label class="form-label form-label-sm mt-2">Optional HS Code</label>
@@ -2612,9 +2771,13 @@
                               <label class="form-label draft-item-label">${escapeHtml(draftT("Good Type"))}</label>
                               <select class="form-select form-select-sm draft-item-copy-normal-goods">
                                 <option value=""></option>
-                                <option value="Normal">${escapeHtml(draftT("Normal Goods"))}</option>
-                                <option value="Dangerous">${escapeHtml(draftT("Dangerous Goods"))}</option>
-                                <option value="Copy">${escapeHtml(draftT("Copy Goods"))}</option>
+                                <option value="normal">${escapeHtml(draftT("Normal Goods"))}</option>
+                                <option value="replica">${escapeHtml(draftT("Copy Goods"))}</option>
+                                <option value="cosmetics">${escapeHtml(draftT("Cosmetics"))}</option>
+                                <option value="branded">${escapeHtml(draftT("Branded Goods"))}</option>
+                                <option value="food">${escapeHtml(draftT("Food"))}</option>
+                                <option value="dangerous">${escapeHtml(draftT("Dangerous Goods"))}</option>
+                                <option value="other">${escapeHtml(draftT("Other"))}</option>
                               </select>
                             </div>
                             <div class="col-12 col-sm-6 col-xl-2">
@@ -3156,6 +3319,7 @@
         const wrapper = document.createElement("div");
         wrapper.innerHTML = itemMarkup(idx);
         const card = wrapper.firstElementChild;
+        card.dataset.existingItemId = initial.existing_item_id || initial.id || "";
         card._photoPaths = (initial.photo_paths || []).slice();
         card._designPaths = (initial.custom_design_paths || []).slice();
         container.appendChild(card);
@@ -3203,7 +3367,7 @@
         card.querySelector(".draft-item-what-brand").value =
             initial.what_brand || "";
         card.querySelector(".draft-item-copy-normal-goods").value =
-            normalizeDraftGoodType(initial.copy_normal_goods);
+            normalizeDraftGoodType(initial.item_type_code || initial.copy_normal_goods);
         card.querySelector(".draft-item-code").value = initial.code || "";
         card.querySelector(".draft-item-express-number").value =
             initial.express_number || "";
@@ -3212,7 +3376,8 @@
         card.querySelector(".draft-item-item-no").value = isSharedCarton
             ? initial.shared_carton_code || ""
             : initial.item_no || "";
-        if (!isSharedCarton && initial.item_no) card.dataset.manualItemNo = "1";
+        card.dataset.itemNoSource = initial.item_no_source || (initial.item_no_manual ? "manual" : "generated");
+        card.dataset.manualItemNo = card.dataset.itemNoSource !== "generated" ? "1" : "";
         card.dataset.dimensionsScope = (
             initial.dimensions_scope || "carton"
         ).toLowerCase();
@@ -3240,6 +3405,7 @@
         card.querySelector('[data-builder-action="remove-item"]')?.addEventListener(
             "click",
             () => {
+                if (!window.confirm(draftT("Remove this item?"))) return;
                 card.remove();
                 renumberDraftItems();
                 updateDraftOrderTotals();
@@ -3364,12 +3530,9 @@
                 if (card.dataset.sharedCartonEnabled === "1") {
                     return;
                 }
-                card.dataset.manualItemNo = card
-                    .querySelector(".draft-item-item-no")
-                    ?.value?.trim()
-                    ? "1"
-                    : "";
-                renumberDraftItems();
+                card.dataset.itemNoSource = "manual";
+                card.dataset.manualItemNo = "1";
+                delete card.querySelector(".draft-item-item-no")?.dataset.suggested;
             },
         );
         syncDraftSharedCartonMode(card, isSharedCarton);
@@ -3746,10 +3909,9 @@
             product_id:
                 row.querySelector(".draft-shared-content-product-id")?.value ||
                 null,
-            item_no:
-                row.querySelector(".draft-shared-content-item-no")?.value?.trim() ||
-                null,
+            item_no: row.querySelector(".draft-shared-content-item-no")?.value || null,
             item_no_manual: row.dataset.manualItemNo ? 1 : 0,
+            item_no_source: row.dataset.itemNoSource || "generated",
             shipping_code:
                 card
                     .querySelector(".draft-item-shipping-code")
@@ -4362,16 +4524,18 @@
                             ? null
                             : card.querySelector(".draft-item-product-id")?.value ||
                               null,
+                        existing_item_id: card.dataset.existingItemId || null,
                         item_no: sharedCartonEnabled
                             ? null
-                            : card
-                                  .querySelector(".draft-item-item-no")
-                                  ?.value?.trim() || null,
+                            : card.querySelector(".draft-item-item-no")?.value || null,
                         item_no_manual: sharedCartonEnabled
                             ? 0
                             : card.dataset.manualItemNo
                               ? 1
                               : 0,
+                        item_no_source: sharedCartonEnabled
+                            ? "generated"
+                            : card.dataset.itemNoSource || "generated",
                         shared_carton_enabled: sharedCartonEnabled ? 1 : 0,
                         shared_carton_code: sharedCartonEnabled
                             ? card
@@ -4501,6 +4665,8 @@
                 document
                     .getElementById("draftOrderHighAlertNotes")
                     ?.value?.trim() || null,
+            idempotency_key: draftOrderRequestKey || (draftOrderRequestKey = newDraftRequestKey("draft")),
+            lock_version: draftOrderLockVersion,
             supplier_sections: supplierSections,
         };
     }
@@ -4760,9 +4926,14 @@
 
         const params = new URLSearchParams(window.location.search);
         const orderId = params.get("order_id");
+        const legacyDraftId = params.get("legacy_draft_id");
         const supplierId = params.get("supplier_id");
         if (orderId) {
             openDraftOrderBuilder(parseInt(orderId, 10));
+            return;
+        }
+        if (legacyDraftId) {
+            openLegacyMigration(parseInt(legacyDraftId, 10));
             return;
         }
         if (supplierId) {
@@ -4786,6 +4957,10 @@
     window.openDraftOrderBuilder = openDraftOrderBuilder;
     window.addDraftOrderSection = addDraftOrderSection;
     window.saveDraftOrder = saveDraftOrder;
+    window.saveDraftOrderCost = saveDraftOrderCost;
+    window.editDraftOrderCost = editDraftOrderCost;
+    window.deleteDraftOrderCost = deleteDraftOrderCost;
+    window.resetDraftOrderCostEditor = resetDraftOrderCostEditor;
     window.openDraftQuickCustomer = openDraftQuickCustomer;
     window.saveDraftQuickCustomer = saveDraftQuickCustomer;
     window.addDraftQuickSupplierPaymentLink = addDraftQuickSupplierPaymentLink;

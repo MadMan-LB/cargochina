@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS user_permission_overrides
   notes VARCHAR(500) NULL,
   granted_by INT UNSIGNED NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  updated_at DATETIME NULL,
   UNIQUE KEY uq_user_permission_override (user_id, permission_key),
   INDEX idx_user_permission_override_user (user_id),
   INDEX idx_user_permission_override_permission (permission_key),

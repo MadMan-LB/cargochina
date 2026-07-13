@@ -24,8 +24,7 @@ IF NOT EXISTS customer_deposits
   customer_id INT UNSIGNED NOT NULL,
   amount DECIMAL
 (12,4) NOT NULL,
-  currency VARCHAR
-(10) NOT NULL DEFAULT 'USD',
+  currency ENUM('USD', 'RMB') NOT NULL DEFAULT 'USD',
   payment_method VARCHAR
 (50) NULL,
   reference_no VARCHAR
@@ -43,9 +42,6 @@ REFERENCES users
 DELETE
 SET NULL
 ,
-  CONSTRAINT chk_deposit_currency CHECK
-(currency IN
-('USD', 'RMB')),
   INDEX idx_deposits_customer
 (customer_id)
 );

@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/NotificationService.php';
+require_once __DIR__ . '/ShipmentAccountingService.php';
 
 if (!class_exists('OrderReceivingValidationException')) {
     class OrderReceivingValidationException extends RuntimeException
@@ -31,6 +32,18 @@ class OrderReceivingService
 {
     public function receive(PDO $pdo, int $orderId, array $input, int $userId, bool $manageTransaction = true, array $options = []): array
     {
+        $operationId = trim((string) ($options['idempotency_key'] ?? $input['idempotency_key'] ?? ''));
+        if ($operationId !== '' && !preg_match('/^[A-Za-z0-9._:-]{8,64}$/', $operationId)) {
+            throw new OrderReceivingValidationException('Invalid receiving idempotency key', 400);
+        }
+        if ($operationId !== '' && $this->tableHasColumn($pdo, 'warehouse_receipts', 'receiving_operation_id')) {
+            $existing = $pdo->prepare('SELECT id FROM warehouse_receipts WHERE receiving_operation_id=? LIMIT 1');
+            $existing->execute([$operationId]);
+            $existingId = (int) $existing->fetchColumn();
+            if ($existingId > 0) {
+                return ['status' => 'already_received', 'receipt_id' => $existingId, 'idempotent_replay' => true];
+            }
+        }
         $stmt = $pdo->prepare("SELECT * FROM orders WHERE id = ?");
         $stmt->execute([$orderId]);
         $order = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -73,9 +86,34 @@ class OrderReceivingService
         $orderItemsRows = $orderItems->fetchAll(PDO::FETCH_ASSOC);
         $declaredCbm = array_sum(array_column($orderItemsRows, 'declared_cbm'));
 
-        $orderVariancePct = $declaredCbm > 0 ? abs($actualCbm - $declaredCbm) / $declaredCbm * 100 : 0;
-        $orderVarianceAbs = abs($actualCbm - $declaredCbm);
-        $hasVariance = $orderVariancePct >= $thresholdPct || $orderVarianceAbs >= $thresholdAbs || $condition !== 'good';
+        $priorSql = "SELECT COALESCE(SUM(actual_cbm),0) cbm,
+                            COALESCE(SUM(actual_weight),0) weight,
+                            COALESCE(SUM(actual_cartons),0) cartons,
+                            COALESCE(MAX(receipt_condition='damaged'),0) has_damage
+                       FROM warehouse_receipts WHERE order_id=?";
+        if ($this->tableHasColumn($pdo, 'warehouse_receipts', 'voided_at')) $priorSql .= ' AND voided_at IS NULL';
+        $priorStmt = $pdo->prepare($priorSql); $priorStmt->execute([$orderId]);
+        $prior = $priorStmt->fetch(PDO::FETCH_ASSOC) ?: ['cbm'=>0,'weight'=>0,'cartons'=>0,'has_damage'=>0];
+        $priorItemSql = "SELECT wri.order_item_id,
+                                COALESCE(SUM(wri.actual_cbm),0) cbm,
+                                COALESCE(MAX(wri.variance_detected),0) has_variance,
+                                COALESCE(MAX(wri.receipt_condition='damaged'),0) has_damage
+                           FROM warehouse_receipt_items wri
+                           JOIN warehouse_receipts wr ON wr.id=wri.receipt_id
+                          WHERE wr.order_id=?";
+        if ($this->tableHasColumn($pdo, 'warehouse_receipts', 'voided_at')) $priorItemSql .= ' AND wr.voided_at IS NULL';
+        $priorItemSql .= ' GROUP BY wri.order_item_id';
+        $priorItemStmt = $pdo->prepare($priorItemSql); $priorItemStmt->execute([$orderId]);
+        $priorItems = [];
+        foreach ($priorItemStmt->fetchAll(PDO::FETCH_ASSOC) as $priorItem) {
+            $priorItems[(int) $priorItem['order_item_id']] = $priorItem;
+        }
+        $isPartial = $condition === 'partial';
+        $hasDamage = $condition === 'damaged' || (!$isPartial && !empty($prior['has_damage']));
+        $comparisonCbm = (float) $prior['cbm'] + $actualCbm;
+        $orderVariancePct = $declaredCbm > 0 ? abs($comparisonCbm - $declaredCbm) / $declaredCbm * 100 : 0;
+        $orderVarianceAbs = abs($comparisonCbm - $declaredCbm);
+        $hasVariance = $hasDamage || (!$isPartial && ($orderVariancePct >= $thresholdPct || $orderVarianceAbs >= $thresholdAbs));
         $itemVariances = [];
         $normalizedReceiptSplitsByItem = [];
 
@@ -192,10 +230,16 @@ class OrderReceivingService
                 }
                 $itPhotos = $this->normalizeStoredUploadPathList($it['photo_paths'] ?? []);
                 $decCbm = (float) $oi['declared_cbm'];
-                $itemVar = $itCond !== 'good';
-                if ($aCbm !== null) {
-                    $varPct = $decCbm > 0 ? abs($aCbm - $decCbm) / $decCbm * 100 : 0;
-                    $varAbs = abs($aCbm - $decCbm);
+                $priorItem = $priorItems[$oiId] ?? ['cbm' => 0, 'has_variance' => 0, 'has_damage' => 0];
+                $itemDamaged = $itCond === 'damaged' || (!$isPartial && (!empty($priorItem['has_damage']) || !empty($priorItem['has_variance'])));
+                $itemVar = $itemDamaged;
+                if ($itemDamaged) {
+                    $hasDamage = true;
+                }
+                if ($aCbm !== null && !$isPartial && $itCond !== 'partial') {
+                    $cumulativeItemCbm = (float) $priorItem['cbm'] + $aCbm;
+                    $varPct = $decCbm > 0 ? abs($cumulativeItemCbm - $decCbm) / $decCbm * 100 : 0;
+                    $varAbs = abs($cumulativeItemCbm - $decCbm);
                     $itemVar = $itemVar || $varPct >= $thresholdPct || $varAbs >= $thresholdAbs;
                 }
                 $itemVariances[$oiId] = $itemVar;
@@ -226,12 +270,12 @@ class OrderReceivingService
                 $actualWeight = round($sumWeight, 4);
             }
 
-            $orderVariancePct = $declaredCbm > 0 ? abs($actualCbm - $declaredCbm) / $declaredCbm * 100 : 0;
-            $orderVarianceAbs = abs($actualCbm - $declaredCbm);
-            $hasVariance = $orderVariancePct >= $thresholdPct
+            $comparisonCbm = (float) $prior['cbm'] + $actualCbm;
+            $orderVariancePct = $declaredCbm > 0 ? abs($comparisonCbm - $declaredCbm) / $declaredCbm * 100 : 0;
+            $orderVarianceAbs = abs($comparisonCbm - $declaredCbm);
+            $hasVariance = $hasDamage || (!$isPartial && ($orderVariancePct >= $thresholdPct
                 || $orderVarianceAbs >= $thresholdAbs
-                || $condition !== 'good'
-                || in_array(true, $itemVariances, true);
+                || in_array(true, $itemVariances, true)));
 
             $tolerance = 0.01;
             if (($hasItemCbm && abs($sumCbm - $actualCbm) > $tolerance)
@@ -240,7 +284,7 @@ class OrderReceivingService
             }
         }
 
-        if ($hasVariance && empty($photoPaths)) {
+        if (($hasVariance || $hasDamage) && empty($photoPaths)) {
             throw new OrderReceivingValidationException('Evidence photos required when variance or damage is present', 400);
         }
         if ($itemLevelEnabled && empty($itemsInput)) {
@@ -252,10 +296,36 @@ class OrderReceivingService
             $pdo->beginTransaction();
             $startedTransaction = true;
         }
+        if (!$manageTransaction && !$pdo->inTransaction()) {
+            throw new RuntimeException('Caller-managed receiving requires an active transaction');
+        }
 
         try {
-            $pdo->prepare("INSERT INTO warehouse_receipts (order_id, actual_cartons, actual_cbm, actual_weight, receipt_condition, notes, received_by) VALUES (?,?,?,?,?,?,?)")
-                ->execute([$orderId, $actualCartons, $actualCbm, $actualWeight, $condition, $input['notes'] ?? null, $userId]);
+            $lock = $pdo->prepare('SELECT status FROM orders WHERE id=? FOR UPDATE');
+            $lock->execute([$orderId]);
+            $lockedStatus = (string) $lock->fetchColumn();
+            // A concurrent request may have committed the same operation while
+            // this request waited for the order lock. Recheck inside the lock
+            // so the loser returns the original receipt instead of a conflict.
+            if ($operationId !== '' && $this->tableHasColumn($pdo, 'warehouse_receipts', 'receiving_operation_id')) {
+                $existing = $pdo->prepare('SELECT id FROM warehouse_receipts WHERE receiving_operation_id=? LIMIT 1');
+                $existing->execute([$operationId]);
+                $existingId = (int) $existing->fetchColumn();
+                if ($existingId > 0) {
+                    if ($startedTransaction) $pdo->commit();
+                    return ['status'=>'already_received','receipt_id'=>$existingId,'idempotent_replay'=>true];
+                }
+            }
+            if (!in_array($lockedStatus, $allowed, true)) {
+                throw new OrderReceivingValidationException('Order has already been received or is no longer receivable', 409);
+            }
+            $receiptCols = 'order_id, actual_cartons, actual_cbm, actual_weight, receipt_condition, notes, received_by';
+            $receiptVals = '?,?,?,?,?,?,?';
+            $receiptParams = [$orderId, $actualCartons, $actualCbm, $actualWeight, $condition, $input['notes'] ?? null, $userId];
+            if ($this->tableHasColumn($pdo, 'warehouse_receipts', 'receiving_operation_id')) {
+                $receiptCols .= ', receiving_operation_id'; $receiptVals .= ',?'; $receiptParams[] = $operationId ?: null;
+            }
+            $pdo->prepare("INSERT INTO warehouse_receipts ($receiptCols) VALUES ($receiptVals)")->execute($receiptParams);
             $receiptId = (int) $pdo->lastInsertId();
 
             $insPhoto = $pdo->prepare("INSERT INTO warehouse_receipt_photos (receipt_id, file_path) VALUES (?,?)");
@@ -279,6 +349,7 @@ class OrderReceivingService
                         $userId,
                     ]);
                 }
+                (new ShipmentAccountingService($pdo))->postReceiptFees($receiptId, $userId);
             }
 
             if (!empty($itemsInput)) {
@@ -410,9 +481,9 @@ class OrderReceivingService
                 }
             }
 
-            $newStatus = $hasVariance ? 'Confirmed' : 'ReadyForConsolidation';
+            $newStatus = $isPartial ? 'InTransitToWarehouse' : ($hasVariance ? 'Confirmed' : 'ReadyForConsolidation');
             $confirmToken = null;
-            if ($hasVariance) {
+            if ($hasVariance && !$isPartial) {
                 $confirmToken = bin2hex(random_bytes(24));
                 $pdo->prepare("UPDATE orders SET status=?, confirmation_token=? WHERE id=?")->execute([$newStatus, $confirmToken, $orderId]);
             } else {

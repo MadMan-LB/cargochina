@@ -1,5 +1,8 @@
 <?php
 require_once __DIR__ . '/includes/i18n.php';
+header('Referrer-Policy: no-referrer');
+header('Cache-Control: no-store, private');
+header('X-Robots-Tag: noindex, nofollow');
 $uiLocale = clmsGetUiLocale();
 $clientTranslations = clmsGetClientTranslationPayload();
 ?>
