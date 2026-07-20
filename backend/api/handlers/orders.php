@@ -11,6 +11,7 @@ require_once dirname(__DIR__, 2) . '/services/OrderCountryService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderItemNumberingService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderReceiptWorkflowService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
+require_once dirname(__DIR__, 2) . '/services/OrderBulkExcelService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderReceivingService.php';
 require_once dirname(__DIR__, 2) . '/services/DraftOrderCostService.php';
 require_once dirname(__DIR__, 2) . '/services/ShipmentAccountingService.php';
@@ -799,7 +800,7 @@ function fetchOrdersListRowsForRequest(PDO $pdo, bool $paginate = false, ?array 
         $custCols .= ', c.priority_level as customer_priority_level, c.priority_note as customer_priority_note';
     }
     $destCols = orderTableHasColumn($pdo, 'orders', 'destination_country_id')
-        ? ', co.id as destination_country_id, co.name as destination_country_name, co.code as destination_country_code'
+        ? ', co.name as destination_country_name, co.code as destination_country_code'
         : '';
     $destJoin = orderTableHasColumn($pdo, 'orders', 'destination_country_id')
         ? ' LEFT JOIN countries co ON o.destination_country_id = co.id'
@@ -867,10 +868,16 @@ function fetchOrdersListRowsForRequest(PDO $pdo, bool $paginate = false, ?array 
             $sql .= " AND o.status = 'CustomerDeclinedAfterAutoConfirm'";
         }
     }
-    $sql .= " ORDER BY o.expected_ready_date IS NULL ASC, o.expected_ready_date ASC, o.created_at DESC, o.id DESC";
     $limit = clmsQueryLimit($_GET['limit'] ?? null, 50, 100);
     $offset = clmsQueryOffset($_GET['offset'] ?? null);
     $requiresPostFilterPagination = $paginate && $supplierId && orderSupportsSharedCartons($pdo);
+    $total = 0;
+    if ($paginate && !$requiresPostFilterPagination) {
+        $countStmt = $pdo->prepare("SELECT COUNT(*) FROM ($sql) orders_filtered");
+        $countStmt->execute($params);
+        $total = (int) $countStmt->fetchColumn();
+    }
+    $sql .= " ORDER BY o.expected_ready_date IS NULL ASC, o.expected_ready_date ASC, o.created_at DESC, o.id DESC";
     if ($paginate && !$requiresPostFilterPagination) {
         $sql .= ' LIMIT ' . ($limit + 1) . ' OFFSET ' . $offset;
     }
@@ -897,18 +904,63 @@ function fetchOrdersListRowsForRequest(PDO $pdo, bool $paginate = false, ?array 
     if ($supplierId && orderSupportsSharedCartons($pdo)) {
         $filterSupplierId = (int) $supplierId;
         $rows = array_values(array_filter($rows, static fn(array $row): bool => orderRowMatchesSupplierFilter($row, $filterSupplierId)));
+        if ($paginate) $total = count($rows);
     }
 
     if ($paginate) {
         $hasMore = count($rows) > ($requiresPostFilterPagination ? $offset + $limit : $limit);
         $rows = $requiresPostFilterPagination ? array_slice($rows, $offset, $limit) : array_slice($rows, 0, $limit);
-        $meta = ['limit' => $limit, 'offset' => $offset, 'has_more' => $hasMore];
+        $meta = ['limit' => $limit, 'offset' => $offset, 'has_more' => $hasMore, 'total' => $total];
     }
 
     orderAttachDepositSummaries($pdo, $rows);
     orderAttachOperationalCostSummaries($pdo, $rows);
 
     return $rows;
+}
+
+function orderBuildExcelEntry(PDO $pdo, int $orderId): ?array
+{
+    if ($orderId <= 0) return null;
+
+    $supplierColumns = 's.name as supplier_name, s.phone as supplier_phone, s.factory_location as supplier_factory';
+    if (orderTableHasColumn($pdo, 'suppliers', 'address')) $supplierColumns .= ', s.address as supplier_address';
+    if (orderTableHasColumn($pdo, 'suppliers', 'fax')) $supplierColumns .= ', s.fax as supplier_fax';
+    if (orderTableHasColumn($pdo, 'suppliers', 'store_id')) $supplierColumns .= ', s.store_id as supplier_store_id';
+    $destinationColumns = orderTableHasColumn($pdo, 'orders', 'destination_country_id')
+        ? ', co.name as destination_country_name, co.code as destination_country_code'
+        : '';
+    $destinationJoin = orderTableHasColumn($pdo, 'orders', 'destination_country_id')
+        ? ' LEFT JOIN countries co ON co.id = o.destination_country_id'
+        : '';
+
+    $stmt = $pdo->prepare(
+        "SELECT o.*, c.name as customer_name, c.default_shipping_code, $supplierColumns$destinationColumns
+         FROM orders o
+         JOIN customers c ON c.id = o.customer_id
+         LEFT JOIN suppliers s ON s.id = o.supplier_id$destinationJoin
+         WHERE o.id = ?"
+    );
+    $stmt->execute([$orderId]);
+    $order = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$order) return null;
+
+    $items = normalizeOrderItems($pdo, fetchOrderItems($pdo, $orderId));
+    $latestReceipt = orderFetchLatestReceiptForOrder($pdo, $orderId);
+    if ($latestReceipt) {
+        $order['receipt'] = $latestReceipt;
+        $order['receipt_fees'] = $latestReceipt['fees'] ?? [];
+    }
+    if (orderTableExists($pdo, 'draft_order_costs')) {
+        $order['operational_costs'] = (new DraftOrderCostService($pdo))->summarize($orderId);
+    }
+
+    $safeCustomer = preg_replace('/[^a-zA-Z0-9_-]+/', '_', (string) ($order['customer_name'] ?? 'customer')) ?: 'customer';
+    return [
+        'order' => $order,
+        'items' => $items,
+        'filename' => 'order_' . $orderId . '_' . trim($safeCustomer, '_') . '_' . date('Ymd_His') . '.xlsx',
+    ];
 }
 
 function orderAttachOperationalCostSummaries(PDO $pdo, array &$rows): void
@@ -1562,34 +1614,19 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
                 (new OrderExcelService())->exportOrdersListSummary(
                     $rows,
-                    'orders_' . date('Y-m-d') . '.xlsx'
+                    'orders_' . date('Ymd_His') . '.xlsx'
                 );
             }
             if ($id && $action === 'export') {
-                $suppCols = 's.name as supplier_name, s.phone as supplier_phone, s.factory_location as supplier_factory';
-                $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'address'");
-                if ($chk && $chk->rowCount() > 0) $suppCols .= ', s.address as supplier_address';
-                $chk = @$pdo->query("SHOW COLUMNS FROM suppliers LIKE 'fax'");
-                if ($chk && $chk->rowCount() > 0) $suppCols .= ', s.fax as supplier_fax';
-                $stmt = $pdo->prepare("SELECT o.*, c.name as customer_name, $suppCols FROM orders o JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id WHERE o.id = ?");
-                $stmt->execute([(int) $id]);
-                $order = $stmt->fetch(PDO::FETCH_ASSOC);
-                if (!$order) jsonError('Order not found', 404);
-                $items = normalizeOrderItems($pdo, fetchOrderItems($pdo, (int) $id));
-                $latestReceipt = orderFetchLatestReceiptForOrder($pdo, (int) $id);
-                if ($latestReceipt) {
-                    $order['receipt'] = $latestReceipt;
-                    $order['receipt_fees'] = $latestReceipt['fees'] ?? [];
-                }
-                if (orderTableExists($pdo, 'draft_order_costs')) {
-                    $order['operational_costs'] = (new DraftOrderCostService($pdo))->summarize((int) $id);
-                }
+                $entry = orderBuildExcelEntry($pdo, (int) $id);
+                if (!$entry) jsonError('Order not found', 404);
+                $order = $entry['order'];
+                $items = $entry['items'];
                 $format = strtolower(trim((string) ($_GET['format'] ?? 'xlsx')));
                 if ($format === 'csv') {
                     outputOrderCsv($order, $items, 'order_' . (int) $id . '.csv');
                 }
-                require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
-                (new OrderExcelService())->exportOrder($order, $items, 'order_' . (int) $id . '_goods_details.xlsx');
+                (new OrderExcelService())->exportOrder($order, $items, $entry['filename']);
             }
             if ($id === null) {
                 $meta = [];
@@ -1843,6 +1880,41 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             break;
 
         case 'POST':
+            if ($id === 'bulk-export') {
+                $rawIds = is_array($input['ids'] ?? null) ? $input['ids'] : [];
+                $ids = array_values(array_unique(array_filter(array_map(
+                    static fn($value): int => filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) ?: 0,
+                    $rawIds
+                ))));
+                if (!$ids) jsonError('Select at least one downloadable record.', 422);
+                if (count($ids) > 100) jsonError('Select no more than 100 records per download.', 422);
+
+                $entries = [];
+                $missing = [];
+                foreach ($ids as $orderId) {
+                    $entry = orderBuildExcelEntry($pdo, $orderId);
+                    if (!$entry) {
+                        $missing[] = $orderId;
+                        continue;
+                    }
+                    $entries[] = $entry;
+                }
+                if ($missing) {
+                    jsonError('One or more selected records are unavailable.', 404, ['ids' => $missing]);
+                }
+
+                $auditPayload = [
+                    'order_ids' => $ids,
+                    'record_count' => count($entries),
+                    'format' => count($entries) === 1 ? 'xlsx' : 'zip',
+                ];
+                if (orderTableExists($pdo, 'audit_log')) {
+                    $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order', 0, 'bulk_export', ?, ?)")
+                        ->execute([json_encode($auditPayload, JSON_UNESCAPED_UNICODE), getAuthUserId()]);
+                }
+                logClms('orders_bulk_export', $auditPayload + ['user_id' => getAuthUserId()]);
+                (new OrderBulkExcelService())->output($entries, 'selected_orders');
+            }
             if ($id === null) {
                 $customerId = (int) ($input['customer_id'] ?? 0);
                 $creationKey = orderCreationIdempotencyKey($input['idempotency_key'] ?? $input['creation_idempotency_key'] ?? null);

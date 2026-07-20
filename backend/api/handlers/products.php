@@ -202,6 +202,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $sql .= ' WHERE ' . implode(' AND ', $where);
                 }
                 $limit=clmsQueryLimit($_GET['limit']??null,50,200);$offset=clmsQueryOffset($_GET['offset']??null);
+                $countStmt=$pdo->prepare("SELECT COUNT(*) FROM ($sql) products_filtered");$countStmt->execute($params);$total=(int)$countStmt->fetchColumn();
                 $sql .= " ORDER BY p.id DESC LIMIT ".($limit+1)." OFFSET ".$offset;
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute($params);
@@ -213,7 +214,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         ? '/cargochina/backend/thumb.php?path=' . rawurlencode($r['image_paths'][0]) . '&w=96&h=96&fit=cover'
                         : null;
                 }
-                jsonResponse(['data' => $rows,'meta'=>['limit'=>$limit,'offset'=>$offset,'has_more'=>$hasMore]]);
+                jsonResponse(['data' => $rows,'meta'=>['limit'=>$limit,'offset'=>$offset,'has_more'=>$hasMore,'total'=>$total]]);
             }
             $stmt = $pdo->prepare("SELECT p.*, s.name as supplier_name, COALESCE(ic.item_type_code,'unclassified') item_type_code, ic.confidence item_type_confidence, COALESCE(ic.is_confirmed,0) item_type_confirmed FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id LEFT JOIN item_classifications ic ON ic.entity_type='product' AND ic.entity_id=p.id WHERE p.id = ?");
             $stmt->execute([$id]);

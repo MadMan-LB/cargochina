@@ -9,6 +9,7 @@ use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
+use PhpOffice\PhpSpreadsheet\Worksheet\PageSetup;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class DownloadExampleService
@@ -29,6 +30,7 @@ class DownloadExampleService
     private function outputProcurementImportTemplate(): void
     {
         $spreadsheet = new Spreadsheet();
+        $spreadsheet->getDefaultStyle()->getFont()->setName('Arial')->setSize(10);
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Procurement Import');
 
@@ -128,6 +130,22 @@ class DownloadExampleService
         foreach ($widths as $index => $width) {
             $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($index + 1))->setWidth($width);
         }
+        $sheet->setShowGridlines(false);
+        $sheet->getPageSetup()
+            ->setOrientation(PageSetup::ORIENTATION_LANDSCAPE)
+            ->setPaperSize(PageSetup::PAPERSIZE_A4)
+            ->setFitToPage(true)
+            ->setFitToWidth(1)
+            ->setFitToHeight(0)
+            ->setPrintArea('A1:' . $lastColumn . ($headerRow + 50))
+            ->setRowsToRepeatAtTopByStartAndEnd(1, $headerRow);
+        $sheet->getPageMargins()
+            ->setTop(0.35)
+            ->setRight(0.25)
+            ->setBottom(0.35)
+            ->setLeft(0.25)
+            ->setHeader(0.15)
+            ->setFooter(0.15);
 
         $writer = new Xlsx($spreadsheet);
         if (headers_sent($file, $line)) {
@@ -139,7 +157,7 @@ class DownloadExampleService
             }
         }
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        header('Content-Disposition: attachment; filename="procurement_import_template.xlsx"');
+        header('Content-Disposition: attachment; filename="procurement_import_template_' . date('Ymd') . '.xlsx"');
         header('Cache-Control: no-cache, no-store, must-revalidate');
         header('X-Content-Type-Options: nosniff');
         $writer->save('php://output');

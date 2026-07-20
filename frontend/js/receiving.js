@@ -14,6 +14,8 @@ let receivingImportLongTimer = null;
 let receivingImportStartedAt = 0;
 let receivingImportProgressState = null;
 let receivingQueueOffset = 0;
+let receivingDownloadSelection = null;
+let receivingQueueTotal = 0;
 const receivingQueueLimit = 50;
 let calMonth = new Date().getMonth();
 let calYear = new Date().getFullYear();
@@ -235,6 +237,7 @@ function countActiveReceivingFilters() {
         document.getElementById("filterDateFrom")?.value,
         document.getElementById("filterDateTo")?.value,
         document.getElementById("filterShippingCode")?.value?.trim(),
+        document.getElementById("filterReceivingItemType")?.value?.trim(),
     ].filter(Boolean).length;
 
     if (!isDefaultReceivingStatusSelection()) count += 1;
@@ -246,7 +249,8 @@ function countActiveReceivingFilters() {
 
 function updateReceivingOverview() {
     const rows = warehouseQueueData || [];
-    const visibleCount = rows.length;
+    const pageVisibleCount = rows.length;
+    const visibleCount = receivingQueueTotal || pageVisibleCount;
     const priorityCount = rows.filter(orderHasPriority).length;
     const totalCartons = rows.reduce(
         (sum, order) =>
@@ -277,7 +281,7 @@ function updateReceivingOverview() {
 
     setReceivingMetric(
         "receiveVisibleDetail",
-        visibleCount
+        pageVisibleCount
             ? receivingT("{suppliers} suppliers across {dates} planned dates.", {
                   suppliers: uniqueSuppliers,
                   dates: uniqueDates,
@@ -294,7 +298,7 @@ function updateReceivingOverview() {
     );
     setReceivingMetric(
         "receiveCartonDetail",
-        visibleCount
+        pageVisibleCount
             ? receivingT("{cbm} declared CBM across the visible queue.", {
                   cbm:
                       typeof formatDisplayCbm === "function"
@@ -313,7 +317,7 @@ function updateReceivingOverview() {
     );
     setReceivingMetric(
         "receiveFilterSummary",
-        visibleCount
+        pageVisibleCount
             ? activeFilters
                 ? receivingT(
                       "Showing {orders} order(s) with {cartons} cartons after {filters} active filter(s).",
@@ -334,11 +338,18 @@ function updateReceivingOverview() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+    receivingDownloadSelection = window.ClmsBulkExcelDownload?.create({
+        endpoint: `${window.API_BASE || "/cargochina/api/v1"}/orders/bulk-export`,
+        buttonId: "receivingDownloadSelectedBtn",
+        countId: "receivingDownloadSelectedCount",
+        selectAllId: "receivingDownloadSelectAll",
+        checkboxSelector: ".receiving-download-cb",
+    });
     registerUnsavedChangesGuard?.("#receiveForm");
     setupFilterAutocomplete();
     setupReceivingImportCustomerAutocomplete();
     setupReceivingFilterControls();
-    setReceivingStatusFilter(RECEIVING_DEFAULT_STATUSES);
+    restoreReceivingFiltersFromUrl();
     updateReceivingStatusSummary();
     loadReceivingConfig();
     applyFilters();
@@ -671,7 +682,48 @@ function getFilterParams() {
     if (dt) params.set("date_to", dt);
     if (sc) params.set("shipping_code", sc);
     if (itemType) params.set("item_type", itemType);
+    const { priorityOnly, alertsOnly } = getReceivingFocusFilters();
+    if (priorityOnly) params.set("priority_only", "1");
+    if (alertsOnly) params.set("alerts_only", "1");
     return params.toString();
+}
+
+function restoreReceivingFiltersFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const statuses = params.getAll("status[]");
+    setReceivingStatusFilter(statuses.length ? statuses : RECEIVING_DEFAULT_STATUSES);
+    receivingQueueOffset = Math.max(0, parseInt(params.get("offset") || "0", 10) || 0);
+    const values = {
+        filterSupplierId: params.get("supplier_id") || "",
+        filterCustomerId: params.get("customer_id") || "",
+        filterDateFrom: params.get("date_from") || "",
+        filterDateTo: params.get("date_to") || "",
+        filterShippingCode: params.get("shipping_code") || "",
+        filterReceivingItemType: params.get("item_type") || "",
+    };
+    Object.entries(values).forEach(([id, value]) => {
+        const node = document.getElementById(id);
+        if (node) node.value = value;
+    });
+    if (values.filterSupplierId) {
+        const input = document.getElementById("filterSupplier");
+        if (input && !input.value) input.value = `#${values.filterSupplierId}`;
+    }
+    if (values.filterCustomerId) {
+        const input = document.getElementById("filterCustomer");
+        if (input && !input.value) input.value = `#${values.filterCustomerId}`;
+    }
+    const priority = document.getElementById("filterPriorityOnly");
+    if (priority) priority.checked = params.get("priority_only") === "1";
+    const alerts = document.getElementById("filterAlertsOnly");
+    if (alerts) alerts.checked = params.get("alerts_only") === "1";
+}
+
+function syncReceivingUrl() {
+    const params = new URLSearchParams(getFilterParams());
+    if (receivingQueueOffset) params.set("offset", String(receivingQueueOffset));
+    const query = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
 }
 
 async function appendReceiveItemPhotos(orderItemId, files) {
@@ -716,11 +768,14 @@ async function applyFilters(resetOffset = true) {
         const params=new URLSearchParams(getFilterParams());params.set("limit",String(receivingQueueLimit));params.set("offset",String(receivingQueueOffset));const qs=params.toString();
         const res = await api("GET", "/receiving/queue?" + qs);
         warehouseQueueSourceData = res.data || [];
-        const prev=document.getElementById("receivingPrevBtn"),next=document.getElementById("receivingNextBtn");if(prev)prev.disabled=receivingQueueOffset<=0;if(next)next.disabled=!res.meta?.has_more;const summary=document.getElementById("receivingPageSummary");if(summary)summary.textContent=receivingT("Page {page}",{page:Math.floor(receivingQueueOffset/receivingQueueLimit)+1});
+        receivingQueueTotal = Number(res.meta?.total || 0);
+        const prev=document.getElementById("receivingPrevBtn"),next=document.getElementById("receivingNextBtn");if(prev)prev.disabled=receivingQueueOffset<=0;if(next)next.disabled=!res.meta?.has_more;const summary=document.getElementById("receivingPageSummary");if(summary)summary.textContent=warehouseQueueSourceData.length?`${receivingQueueOffset+1}–${receivingQueueOffset+warehouseQueueSourceData.length} ${receivingT("of")} ${receivingQueueTotal}`:`0 ${receivingT("results")}`;
         applyLocalReceivingFilters();
+        syncReceivingUrl();
     } catch (e) {
         warehouseQueueSourceData = [];
         warehouseQueueData = [];
+        receivingQueueTotal = 0;
         renderWarehouseList();
         renderCalendar();
         renderSchedule();
@@ -1454,8 +1509,11 @@ function renderWarehouseList() {
         <div class="col-12 col-md-6 col-lg-4">
           <div class="card warehouse-record-card h-100">
             <div class="card-body">
-              <div class="d-flex justify-content-between align-items-start mb-2">
-                <h6 class="mb-0">#${o.id} — ${escapeHtml(o.customer_name)}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(o.customer_priority_note || "")}">${escapeHtml(typeof statusLabel === "function" ? statusLabel(o.customer_priority_level) : receivingT(o.customer_priority_level))}</span>` : ""}</h6>
+              <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                <div class="d-flex align-items-start gap-2">
+                  <input class="form-check-input receiving-download-cb mt-1" type="checkbox" data-download-id="${o.id}" aria-label="${escapeHtml(receivingT("Select order {id}", { id: o.id }))}">
+                  <h6 class="mb-0">#${o.id} — ${escapeHtml(o.customer_name)}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(o.customer_priority_note || "")}">${escapeHtml(typeof statusLabel === "function" ? statusLabel(o.customer_priority_level) : receivingT(o.customer_priority_level))}</span>` : ""}</h6>
+                </div>
                 <span class="badge ${typeof statusBadgeClass === "function" ? statusBadgeClass(o.status) : "bg-secondary"}">${typeof statusLabel === "function" ? statusLabel(o.status) : escapeHtml(o.status)}</span>
               </div>
               <div class="small text-muted mb-2">${escapeHtml(o.expected_ready_date)}</div>
@@ -1477,13 +1535,14 @@ function renderWarehouseList() {
               ${items.length ? `<div class="mt-2 pt-2 border-top"><small class="text-muted">${escapeHtml(receivingT("Items"))}:</small> ${badgeItems.map((it) => `<span class="badge bg-light text-dark me-1">${escapeHtml(it.shipping_code || "—")} ${it.cartons || 0}ctn ${it.qty_per_carton || ""}/ctn HS:${escapeHtml(it.hs_code || "-")}${it.product_high_alert_note || it.product_required_design ? ` ${escapeHtml(receivingT("ALERT"))}` : ""}</span>`).join("")}${hiddenItemCount ? `<span class="badge bg-secondary-subtle text-secondary border">+${hiddenItemCount} ${escapeHtml(receivingT("more"))}</span>` : ""}</div>` : ""}
               <div class="mt-2 pt-2 d-flex flex-wrap gap-2">
                 ${canRecordReceiving() ? `<button type="button" class="btn btn-sm btn-primary js-receive-btn" data-order-id="${o.id}">${escapeHtml(receivingT("Receive"))}</button>` : ""}
-                <a class="btn btn-sm btn-outline-success" href="${receivingOrderExcelUrl(o.id)}" target="_blank" rel="noopener">${escapeHtml(receivingT("XLSX"))}</a>
+                <a class="btn btn-sm btn-outline-success" href="${receivingOrderExcelUrl(o.id)}" target="_blank" rel="noopener">${escapeHtml(receivingT("Download"))}</a>
               </div>
             </div>
           </div>
         </div>`;
         })
         .join("");
+    receivingDownloadSelection?.bind();
 }
 
 function renderReceiveDropdown() {
@@ -1679,7 +1738,7 @@ function renderSchedule() {
               </div>
               <div class="d-flex flex-wrap gap-2">
                 <button type="button" class="btn btn-sm btn-outline-primary js-receive-btn" data-order-id="${o.id}">${escapeHtml(receivingT("Receive"))}</button>
-                <a class="btn btn-sm btn-outline-success" href="${receivingOrderExcelUrl(o.id)}" target="_blank" rel="noopener">${escapeHtml(receivingT("XLSX"))}</a>
+                <a class="btn btn-sm btn-outline-success" href="${receivingOrderExcelUrl(o.id)}" target="_blank" rel="noopener">${escapeHtml(receivingT("Download"))}</a>
               </div>
             </div>
           `,

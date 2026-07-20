@@ -865,3 +865,20 @@ This ledger should be maintained over time so both Codex and Cursor can see exec
 ### Guardrails
 - Keep the generated template, Draft Order import parser, Receiving import parser, modal help text, and Downloads registry aligned when changing procurement import columns.
 - Do not remove the old supplier-column aliases unless legacy files have been formally retired.
+
+## 2026-07-20 Excel Export and Warehouse Filter Handoff
+
+### What changed
+- `OrderExcelService` is the shared XLSX formatter for order, filtered table, and balance exports. Its output follows the Receiving Procurement Import Template structure and embeds item photos.
+- `OrderBulkExcelService` and `/api/v1/orders/bulk-export` implement the single-XLSX/multiple-ZIP contract used by Orders, Receiving, Warehouse Stock, and Draft an Order.
+- `frontend/js/bulk_excel_download.js` owns current-page checkbox state and must remain aligned with each page's `data-download-id` record markup.
+- Keep `warehouse_stock.php`'s `warehouse_stock.js` filemtime query intact. The page HTML and dynamic row renderer are deployed together; serving stale JavaScript removes the row checkboxes and disconnects the download controls.
+- Warehouse Stock `WarehouseReceived` is a virtual filter implemented as an active, non-void warehouse-receipt predicate. It is deliberately different from the historical stored `ReceivedAtWarehouse` status.
+- Migration `079_receipt_item_dimension_compatibility.sql` repairs legacy receipt-item dimension schemas. The warehouse query's null-column fallback supports rolling deployment but does not replace running migrations.
+
+### Performance and security guardrails
+- Preserve server-side ID revalidation for every bulk request and the 100-record cap. Do not trust checkbox IDs or expose order exports through public download routes.
+- Keep filtered exports independent of pagination while passing the same search/status/customer/supplier/date parameters used by the list endpoint.
+- Workbook thumbnails are cached in the system temp directory by source content hash. Do not write generated thumbnails back into upload storage or alter original evidence photos.
+- Keep date and numeric worksheet cells typed. Do not stringify prices, quantities, dimensions, or dates for cosmetic formatting.
+- The current UI locale set is English and Chinese. Arabic data is supported in workbooks, but an Arabic UI label should only be introduced together with an actual Arabic locale.

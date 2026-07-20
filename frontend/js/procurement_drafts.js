@@ -23,6 +23,7 @@
     let draftOrderImportStartedAt = 0;
     let draftOrderImportProgressState = null;
     let draftOrderUnsavedGuard = null;
+    let draftDownloadSelection = null;
     const DRAFT_ORDER_IMPORT_STEPS = [
         { key: "uploading", label: "Uploading", target: 40 },
         { key: "reading", label: "Reading Excel", target: 62 },
@@ -806,7 +807,8 @@
         if (!tbody) return;
         if (!rows.length) {
             tbody.innerHTML =
-                `<tr><td colspan="8" class="text-center text-muted py-4">${escapeHtml(draftT("No draft orders yet."))}</td></tr>`;
+                `<tr><td colspan="9" class="text-center text-muted py-4">${escapeHtml(draftT("No draft orders yet."))}</td></tr>`;
+            draftDownloadSelection?.bind();
             return;
         }
         tbody.innerHTML = rows
@@ -814,6 +816,7 @@
                 const suppliers = (row.supplier_names || []).join(", ") || "—";
                 return `
                     <tr>
+                      <td class="text-center"><input class="form-check-input draft-download-cb" type="checkbox" data-download-id="${row.id}" aria-label="${escapeHtml(draftT("Select order {id}", { id: row.id }))}"></td>
                       <td>${row.id}</td>
                       <td>${escapeHtml(row.customer_name || "—")}</td>
                       <td>${escapeHtml(suppliers)}</td>
@@ -827,7 +830,7 @@
                       <td class="table-actions"><div class="draft-action-group draft-row-actions" role="group" aria-label="${escapeHtml(draftT("Actions for draft order {id}", { id: row.id }))}">
                         <button class="btn btn-sm btn-outline-primary" type="button" onclick="openDraftOrderBuilder(${row.id})">${escapeHtml(draftT(row.editable ? "Open" : "View"))}</button>
                         ${row.status === "Draft" ? `<button class="btn btn-sm btn-success" type="button" onclick="submitDraftOrder(${row.id})">${escapeHtml(draftT("Submit"))}</button>` : ""}
-                        <a class="btn btn-sm btn-outline-success" href="${API}/draft-orders/${row.id}/export?format=xlsx" download>XLSX</a>
+                        <a class="btn btn-sm btn-outline-success" href="${API}/draft-orders/${row.id}/export?format=xlsx" download>${escapeHtml(draftT("Download"))}</a>
                         <a class="btn btn-sm btn-outline-secondary" href="/cargochina/procurement_draft_print.php?order_id=${row.id}" target="_blank" rel="noopener">${escapeHtml(draftT("Print"))}</a>
                         <a class="btn btn-sm btn-outline-info" href="/cargochina/orders.php?order_type=draft_procurement">${escapeHtml(draftT("Orders"))}</a>
                       </div></td>
@@ -835,6 +838,7 @@
                 `;
             })
             .join("");
+        draftDownloadSelection?.bind();
     }
 
     async function loadLegacyDrafts() {
@@ -4791,6 +4795,13 @@
     }
 
     document.addEventListener("DOMContentLoaded", async () => {
+        draftDownloadSelection = window.ClmsBulkExcelDownload?.create({
+            endpoint: `${API}/orders/bulk-export`,
+            buttonId: "draftDownloadSelectedBtn",
+            countId: "draftDownloadSelectedCount",
+            selectAllId: "draftDownloadSelectAll",
+            checkboxSelector: ".draft-download-cb",
+        });
         builderModal = bootstrap.Modal.getOrCreateInstance(
             document.getElementById("draftOrderModal"),
         );

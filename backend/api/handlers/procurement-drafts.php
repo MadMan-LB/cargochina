@@ -203,7 +203,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             ];
         }
         require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
-        $filename = 'procurement_draft_' . $draft['id'] . '_' . $safeName . '.xlsx';
+        $filename = 'procurement_draft_' . $draft['id'] . '_' . $safeName . '_' . date('Ymd_His') . '.xlsx';
         (new OrderExcelService())->exportOrder($orderLike, $excelItems, $filename);
         exit;
     }

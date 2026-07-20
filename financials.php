@@ -120,11 +120,11 @@ require 'includes/layout.php';
           <div class="col-md-3">
             <label class="form-label small" for="profitItemType">Item type</label>
             <select class="form-select form-select-sm" id="profitItemType">
-              <option value="">All item types</option>
-              <option value="normal">Normal goods</option><option value="replica">Copy / replica goods</option>
-              <option value="cosmetics">Cosmetics</option><option value="branded">Branded goods</option>
-              <option value="food">Food</option><option value="dangerous">Dangerous goods</option>
-              <option value="other">Other</option><option value="unclassified">Unclassified</option>
+              <option value=""><?= htmlspecialchars(clmsT('All item types')) ?></option>
+              <option value="normal"><?= htmlspecialchars(clmsT('Normal goods')) ?></option><option value="replica"><?= htmlspecialchars(clmsT('Copy / replica goods')) ?></option>
+              <option value="cosmetics"><?= htmlspecialchars(clmsT('Cosmetics')) ?></option><option value="branded"><?= htmlspecialchars(clmsT('Branded goods')) ?></option>
+              <option value="food"><?= htmlspecialchars(clmsT('Food')) ?></option><option value="dangerous"><?= htmlspecialchars(clmsT('Dangerous goods')) ?></option>
+              <option value="other"><?= htmlspecialchars(clmsT('Other')) ?></option><option value="unclassified"><?= htmlspecialchars(clmsT('Unclassified')) ?></option>
             </select>
           </div>
         </div>

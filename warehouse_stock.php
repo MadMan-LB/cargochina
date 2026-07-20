@@ -31,7 +31,8 @@ require 'includes/layout.php';
         <div class="filter-chip-grid" id="filterStatusList">
           <?php foreach ([
             'InTransitToWarehouse' => 'Partially Received / In Transit',
-            'ReceivedAtWarehouse' => 'Received',
+            'WarehouseReceived' => 'Received',
+            'ReceivedAtWarehouse' => 'Legacy Received Status',
             'AwaitingCustomerConfirmation' => 'Legacy Awaiting Confirmation',
             'Confirmed' => 'Confirmed',
             'ReadyForConsolidation' => 'Ready for Consolidation',
@@ -55,13 +56,24 @@ require 'includes/layout.php';
         </div>
       </div>
       <div class="col-md-2"><label class="form-label small">Search</label><input type="text" class="form-control form-control-sm" id="filterQ" placeholder="Description..."></div>
-      <div class="col-md-2"><label class="form-label small">Item Type</label><select class="form-select form-select-sm" id="filterStockItemType"><option value="">All types</option><option value="normal">Normal</option><option value="replica">Copy / replica</option><option value="cosmetics">Cosmetics</option><option value="branded">Branded</option><option value="food">Food</option><option value="dangerous">Dangerous</option><option value="other">Other</option><option value="unclassified">Needs classification</option></select></div>
-      <div class="col-md-2 d-flex align-items-end gap-2"><button class="btn btn-primary btn-sm" onclick="loadStock()">Apply</button><button class="btn btn-outline-success btn-sm" onclick="exportWarehouseStockXlsx()">Export XLSX</button></div>
+      <div class="col-md-2"><label class="form-label small"><?= htmlspecialchars(clmsT('Item Type')) ?></label><select class="form-select form-select-sm" id="filterStockItemType"><option value=""><?= htmlspecialchars(clmsT('All types')) ?></option><option value="normal"><?= htmlspecialchars(clmsT('Normal')) ?></option><option value="replica"><?= htmlspecialchars(clmsT('Copy / replica')) ?></option><option value="cosmetics"><?= htmlspecialchars(clmsT('Cosmetics')) ?></option><option value="branded"><?= htmlspecialchars(clmsT('Branded')) ?></option><option value="food"><?= htmlspecialchars(clmsT('Food')) ?></option><option value="dangerous"><?= htmlspecialchars(clmsT('Dangerous')) ?></option><option value="other"><?= htmlspecialchars(clmsT('Other')) ?></option><option value="unclassified"><?= htmlspecialchars(clmsT('Needs classification')) ?></option></select></div>
+      <div class="col-md-2 d-flex flex-wrap align-items-end gap-2"><button class="btn btn-primary btn-sm" onclick="loadStock()">Apply</button><button class="btn btn-outline-secondary btn-sm" onclick="clearWarehouseStockFilters()"><?= htmlspecialchars(clmsT('Clear filters')) ?></button><button class="btn btn-outline-success btn-sm" onclick="exportWarehouseStockXlsx()"><?= htmlspecialchars(clmsT('Download')) ?></button></div>
+    </div>
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+      <div class="form-check mb-0">
+        <input class="form-check-input" type="checkbox" id="stockDownloadSelectAll">
+        <label class="form-check-label" for="stockDownloadSelectAll"><?= htmlspecialchars(clmsT('Select all on this page')) ?></label>
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        <span class="small text-muted" id="stockDownloadSelectedCount"><?= htmlspecialchars(clmsT('{count} selected', ['count' => 0])) ?></span>
+        <button type="button" class="btn btn-success btn-sm" id="stockDownloadSelectedBtn" disabled><?= htmlspecialchars(clmsT('Download selected')) ?></button>
+      </div>
     </div>
     <div class="table-responsive">
       <table class="table table-hover table-sm">
         <thead>
           <tr>
+            <th class="text-center"><span class="visually-hidden"><?= htmlspecialchars(clmsT('Select')) ?></span></th>
             <th>Order</th>
             <th>Customer</th>
             <th>Supplier</th>
@@ -70,6 +82,7 @@ require 'includes/layout.php';
             <th>Qty</th>
             <th>Declared CBM</th>
             <th>Actual CBM</th>
+            <th>Dimensions</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -94,6 +107,9 @@ require 'includes/layout.php';
   </div>
 </div>
 
-<?php $pageScripts = ['frontend/js/autocomplete.js'];
-$pageScript = 'frontend/js/warehouse_stock.js';
+<?php $pageScripts = [
+  'frontend/js/autocomplete.js',
+  'frontend/js/bulk_excel_download.js?v=' . filemtime(__DIR__ . '/frontend/js/bulk_excel_download.js'),
+];
+$pageScript = 'frontend/js/warehouse_stock.js?v=' . filemtime(__DIR__ . '/frontend/js/warehouse_stock.js');
 require 'includes/footer.php'; ?>

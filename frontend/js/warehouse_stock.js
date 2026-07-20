@@ -8,6 +8,7 @@
     let stockOffset = 0;
     const stockPageSize = 100;
     let lastStockFilterQuery = null;
+    let stockDownloadSelection = null;
 
     function stockT(text, replacements = null) {
         return typeof t === "function" ? t(text, replacements) : text;
@@ -103,6 +104,18 @@
         loadStock();
     };
 
+    window.clearWarehouseStockFilters = function () {
+        setStockStatusFilter([], "include");
+        stockCustomerAc?.setValue(null);
+        stockSupplierAc?.setValue(null);
+        ["filterCustomerId", "filterSupplierId", "filterQ", "filterStockItemType"].forEach((id) => {
+            const node = document.getElementById(id);
+            if (node) node.value = "";
+        });
+        stockOffset = 0;
+        loadStock();
+    };
+
     async function api(path) {
         const r = await fetch(API + path, { credentials: "same-origin" });
         const d = await r.json();
@@ -122,7 +135,9 @@
             const d = await api("/warehouse-stock?" + params.toString());
             renderStock(d.data);
             const prev=document.getElementById("stockPrevPage"), next=document.getElementById("stockNextPage"), summary=document.getElementById("stockPageSummary");
-            if(prev)prev.disabled=stockOffset===0; if(next)next.disabled=!d.meta?.has_more; if(summary)summary.textContent=d.data?.length?`${stockOffset+1}–${stockOffset+d.data.length}`:"0 results";
+            const total = Number(d.meta?.total || 0);
+            if(prev)prev.disabled=stockOffset===0; if(next)next.disabled=!d.meta?.has_more; if(summary)summary.textContent=d.data?.length?`${stockOffset+1}–${stockOffset+d.data.length} ${stockT("of")} ${total}`:`0 ${stockT("results")}`;
+            syncStockUrl();
         } catch (e) {
             alert(e.message || stockT("Failed to load stock"));
         }
@@ -138,15 +153,17 @@
         const tbody = document.getElementById("stockTableBody");
         if (!rows || rows.length === 0) {
             tbody.innerHTML =
-                `<tr><td colspan="10" class="text-center text-muted py-4">${escapeHtml(
+                `<tr><td colspan="12" class="text-center text-muted py-4">${escapeHtml(
                     stockT("No stock found."),
                 )}</td></tr>`;
+            stockDownloadSelection?.bind();
             return;
         }
         tbody.innerHTML = rows
             .map(
                 (r) => `
             <tr>
+                <td class="text-center"><input class="form-check-input stock-download-cb" type="checkbox" data-download-id="${r.order_id}" aria-label="${escapeHtml(stockT("Select order {id}", { id: r.order_id }))}"></td>
                 <td><a href="/cargochina/orders.php?id=${r.order_id}">#${r.order_id}</a></td>
                 <td>${escapeHtml(r.customer_name || "")}</td>
                 <td>${escapeHtml(r.supplier_name || "—")}</td>
@@ -156,11 +173,19 @@
                 <td>${r.declared_cbm != null ? formatStockCbm(r.declared_cbm, 2) : "—"}</td>
                 <td>${r.item_actual_cbm != null ? formatStockCbm(r.item_actual_cbm, 2) : r.order_actual_cbm != null ? formatStockCbm(r.order_actual_cbm, 2) : "—"}</td>
                 <td>${escapeHtml(stockDimensionText(r))}</td>
-                <td><div class="d-flex flex-wrap gap-1"><button type="button" class="btn btn-sm btn-outline-info" onclick="openStockOrderInfo(${Number(r.order_id)})" title="${escapeHtml(stockT("View full order details"))}">${escapeHtml(stockT("Info"))}</button><a class="btn btn-sm btn-outline-success" href="${stockOrderExcelUrl(r.order_id)}" target="_blank" rel="noopener">XLSX</a></div></td>
+                <td><div class="d-flex flex-wrap gap-1"><button type="button" class="btn btn-sm btn-outline-info" onclick="openStockOrderInfo(${Number(r.order_id)})" title="${escapeHtml(stockT("View full order details"))}">${escapeHtml(stockT("Info"))}</button><a class="btn btn-sm btn-outline-success" href="${stockOrderExcelUrl(r.order_id)}" target="_blank" rel="noopener">${escapeHtml(stockT("Download"))}</a></div></td>
             </tr>
         `,
             )
             .join("");
+        stockDownloadSelection?.bind();
+    }
+
+    function syncStockUrl() {
+        const params = buildStockParams();
+        if (stockOffset) params.set("offset", String(stockOffset));
+        const query = params.toString();
+        window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
     }
 
     function renderStatusBadge(status) {
@@ -288,10 +313,30 @@
     }
 
     document.addEventListener("DOMContentLoaded", function () {
+        stockDownloadSelection = window.ClmsBulkExcelDownload?.create({
+            endpoint: `${API}/orders/bulk-export`,
+            buttonId: "stockDownloadSelectedBtn",
+            countId: "stockDownloadSelectedCount",
+            selectAllId: "stockDownloadSelectAll",
+            checkboxSelector: ".stock-download-cb",
+        });
         const urlParams = new URLSearchParams(window.location.search);
+        stockOffset = Math.max(0, parseInt(urlParams.get("offset") || "0", 10) || 0);
         const statusFromUrl = urlParams.getAll("status[]");
         const legacyStatus = urlParams.get("status");
         const statusMode = urlParams.get("status_mode") || "include";
+        const restoredValues = {
+            filterCustomerId: urlParams.get("customer_id") || "",
+            filterSupplierId: urlParams.get("supplier_id") || "",
+            filterQ: urlParams.get("q") || "",
+            filterStockItemType: urlParams.get("item_type") || "",
+        };
+        Object.entries(restoredValues).forEach(([id, value]) => {
+            const node = document.getElementById(id);
+            if (node) node.value = value;
+        });
+        if (restoredValues.filterCustomerId) document.getElementById("filterCustomerSearch").value = `#${restoredValues.filterCustomerId}`;
+        if (restoredValues.filterSupplierId) document.getElementById("filterSupplierSearch").value = `#${restoredValues.filterSupplierId}`;
         if (statusFromUrl.length) {
             setStockStatusFilter(statusFromUrl, statusMode);
         } else if (legacyStatus) {

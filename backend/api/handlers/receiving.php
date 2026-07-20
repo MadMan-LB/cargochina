@@ -72,6 +72,11 @@ function receivingUtf8LikeExpr(string $expr): string
     return "CONVERT($expr USING utf8mb4) COLLATE utf8mb4_unicode_ci";
 }
 
+function receivingQueryFlag($value): bool
+{
+    return in_array(strtolower(trim((string) $value)), ['1', 'true', 'yes', 'on'], true);
+}
+
 function receivingFetchQueueRowsForRequest(PDO $pdo, bool $paginate = true, ?array &$meta = null): array
 {
     $statuses = $_GET['status'] ?? null;
@@ -137,7 +142,34 @@ function receivingFetchQueueRowsForRequest(PDO $pdo, bool $paginate = true, ?arr
         $sql .= " AND EXISTS (SELECT 1 FROM order_items oit JOIN item_classifications ict ON ict.entity_type='order_item' AND ict.entity_id=oit.id WHERE oit.order_id=o.id AND ict.item_type_code=?)";
         $params[] = $itemType;
     }
+    if (receivingQueryFlag($_GET['priority_only'] ?? false)) {
+        if (receivingTableHasColumn($pdo, 'customers', 'priority_level')) {
+            $sql .= " AND LOWER(TRIM(COALESCE(c.priority_level, 'normal'))) NOT IN ('', 'normal')";
+        } else {
+            $sql .= ' AND 1 = 0';
+        }
+    }
+    if (receivingQueryFlag($_GET['alerts_only'] ?? false)) {
+        $alertClauses = ["TRIM(COALESCE(o.high_alert_notes, '')) <> ''"];
+        $productAlertClauses = [];
+        if (receivingTableHasColumn($pdo, 'products', 'required_design')) {
+            $productAlertClauses[] = 'COALESCE(pra.required_design, 0) <> 0';
+        }
+        if (receivingTableHasColumn($pdo, 'products', 'high_alert_note')) {
+            $productAlertClauses[] = "TRIM(COALESCE(pra.high_alert_note, '')) <> ''";
+        }
+        if ($productAlertClauses) {
+            $alertClauses[] = 'EXISTS (SELECT 1 FROM order_items oia LEFT JOIN products pra ON pra.id = oia.product_id WHERE oia.order_id = o.id AND (' . implode(' OR ', $productAlertClauses) . '))';
+        }
+        $sql .= ' AND (' . implode(' OR ', $alertClauses) . ')';
+    }
     $limit=clmsQueryLimit($_GET['limit']??null,50,200);$offset=clmsQueryOffset($_GET['offset']??null);
+    $total = 0;
+    if ($paginate) {
+        $countStmt = $pdo->prepare("SELECT COUNT(*) FROM ($sql) receiving_queue_filtered");
+        $countStmt->execute($params);
+        $total = (int) $countStmt->fetchColumn();
+    }
     $sql .= " ORDER BY o.expected_ready_date IS NULL ASC, o.expected_ready_date ASC, o.id ASC";
     if($paginate)$sql.=' LIMIT '.($limit+1).' OFFSET '.$offset;
 
@@ -145,7 +177,7 @@ function receivingFetchQueueRowsForRequest(PDO $pdo, bool $paginate = true, ?arr
     $stmt->execute($params);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
     $hasMore=$paginate&&count($rows)>$limit;if($hasMore)$rows=array_slice($rows,0,$limit);
-    $meta=['limit'=>$limit,'offset'=>$offset,'has_more'=>$hasMore];
+    $meta=['limit'=>$limit,'offset'=>$offset,'has_more'=>$hasMore,'total'=>$total];
     if (!$rows) {
         return [];
     }
@@ -160,7 +192,7 @@ function receivingFetchQueueRowsForRequest(PDO $pdo, bool $paginate = true, ?arr
         ? ", COALESCE(oi.hs_code, p.hs_code) as hs_code"
         : ", p.hs_code as hs_code";
     $itemMetaCols = '';
-    foreach (['what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'height', 'width', 'length'] as $column) {
+    foreach (['what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'height', 'width', 'length', 'image_paths'] as $column) {
         if (receivingTableHasColumn($pdo, 'order_items', $column)) {
             $itemMetaCols .= ", oi.$column";
         }
@@ -565,7 +597,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
         (new OrderExcelService())->exportReceivingQueueSummary(
             $rows,
-            'receiving_queue_' . date('Y-m-d') . '.xlsx'
+            'receiving_queue_' . date('Ymd_His') . '.xlsx'
         );
     }
 

@@ -105,7 +105,7 @@ require 'includes/layout.php';
   <div class="filter-summary-row">
     <div class="summary-text" id="balanceFilterSummary"><?= htmlspecialchars(clmsT('Showing all current balances.')) ?></div>
     <div class="d-flex flex-wrap gap-2">
-      <button type="button" class="btn btn-outline-secondary btn-sm" onclick="exportActiveBalanceView()"><?= htmlspecialchars(clmsT('Export')) ?></button>
+      <button type="button" class="btn btn-outline-secondary btn-sm" onclick="exportActiveBalanceView()"><?= htmlspecialchars(clmsT('Download')) ?></button>
       <button type="button" class="btn btn-primary btn-sm" onclick="loadBalancePageData()"><?= htmlspecialchars(clmsT('Apply Filters')) ?></button>
     </div>
   </div>

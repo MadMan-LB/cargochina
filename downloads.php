@@ -93,7 +93,7 @@ require 'includes/layout.php';
 
                       <div class="mt-auto d-flex flex-wrap gap-2">
                         <?php if ($isDownload): ?>
-                          <a class="btn btn-primary btn-sm" href="<?= $basePath ?>/download_template.php?slug=<?= urlencode($entry['slug']) ?>" download>Download</a>
+                          <a class="btn btn-primary btn-sm" href="<?= $basePath ?>/download_template.php?slug=<?= urlencode($entry['slug']) ?>" download><?= htmlspecialchars(clmsT('Download')) ?></a>
                         <?php else: ?>
                           <a class="btn btn-outline-primary btn-sm" href="<?= $basePath ?>/<?= htmlspecialchars(ltrim((string) ($entry['module_path'] ?? ''), '/')) ?>"><?= htmlspecialchars($entry['action_label'] ?? 'Open module') ?></a>
                         <?php endif; ?>

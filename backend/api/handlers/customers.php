@@ -362,6 +362,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 $limit = clmsQueryLimit($_GET['limit'] ?? null, 50, 100);
                 $offset = clmsQueryOffset($_GET['offset'] ?? null);
+                $countStmt = $params ? $pdo->prepare("SELECT COUNT(*) FROM ($sql) customers_filtered") : $pdo->query("SELECT COUNT(*) FROM ($sql) customers_filtered");
+                if ($params) $countStmt->execute($params);
+                $total = (int) $countStmt->fetchColumn();
                 $sql .= " ORDER BY name LIMIT " . ($limit + 1) . " OFFSET " . $offset;
                 $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
                 if ($params) $stmt->execute($params);
@@ -375,7 +378,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $r['country_shipping'] = loadCountryShipping($pdo, (int) $r['id']);
                     $r['por'] = loadCustomerPorValues($pdo, (int) $r['id']);
                 }
-                jsonResponse(['data' => $rows, 'meta' => ['limit' => $limit, 'offset' => $offset, 'has_more' => $hasMore]]);
+                jsonResponse(['data' => $rows, 'meta' => ['limit' => $limit, 'offset' => $offset, 'has_more' => $hasMore, 'total' => $total]]);
             }
             if ($action === 'lookup') {
                 $row = customerLookupRow($pdo, (int) $id);

@@ -7,6 +7,7 @@ const orderPageSize = 50;
 let lastOrderFilterQuery = null;
 let orderCreateRequestKey = null;
 let orderLockVersion = 0;
+let orderDownloadSelection = null;
 
 function newOrderRequestKey() {
     if (globalThis.crypto?.randomUUID) return `order:${globalThis.crypto.randomUUID()}`;
@@ -698,6 +699,13 @@ function buildOrderListQuery() {
     return params.toString();
 }
 
+function syncOrderListUrl() {
+    const params = new URLSearchParams(buildOrderListQuery());
+    if (orderOffset) params.set("offset", String(orderOffset));
+    const query = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+}
+
 window.clearOrderStatusFilter = function () {
     setOrderStatusFilter([], "include");
     loadOrders();
@@ -713,7 +721,31 @@ window.clearOrderSearch = function () {
     loadOrders();
 };
 
+window.clearOrderFilters = function () {
+    setOrderStatusFilter([], "include");
+    if (orderSearchAc) orderSearchAc.setValue(null);
+    const values = {
+        orderSearch: "",
+        filterOrderType: "",
+        filterItemType: "",
+        filterCustomerFeedback: "",
+    };
+    Object.entries(values).forEach(([id, value]) => {
+        const node = document.getElementById(id);
+        if (node) node.value = value;
+    });
+    orderOffset = 0;
+    loadOrders();
+};
+
 document.addEventListener("DOMContentLoaded", () => {
+    orderDownloadSelection = window.ClmsBulkExcelDownload?.create({
+        endpoint: `${window.API_BASE || "/cargochina/api/v1"}/orders/bulk-export`,
+        buttonId: "ordersDownloadSelectedBtn",
+        countId: "ordersDownloadSelectedCount",
+        selectAllId: "orderSelectAll",
+        checkboxSelector: ".order-bulk-cb",
+    });
     registerUnsavedChangesGuard?.("#orderModal .modal-body");
     orderCustomerAc = Autocomplete.init(
         document.getElementById("orderCustomer"),
@@ -826,6 +858,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const statusMode = urlParams.get("status_mode") || "include";
     const orderTypeFromUrl = urlParams.get("order_type") || "";
     const customerFeedbackFromUrl = urlParams.get("customer_feedback") || "";
+    const itemTypeFromUrl = urlParams.get("item_type") || "";
+    const searchFromUrl = urlParams.get("q") || "";
+    orderOffset = Math.max(0, parseInt(urlParams.get("offset") || "0", 10) || 0);
     const orderTypeEl = document.getElementById("filterOrderType");
     if (orderTypeEl && orderTypeFromUrl) orderTypeEl.value = orderTypeFromUrl;
     const customerFeedbackEl = document.getElementById(
@@ -834,6 +869,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (customerFeedbackEl && customerFeedbackFromUrl) {
         customerFeedbackEl.value = customerFeedbackFromUrl;
     }
+    const itemTypeEl = document.getElementById("filterItemType");
+    if (itemTypeEl && itemTypeFromUrl) itemTypeEl.value = itemTypeFromUrl;
+    if (orderSearchEl && searchFromUrl) orderSearchEl.value = searchFromUrl;
     if (statusFromUrl.length) {
         setOrderStatusFilter(statusFromUrl, statusMode);
     } else if (legacyStatus) {
@@ -894,8 +932,6 @@ async function loadOrders() {
         tbody.innerHTML =
             rows
                 .map((r) => {
-                    const canBulk =
-                        r.status === "Submitted" || r.status === "Draft";
                     const suppDisplay = getOrderSupplierDisplay(r);
                     const hasCustomerFeedback = !!String(
                         r.confirmation_token || "",
@@ -928,7 +964,7 @@ async function loadOrders() {
                         : `${window.API_BASE || "/cargochina/api/v1"}/orders/${r.id}/export?format=xlsx`;
                     return `
       <tr data-order-id="${r.id}" data-status="${escapeHtml(r.status)}" class="${isDeclinedAfterAutoConfirm ? "table-danger" : ""}">
-        <td class="text-center">${canBulk ? `<input type="checkbox" class="form-check-input order-bulk-cb" data-order-id="${r.id}" data-status="${escapeHtml(r.status)}">` : ""}</td>
+        <td class="text-center"><input type="checkbox" class="form-check-input order-bulk-cb" data-order-id="${r.id}" data-download-id="${r.id}" data-status="${escapeHtml(r.status)}" aria-label="${escapeHtml(orderT("Select order {id}", { id: r.id }))}"></td>
         <td>${r.id}</td>
         <td>${escapeHtml(r.customer_name)}${r.customer_priority_level && r.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escapeHtml(r.customer_priority_note || "")}">${escapeHtml(orderT(r.customer_priority_level))}</span>` : ""}</td>
         <td>${escapeHtml(suppDisplay)}</td>
@@ -938,7 +974,7 @@ async function loadOrders() {
           <button class="btn btn-sm btn-outline-info" onclick="showOrderInfo(${r.id})" title="${escapeHtml(orderT("View order details"))}">ℹ</button>
           <button class="btn btn-sm btn-outline-primary" onclick="editOrder(${r.id})">${escapeHtml(orderT(isDraftBuilder ? "Open Builder" : "Edit"))}</button>
           <button class="btn btn-sm btn-outline-secondary" onclick="copyOrder(${r.id})" title="${escapeHtml(orderT("Duplicate as new draft"))}">${escapeHtml(orderT("Copy"))}</button>
-          <a class="btn btn-sm btn-outline-success" href="${exportHrefXlsx}" download title="${escapeHtml(orderT("Download XLSX export"))}">XLSX</a>
+          <a class="btn btn-sm btn-outline-success" href="${exportHrefXlsx}" download title="${escapeHtml(orderT("Download"))}">${escapeHtml(orderT("Download"))}</a>
           ${r.status === "Draft" ? `<button class="btn btn-sm btn-success" onclick="submitOrder(${r.id})">${escapeHtml(orderT("Submit"))}</button>` : ""}
           ${r.status === "Submitted" ? `<button class="btn btn-sm btn-success" onclick="approveOrder(${r.id})">${escapeHtml(orderT("Approve"))}</button>` : ""}
           ${r.status === "AwaitingCustomerConfirmation" ? `<button class="btn btn-sm btn-warning" onclick="confirmOrder(${r.id})">${escapeHtml(orderT("Confirm"))}</button>` : ""}
@@ -955,12 +991,15 @@ async function loadOrders() {
         tbody.querySelectorAll(".order-bulk-cb").forEach((cb) => {
             cb.addEventListener("change", updateSelectAllState);
         });
+        orderDownloadSelection?.bind();
         const prev = document.getElementById("ordersPrevPage");
         const next = document.getElementById("ordersNextPage");
         if (prev) prev.disabled = orderOffset === 0;
         if (next) next.disabled = !meta.has_more;
         const summary = document.getElementById("ordersPageSummary");
-        if (summary) summary.textContent = rows.length ? `${orderOffset + 1}–${orderOffset + rows.length}` : "0 results";
+        const total = Number(meta.total || 0);
+        if (summary) summary.textContent = rows.length ? `${orderOffset + 1}–${orderOffset + rows.length} ${orderT("of")} ${total}` : `0 ${orderT("results")}`;
+        syncOrderListUrl();
     } catch (e) {
         updateOrderOverview([]);
         showToast(e.message, "danger");
@@ -3006,7 +3045,7 @@ async function showOrderInfo(id) {
           ${containerHtml}
           <div class="d-flex gap-2 mt-3">
             <button class="btn btn-sm btn-outline-primary" onclick="bootstrap.Modal.getOrCreateInstance(document.getElementById('orderInfoModal')).hide(); editOrder(${id})">${escapeHtml(orderT(o.order_type === "draft_procurement" ? "Open Draft Builder" : "Edit Order"))}</button>
-            <a class="btn btn-sm btn-outline-success" href="${exportHrefXlsx}" download>${escapeHtml(orderT("Export XLSX"))}</a>
+            <a class="btn btn-sm btn-outline-success" href="${exportHrefXlsx}" download>${escapeHtml(orderT("Download"))}</a>
           </div>`;
     } catch (e) {
         document.getElementById("orderInfoBody").innerHTML =

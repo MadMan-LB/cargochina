@@ -27,7 +27,7 @@ require 'includes/layout.php';
       <?php if ($canImportReceiving): ?>
         <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#receivingImportModal"><?= clmsT('Import Excel') ?></button>
       <?php endif; ?>
-      <button type="button" class="btn btn-outline-success" onclick="exportReceivingXlsx()" title="<?= clmsT('Export queue to XLSX') ?>"><?= clmsT('Export XLSX') ?></button>
+      <button type="button" class="btn btn-outline-success" onclick="exportReceivingXlsx()" title="<?= clmsT('Download complete filtered results') ?>"><?= clmsT('Download') ?></button>
     </div>
   </div>
 </div>
@@ -130,7 +130,7 @@ require 'includes/layout.php';
       </div>
       <div class="col-12 col-md-6 col-xl-2 d-grid gap-2">
         <button type="button" class="btn btn-primary btn-sm" id="applyFiltersBtn" onclick="applyFilters()"><?= clmsT('Apply') ?></button>
-        <button type="button" class="btn btn-outline-success btn-sm" onclick="exportReceivingXlsx()" title="<?= clmsT('Export queue to XLSX') ?>"><?= clmsT('Export XLSX') ?></button>
+        <button type="button" class="btn btn-outline-success btn-sm" onclick="exportReceivingXlsx()" title="<?= clmsT('Download complete filtered results') ?>"><?= clmsT('Download') ?></button>
       </div>
     </div>
     <div class="filter-summary-row">
@@ -141,6 +141,16 @@ require 'includes/layout.php';
 </div>
 
 <!-- Tabs: List | Calendar | Schedule -->
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <div class="form-check mb-0">
+    <input class="form-check-input" type="checkbox" id="receivingDownloadSelectAll">
+    <label class="form-check-label" for="receivingDownloadSelectAll"><?= clmsT('Select all on this page') ?></label>
+  </div>
+  <div class="d-flex align-items-center gap-2">
+    <span class="small text-muted" id="receivingDownloadSelectedCount"><?= clmsT('{count} selected', ['count' => 0]) ?></span>
+    <button type="button" class="btn btn-success btn-sm" id="receivingDownloadSelectedBtn" disabled><?= clmsT('Download selected') ?></button>
+  </div>
+</div>
 <ul class="nav nav-tabs mb-3" role="tablist">
   <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tabList"><?= clmsT('List') ?></a></li>
   <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabCalendar"><?= clmsT('Calendar') ?></a></li>
@@ -223,7 +233,7 @@ require 'includes/layout.php';
   <?= clmsT('Hide item details') ?>
 </button>
 <button type="button" class="btn btn-outline-primary btn-sm" onclick="fillReceiveActualsFromDeclared()"><?= clmsT('Fill from declared') ?></button>
-<a class="btn btn-outline-success btn-sm d-none" id="receiveOrderExportBtn" href="#" target="_blank" rel="noopener"><?= clmsT('Download Order Excel') ?></a>
+<a class="btn btn-outline-success btn-sm d-none" id="receiveOrderExportBtn" href="#" target="_blank" rel="noopener"><?= clmsT('Download') ?></a>
 </div>        </div>
         <div id="itemLevelTable" class="table-responsive">
           <table class="table table-sm align-middle">
@@ -364,6 +374,7 @@ require 'includes/layout.php';
 <?php $pageScripts = [
   'frontend/js/photo_uploader.js?v=' . filemtime(__DIR__ . '/frontend/js/photo_uploader.js'),
   'frontend/js/autocomplete.js?v=' . filemtime(__DIR__ . '/frontend/js/autocomplete.js'),
+  'frontend/js/bulk_excel_download.js?v=' . filemtime(__DIR__ . '/frontend/js/bulk_excel_download.js'),
 ];
 $pageScript = 'frontend/js/receiving.js?v=' . filemtime(__DIR__ . '/frontend/js/receiving.js');
 require 'includes/footer.php'; ?>

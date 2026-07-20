@@ -25,6 +25,8 @@ require 'includes/layout.php';
       <small class="text-muted">These are real orders saved with the draft-order workflow.</small>
     </div>
     <div class="draft-action-group draft-page-actions" role="group" aria-label="<?= htmlspecialchars(clmsT('Draft order actions')) ?>">
+      <span class="small text-muted align-self-center" id="draftDownloadSelectedCount"><?= htmlspecialchars(clmsT('{count} selected', ['count' => 0])) ?></span>
+      <button class="btn btn-success btn-sm" type="button" id="draftDownloadSelectedBtn" disabled><?= htmlspecialchars(clmsT('Download selected')) ?></button>
       <button class="btn btn-outline-primary btn-sm" type="button" id="draftOrderImportBtn">Import</button>
       <button class="btn btn-primary btn-sm" type="button" onclick="openDraftOrderBuilder()">+ Draft an Order</button>
     </div>
@@ -34,6 +36,7 @@ require 'includes/layout.php';
       <table class="table table-hover table-striped table-sm align-middle">
         <thead>
           <tr>
+            <th class="text-center" style="width:2.5rem"><input class="form-check-input" type="checkbox" id="draftDownloadSelectAll" title="<?= htmlspecialchars(clmsT('Select all on this page')) ?>"></th>
             <th>ID</th>
             <th>Customer</th>
             <th>Suppliers</th>
@@ -393,6 +396,7 @@ $baseAssetPath = $basePath ?? '/cargochina';
 $pageScripts = [
   $baseAssetPath . '/frontend/js/autocomplete.js?v=' . @filemtime(__DIR__ . '/frontend/js/autocomplete.js'),
   $baseAssetPath . '/frontend/js/photo_uploader.js?v=' . @filemtime(__DIR__ . '/frontend/js/photo_uploader.js'),
+  $baseAssetPath . '/frontend/js/bulk_excel_download.js?v=' . @filemtime(__DIR__ . '/frontend/js/bulk_excel_download.js'),
 ];
 $jsQrPath = __DIR__ . '/frontend/js/lib/jsQR.js';
 if (is_file($jsQrPath)) {

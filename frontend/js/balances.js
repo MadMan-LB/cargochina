@@ -471,7 +471,7 @@
         const safeRows = Array.isArray(rows) ? rows : [];
         balanceDocumentRows.clear();
         safeRows.forEach((row) => balanceDocumentRows.set(documentKey(row), row));
-        document.querySelectorAll(".balanceTxPrevBtn").forEach(btn=>btn.disabled=balanceTxOffset<=0);document.querySelectorAll(".balanceTxNextBtn").forEach(btn=>btn.disabled=!meta?.has_more);document.querySelectorAll(".balanceTxPageSummary").forEach(node=>node.textContent=balancesT("Page {page}",{page:Math.floor(balanceTxOffset/balanceTxLimit)+1}));
+        document.querySelectorAll(".balanceTxPrevBtn").forEach(btn=>btn.disabled=balanceTxOffset<=0);document.querySelectorAll(".balanceTxNextBtn").forEach(btn=>btn.disabled=!meta?.has_more);document.querySelectorAll(".balanceTxPageSummary").forEach(node=>node.textContent=balancesT("Showing {from}-{to} of {total}",{from:safeRows.length?balanceTxOffset+1:0,to:balanceTxOffset+safeRows.length,total:meta?.total??safeRows.length}));
         setText(
             "transactionsSummary",
             safeRows.length

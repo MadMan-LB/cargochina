@@ -135,7 +135,9 @@ async function loadCustomers() {
         if (prev) prev.disabled = customerOffset === 0;
         if (next) next.disabled = !meta.has_more;
         const summary = document.getElementById("customerPageSummary");
-        if (summary) summary.textContent = rows.length ? `${customerOffset + 1}–${customerOffset + rows.length}` : "0 results";
+        if (summary) summary.textContent = typeof t === "function"
+            ? t("Showing {from}-{to} of {total}", { from: rows.length ? customerOffset + 1 : 0, to: customerOffset + rows.length, total: meta.total ?? rows.length })
+            : `Showing ${rows.length ? customerOffset + 1 : 0}-${customerOffset + rows.length} of ${meta.total ?? rows.length}`;
     } catch (e) {
         showToast(e.message, "danger");
     }

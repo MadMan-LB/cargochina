@@ -547,6 +547,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 $limit = clmsQueryLimit($_GET['limit'] ?? null, 50, 100);
                 $offset = clmsQueryOffset($_GET['offset'] ?? null);
+                $countStmt = $params ? $pdo->prepare("SELECT COUNT(*) FROM ($sql) suppliers_filtered") : $pdo->query("SELECT COUNT(*) FROM ($sql) suppliers_filtered");
+                if ($params) $countStmt->execute($params);
+                $total = (int) $countStmt->fetchColumn();
                 $sql .= " ORDER BY s." . $sort . " " . $order . ", s.id ASC LIMIT " . ($limit + 1) . " OFFSET " . $offset;
 
                 $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
@@ -564,7 +567,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         unset($r['commission_rate'], $r['commission_type'], $r['commission_applied_on']);
                     }
                 }
-                jsonResponse(['data' => $rows, 'meta' => ['limit' => $limit, 'offset' => $offset, 'has_more' => $hasMore]]);
+                jsonResponse(['data' => $rows, 'meta' => ['limit' => $limit, 'offset' => $offset, 'has_more' => $hasMore, 'total' => $total]]);
             }
             $stmt = $pdo->prepare("SELECT * FROM suppliers WHERE id = ?");
             $stmt->execute([$id]);

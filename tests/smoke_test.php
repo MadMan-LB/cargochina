@@ -25,6 +25,11 @@ try {
     echo "OK: tracking_push_log\n";
     $pdo->query("SELECT 1 FROM warehouse_receipt_items LIMIT 1");
     echo "OK: warehouse_receipt_items\n";
+    $cols = $pdo->query("SHOW COLUMNS FROM warehouse_receipt_items WHERE Field IN ('actual_height','actual_width','actual_length')")->fetchAll(PDO::FETCH_COLUMN);
+    if (count($cols) !== 3) {
+        throw new Exception('warehouse_receipt_items missing actual dimensions (run migration 079)');
+    }
+    echo "OK: warehouse_receipt_items.actual_height, actual_width, actual_length\n";
     $pdo->query("SELECT 1 FROM user_notification_preferences LIMIT 1");
     echo "OK: user_notification_preferences\n";
     $pdo->query("SELECT 1 FROM notification_delivery_log LIMIT 1");

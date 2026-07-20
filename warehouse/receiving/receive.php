@@ -14,7 +14,7 @@ require __DIR__ . '/../../includes/area_layout.php';
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="h3 mb-0"><?= htmlspecialchars(clmsT('Receive Order #{id}', ['id' => $orderId])) ?></h1>
     <div class="d-flex gap-2">
-        <a href="/cargochina/api/v1/orders/<?= (int)$orderId ?>/export?format=xlsx" class="btn btn-outline-success btn-sm" target="_blank" rel="noopener"><?= htmlspecialchars(clmsT('Download Order Excel')) ?></a>
+        <a href="/cargochina/api/v1/orders/<?= (int)$orderId ?>/export?format=xlsx" class="btn btn-outline-success btn-sm" target="_blank" rel="noopener"><?= htmlspecialchars(clmsT('Download')) ?></a>
         <a href="<?= $areaBase ?>/receiving/" class="btn btn-outline-secondary btn-sm">← <?= htmlspecialchars(clmsT('Back to Queue')) ?></a>
     </div>
 </div>

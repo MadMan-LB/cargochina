@@ -2013,7 +2013,9 @@ function draftOrderExportXlsx(PDO $pdo, int $orderId): void
     }
 
     require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
-    $filename = 'draft_order_' . $orderId . '.xlsx';
+    $customerName = preg_replace('/[^a-zA-Z0-9_-]+/', '_', trim((string) ($order['customer_name'] ?? 'customer')));
+    $customerName = trim((string) $customerName, '_') ?: 'customer';
+    $filename = 'draft_order_' . $orderId . '_' . $customerName . '_' . date('Ymd_His') . '.xlsx';
     (new OrderExcelService())->exportOrder($order, $excelItems, $filename);
 }
 

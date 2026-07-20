@@ -5,17 +5,20 @@ require_once dirname(__DIR__) . '/api/helpers.php';
 
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Shared\Drawing as SharedDrawing;
+use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
+use PhpOffice\PhpSpreadsheet\Worksheet\PageSetup;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class OrderExcelService
 {
     private string $backendDir;
+    private array $workbookImageCache = [];
 
     private const STANDARD_LAST_COL = 'X';
     private const CONTAINER_LAST_COL = 'V';
@@ -31,6 +34,7 @@ class OrderExcelService
     private const LIGHT_RED = 'F4CCCC';
     private const SOFT_SECTION = 'EEF5FF';
     private const SOFT_GREEN = 'E2F0D9';
+    private const MASTER_TABLE_BLUE = '2563EB';
 
     public function __construct()
     {
@@ -49,19 +53,47 @@ class OrderExcelService
 
     public function exportOrder(array $order, array $items, ?string $filename = null): void
     {
+        $spreadsheet = $this->buildOrderSpreadsheet($order, $items);
+        $outName = $filename ?? ('order_' . (int) ($order['id'] ?? 0) . '_goods_details.xlsx');
+        $this->outputXlsx($spreadsheet, $outName);
+    }
+
+    public function saveOrderXlsx(array $order, array $items, string $path): void
+    {
+        $spreadsheet = $this->buildOrderSpreadsheet($order, $items);
+        $this->prepareWorkbook($spreadsheet);
+        (new Xlsx($spreadsheet))->save($path);
+        $spreadsheet->disconnectWorksheets();
+    }
+
+    private function buildOrderSpreadsheet(array $order, array $items): Spreadsheet
+    {
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle(substr($this->tr('Order') . ' ' . (int) ($order['id'] ?? 0), 0, 31));
         $this->setStandardColumnWidths($sheet);
 
-        $row = $this->writeCompanyHeader($sheet, 1, self::STANDARD_LAST_COL);
+        $row = $this->writeCompanyHeader(
+            $sheet,
+            1,
+            self::STANDARD_LAST_COL,
+            $this->tr('Order #{id} Goods Details', ['id' => (int) ($order['id'] ?? 0)]),
+            [
+                [$this->tr('Customer') . ':', self::formatCustomerDisplay($order, $items)],
+                [$this->tr('Destination Country') . ':', (string) ($order['destination_country_name'] ?? $order['destination_country_code'] ?? '')],
+                [$this->tr('Expected Ready') . ':', (string) ($order['expected_ready_date'] ?? '')],
+                [$this->tr('Currency') . ':', (string) ($order['currency'] ?? '')],
+            ],
+            $this->tr('Order Number') . ': ' . (int) ($order['id'] ?? 0) . '    ' . $this->tr('Status') . ': ' . $this->statusText((string) ($order['status'] ?? ''))
+        );
         $this->writeStandardColumnHeaders($sheet, $row);
         $row++;
         $row = $this->writeStandardItems($sheet, $items, $row, $order);
         $row = $this->writeStandardReceiptFees($sheet, $row, $order, $items);
         $this->writeStandardOperationalCosts($sheet, $row, $order);
 
-        $outName = $filename ?? ('order_' . (int) ($order['id'] ?? 0) . '_goods_details.xlsx');
-        $this->outputXlsx($spreadsheet, $outName);
+        $sheet->freezePane('A9');
+        return $spreadsheet;
     }
 
     public function exportOrders(array $ordersWithItems, string $filename = 'container_orders.xlsx', array $context = []): void
@@ -70,7 +102,19 @@ class OrderExcelService
         $sheet = $spreadsheet->getActiveSheet();
         $this->setContainerColumnWidths($sheet);
 
-        $row = $this->writeCompanyHeader($sheet, 1, self::CONTAINER_LAST_COL);
+        $row = $this->writeCompanyHeader(
+            $sheet,
+            1,
+            self::CONTAINER_LAST_COL,
+            $this->tr('Container Orders'),
+            [
+                [$this->tr('Container') . ':', (string) ($context['container_code'] ?? $context['code'] ?? '')],
+                [$this->tr('Orders') . ':', (string) count($ordersWithItems)],
+                [$this->tr('Generated') . ':', date('Y-m-d H:i:s')],
+                [$this->tr('Currency') . ':', (string) ($context['currency'] ?? '')],
+            ],
+            $this->tr('Salameh Global / CargoChina')
+        );
         $this->writeContainerColumnHeaders($sheet, $row);
         $row++;
 
@@ -131,7 +175,7 @@ class OrderExcelService
         }
 
         $this->writeOverallTotals($sheet, $overallTotals, $row);
-        $sheet->freezePane('A6');
+        $sheet->freezePane('A9');
 
         $this->outputXlsx($spreadsheet, $filename);
     }
@@ -140,6 +184,7 @@ class OrderExcelService
     {
         $headers = [
             'Order ID',
+            'Photo',
             'Order Type',
             'Customer',
             'Supplier',
@@ -175,6 +220,7 @@ class OrderExcelService
 
             return [
                 (int) ($row['id'] ?? 0),
+                $items[0]['image_paths'] ?? [],
                 (string) ($row['order_type'] ?? 'standard'),
                 self::formatCustomerDisplay($row, $items),
                 $supplierDisplay,
@@ -196,6 +242,7 @@ class OrderExcelService
     {
         $headers = [
             'Order ID',
+            'Photo',
             'Customer',
             'Supplier',
             'Supplier Phone',
@@ -252,6 +299,7 @@ class OrderExcelService
 
             return [
                 (int) ($row['id'] ?? 0),
+                $items[0]['image_paths'] ?? [],
                 self::formatCustomerDisplay($row, $items),
                 (string) ($row['supplier_name'] ?? ''),
                 (string) ($row['supplier_phone'] ?? ''),
@@ -272,6 +320,7 @@ class OrderExcelService
     {
         $headers = [
             'Order ID',
+            'Photo',
             'Customer',
             'Supplier',
             'Status',
@@ -293,6 +342,7 @@ class OrderExcelService
         $bodyRows = array_map(function (array $row): array {
             return [
                 (int) ($row['order_id'] ?? 0),
+                $row['image_paths'] ?? [],
                 (string) ($row['customer_name'] ?? ''),
                 (string) ($row['supplier_name'] ?? ''),
                 $this->statusText((string) ($row['status'] ?? '')),
@@ -313,6 +363,11 @@ class OrderExcelService
         }, $rows);
 
         $this->exportSimpleTable('Warehouse Stock', $headers, $bodyRows, $filename);
+    }
+
+    public function exportTable(string $title, array $headers, array $rows, string $filename): void
+    {
+        $this->exportSimpleTable($title, $headers, $rows, $filename);
     }
 
     private function setStandardColumnWidths($sheet): void
@@ -381,45 +436,56 @@ class OrderExcelService
         }
     }
 
-    private function writeCompanyHeader($sheet, int $startRow, string $lastColumn): int
+    private function writeCompanyHeader($sheet, int $startRow, string $lastColumn, string $title = 'Goods Details', array $metadata = [], string $note = ''): int
     {
-        $headerRows = [
-            'MASTERTOOLS COMPANY LIMITED',
-            '        ADDRESS: CHINA-ZHEJIANG PROVINCE-YIWU CITY-JIANDONG STREET-WUYUE SQUARE -MANSION NO.1 -25th FLOOR-2515',
-            '        TEL: 0579-85178151/85178152        FAX: 0579-85177247',
-            'GOOD DETAILS',
-        ];
+        $titleRow = $startRow;
+        $sheet->setCellValue('A' . $titleRow, $title);
+        $sheet->mergeCells("A{$titleRow}:{$lastColumn}{$titleRow}");
+        $sheet->getStyle("A{$titleRow}:{$lastColumn}{$titleRow}")->applyFromArray([
+            'font' => ['name' => 'Arial', 'size' => 16, 'bold' => true, 'color' => ['rgb' => self::HEADER_BLUE]],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_BLUE]],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT, 'vertical' => Alignment::VERTICAL_CENTER],
+        ]);
+        $sheet->getRowDimension($titleRow)->setRowHeight(28);
 
-        foreach ($headerRows as $index => $text) {
-            $row = $startRow + $index;
-            $sheet->setCellValue('B' . $row, $text);
-            $sheet->mergeCells(sprintf('B%d:%s%d', $row, $lastColumn, $row));
-            $sheet->getStyle(sprintf('B%d:%s%d', $row, $lastColumn, $row))->applyFromArray([
-                'font' => [
-                    'name' => 'Calibri',
-                    'size' => 16,
-                    'bold' => true,
-                    'color' => ['rgb' => self::HEADER_BLUE],
-                ],
-                'alignment' => [
-                    'horizontal' => Alignment::HORIZONTAL_CENTER,
-                    'vertical' => Alignment::VERTICAL_CENTER,
-                ],
-                'fill' => [
-                    'fillType' => Fill::FILL_SOLID,
-                    'startColor' => ['rgb' => 'FFFFFF'],
-                ],
-                'borders' => [
-                    'outline' => [
-                        'borderStyle' => Border::BORDER_THIN,
-                        'color' => ['rgb' => self::BORDER_COLOR],
-                    ],
-                ],
-            ]);
-            $sheet->getRowDimension($row)->setRowHeight(39.95);
+        $brandRow = $startRow + 1;
+        $sheet->setCellValue('A' . $brandRow, $this->tr('Salameh Global / CargoChina'));
+        $sheet->mergeCells("A{$brandRow}:{$lastColumn}{$brandRow}");
+        $sheet->getStyle("A{$brandRow}:{$lastColumn}{$brandRow}")->applyFromArray([
+            'font' => ['name' => 'Arial', 'size' => 10, 'bold' => true, 'color' => ['rgb' => self::HEADER_BLUE]],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT, 'vertical' => Alignment::VERTICAL_CENTER],
+        ]);
+
+        for ($index = 0; $index < 4; $index++) {
+            $row = $startRow + 2 + $index;
+            $entry = $metadata[$index] ?? ['', ''];
+            $label = (string) ($entry[0] ?? '');
+            $value = $entry[1] ?? '';
+            $sheet->setCellValue('A' . $row, $label);
+            if (is_string($value)
+                && preg_match('/^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?$/', $value)
+                && preg_match('/date|ready|received|created|updated|generated/i', $label)) {
+                $timestamp = strtotime($value);
+                $sheet->setCellValue('B' . $row, $timestamp !== false ? ExcelDate::PHPToExcel($timestamp) : $value);
+                $sheet->getStyle('B' . $row)->getNumberFormat()->setFormatCode(str_contains($value, ':') ? 'yyyy-mm-dd hh:mm:ss' : 'yyyy-mm-dd');
+            } else {
+                $sheet->setCellValue('B' . $row, $value);
+            }
+            $sheet->getStyle('A' . $row)->getFont()->setName('Arial')->setBold(true);
+            $sheet->getStyle('A' . $row . ':' . $lastColumn . $row)->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
         }
 
-        return $startRow + 4;
+        $noteRow = $startRow + 6;
+        $sheet->setCellValue('A' . $noteRow, $note);
+        $sheet->mergeCells("A{$noteRow}:{$lastColumn}{$noteRow}");
+        $sheet->getStyle("A{$noteRow}:{$lastColumn}{$noteRow}")->applyFromArray([
+            'font' => ['name' => 'Arial', 'size' => 10, 'bold' => true, 'color' => ['rgb' => self::HEADER_BLUE]],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F3F8FF']],
+            'alignment' => ['vertical' => Alignment::VERTICAL_CENTER, 'wrapText' => true],
+        ]);
+        $sheet->getRowDimension($noteRow)->setRowHeight(24);
+
+        return $startRow + 7;
     }
 
     private function writeStandardColumnHeaders($sheet, int $row): void
@@ -456,13 +522,13 @@ class OrderExcelService
         }
 
         $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
-            'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true, 'color' => ['rgb' => self::HEADER_BLUE]],
+            'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true, 'color' => ['rgb' => 'FFFFFF']],
             'alignment' => [
                 'horizontal' => Alignment::HORIZONTAL_CENTER,
                 'vertical' => Alignment::VERTICAL_CENTER,
                 'wrapText' => true,
             ],
-            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FFFFFF']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::MASTER_TABLE_BLUE]],
             'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
         ]);
         $sheet->getRowDimension($row)->setRowHeight(54.75);
@@ -555,7 +621,7 @@ class OrderExcelService
         $sheet->setCellValue('A' . $row, $this->tr('Customer-facing receiving fees'));
         $sheet->mergeCells('A' . $row . ':' . self::STANDARD_LAST_COL . $row);
         $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
-            'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true, 'color' => ['rgb' => self::HEADER_BLUE]],
+            'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true, 'color' => ['rgb' => 'FFFFFF']],
             'alignment' => [
                 'horizontal' => Alignment::HORIZONTAL_LEFT,
                 'vertical' => Alignment::VERTICAL_CENTER,
@@ -637,7 +703,7 @@ class OrderExcelService
         $sheet->setCellValue('A' . $row, $this->tr('Shipment Charges'));
         $sheet->mergeCells('A' . $row . ':' . self::STANDARD_LAST_COL . $row);
         $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
-            'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true, 'color' => ['rgb' => self::HEADER_BLUE]],
+            'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true, 'color' => ['rgb' => 'FFFFFF']],
             'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT, 'vertical' => Alignment::VERTICAL_CENTER],
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_YELLOW]],
             'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
@@ -720,19 +786,21 @@ class OrderExcelService
         }
 
         $this->styleRange($sheet, 'B' . $row . ':' . self::CONTAINER_LAST_COL . $row, [
-            'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true, 'color' => ['rgb' => self::HEADER_BLUE]],
+            'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true, 'color' => ['rgb' => 'FFFFFF']],
             'alignment' => [
                 'horizontal' => Alignment::HORIZONTAL_CENTER,
                 'vertical' => Alignment::VERTICAL_CENTER,
                 'wrapText' => true,
             ],
-            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FFFFFF']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::MASTER_TABLE_BLUE]],
             'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
         ]);
         $this->styleRange($sheet, 'G' . $row . ':I' . $row, [
+            'font' => ['color' => ['rgb' => self::HEADER_BLUE]],
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_YELLOW]],
         ]);
         $this->styleRange($sheet, 'O' . $row, [
+            'font' => ['color' => ['rgb' => self::HEADER_BLUE]],
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_YELLOW]],
         ]);
         $sheet->getRowDimension($row)->setRowHeight(54.75);
@@ -1151,8 +1219,8 @@ class OrderExcelService
             return;
         }
 
-        $path = $this->backendDir . '/' . $paths[0];
-        if (!is_file($path) || !is_readable($path)) {
+        $sourcePath = $this->backendDir . '/' . $paths[0];
+        if (!is_file($sourcePath) || !is_readable($sourcePath)) {
             $sheet->setCellValue($cell, $this->tr('{count} photo(s)', ['count' => count($paths)]));
             return;
         }
@@ -1169,6 +1237,7 @@ class OrderExcelService
             $imageHeightPx = max(32, (int) floor($heightPx * self::PHOTO_IMAGE_SCALE));
             $offsetX = max(0, (int) floor(($columnWidthPx - $imageWidthPx) / 2));
             $offsetY = max(0, (int) floor(($heightPx - $imageHeightPx) / 2));
+            $path = $this->workbookImagePath($sourcePath, $imageWidthPx * 2, $imageHeightPx * 2);
 
             $drawing = new Drawing();
             $drawing->setPath($path);
@@ -1546,12 +1615,124 @@ class OrderExcelService
 
     private function outputXlsx(Spreadsheet $spreadsheet, string $filename): void
     {
+        $this->prepareWorkbook($spreadsheet);
         $writer = new Xlsx($spreadsheet);
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment; filename="' . preg_replace('/[^a-zA-Z0-9_.-]/', '_', $filename) . '"');
         header('Cache-Control: no-cache, no-store, must-revalidate');
         $writer->save('php://output');
         exit;
+    }
+
+    private function prepareWorkbook(Spreadsheet $spreadsheet): void
+    {
+        $spreadsheet->getDefaultStyle()->getFont()->setName('Arial')->setSize(10);
+        foreach ($spreadsheet->getAllSheets() as $sheet) {
+            $lastColumn = $sheet->getHighestColumn();
+            $lastRow = max(1, $sheet->getHighestRow());
+            $sheet->setShowGridlines(false);
+            $sheet->getPageSetup()
+                ->setOrientation(PageSetup::ORIENTATION_LANDSCAPE)
+                ->setPaperSize(PageSetup::PAPERSIZE_A4)
+                ->setFitToPage(true)
+                ->setFitToWidth(1)
+                ->setFitToHeight(0)
+                ->setPrintArea("A1:{$lastColumn}{$lastRow}")
+                ->setRowsToRepeatAtTopByStartAndEnd(1, min(8, $lastRow));
+            $sheet->getPageMargins()
+                ->setTop(0.35)
+                ->setRight(0.25)
+                ->setBottom(0.35)
+                ->setLeft(0.25)
+                ->setHeader(0.15)
+                ->setFooter(0.15);
+            $sheet->getPageSetup()->setHorizontalCentered(true);
+        }
+    }
+
+    private function workbookImagePath(string $sourcePath, int $targetWidth, int $targetHeight): string
+    {
+        $targetWidth = max(64, min(640, $targetWidth));
+        $targetHeight = max(64, min(480, $targetHeight));
+        $requestKey = $sourcePath . '|' . $targetWidth . 'x' . $targetHeight;
+        if (isset($this->workbookImageCache[$requestKey])) {
+            return $this->workbookImageCache[$requestKey];
+        }
+
+        if (!extension_loaded('gd') || !function_exists('imagecreatefromstring')) {
+            return $this->workbookImageCache[$requestKey] = $sourcePath;
+        }
+
+        $contentHash = @hash_file('sha256', $sourcePath);
+        if (!is_string($contentHash) || $contentHash === '') {
+            return $this->workbookImageCache[$requestKey] = $sourcePath;
+        }
+
+        $cacheDir = rtrim(sys_get_temp_dir(), '/\\') . DIRECTORY_SEPARATOR . 'clms_excel_thumbnails';
+        if (!is_dir($cacheDir) && !@mkdir($cacheDir, 0770, true) && !is_dir($cacheDir)) {
+            return $this->workbookImageCache[$requestKey] = $sourcePath;
+        }
+
+        $thumbnailPath = $cacheDir . DIRECTORY_SEPARATOR
+            . $contentHash . '_' . $targetWidth . 'x' . $targetHeight . '.jpg';
+        if (is_file($thumbnailPath) && filesize($thumbnailPath) > 0) {
+            return $this->workbookImageCache[$requestKey] = $thumbnailPath;
+        }
+
+        $sourceData = @file_get_contents($sourcePath);
+        if (!is_string($sourceData) || $sourceData === '') {
+            return $this->workbookImageCache[$requestKey] = $sourcePath;
+        }
+        $sourceImage = @imagecreatefromstring($sourceData);
+        unset($sourceData);
+        if ($sourceImage === false) {
+            return $this->workbookImageCache[$requestKey] = $sourcePath;
+        }
+
+        $sourceWidth = imagesx($sourceImage);
+        $sourceHeight = imagesy($sourceImage);
+        if ($sourceWidth < 1 || $sourceHeight < 1) {
+            imagedestroy($sourceImage);
+            return $this->workbookImageCache[$requestKey] = $sourcePath;
+        }
+
+        $thumbnail = imagecreatetruecolor($targetWidth, $targetHeight);
+        $white = imagecolorallocate($thumbnail, 255, 255, 255);
+        imagefill($thumbnail, 0, 0, $white);
+        $scale = min($targetWidth / $sourceWidth, $targetHeight / $sourceHeight);
+        $copyWidth = max(1, (int) floor($sourceWidth * $scale));
+        $copyHeight = max(1, (int) floor($sourceHeight * $scale));
+        $copyX = (int) floor(($targetWidth - $copyWidth) / 2);
+        $copyY = (int) floor(($targetHeight - $copyHeight) / 2);
+        imagecopyresampled(
+            $thumbnail,
+            $sourceImage,
+            $copyX,
+            $copyY,
+            0,
+            0,
+            $copyWidth,
+            $copyHeight,
+            $sourceWidth,
+            $sourceHeight
+        );
+        imagedestroy($sourceImage);
+
+        $temporaryPath = $thumbnailPath . '.' . getmypid() . '.tmp';
+        $written = @imagejpeg($thumbnail, $temporaryPath, 78);
+        imagedestroy($thumbnail);
+        if (!$written || !is_file($temporaryPath)) {
+            @unlink($temporaryPath);
+            return $this->workbookImageCache[$requestKey] = $sourcePath;
+        }
+
+        if (!is_file($thumbnailPath) && !@rename($temporaryPath, $thumbnailPath)) {
+            @unlink($temporaryPath);
+            return $this->workbookImageCache[$requestKey] = $sourcePath;
+        }
+        @unlink($temporaryPath);
+
+        return $this->workbookImageCache[$requestKey] = $thumbnailPath;
     }
 
     private function exportSimpleTable(string $title, array $headers, array $rows, string $filename): void
@@ -1561,43 +1742,59 @@ class OrderExcelService
         $localizedTitle = $this->tr($title);
         $localizedHeaders = array_map(fn($header) => $this->tr((string) $header), $headers);
         $sheet->setTitle(substr($localizedTitle, 0, 31));
-        $sheet->setCellValue('A1', $localizedTitle);
         $lastColumn = Coordinate::stringFromColumnIndex(max(1, count($localizedHeaders)));
-        $sheet->mergeCells("A1:{$lastColumn}1");
-        $sheet->getStyle("A1:{$lastColumn}1")->applyFromArray([
-            'font' => ['name' => 'Calibri', 'size' => 14, 'bold' => true, 'color' => ['rgb' => self::HEADER_BLUE]],
-            'alignment' => [
-                'horizontal' => Alignment::HORIZONTAL_LEFT,
-                'vertical' => Alignment::VERTICAL_CENTER,
+        $headerRow = $this->writeCompanyHeader(
+            $sheet,
+            1,
+            $lastColumn,
+            $localizedTitle,
+            [
+                [$this->tr('Generated') . ':', date('Y-m-d H:i:s')],
+                [$this->tr('Records') . ':', (string) count($rows)],
+                ['', ''],
+                ['', ''],
             ],
-            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F8FBFF']],
-        ]);
-        $sheet->getRowDimension(1)->setRowHeight(26);
+            $this->tr('Filtered export - complete result set')
+        );
 
         foreach ($localizedHeaders as $index => $header) {
             $column = Coordinate::stringFromColumnIndex($index + 1);
-            $sheet->setCellValue($column . '2', $header);
-            $sheet->getStyle($column . '2')->applyFromArray([
-                'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true, 'color' => ['rgb' => self::HEADER_BLUE]],
+            $sheet->setCellValue($column . $headerRow, $header);
+            $sheet->getStyle($column . $headerRow)->applyFromArray([
+                'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true, 'color' => ['rgb' => 'FFFFFF']],
                 'alignment' => [
                     'horizontal' => Alignment::HORIZONTAL_CENTER,
                     'vertical' => Alignment::VERTICAL_CENTER,
                     'wrapText' => true,
                 ],
-                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_BLUE]],
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::MASTER_TABLE_BLUE]],
                 'borders' => [
                     'allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => 'D8E2F0']],
                 ],
             ]);
         }
-        $sheet->getRowDimension(2)->setRowHeight(22);
+        $sheet->getRowDimension($headerRow)->setRowHeight(34);
 
-        $rowNumber = 3;
+        $rowNumber = $headerRow + 1;
         foreach ($rows as $row) {
             foreach (array_values($row) as $index => $value) {
                 $column = Coordinate::stringFromColumnIndex($index + 1);
-                $sheet->setCellValue($column . $rowNumber, $value);
-                $sheet->getStyle($column . $rowNumber)->applyFromArray([
+                $cell = $column . $rowNumber;
+                $header = (string) ($headers[$index] ?? '');
+                if (strcasecmp(trim($header), 'Photo') === 0) {
+                    $this->writePhotoCell($sheet, $cell, $value);
+                    $sheet->getColumnDimension($column)->setWidth(self::PHOTO_COLUMN_WIDTH);
+                    $sheet->getRowDimension($rowNumber)->setRowHeight(self::PHOTO_ROW_HEIGHT_PT);
+                } elseif (is_string($value)
+                    && preg_match('/^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?$/', $value)
+                    && preg_match('/date|ready|received|created|updated|generated/i', $header)) {
+                    $timestamp = strtotime($value);
+                    $sheet->setCellValue($cell, $timestamp !== false ? ExcelDate::PHPToExcel($timestamp) : $value);
+                    $sheet->getStyle($cell)->getNumberFormat()->setFormatCode(str_contains($value, ':') ? 'yyyy-mm-dd hh:mm:ss' : 'yyyy-mm-dd');
+                } else {
+                    $sheet->setCellValue($cell, $value);
+                }
+                $sheet->getStyle($cell)->applyFromArray([
                     'font' => ['name' => 'Arial', 'size' => 10],
                     'alignment' => [
                         'horizontal' => is_numeric($value) ? Alignment::HORIZONTAL_RIGHT : Alignment::HORIZONTAL_LEFT,
@@ -1612,22 +1809,24 @@ class OrderExcelService
             $rowNumber++;
         }
 
-        if ($rowNumber === 3) {
-            $sheet->setCellValue('A3', $this->tr('No rows available.'));
-            $sheet->mergeCells("A3:{$lastColumn}3");
-            $sheet->getStyle("A3:{$lastColumn}3")->getAlignment()
+        if ($rowNumber === $headerRow + 1) {
+            $sheet->setCellValue('A' . $rowNumber, $this->tr('No rows available.'));
+            $sheet->mergeCells("A{$rowNumber}:{$lastColumn}{$rowNumber}");
+            $sheet->getStyle("A{$rowNumber}:{$lastColumn}{$rowNumber}")->getAlignment()
                 ->setHorizontal(Alignment::HORIZONTAL_CENTER)
                 ->setVertical(Alignment::VERTICAL_CENTER);
-            $sheet->getStyle("A3:{$lastColumn}3")->getFont()->setItalic(true);
+            $sheet->getStyle("A{$rowNumber}:{$lastColumn}{$rowNumber}")->getFont()->setItalic(true);
             $rowNumber++;
         }
 
         foreach (range(1, count($localizedHeaders)) as $index) {
             $column = Coordinate::stringFromColumnIndex($index);
-            $sheet->getColumnDimension($column)->setAutoSize(true);
+            if (strcasecmp(trim((string) ($headers[$index - 1] ?? '')), 'Photo') !== 0) {
+                $sheet->getColumnDimension($column)->setAutoSize(true);
+            }
         }
-        $sheet->freezePane('A3');
-        $sheet->setAutoFilter("A2:{$lastColumn}2");
+        $sheet->freezePane('A' . ($headerRow + 1));
+        $sheet->setAutoFilter("A{$headerRow}:{$lastColumn}{$headerRow}");
 
         $this->outputXlsx($spreadsheet, $filename);
     }

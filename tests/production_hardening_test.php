@@ -155,5 +155,19 @@ test('Authentication throttles repeated failures without storing email or IP', f
     }
 });
 
+test('Warehouse stock bulk controls load the current row renderer', function () use ($root) {
+    $page = file_get_contents($root . '/warehouse_stock.php');
+    $script = file_get_contents($root . '/frontend/js/warehouse_stock.js');
+    if ($page === false || $script === false) throw new Exception('Warehouse stock assets could not be read');
+    if (strpos($page, "warehouse_stock.js?v=' . filemtime") === false) {
+        throw new Exception('Warehouse stock renderer is not cache-busted');
+    }
+    foreach (['stockDownloadSelectAll', 'stockDownloadSelectedBtn', 'stock-download-cb', 'data-download-id'] as $hook) {
+        if (strpos($page . $script, $hook) === false) {
+            throw new Exception("Warehouse stock bulk hook is missing: $hook");
+        }
+    }
+});
+
 echo "\nTotal: $passed passed, $failed failed\n";
 exit($failed > 0 ? 1 : 0);

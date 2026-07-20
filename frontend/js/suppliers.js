@@ -137,7 +137,11 @@ async function loadSuppliers() {
         if (prev) prev.disabled = supplierOffset === 0;
         if (next) next.disabled = !meta.has_more;
         const summary = document.getElementById("supplierPageSummary");
-        if (summary) summary.textContent = rows.length ? `${supplierOffset + 1}–${supplierOffset + rows.length}` : "0 results";
+        if (summary) summary.textContent = supplierT("Showing {from}-{to} of {total}", {
+            from: rows.length ? supplierOffset + 1 : 0,
+            to: supplierOffset + rows.length,
+            total: meta.total ?? rows.length,
+        });
     } catch (e) {
         showToast(e.message, "danger");
     } finally {

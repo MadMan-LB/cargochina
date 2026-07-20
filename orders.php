@@ -40,10 +40,12 @@ $canUseBalancesFromRole = $isSuperAdmin
 <div class="card mb-4">
   <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <span>Order List</span>
-    <div class="d-flex gap-2">
+    <div class="d-flex flex-wrap justify-content-end gap-2">
       <button class="btn btn-outline-primary btn-sm d-none" id="bulkSubmitBtn" onclick="bulkSubmitOrders()" title="Submit selected draft orders">Bulk Submit</button>
       <button class="btn btn-outline-success btn-sm d-none" id="bulkApproveBtn" onclick="bulkApproveOrders()" title="Approve selected submitted orders">Bulk Approve</button>
-      <button class="btn btn-outline-success btn-sm" onclick="exportOrdersXlsx()" title="Export current list to XLSX">Export XLSX</button>
+      <span class="small text-muted align-self-center" id="ordersDownloadSelectedCount"><?= htmlspecialchars(clmsT('{count} selected', ['count' => 0])) ?></span>
+      <button class="btn btn-success btn-sm" type="button" id="ordersDownloadSelectedBtn" disabled><?= htmlspecialchars(clmsT('Download selected')) ?></button>
+      <button class="btn btn-outline-success btn-sm" onclick="exportOrdersXlsx()" title="<?= htmlspecialchars(clmsT('Download complete filtered results')) ?>"><?= htmlspecialchars(clmsT('Download')) ?></button>
       <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#orderModal" onclick="openOrderForm()">+ New Order</button>
     </div>
   </div>
@@ -99,7 +101,7 @@ $canUseBalancesFromRole = $isSuperAdmin
         <div class="input-group input-group-sm">
           <input type="text" class="form-control" id="orderSearch" placeholder="Customer, phone, shipping code, items...">
           <button class="btn btn-outline-primary" type="button" onclick="loadOrders()" title="Search">Search</button>
-          <button class="btn btn-outline-secondary" type="button" onclick="clearOrderSearch()" title="Clear">Clear</button>
+          <button class="btn btn-outline-secondary" type="button" onclick="clearOrderFilters()" title="<?= htmlspecialchars(clmsT('Clear filters')) ?>"><?= htmlspecialchars(clmsT('Clear filters')) ?></button>
         </div>
         <div class="row g-2 mt-2">
           <div class="col-12 col-md-5">
@@ -112,7 +114,7 @@ $canUseBalancesFromRole = $isSuperAdmin
           </div>
           <div class="col-12 col-md-5">
             <label class="form-label small mb-1">Item Type</label>
-            <select class="form-select form-select-sm" id="filterItemType" onchange="loadOrders()"><option value="">All item types</option><option value="normal">Normal goods</option><option value="replica">Copy / replica</option><option value="cosmetics">Cosmetics</option><option value="branded">Branded goods</option><option value="food">Food</option><option value="dangerous">Dangerous goods</option><option value="other">Other</option><option value="unclassified">Needs classification</option></select>
+            <select class="form-select form-select-sm" id="filterItemType" onchange="loadOrders()"><option value=""><?= htmlspecialchars(clmsT('All item types')) ?></option><option value="normal"><?= htmlspecialchars(clmsT('Normal goods')) ?></option><option value="replica"><?= htmlspecialchars(clmsT('Copy / replica')) ?></option><option value="cosmetics"><?= htmlspecialchars(clmsT('Cosmetics')) ?></option><option value="branded"><?= htmlspecialchars(clmsT('Branded goods')) ?></option><option value="food"><?= htmlspecialchars(clmsT('Food')) ?></option><option value="dangerous"><?= htmlspecialchars(clmsT('Dangerous goods')) ?></option><option value="other"><?= htmlspecialchars(clmsT('Other')) ?></option><option value="unclassified"><?= htmlspecialchars(clmsT('Needs classification')) ?></option></select>
           </div>
           <div class="col-12 col-md-7">
             <label class="form-label small mb-1">Customer Follow-Up</label>
@@ -132,7 +134,7 @@ $canUseBalancesFromRole = $isSuperAdmin
       <table class="table table-hover table-striped table-sm align-middle">
         <thead>
           <tr>
-            <th class="text-center" style="width:2.5rem"><input type="checkbox" class="form-check-input" id="orderSelectAll" title="Select all submitted"></th>
+            <th class="text-center" style="width:2.5rem"><input type="checkbox" class="form-check-input" id="orderSelectAll" title="<?= htmlspecialchars(clmsT('Select all on this page')) ?>"></th>
             <th>ID</th>
             <th>Customer</th>
             <th>Supplier</th>
@@ -316,6 +318,9 @@ $canUseBalancesFromRole = $isSuperAdmin
     </div>
   </div>
 </div>
-<?php $pageScripts = ['frontend/js/autocomplete.js?v=' . filemtime(__DIR__ . '/frontend/js/autocomplete.js')];
+<?php $pageScripts = [
+  'frontend/js/autocomplete.js?v=' . filemtime(__DIR__ . '/frontend/js/autocomplete.js'),
+  'frontend/js/bulk_excel_download.js?v=' . filemtime(__DIR__ . '/frontend/js/bulk_excel_download.js'),
+];
 $pageScript = 'frontend/js/orders.js?v=' . filemtime(__DIR__ . '/frontend/js/orders.js');
 require 'includes/footer.php'; ?>

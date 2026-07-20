@@ -205,7 +205,7 @@ async function loadContainers(resetOffset = true) {
             );
         const data = await res.json();
         _allContainers = data.data || [];
-        const prev=document.getElementById("containersPrevBtn"),next=document.getElementById("containersNextBtn");if(prev)prev.disabled=containersOffset<=0;if(next)next.disabled=!data.meta?.has_more;const summary=document.getElementById("containersPageSummary");if(summary)summary.textContent=`${typeof t==="function"?t("Page"):"Page"} ${Math.floor(containersOffset/containersLimit)+1}`;
+        const prev=document.getElementById("containersPrevBtn"),next=document.getElementById("containersNextBtn");if(prev)prev.disabled=containersOffset<=0;if(next)next.disabled=!data.meta?.has_more;const summary=document.getElementById("containersPageSummary");if(summary)summary.textContent=typeof t==="function"?t("Showing {from}-{to} of {total}",{from:_allContainers.length?containersOffset+1:0,to:containersOffset+_allContainers.length,total:data.meta?.total??_allContainers.length}):`Showing ${_allContainers.length?containersOffset+1:0}-${containersOffset+_allContainers.length} of ${data.meta?.total??_allContainers.length}`;
         applyClientFilters();
     } catch (e) {
         updateContainerOverview([]);
@@ -335,7 +335,7 @@ function applyClientFilters() {
               <button class="btn btn-sm btn-outline-secondary js-edit-container" data-id="${c.id}" data-code="${escHtml(c.code || "")}" title="Edit container info">Edit</button>
               <button class="btn btn-sm btn-success js-assign-btn" data-id="${c.id}" data-code="${escHtml(c.code || "")}" data-max-cbm="${c.max_cbm}" data-max-weight="${c.max_weight}" data-used-cbm="${parseFloat(c.used_cbm || 0).toFixed(4)}" data-used-weight="${parseFloat(c.used_weight || 0).toFixed(2)}" title="Assign orders to this container">+ Assign</button>
               <button class="btn btn-sm btn-outline-info js-view-container" data-id="${c.id}" data-code="${escHtml(c.code || "")}" title="View orders in this container">View</button>
-              <a class="btn btn-sm btn-outline-success" href="${CONTAINERS_API_BASE}/containers/${c.id}/export?format=xlsx" download title="Download XLSX">XLSX</a>
+              <a class="btn btn-sm btn-outline-success" href="${CONTAINERS_API_BASE}/containers/${c.id}/export?format=xlsx" download title="${escapeHtml(typeof t === "function" ? t("Download") : "Download")}">${escapeHtml(typeof t === "function" ? t("Download") : "Download")}</a>
             </td>
           </tr>`;
         })

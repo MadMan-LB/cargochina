@@ -9,7 +9,8 @@ let productsOffset = 0;
 const productsLimit = 50;
 
 function productItemTypeLabel(code) {
-    return ({normal:"Normal goods",replica:"Copy / replica goods",cosmetics:"Cosmetics",branded:"Branded goods",food:"Food",dangerous:"Dangerous goods",other:"Other",unclassified:"Needs classification"})[code] || "Needs classification";
+    const label = ({normal:"Normal goods",replica:"Copy / replica goods",cosmetics:"Cosmetics",branded:"Branded goods",food:"Food",dangerous:"Dangerous goods",other:"Other",unclassified:"Needs classification"})[code] || "Needs classification";
+    return typeof t === "function" ? t(label) : label;
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -645,7 +646,7 @@ async function loadProducts(resetOffset = true) {
             "/products" + (params.toString() ? "?" + params.toString() : ""),
         );
         const rows = res.data || [];
-        const prev=document.getElementById("productsPrevBtn"),next=document.getElementById("productsNextBtn");if(prev)prev.disabled=productsOffset<=0;if(next)next.disabled=!res.meta?.has_more;setProductText("productsPageSummary",`Page ${Math.floor(productsOffset/productsLimit)+1}`);
+        const prev=document.getElementById("productsPrevBtn"),next=document.getElementById("productsNextBtn");if(prev)prev.disabled=productsOffset<=0;if(next)next.disabled=!res.meta?.has_more;const pageSummary=document.getElementById("productsPageSummary");if(pageSummary)pageSummary.textContent=typeof t==="function"?t("Showing {from}-{to} of {total}",{from:rows.length?productsOffset+1:0,to:productsOffset+rows.length,total:res.meta?.total??rows.length}):`Showing ${rows.length?productsOffset+1:0}-${productsOffset+rows.length} of ${res.meta?.total??rows.length}`;
         updateProductsOverview(rows);
         tbody.innerHTML =
             rows

@@ -106,6 +106,12 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
+    if ($resource === 'orders' && $method === 'POST' && $id === 'bulk-export'
+        && !hasPermission('orders.read', $rbac['orders']['read'] ?? $operationalRoles)) {
+        http_response_code(403);
+        echo json_encode(['error' => true, 'message' => 'Forbidden']);
+        exit;
+    }
     if ($resource === 'balances') {
         $userRoles = getUserRoles();
         if (!in_array('SuperAdmin', $userRoles, true) && !clmsCanRolesAccessPage($userRoles, 'balances', null, $userId)) {
@@ -117,7 +123,7 @@ if (!in_array($resource, $publicResources)) {
 
     $resourcePermissions = $rbac[$resource] ?? null;
     $permissionKey = $method === 'GET' ? 'read' : 'write';
-    $skipGenericPermission = ($resource === 'orders' && in_array($action, ['approve', 'receive', 'confirm'], true))
+    $skipGenericPermission = ($resource === 'orders' && (in_array($action, ['approve', 'receive', 'confirm'], true) || ($method === 'POST' && $id === 'bulk-export')))
         || ($resource === 'customers' && ($method === 'GET' || ($method === 'POST' && ($id === null || $id === 'import'))))
         || $resource === 'balances';
     if (

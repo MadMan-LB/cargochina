@@ -50,16 +50,26 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $classificationSelect = warehouseStockHasColumn($pdo, 'item_classifications', 'item_type_code') ? ', ic.item_type_code, ic.confidence AS item_type_confidence, ic.is_confirmed AS item_type_confirmed' : '';
     $classificationJoin = warehouseStockHasColumn($pdo, 'item_classifications', 'item_type_code') ? " LEFT JOIN item_classifications ic ON ic.entity_type='order_item' AND ic.entity_id=oi.id" : '';
     $actualDimensionSelect = '';
+    $actualDimensionOuter = [];
     foreach (['actual_height','actual_width','actual_length'] as $dimensionColumn) {
-        if (warehouseStockHasColumn($pdo, 'warehouse_receipt_items', $dimensionColumn)) $actualDimensionSelect .= ", MAX(wri.$dimensionColumn) AS $dimensionColumn";
+        $hasDimension = warehouseStockHasColumn($pdo, 'warehouse_receipt_items', $dimensionColumn);
+        if ($hasDimension) {
+            $actualDimensionSelect .= ", MAX(wri.$dimensionColumn) AS $dimensionColumn";
+        }
+        $outputAlias = 'item_' . $dimensionColumn;
+        $actualDimensionOuter[] = $hasDimension
+            ? "ria.$dimensionColumn AS $outputAlias"
+            : "NULL AS $outputAlias";
     }
+    $actualDimensionOuterSql = implode(', ', $actualDimensionOuter);
 
+    $imagePathsSelect = warehouseStockHasColumn($pdo, 'order_items', 'image_paths') ? ', oi.image_paths' : ', NULL AS image_paths';
     $sql = "SELECT o.id as order_id, o.customer_id, o.supplier_id, o.status, o.expected_ready_date,
         c.name as customer_name, s.name as supplier_name,
         oi.id as item_id, oi.product_id, oi.item_no, oi.shipping_code, oi.quantity, oi.unit, oi.declared_cbm, oi.declared_weight, oi.item_length, oi.item_width, oi.item_height, oi.description_cn, oi.description_en,
         p.description_cn as product_desc_cn, p.description_en as product_desc_en,
         wr.actual_cbm as order_actual_cbm, wr.actual_weight as order_actual_weight, wr.actual_cartons as order_actual_cartons,
-        ria.item_actual_cbm, ria.item_actual_weight, ria.item_actual_cartons, ria.item_actual_quantity, ria.actual_height AS item_actual_height, ria.actual_width AS item_actual_width, ria.actual_length AS item_actual_length$classificationSelect
+        ria.item_actual_cbm, ria.item_actual_weight, ria.item_actual_cartons, ria.item_actual_quantity, $actualDimensionOuterSql$imagePathsSelect$classificationSelect
         FROM orders o
         JOIN customers c ON o.customer_id = c.id
         LEFT JOIN suppliers s ON o.supplier_id = s.id
@@ -88,11 +98,28 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $params[] = $containerId;
     }
     if (!empty($statuses)) {
-        $placeholders = implode(',', array_fill(0, count($statuses), '?'));
-        $sql .= $statusMode === 'exclude'
-            ? " AND o.status NOT IN ($placeholders)"
-            : " AND o.status IN ($placeholders)";
-        $params = array_merge($params, $statuses);
+        $receivedSelected = in_array('WarehouseReceived', $statuses, true);
+        $storedStatuses = array_values(array_filter(
+            $statuses,
+            static fn(string $status): bool => $status !== 'WarehouseReceived'
+        ));
+        $statusClauses = [];
+        if ($receivedSelected) {
+            $receiptPredicate = 'EXISTS (SELECT 1 FROM warehouse_receipts wsf WHERE wsf.order_id = o.id'
+                . ($receiptHasVoidedAt ? ' AND wsf.voided_at IS NULL' : '') . ')';
+            $statusClauses[] = $receiptPredicate;
+        }
+        if ($storedStatuses) {
+            $placeholders = implode(',', array_fill(0, count($storedStatuses), '?'));
+            $statusClauses[] = "o.status IN ($placeholders)";
+            $params = array_merge($params, $storedStatuses);
+        }
+        if ($statusClauses) {
+            $combinedStatus = '(' . implode(' OR ', $statusClauses) . ')';
+            $sql .= $statusMode === 'exclude'
+                ? " AND NOT $combinedStatus"
+                : " AND $combinedStatus";
+        }
     }
     if ($q) {
         $like = clmsSearchLike($q);
@@ -102,6 +129,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     if ($itemType !== null && warehouseStockHasColumn($pdo, 'item_classifications', 'item_type_code')) {
         $sql .= ' AND ic.item_type_code=?'; $params[] = $itemType;
     }
+    $countSql = "SELECT COUNT(*) FROM ($sql) warehouse_stock_filtered";
+    $countStmt = $params ? $pdo->prepare($countSql) : $pdo->query($countSql);
+    if ($params) $countStmt->execute($params);
+    $total = (int) $countStmt->fetchColumn();
+
     $sql .= " ORDER BY o.expected_ready_date IS NULL, o.expected_ready_date, o.id, oi.id";
     $limit = clmsQueryLimit($_GET['limit'] ?? null, 100, 200);
     $offset = clmsQueryOffset($_GET['offset'] ?? null);
@@ -118,8 +150,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             foreach($rows as $row) fputcsv($out,[$row['order_id'],$row['customer_name'],$row['supplier_name'],$row['status'],$row['item_id'],$row['description_en'],$row['description_cn'],$row['item_type_code']??'unclassified',$row['quantity'],$row['item_actual_quantity'],$row['item_actual_cartons'],$row['item_actual_cbm'],$row['item_actual_weight'],$row['item_actual_height'],$row['item_actual_width'],$row['item_actual_length']]);
             fclose($out); exit;
         }
-        (new OrderExcelService())->exportWarehouseStockSummary($rows, 'warehouse_stock_' . date('Y-m-d') . '.xlsx');
+        (new OrderExcelService())->exportWarehouseStockSummary($rows, 'warehouse_stock_' . date('Ymd_His') . '.xlsx');
     }
     $hasMore=count($rows)>$limit; if($hasMore)$rows=array_slice($rows,0,$limit);
-    jsonResponse(['data' => $rows, 'meta'=>['limit'=>$limit,'offset'=>$offset,'has_more'=>$hasMore]]);
+    jsonResponse(['data' => $rows, 'meta'=>['limit'=>$limit,'offset'=>$offset,'total'=>$total,'has_more'=>$hasMore]]);
 };

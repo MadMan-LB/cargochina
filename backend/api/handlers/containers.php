@@ -408,7 +408,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 (new OrderExcelService())->exportOrders(
                     $ordersWithItems,
-                    'container_' . $code . '_orders.xlsx',
+                    'container_' . $code . '_orders_' . date('Ymd_His') . '.xlsx',
                     [
                         'container' => $container,
                         'expenses' => $expenses,
@@ -488,6 +488,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 elseif($fillFilter==='full')$sql.=' AND (COALESCE(cu.used_cbm,0)/NULLIF(c.max_cbm,0))*100>=100';
                 elseif($fillFilter==='launching_soon')$sql.=' AND c.expected_ship_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(),INTERVAL 7 DAY)';
                 $limit=clmsQueryLimit($_GET['limit']??null,50,200);$offset=clmsQueryOffset($_GET['offset']??null);
+                $countStmt=$params?$pdo->prepare("SELECT COUNT(*) FROM ($sql) containers_filtered"):$pdo->query("SELECT COUNT(*) FROM ($sql) containers_filtered");if($params)$countStmt->execute($params);$total=(int)$countStmt->fetchColumn();
                 $sql .= " ORDER BY c.id DESC LIMIT ".($limit+1)." OFFSET ".$offset;
                 $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
                 if ($params) $stmt->execute($params);
@@ -502,7 +503,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $r = enrichContainerDestination($pdo, $r);
                 }
                 unset($r);
-                jsonResponse(['data' => $rows,'meta'=>['limit'=>$limit,'offset'=>$offset,'has_more'=>$hasMore]]);
+                jsonResponse(['data' => $rows,'meta'=>['limit'=>$limit,'offset'=>$offset,'has_more'=>$hasMore,'total'=>$total]]);
             }
 
             $stmt = $pdo->prepare("SELECT * FROM containers WHERE id = ?");

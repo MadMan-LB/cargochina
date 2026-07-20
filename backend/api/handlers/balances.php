@@ -929,12 +929,14 @@ function balancesListTransactions(PDO $pdo, array $filters, bool $paginate = tru
         array_push($params, $like, $like, $like, $like, $like, $like, $like, $like);
     }
     $limit=clmsQueryLimit($filters['limit']??null,100,500);$offset=clmsQueryOffset($filters['offset']??null);
+    $total=0;
+    if($paginate){$countStmt=$pdo->prepare("SELECT COUNT(*) FROM ($sql) balance_transactions_filtered");$countStmt->execute($params);$total=(int)$countStmt->fetchColumn();}
     $sql .= ' ORDER BY tx.transaction_date DESC, tx.created_at DESC, tx.id DESC';
     if($paginate)$sql.=' LIMIT '.($limit+1).' OFFSET '.$offset;
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    $hasMore=$paginate&&count($rows)>$limit;if($hasMore)$rows=array_slice($rows,0,$limit);$meta=['limit'=>$limit,'offset'=>$offset,'has_more'=>$hasMore];
+    $hasMore=$paginate&&count($rows)>$limit;if($hasMore)$rows=array_slice($rows,0,$limit);$meta=['limit'=>$limit,'offset'=>$offset,'has_more'=>$hasMore,'total'=>$total];
     foreach ($rows as &$row) {
         $row['document_type'] = balancesDocumentTypeForRow($row);
         $row['document_number'] = balancesDocumentNumberForRow($row);
@@ -1271,17 +1273,10 @@ function balancesCreateTransaction(PDO $pdo, array $input): array
     return $row;
 }
 
-function balancesExportCsv(string $filename, array $headers, array $rows): void
+function balancesExportXlsx(string $filename, string $title, array $headers, array $rows): void
 {
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename="' . $filename . '"');
-    $out = fopen('php://output', 'w');
-    fputcsv($out, array_map('clmsT', $headers));
-    foreach ($rows as $row) {
-        fputcsv($out, $row);
-    }
-    fclose($out);
-    exit;
+    require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
+    (new OrderExcelService())->exportTable($title, $headers, $rows, $filename);
 }
 
 return function (string $method, ?string $id, ?string $action, array $input) {
@@ -1349,8 +1344,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         clmsT($row['status_label']),
                     ];
                 }
-                balancesExportCsv(
-                    $dataset . '_balances_' . date('Y-m-d') . '.csv',
+                balancesExportXlsx(
+                    $dataset . '_balances_' . date('Ymd_His') . '.xlsx',
+                    $dataset === 'customers' ? 'Customer Balances' : 'Supplier Balances',
                     ['Name', 'Phone', 'Currency', 'Current Balance', 'Total Paid', 'Total Due', 'Last Payment Date', 'Status'],
                     $rows
                 );
@@ -1373,8 +1369,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         $row['created_by_name'],
                     ];
                 }
-                balancesExportCsv(
-                    'balance_documents_' . date('Y-m-d') . '.csv',
+                balancesExportXlsx(
+                    'balance_documents_' . date('Ymd_His') . '.xlsx',
+                    'Balance Documents',
                     ['Document No.', 'Document Type', 'Date', 'Type', 'Name', 'Amount', 'Currency', 'Payment Method', 'Linked Order', 'Reference Number', 'Recorded By'],
                     $rows
                 );
@@ -1397,8 +1394,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $row['notes'],
                 ];
             }
-            balancesExportCsv(
-                'balance_transactions_' . date('Y-m-d') . '.csv',
+            balancesExportXlsx(
+                'balance_transactions_' . date('Ymd_His') . '.xlsx',
+                'Balance Transactions',
                 ['Date', 'Type', 'Name', 'Transaction Type', 'Amount', 'Currency', 'Payment Method', 'Account Number', 'Linked Order', 'Reference Number', 'Recorded By', 'Notes'],
                 $rows
             );

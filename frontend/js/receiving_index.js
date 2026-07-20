@@ -87,7 +87,7 @@ async function loadQueue() {
                     <td>
                         <div class="d-flex gap-2 flex-wrap">
                             <a class="btn btn-sm btn-primary" href="${AREA_BASE}/receiving/receive.php?order_id=${o.id}">${escapeHtml(receivingIndexT("Receive"))}</a>
-                            <a class="btn btn-sm btn-outline-success" href="${receivingOrderExcelUrl(o.id)}">${escapeHtml(receivingIndexT("XLSX"))}</a>
+                            <a class="btn btn-sm btn-outline-success" href="${receivingOrderExcelUrl(o.id)}">${escapeHtml(receivingIndexT("Download"))}</a>
                         </div>
                     </td>
                 </tr>
@@ -140,7 +140,7 @@ async function loadHistory() {
                     <td>
                         <div class="d-flex gap-2 flex-wrap">
                             <a class="btn btn-sm btn-outline-secondary" href="${AREA_BASE}/receiving/receipt.php?id=${r.id}">${escapeHtml(receivingIndexT("View"))}</a>
-                            <a class="btn btn-sm btn-outline-success" href="${receivingOrderExcelUrl(r.order_id)}">${escapeHtml(receivingIndexT("XLSX"))}</a>
+                            <a class="btn btn-sm btn-outline-success" href="${receivingOrderExcelUrl(r.order_id)}">${escapeHtml(receivingIndexT("Download"))}</a>
                         </div>
                     </td>
                 </tr>
