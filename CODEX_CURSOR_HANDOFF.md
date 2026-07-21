@@ -870,7 +870,7 @@ This ledger should be maintained over time so both Codex and Cursor can see exec
 
 ### What changed
 - `OrderExcelService` is the shared XLSX formatter for order, filtered table, and balance exports. Its output follows the Receiving Procurement Import Template structure and embeds item photos.
-- `OrderBulkExcelService` and `/api/v1/orders/bulk-export` implement the single-XLSX/multiple-ZIP contract used by Orders, Receiving, Warehouse Stock, and Draft an Order.
+- `OrderBulkExcelService` and `/api/v1/orders/bulk-export` implement the one-XLSX/one-worksheet repeated-order-section contract used by Orders, Receiving, Warehouse Stock, and Draft an Order.
 - `frontend/js/bulk_excel_download.js` owns current-page checkbox state and must remain aligned with each page's `data-download-id` record markup.
 - Keep `warehouse_stock.php`'s `warehouse_stock.js` filemtime query intact. The page HTML and dynamic row renderer are deployed together; serving stale JavaScript removes the row checkboxes and disconnects the download controls.
 - Warehouse Stock `WarehouseReceived` is a virtual filter implemented as an active, non-void warehouse-receipt predicate. It is deliberately different from the historical stored `ReceivedAtWarehouse` status.
@@ -882,3 +882,13 @@ This ledger should be maintained over time so both Codex and Cursor can see exec
 - Workbook thumbnails are cached in the system temp directory by source content hash. Do not write generated thumbnails back into upload storage or alter original evidence photos.
 - Keep date and numeric worksheet cells typed. Do not stringify prices, quantities, dimensions, or dates for cosmetic formatting.
 - The current UI locale set is English and Chinese. Arabic data is supported in workbooks, but an Arabic UI label should only be introduced together with an actual Arabic locale.
+
+## 2026-07-21 Draft Procurement Bilingual/Export Handoff
+
+- Canonical item descriptions are `order_items.description_en` and `order_items.description_cn`; no new description columns or migration were added.
+- `frontend/js/procurement_drafts.js` owns source-change tracking, blur translation, explicit retranslation, retry UI, and manual-edit protection. `backend/api/handlers/draft-orders.php` is the final enforcement point and rejects a save when either language remains empty.
+- `/api/v1/translations` uses `TranslationService` and is operational-role protected in `backend/config/rbac.php`. `/translations/manual` remains ChinaAdmin/SuperAdmin-only.
+- Procurement Draft list/filter/count/export predicates are centralized in `draftOrderListQuery()`. Keep pagination and `export-filtered` on this same function to avoid count/export drift.
+- `OrderBulkExcelService` emits one XLSX for any selected batch. `OrderExcelService::exportSelectedOrders()` writes vertical repeated order sections in one worksheet, with English and Chinese columns and embedded images.
+- Orders, Receiving, Warehouse Stock, and Draft an Order all call `/orders/bulk-export`; do not restore page-specific ZIP builders.
+- Existing legacy procurement conversion/export paths preserve and validate both languages.

@@ -2171,6 +2171,10 @@ async function copyOrder(id) {
     try {
         const res = await api("GET", "/orders/" + id);
         const o = res.data;
+        if (o.order_type === "draft_procurement") {
+            window.location.href = `${window.APP_BASE_PATH || "/cargochina"}/procurement_drafts.php?copy_order_id=${encodeURIComponent(id)}`;
+            return;
+        }
         document.getElementById("orderId").value = "";
         orderCreateRequestKey = newOrderRequestKey();
         orderLockVersion = 0;

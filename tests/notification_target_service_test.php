@@ -1,5 +1,7 @@
 <?php
 
+ob_start();
+
 $root=dirname(__DIR__);
 require_once $root.'/backend/config/database.php';
 require_once $root.'/backend/api/helpers.php';

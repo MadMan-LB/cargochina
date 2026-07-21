@@ -24,6 +24,10 @@
     let draftOrderImportProgressState = null;
     let draftOrderUnsavedGuard = null;
     let draftDownloadSelection = null;
+    let draftFilterCustomerAc = null;
+    let draftFilterSupplierAc = null;
+    let draftListPage = 1;
+    let draftListMeta = { page: 1, pages: 1, total: 0 };
     const DRAFT_ORDER_IMPORT_STEPS = [
         { key: "uploading", label: "Uploading", target: 40 },
         { key: "reading", label: "Reading Excel", target: 62 },
@@ -771,9 +775,84 @@
         section.classList.toggle("draft-order-section-collapsed", collapsed);
     }
 
+    function collectDraftFilters(includePage = true) {
+        const params = new URLSearchParams();
+        const values = {
+            q: document.getElementById("draftFilterSearch")?.value?.trim(),
+            customer_id: document.getElementById("draftFilterCustomerId")?.value,
+            supplier_id: document.getElementById("draftFilterSupplierId")?.value,
+            goods_type: document.getElementById("draftFilterGoodsType")?.value,
+            brand: document.getElementById("draftFilterBrand")?.value,
+            creator_id: document.getElementById("draftFilterCreator")?.value,
+            created_from: document.getElementById("draftFilterCreatedFrom")?.value,
+            created_to: document.getElementById("draftFilterCreatedTo")?.value,
+            expected_from: document.getElementById("draftFilterExpectedFrom")?.value,
+            expected_to: document.getElementById("draftFilterExpectedTo")?.value,
+        };
+        Object.entries(values).forEach(([key, value]) => value && params.set(key, value));
+        document.querySelectorAll(".draft-filter-status:checked").forEach((node) => params.append("status[]", node.value));
+        if (!document.querySelector(".draft-filter-status")) {
+            new URLSearchParams(window.location.search).getAll("status[]").forEach((value) => params.append("status[]", value));
+        }
+        if (includePage) params.set("page", String(draftListPage));
+        params.set("limit", "20");
+        return params;
+    }
+
+    function renderDraftFilterOptions(options = {}) {
+        const currentParams = new URLSearchParams(window.location.search);
+        const statusWrap = document.getElementById("draftFilterStatuses");
+        if (statusWrap && !statusWrap.children.length) {
+            statusWrap.innerHTML = (options.statuses || []).map((status, index) => `<label class="border rounded px-2 py-1 small"><input class="form-check-input me-1 draft-filter-status" type="checkbox" value="${escapeHtml(status)}" id="draftStatus${index}">${escapeHtml(typeof statusLabel === "function" ? statusLabel(status) : status)}</label>`).join("");
+            const selectedStatuses = new Set(currentParams.getAll("status[]"));
+            statusWrap.querySelectorAll(".draft-filter-status").forEach((node) => { node.checked = selectedStatuses.has(node.value); });
+        }
+        const brand = document.getElementById("draftFilterBrand");
+        if (brand && brand.options.length <= 1) {
+            (options.brands || []).forEach((value) => brand.add(new Option(value, value)));
+            brand.value = currentParams.get("brand") || "";
+        }
+        const creator = document.getElementById("draftFilterCreator");
+        if (creator && creator.options.length <= 1 && (options.creators || []).length) {
+            (options.creators || []).forEach((row) => creator.add(new Option(row.name, row.id)));
+            creator.value = currentParams.get("creator_id") || "";
+            document.getElementById("draftFilterCreatorWrap")?.classList.remove("d-none");
+        }
+        const selected = options.selected || {};
+        const customerInput = document.getElementById("draftFilterCustomer");
+        if (selected.customer_id && customerInput && !customerInput.value.trim()) {
+            draftFilterCustomerAc?.setValue(selected.customer_id);
+        }
+        const supplierInput = document.getElementById("draftFilterSupplier");
+        if (selected.supplier_id && supplierInput && !supplierInput.value.trim()) {
+            draftFilterSupplierAc?.setValue(selected.supplier_id);
+        }
+    }
+
+    function syncDraftPagination() {
+        const summary = document.getElementById("draftPaginationSummary");
+        if (summary) summary.textContent = draftT("Page {page} of {pages} · {count} records", { page: draftListMeta.page || 1, pages: draftListMeta.pages || 1, count: draftListMeta.total || 0 });
+        const previous = document.getElementById("draftPagePrevious");
+        const next = document.getElementById("draftPageNext");
+        if (previous) previous.disabled = (draftListMeta.page || 1) <= 1;
+        if (next) next.disabled = (draftListMeta.page || 1) >= (draftListMeta.pages || 1);
+        const active = Array.from(collectDraftFilters(false).entries()).filter(([key]) => key !== "limit");
+        const activeSummary = document.getElementById("draftActiveFilterSummary");
+        if (activeSummary) activeSummary.textContent = active.length ? draftT("Active filters: {count}", { count: active.length }) : draftT("No active filters");
+    }
+
     async function loadDraftOrders() {
-        const res = await api("GET", "/draft-orders");
+        const query = collectDraftFilters(true);
+        const res = await api("GET", `/draft-orders?${query.toString()}`);
+        draftListMeta = res.meta || draftListMeta;
+        draftListPage = draftListMeta.page || draftListPage;
+        renderDraftFilterOptions(res.filter_options || {});
         renderDraftOrders(res.data || []);
+        syncDraftPagination();
+        const url = new URL(window.location.href);
+        ["q", "status[]", "customer_id", "supplier_id", "goods_type", "brand", "creator_id", "created_from", "created_to", "expected_from", "expected_to", "page"].forEach((key) => url.searchParams.delete(key));
+        query.forEach((value, key) => { if (key !== "limit") url.searchParams.append(key, value); });
+        window.history.replaceState({}, "", url);
     }
 
     let legacyDraftLoadTimer = null;
@@ -976,7 +1055,7 @@
         );
     }
 
-    async function openDraftOrderBuilder(orderId = null) {
+    async function openDraftOrderBuilder(orderId = null, options = {}) {
         builderModal =
             builderModal ||
             bootstrap.Modal.getOrCreateInstance(
@@ -985,6 +1064,34 @@
         resetDraftOrderBuilder();
         if (orderId) {
             await fillDraftOrderBuilder(orderId);
+            if (options.duplicate) {
+                document.getElementById("draftOrderId").value = "";
+                draftOrderLockVersion = 0;
+                currentDraftCosts = [];
+                renderDraftOrderCosts({ lines: [] });
+                document.querySelectorAll(".draft-order-item-card").forEach((card) => {
+                    card.dataset.existingItemId = "";
+                    card.dataset.itemNoSource = "generated";
+                    delete card.dataset.manualItemNo;
+                    const itemNo = card.querySelector(".draft-item-item-no");
+                    if (itemNo) itemNo.value = "";
+                    getDraftSharedCartonRows(card).forEach((row) => {
+                        row.dataset.itemNoSource = "generated";
+                        delete row.dataset.manualItemNo;
+                        const sharedItemNo = row.querySelector(".draft-shared-content-item-no");
+                        if (sharedItemNo) sharedItemNo.value = "";
+                    });
+                });
+                document.getElementById("draftOrderModalTitle").textContent =
+                    draftT("Copy of Draft Order #{id}", { id: orderId });
+                document.getElementById("draftOrderModalSubtitle").textContent =
+                    draftT("Review the copied values before saving a new draft.");
+                setBuilderEditable(true);
+                renumberDraftItems();
+                refreshUnsavedBaseline?.(
+                    document.querySelector("#draftOrderModal .modal-body"),
+                );
+            }
         } else {
             addDraftOrderSection();
             refreshUnsavedBaseline?.(
@@ -2003,30 +2110,104 @@
                 entry?.description_en ||
                 ""
             ).trim();
-        const display = draftDescriptionDisplayValue(cn, en);
         return `
-            <div class="draft-item-description-row">
-              <input
-                type="text"
-                class="form-control form-control-sm draft-item-description-entry-input"
-                placeholder="Product name / description"
-                value="${escapeHtml(display)}"
-                data-description-cn="${escapeHtml(cn).replace(/"/g, "&quot;")}"
-                data-description-en="${escapeHtml(en).replace(/"/g, "&quot;")}"
-              >
-              <button type="button" class="btn btn-outline-danger btn-sm draft-item-action draft-item-description-remove" title="${escapeHtml(draftT("Remove row"))}">×</button>
+            <div class="draft-item-description-row border rounded p-2" data-description-entry>
+              <div class="draft-description-language-grid">
+                <div>
+                  <div class="d-flex align-items-center justify-content-between gap-2 mb-1">
+                    <label class="form-label form-label-sm mb-0">${escapeHtml(draftT("English Description"))}</label>
+                    <button type="button" class="btn btn-link btn-sm p-0 draft-description-translate" data-source-lang="en">${escapeHtml(draftT(en ? "Retranslate" : "Translate"))}</button>
+                  </div>
+                  <textarea rows="2" class="form-control form-control-sm draft-item-description-entry-input draft-description-en" lang="en" placeholder="${escapeHtml(draftT("English product description"))}">${escapeHtml(en)}</textarea>
+                </div>
+                <div>
+                  <div class="d-flex align-items-center justify-content-between gap-2 mb-1">
+                    <label class="form-label form-label-sm mb-0">${escapeHtml(draftT("Chinese Description"))}</label>
+                    <button type="button" class="btn btn-link btn-sm p-0 draft-description-translate" data-source-lang="zh">${escapeHtml(draftT(cn ? "Retranslate" : "Translate"))}</button>
+                  </div>
+                  <textarea rows="2" class="form-control form-control-sm draft-description-cn" lang="zh" placeholder="${escapeHtml(draftT("Chinese product description"))}">${escapeHtml(cn)}</textarea>
+                </div>
+              </div>
+              <div class="d-flex justify-content-between align-items-center gap-2 mt-1">
+                <small class="draft-description-status text-muted" aria-live="polite"></small>
+                <button type="button" class="btn btn-outline-danger btn-sm draft-item-action draft-item-description-remove" title="${escapeHtml(draftT("Remove row"))}">×</button>
+              </div>
             </div>
         `;
     }
 
+    async function translateDraftDescriptionRow(row, sourceLang, explicit = false) {
+        const source = row.querySelector(sourceLang === "zh" ? ".draft-description-cn" : ".draft-description-en");
+        const target = row.querySelector(sourceLang === "zh" ? ".draft-description-en" : ".draft-description-cn");
+        const status = row.querySelector(".draft-description-status");
+        const buttons = Array.from(row.querySelectorAll(".draft-description-translate"));
+        const text = source?.value?.trim() || "";
+        if (!source || !target || !text) return;
+        if (!explicit && target.value.trim() && target.dataset.manualEdit === "1") {
+            target.dataset.stale = "1";
+            target.classList.add("border-warning");
+            if (status) status.textContent = draftT("Source changed; review the manual translation or choose Retranslate.");
+            return;
+        }
+        buttons.forEach((button) => (button.disabled = true));
+        source.setAttribute("aria-busy", "true");
+        if (status) {
+            status.className = "draft-description-status text-primary";
+            status.textContent = draftT("Translating...");
+        }
+        try {
+            const response = await api("POST", "/translations", {
+                text,
+                source_lang: sourceLang,
+                target_lang: sourceLang === "zh" ? "en" : "zh",
+            });
+            const translated = String(response?.data?.translated || "").trim();
+            if (!translated) throw new Error(draftT("Translation is not available yet. Retry or enter the missing language manually."));
+            target.dataset.programmatic = "1";
+            target.value = translated;
+            target.dataset.manualEdit = "0";
+            target.dataset.autoSource = text;
+            target.dataset.stale = "0";
+            target.classList.remove("border-warning", "is-invalid");
+            delete target.dataset.programmatic;
+            if (status) {
+                status.className = "draft-description-status text-success";
+                status.textContent = draftT("Translation complete. You can edit either language.");
+            }
+        } catch (error) {
+            if (status) {
+                status.className = "draft-description-status text-danger";
+                status.innerHTML = `${escapeHtml(error.message || draftT("Translation failed."))} <button type="button" class="btn btn-link btn-sm p-0 draft-description-retry">${escapeHtml(draftT("Retry"))}</button>`;
+                status.querySelector(".draft-description-retry")?.addEventListener("click", () => translateDraftDescriptionRow(row, sourceLang, true));
+            }
+        } finally {
+            source.removeAttribute("aria-busy");
+            buttons.forEach((button) => (button.disabled = false));
+        }
+    }
+
     function attachDraftDescriptionRowEvents(card, row) {
-        row.querySelector(".draft-item-description-entry-input")?.addEventListener(
-            "input",
-            (event) => {
-                event.currentTarget.dataset.descriptionCn = "";
-                event.currentTarget.dataset.descriptionEn = "";
-            },
-        );
+        const enInput = row.querySelector(".draft-description-en");
+        const cnInput = row.querySelector(".draft-description-cn");
+        [enInput, cnInput].forEach((input) => {
+            input?.addEventListener("input", () => {
+                if (input.dataset.programmatic !== "1") input.dataset.manualEdit = "1";
+                const other = input === enInput ? cnInput : enInput;
+                if (other?.value?.trim()) {
+                    other.dataset.stale = "1";
+                    other.classList.add("border-warning");
+                }
+            });
+            input?.addEventListener("blur", () => {
+                const other = input === enInput ? cnInput : enInput;
+                if (input.value.trim() && !other?.value?.trim()) {
+                    translateDraftDescriptionRow(row, input === enInput ? "en" : "zh", false);
+                }
+            });
+        });
+        row.querySelectorAll(".draft-description-translate").forEach((button) => {
+            button.addEventListener("click", () => translateDraftDescriptionRow(row, button.dataset.sourceLang || "en", true));
+        });
         row.querySelector(".draft-item-description-remove")?.addEventListener(
             "click",
             () => {
@@ -2149,11 +2330,13 @@
                   <label class="form-label draft-item-label">Qty / Carton</label>
                   <input type="number" step="0.0001" min="0" class="form-control form-control-sm draft-shared-content-qty-per-carton" placeholder="0">
                 </div>
-                <div class="col-12 col-xl-3">
-                  <label class="form-label draft-item-label">Description</label>
-                  <input type="text" class="form-control form-control-sm draft-shared-content-description-input" placeholder="${escapeHtml(draftT("Search for a product or add a new one."))}">
+                <div class="col-12 col-xl-4">
+                  <div class="row g-1">
+                    <div class="col-12 col-md-6"><div class="d-flex justify-content-between"><label class="form-label draft-item-label">${escapeHtml(draftT("English Description"))}</label><button type="button" class="btn btn-link btn-sm p-0 draft-description-translate" data-source-lang="en">${escapeHtml(draftT("Translate"))}</button></div><input type="text" class="form-control form-control-sm draft-shared-content-description-input draft-description-en" lang="en" placeholder="${escapeHtml(draftT("English description"))}"></div>
+                    <div class="col-12 col-md-6"><div class="d-flex justify-content-between"><label class="form-label draft-item-label">${escapeHtml(draftT("Chinese Description"))}</label><button type="button" class="btn btn-link btn-sm p-0 draft-description-translate" data-source-lang="zh">${escapeHtml(draftT("Translate"))}</button></div><input type="text" class="form-control form-control-sm draft-shared-content-description-cn draft-description-cn" lang="zh" placeholder="${escapeHtml(draftT("Chinese description"))}"></div>
+                  </div>
                   <input type="hidden" class="draft-shared-content-product-id">
-                  <div class="form-text draft-shared-content-meta"></div>
+                  <div class="form-text draft-shared-content-meta"></div><small class="draft-description-status text-muted" aria-live="polite"></small>
                 </div>
                 <div class="col-12 col-sm-6 col-xl-1">
                   <label class="form-label draft-item-label">Factory</label>
@@ -2225,8 +2408,9 @@
     }
 
     function setDraftSharedCartonDescription(row, entry = {}) {
-        const input = row.querySelector(".draft-shared-content-description-input");
-        if (!input) return;
+        const enInput = row.querySelector(".draft-shared-content-description-input");
+        const cnInput = row.querySelector(".draft-shared-content-description-cn");
+        if (!enInput || !cnInput) return;
         const cn = (
             entry.description_text ||
             entry.text ||
@@ -2239,33 +2423,18 @@
             entry.description_en ||
             ""
         ).trim();
-        input.value = draftDescriptionDisplayValue(cn, en);
-        input.dataset.descriptionCn = cn;
-        input.dataset.descriptionEn = en;
+        enInput.value = en;
+        cnInput.value = cn;
     }
 
     function collectDraftSharedCartonDescription(row) {
-        const input = row.querySelector(".draft-shared-content-description-input");
-        if (!input) return [];
-        const value = input.value.trim();
-        const storedCn = (input.dataset.descriptionCn || "").trim();
-        const storedEn = (input.dataset.descriptionEn || "").trim();
-        if (!value && !storedCn && !storedEn) return [];
-        if (storedCn || storedEn) {
-            const storedDisplay = draftDescriptionDisplayValue(storedCn, storedEn);
-            if (!value || value === storedDisplay) {
-                return [
-                    {
-                        description_text: storedCn || storedEn || value,
-                        description_translated: storedEn || storedCn || value,
-                    },
-                ];
-            }
-        }
+        const en = row.querySelector(".draft-shared-content-description-input")?.value?.trim() || "";
+        const cn = row.querySelector(".draft-shared-content-description-cn")?.value?.trim() || "";
+        if (!en && !cn) return [];
         return [
             {
-                description_text: value,
-                description_translated: "",
+                description_text: cn,
+                description_translated: en,
             },
         ];
     }
@@ -2454,14 +2623,19 @@
             .filter(Boolean)
             .join(" · ");
 
-        row.querySelector(".draft-shared-content-description-input")?.addEventListener(
-            "input",
-            (event) => {
-                event.currentTarget.dataset.descriptionCn = "";
-                event.currentTarget.dataset.descriptionEn = "";
+        [row.querySelector(".draft-description-en"), row.querySelector(".draft-description-cn")].forEach((input) => {
+            input?.addEventListener("input", () => {
+                input.dataset.manualEdit = "1";
+                const other = input.classList.contains("draft-description-en") ? row.querySelector(".draft-description-cn") : row.querySelector(".draft-description-en");
+                if (other?.value?.trim()) { other.dataset.stale = "1"; other.classList.add("border-warning"); }
                 row.querySelector(".draft-shared-content-product-id").value = "";
-            },
-        );
+            });
+            input?.addEventListener("blur", () => {
+                const other = input.classList.contains("draft-description-en") ? row.querySelector(".draft-description-cn") : row.querySelector(".draft-description-en");
+                if (input.value.trim() && !other?.value?.trim()) translateDraftDescriptionRow(row, input.classList.contains("draft-description-en") ? "en" : "zh", false);
+            });
+        });
+        row.querySelectorAll(".draft-description-translate").forEach((button) => button.addEventListener("click", () => translateDraftDescriptionRow(row, button.dataset.sourceLang || "en", true)));
         [
             ".draft-shared-content-qty-per-carton",
             ".draft-shared-content-unit-price",
@@ -2635,7 +2809,7 @@
 
     function draftDescriptionHasContent(card) {
         return Array.from(
-            card.querySelectorAll(".draft-item-description-entry-input"),
+            card.querySelectorAll(".draft-description-en, .draft-description-cn"),
         ).some((input) => input.value.trim());
     }
 
@@ -3874,31 +4048,15 @@
 
     function collectDescriptionEntries(card) {
         return Array.from(
-            card.querySelectorAll(".draft-item-description-entry-input"),
+            card.querySelectorAll("[data-description-entry]"),
         )
-            .map((input) => {
-                const value = input?.value?.trim() || "";
-                const storedCn = input?.dataset?.descriptionCn?.trim() || "";
-                const storedEn = input?.dataset?.descriptionEn?.trim() || "";
-                if (!value && !storedCn && !storedEn) {
-                    return null;
-                }
-                if (storedCn || storedEn) {
-                    const storedDisplay = draftDescriptionDisplayValue(
-                        storedCn,
-                        storedEn,
-                    );
-                    if (!value || value === storedDisplay) {
-                        return {
-                            description_text: storedCn || storedEn || value,
-                            description_translated:
-                                storedEn || storedCn || value,
-                        };
-                    }
-                }
+            .map((row) => {
+                const cn = row.querySelector(".draft-description-cn")?.value?.trim() || "";
+                const en = row.querySelector(".draft-description-en")?.value?.trim() || "";
+                if (!cn && !en) return null;
                 return {
-                    description_text: value,
-                    description_translated: "",
+                    description_text: cn,
+                    description_translated: en,
                 };
             })
             .filter(Boolean);
@@ -4303,7 +4461,8 @@
                         const desc = row.querySelector(
                             ".draft-shared-content-description-input",
                         );
-                        if (!String(desc?.value || "").trim()) {
+                        const descCn = row.querySelector(".draft-shared-content-description-cn");
+                        if (!String(desc?.value || "").trim() && !String(descCn?.value || "").trim()) {
                             addInvalid(
                                 desc,
                                 draftT("Contained item description is required."),
@@ -4332,7 +4491,7 @@
                     addInvalid(
                         card.querySelector(".draft-item-description-primary") ||
                             card.querySelector(
-                                ".draft-item-description-entry-input",
+                                ".draft-description-en, .draft-description-cn",
                             ),
                         draftT("Item description is required."),
                     );
@@ -4794,6 +4953,57 @@
         }
     }
 
+    function initializeDraftFilters() {
+        const params = new URLSearchParams(window.location.search);
+        const mapping = {
+            q: "draftFilterSearch",
+            customer_id: "draftFilterCustomerId",
+            supplier_id: "draftFilterSupplierId",
+            goods_type: "draftFilterGoodsType",
+            brand: "draftFilterBrand",
+            creator_id: "draftFilterCreator",
+            created_from: "draftFilterCreatedFrom",
+            created_to: "draftFilterCreatedTo",
+            expected_from: "draftFilterExpectedFrom",
+            expected_to: "draftFilterExpectedTo",
+        };
+        Object.entries(mapping).forEach(([key, id]) => {
+            const node = document.getElementById(id);
+            if (node && params.has(key)) {
+                const value = params.get(key) || "";
+                if (node.tagName === "SELECT" && value && !Array.from(node.options).some((option) => option.value === value)) node.add(new Option(value, value));
+                node.value = value;
+            }
+        });
+        draftListPage = Math.max(1, parseInt(params.get("page") || "1", 10) || 1);
+        draftFilterCustomerAc = Autocomplete.init(document.getElementById("draftFilterCustomer"), {
+            resource: "customers", searchPath: "/lookup", placeholder: draftT("Search customer"),
+            onSelect: (item) => { document.getElementById("draftFilterCustomerId").value = item.id || ""; },
+        });
+        draftFilterSupplierAc = Autocomplete.init(document.getElementById("draftFilterSupplier"), {
+            resource: "suppliers", searchPath: "/search", placeholder: draftT("Search supplier"),
+            onSelect: (item) => { document.getElementById("draftFilterSupplierId").value = item.id || ""; },
+        });
+        document.getElementById("draftFilterCustomer")?.addEventListener("input", () => { document.getElementById("draftFilterCustomerId").value = ""; });
+        document.getElementById("draftFilterSupplier")?.addEventListener("input", () => { document.getElementById("draftFilterSupplierId").value = ""; });
+        document.getElementById("draftOrderFilters")?.addEventListener("submit", async (event) => {
+            event.preventDefault(); draftListPage = 1; await loadDraftOrders();
+        });
+        document.getElementById("draftFilterClear")?.addEventListener("click", async () => {
+            document.getElementById("draftOrderFilters")?.reset();
+            draftFilterCustomerAc?.setValue(null); draftFilterSupplierAc?.setValue(null);
+            document.getElementById("draftFilterCustomerId").value = "";
+            document.getElementById("draftFilterSupplierId").value = "";
+            draftListPage = 1; await loadDraftOrders();
+        });
+        document.getElementById("draftPagePrevious")?.addEventListener("click", async () => { if (draftListPage > 1) { draftListPage--; await loadDraftOrders(); } });
+        document.getElementById("draftPageNext")?.addEventListener("click", async () => { if (draftListPage < (draftListMeta.pages || 1)) { draftListPage++; await loadDraftOrders(); } });
+        document.getElementById("draftDownloadFilteredBtn")?.addEventListener("click", () => {
+            const query = collectDraftFilters(false);
+            window.location.href = `${API}/draft-orders/export-filtered?${query.toString()}`;
+        });
+    }
+
     document.addEventListener("DOMContentLoaded", async () => {
         draftDownloadSelection = window.ClmsBulkExcelDownload?.create({
             endpoint: `${API}/orders/bulk-export`,
@@ -4826,6 +5036,7 @@
             });
         ensureDraftValidationSummary();
         bindDraftValidationAutoClear(document.getElementById("draftOrderModal"));
+        initializeDraftFilters();
 
         draftOrderCustomerAc = Autocomplete.init(
             document.getElementById("draftOrderCustomer"),
@@ -4936,9 +5147,17 @@
         await refreshDraftLists({ deferLegacy: true });
 
         const params = new URLSearchParams(window.location.search);
+        const copyOrderId = params.get("copy_order_id");
         const orderId = params.get("order_id");
         const legacyDraftId = params.get("legacy_draft_id");
         const supplierId = params.get("supplier_id");
+        if (copyOrderId) {
+            const url = new URL(window.location.href);
+            url.searchParams.delete("copy_order_id");
+            window.history.replaceState({}, "", url);
+            openDraftOrderBuilder(parseInt(copyOrderId, 10), { duplicate: true });
+            return;
+        }
         if (orderId) {
             openDraftOrderBuilder(parseInt(orderId, 10));
             return;

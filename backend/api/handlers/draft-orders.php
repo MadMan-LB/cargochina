@@ -15,6 +15,7 @@ require_once dirname(__DIR__, 2) . '/services/TranslationService.php';
 require_once dirname(__DIR__, 2) . '/services/ItemClassificationService.php';
 require_once dirname(__DIR__, 2) . '/services/DraftOrderCostService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
+require_once dirname(__DIR__, 2) . '/services/OrderBulkExcelService.php';
 
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate as SpreadsheetCoordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -347,6 +348,13 @@ function draftOrderBuildDescriptionStrings(PDO $pdo, array $entries): array
             continue;
         }
         $pair = draftOrderNormalizeDescriptionPair($pdo, $text, $translated);
+        if (trim((string) ($pair['description_text'] ?? '')) === '' || trim((string) ($pair['description_translated'] ?? '')) === '') {
+            jsonError(
+                'Both English and Chinese descriptions are required. Translation is currently unavailable; retry translation or enter the missing language manually.',
+                422,
+                ['items.description' => 'Enter both English and Chinese descriptions, or retry translation.']
+            );
+        }
         $normalized[] = $pair;
         $cnParts[] = $pair['description_text'];
         $enParts[] = $pair['description_translated'];
@@ -1610,6 +1618,8 @@ function draftOrderBuildSupplierSections(array $items): array
             'dimensions_scope' => $item['dimensions_scope'],
             'hs_code' => draftOrderNormalizeHsCode($item['hs_code'] ?? null),
             'description_entries' => $item['description_entries'] ?? [],
+            'description_cn' => $item['description_cn'] ?? null,
+            'description_en' => $item['description_en'] ?? null,
             'notes' => trim((string) ($item['notes'] ?? '')) ?: null,
             'photo_paths' => $item['image_paths'] ?? [],
             'custom_design_required' => !empty($item['custom_design_required']) ? 1 : 0,
@@ -1752,6 +1762,8 @@ function draftOrderBuildExportRows(array $sections): array
                     'width' => $item['width'] ?? $item['item_width'] ?? '',
                     'height' => $item['height'] ?? $item['item_height'] ?? '',
                     'description' => 'Shared carton / multiple items',
+                    'description_en' => 'Shared carton / multiple items',
+                    'description_cn' => '共享纸箱 / 多件商品',
                     'hs_code' => '',
                     'pieces_per_carton' => $item['pieces_per_carton'] ?? '',
                     'cartons' => $item['cartons'] ?? '',
@@ -1771,8 +1783,12 @@ function draftOrderBuildExportRows(array $sections): array
                 ];
 
                 foreach ($item['shared_carton_contents'] as $content) {
-                    $description = implode(' | ', array_map(
+                    $descriptionEn = implode(' | ', array_map(
                         static fn($entry) => trim((string) (($entry['description_translated'] ?? '') ?: ($entry['description_text'] ?? ''))),
+                        $content['description_entries'] ?? []
+                    ));
+                    $descriptionCn = implode(' | ', array_map(
+                        static fn($entry) => trim((string) (($entry['description_text'] ?? '') ?: ($entry['description_translated'] ?? ''))),
                         $content['description_entries'] ?? []
                     ));
                     $customerPrice = isset($content['sell_price']) && $content['sell_price'] !== null && $content['sell_price'] !== ''
@@ -1795,7 +1811,9 @@ function draftOrderBuildExportRows(array $sections): array
                         'length' => $content['length'] ?? $content['item_length'] ?? '',
                         'width' => $content['width'] ?? $content['item_width'] ?? '',
                         'height' => $content['height'] ?? $content['item_height'] ?? '',
-                        'description' => trim(($item['shared_carton_code'] ? ('[' . $item['shared_carton_code'] . '] ') : '') . $description),
+                        'description' => trim(($item['shared_carton_code'] ? ('[' . $item['shared_carton_code'] . '] ') : '') . $descriptionEn),
+                        'description_en' => $descriptionEn,
+                        'description_cn' => $descriptionCn,
                         'hs_code' => $content['hs_code'] ?? '',
                         'pieces_per_carton' => $content['quantity_per_carton'] ?? '',
                         'cartons' => '',
@@ -1817,8 +1835,12 @@ function draftOrderBuildExportRows(array $sections): array
                 continue;
             }
 
-            $desc = implode(' | ', array_map(
+            $descEn = implode(' | ', array_map(
                 static fn($entry) => trim((string) (($entry['description_translated'] ?? '') ?: ($entry['description_text'] ?? ''))),
+                $item['description_entries'] ?? []
+            ));
+            $descCn = implode(' | ', array_map(
+                static fn($entry) => trim((string) (($entry['description_text'] ?? '') ?: ($entry['description_translated'] ?? ''))),
                 $item['description_entries'] ?? []
             ));
             $multiplier = ($item['dimensions_scope'] ?? 'carton') === 'carton'
@@ -1842,7 +1864,9 @@ function draftOrderBuildExportRows(array $sections): array
                 'length' => $item['length'] ?? $item['item_length'] ?? '',
                 'width' => $item['width'] ?? $item['item_width'] ?? '',
                 'height' => $item['height'] ?? $item['item_height'] ?? '',
-                'description' => $desc,
+                'description' => $descEn,
+                'description_en' => $descEn,
+                'description_cn' => $descCn,
                 'hs_code' => $item['hs_code'] ?: '',
                 'pieces_per_carton' => $item['pieces_per_carton'] ?? '',
                 'cartons' => $item['cartons'] ?? '',
@@ -1866,14 +1890,98 @@ function draftOrderBuildExportRows(array $sections): array
     return $rows;
 }
 
-function draftOrderListRows(PDO $pdo): array
+function draftOrderListQuery(PDO $pdo, array $filters, bool $paginate = true): array
 {
-    $stmt = $pdo->query(
-        "SELECT o.id
-         FROM orders o
-         WHERE o.order_type = 'draft_procurement'
-         ORDER BY o.created_at DESC, o.id DESC"
-    );
+    $where = ["o.order_type = 'draft_procurement'"];
+    $params = [];
+    $q = trim((string) ($filters['q'] ?? ''));
+    if ($q !== '') {
+        $like = '%' . $q . '%';
+        $classificationJoin = draftOrderTableHasColumn($pdo, 'item_classifications', 'item_type_code')
+            ? " LEFT JOIN item_classifications icq ON icq.entity_type='order_item' AND icq.entity_id=oi.id"
+            : '';
+        $classificationSearch = $classificationJoin !== '' ? ' OR icq.item_type_code LIKE ?' : '';
+        $where[] = "(CAST(o.id AS CHAR) LIKE ? OR c.name LIKE ? OR EXISTS (
+            SELECT 1 FROM order_items oi
+            LEFT JOIN suppliers si ON si.id = oi.supplier_id
+            $classificationJoin
+            WHERE oi.order_id = o.id AND (
+                oi.item_no LIKE ? OR oi.shipping_code LIKE ? OR oi.code LIKE ?
+                OR oi.description_en LIKE ? OR oi.description_cn LIKE ?
+                OR oi.brand LIKE ? OR oi.what_brand LIKE ? OR oi.materials LIKE ?
+                OR oi.copy_normal_goods LIKE ? OR si.name LIKE ?$classificationSearch
+            )
+        ))";
+        $params = array_merge($params, array_fill(0, $classificationJoin !== '' ? 13 : 12, $like));
+    }
+    $statuses = $filters['status'] ?? [];
+    if (!is_array($statuses)) $statuses = preg_split('/\s*,\s*/', (string) $statuses) ?: [];
+    $statuses = array_values(array_unique(array_filter(array_map('trim', $statuses))));
+    if ($statuses) {
+        $where[] = 'o.status IN (' . implode(',', array_fill(0, count($statuses), '?')) . ')';
+        array_push($params, ...$statuses);
+    }
+    foreach (['customer_id' => 'o.customer_id', 'creator_id' => 'o.created_by'] as $key => $column) {
+        if ($key === 'creator_id' && !hasAnyRole(['SuperAdmin', 'ChinaAdmin', 'LebanonAdmin'])) continue;
+        $value = (int) ($filters[$key] ?? 0);
+        if ($value > 0) { $where[] = "$column = ?"; $params[] = $value; }
+    }
+    $supplierId = (int) ($filters['supplier_id'] ?? 0);
+    if ($supplierId > 0) {
+        $where[] = 'EXISTS (SELECT 1 FROM order_items ois WHERE ois.order_id=o.id AND ois.supplier_id=?)';
+        $params[] = $supplierId;
+    }
+    $goodsType = trim((string) ($filters['goods_type'] ?? ''));
+    if ($goodsType !== '') {
+        $canonicalType = (new ItemClassificationService($pdo))->normalize($goodsType);
+        $legacyAliases = [
+            'normal' => ['normal'],
+            'replica' => ['copy', 'replica'],
+            'dangerous' => ['dangerous'],
+        ][$canonicalType] ?? [$canonicalType];
+        $legacySql = implode(',', array_fill(0, count($legacyAliases), '?'));
+        if (draftOrderTableHasColumn($pdo, 'item_classifications', 'item_type_code')) {
+            $where[] = "EXISTS (
+                SELECT 1 FROM order_items oif
+                LEFT JOIN item_classifications icf ON icf.entity_type='order_item' AND icf.entity_id=oif.id
+                WHERE oif.order_id=o.id AND (icf.item_type_code=? OR LOWER(TRIM(COALESCE(oif.copy_normal_goods,''))) IN ($legacySql))
+            )";
+            $params[] = $canonicalType;
+        } else {
+            $where[] = "EXISTS (SELECT 1 FROM order_items oif WHERE oif.order_id=o.id AND LOWER(TRIM(COALESCE(oif.copy_normal_goods,''))) IN ($legacySql))";
+        }
+        array_push($params, ...$legacyAliases);
+    }
+    $brand = trim((string) ($filters['brand'] ?? ''));
+    if ($brand !== '') {
+        $where[] = 'EXISTS (SELECT 1 FROM order_items oif WHERE oif.order_id=o.id AND (oif.brand=? OR oif.what_brand=?))';
+        $params[] = $brand;
+        $params[] = $brand;
+    }
+    foreach ([
+        'created_from' => ['o.created_at', '>=', ' 00:00:00'],
+        'created_to' => ['o.created_at', '<=', ' 23:59:59'],
+        'expected_from' => ['o.expected_ready_date', '>=', ''],
+        'expected_to' => ['o.expected_ready_date', '<=', ''],
+    ] as $key => [$column, $operator, $suffix]) {
+        $value = trim((string) ($filters[$key] ?? ''));
+        if ($value !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+            $where[] = "$column $operator ?";
+            $params[] = $value . $suffix;
+        }
+    }
+
+    $from = ' FROM orders o JOIN customers c ON c.id=o.customer_id WHERE ' . implode(' AND ', $where);
+    $countStmt = $pdo->prepare('SELECT COUNT(*)' . $from);
+    $countStmt->execute($params);
+    $total = (int) $countStmt->fetchColumn();
+    $page = max(1, (int) ($filters['page'] ?? 1));
+    $limit = max(10, min(100, (int) ($filters['limit'] ?? 20)));
+    $offset = ($page - 1) * $limit;
+    $sql = 'SELECT o.id' . $from . ' ORDER BY o.created_at DESC, o.id DESC';
+    if ($paginate) $sql .= ' LIMIT ' . $limit . ' OFFSET ' . $offset;
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
 
     $list = [];
     foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $orderId) {
@@ -1887,7 +1995,56 @@ function draftOrderListRows(PDO $pdo): array
         $list[] = $payload;
     }
 
-    return $list;
+    return [$list, [
+        'page' => $page,
+        'limit' => $limit,
+        'total' => $total,
+        'pages' => max(1, (int) ceil($total / $limit)),
+    ]];
+}
+
+function draftOrderFilterOptions(PDO $pdo, array $filters = []): array
+{
+    $statuses = $pdo->query("SELECT DISTINCT status FROM orders WHERE order_type='draft_procurement' AND status IS NOT NULL AND status<>'' ORDER BY status")->fetchAll(PDO::FETCH_COLUMN);
+    $brands = $pdo->query("SELECT DISTINCT COALESCE(NULLIF(TRIM(brand),''), NULLIF(TRIM(what_brand),'')) brand FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE o.order_type='draft_procurement' HAVING brand IS NOT NULL ORDER BY brand LIMIT 200")->fetchAll(PDO::FETCH_COLUMN);
+    $creators = [];
+    if (hasAnyRole(['SuperAdmin', 'ChinaAdmin', 'LebanonAdmin'])) {
+        $creators = $pdo->query("SELECT DISTINCT u.id, COALESCE(NULLIF(u.full_name,''),u.email) name FROM users u JOIN orders o ON o.created_by=u.id WHERE o.order_type='draft_procurement' ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
+    }
+    $selected = [];
+    foreach (['customer_id' => ['customers', 'name'], 'supplier_id' => ['suppliers', 'name']] as $key => [$table, $nameColumn]) {
+        $selectedId = (int) ($filters[$key] ?? 0);
+        if ($selectedId <= 0) continue;
+        $stmt = $pdo->prepare("SELECT id, $nameColumn AS name FROM $table WHERE id=? LIMIT 1");
+        $stmt->execute([$selectedId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row) $selected[$key] = $row;
+    }
+    return ['statuses' => $statuses, 'brands' => $brands, 'creators' => $creators, 'selected' => $selected];
+}
+
+function draftOrderListRows(PDO $pdo): array
+{
+    return draftOrderListQuery($pdo, [], false)[0];
+}
+
+function draftOrderRequestFilters(): array
+{
+    return [
+        'q' => $_GET['q'] ?? '',
+        'status' => $_GET['status'] ?? [],
+        'customer_id' => $_GET['customer_id'] ?? null,
+        'supplier_id' => $_GET['supplier_id'] ?? null,
+        'goods_type' => $_GET['goods_type'] ?? '',
+        'brand' => $_GET['brand'] ?? '',
+        'creator_id' => $_GET['creator_id'] ?? null,
+        'created_from' => $_GET['created_from'] ?? '',
+        'created_to' => $_GET['created_to'] ?? '',
+        'expected_from' => $_GET['expected_from'] ?? '',
+        'expected_to' => $_GET['expected_to'] ?? '',
+        'page' => $_GET['page'] ?? 1,
+        'limit' => $_GET['limit'] ?? 20,
+    ];
 }
 
 function draftOrderExportCsv(PDO $pdo, int $orderId): void
@@ -1915,7 +2072,7 @@ function draftOrderExportCsv(PDO $pdo, int $orderId): void
 
     foreach ($order['supplier_sections'] as $section) {
         fputcsv($out, [clmsT('Supplier') . ':', $section['supplier_name']]);
-        fputcsv($out, array_map('clmsT', ['Supplier', 'Supplier Name', 'Brand', 'Materials', 'Height', 'Width', 'Length', 'What Brand', 'Good Type', 'Code', 'Item No', 'Product / Names', 'Notes', 'HS Code', 'Pieces/Carton', 'Cartons', 'Quantity', 'Unit', 'Factory Price', 'Customer Price', 'Total Amount', 'CBM/Unit', 'Total CBM', 'Weight/Unit', 'Total Weight', 'Custom Design', 'Express Number', 'Size']));
+        fputcsv($out, array_map('clmsT', ['Supplier', 'Supplier Name', 'Brand', 'Materials', 'Height', 'Width', 'Length', 'What Brand', 'Good Type', 'Code', 'Item No', 'English Description', 'Chinese Description', 'Notes', 'HS Code', 'Pieces/Carton', 'Cartons', 'Quantity', 'Unit', 'Factory Price', 'Customer Price', 'Total Amount', 'CBM/Unit', 'Total CBM', 'Weight/Unit', 'Total Weight', 'Custom Design', 'Express Number', 'Size']));
         foreach (draftOrderBuildExportRows([$section]) as $item) {
             $customDesignValue = strtolower(trim((string) ($item['custom_design_required'] ?? '')));
             $customDesignLabel = $customDesignValue === ''
@@ -1933,7 +2090,8 @@ function draftOrderExportCsv(PDO $pdo, int $orderId): void
                 draftOrderCopyNormalGoodsDisplay($item['copy_normal_goods'] ?? ''),
                 $item['code'] ?? '',
                 $item['item_no'] ?: '',
-                $item['description'] ?? '',
+                $item['description_en'] ?? $item['description'] ?? '',
+                $item['description_cn'] ?? $item['description'] ?? '',
                 $item['notes'] ?? '',
                 $item['hs_code'] ?: '',
                 $item['pieces_per_carton'] ?? '',
@@ -1970,7 +2128,7 @@ function draftOrderExportCsv(PDO $pdo, int $orderId): void
     exit;
 }
 
-function draftOrderExportXlsx(PDO $pdo, int $orderId): void
+function draftOrderBuildExcelEntry(PDO $pdo, int $orderId): array
 {
     $order = draftOrderFetchOrderPayload($pdo, $orderId);
     $excelItems = [];
@@ -1993,8 +2151,8 @@ function draftOrderExportXlsx(PDO $pdo, int $orderId): void
             'item_length' => is_numeric($row['length'] ?? null) ? (float) $row['length'] : null,
             'item_width' => is_numeric($row['width'] ?? null) ? (float) $row['width'] : null,
             'item_height' => is_numeric($row['height'] ?? null) ? (float) $row['height'] : null,
-            'description_en' => $row['description'] ?? '',
-            'description_cn' => $row['description'] ?? '',
+            'description_en' => $row['description_en'] ?? $row['description'] ?? '',
+            'description_cn' => $row['description_cn'] ?? $row['description'] ?? '',
             'notes' => $row['notes'] ?? '',
             'quantity' => $isSummary ? '' : (float) ($row['quantity'] ?? 0),
             'unit' => $row['unit'] ?? 'pieces',
@@ -2012,11 +2170,16 @@ function draftOrderExportXlsx(PDO $pdo, int $orderId): void
         ];
     }
 
-    require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
     $customerName = preg_replace('/[^a-zA-Z0-9_-]+/', '_', trim((string) ($order['customer_name'] ?? 'customer')));
     $customerName = trim((string) $customerName, '_') ?: 'customer';
     $filename = 'draft_order_' . $orderId . '_' . $customerName . '_' . date('Ymd_His') . '.xlsx';
-    (new OrderExcelService())->exportOrder($order, $excelItems, $filename);
+    return ['order' => $order, 'items' => $excelItems, 'filename' => $filename];
+}
+
+function draftOrderExportXlsx(PDO $pdo, int $orderId): void
+{
+    $entry = draftOrderBuildExcelEntry($pdo, $orderId);
+    (new OrderExcelService())->exportOrder($entry['order'], $entry['items'], $entry['filename']);
 }
 
 function draftOrderImportCellString($value): string
@@ -4217,6 +4380,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         jsonResponse(['data' => OrderItemNumberingService::fetchNumberingHistory($pdo, $customerId)]);
     }
 
+    if ($method === 'GET' && $id === 'export-filtered') {
+        [$rows] = draftOrderListQuery($pdo, draftOrderRequestFilters(), false);
+        if (!$rows) jsonError('No draft orders match the active filters.', 404);
+        $entries = array_map(static fn(array $row): array => draftOrderBuildExcelEntry($pdo, (int) $row['id']), $rows);
+        (new OrderBulkExcelService())->output($entries, 'filtered_draft_orders');
+    }
+
     if ($method === 'POST' && $id === 'import' && $action === null) {
         [$rows, $filename, $readWarnings, $readMeta] = draftOrderImportReadRowsFromUpload();
         jsonResponse(['data' => draftOrderImportBuildPayload($pdo, $rows, $filename, $readWarnings, $readMeta)]);
@@ -4295,7 +4465,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if ($qty <= 0) {
                     continue;
                 }
-                $description = trim((string) ($legacyItem['description_cn'] ?? $legacyItem['description_en'] ?? $legacyItem['notes'] ?? ''));
+                $description = draftOrderBuildDescriptionStrings($pdo, [[
+                    'description_text' => $legacyItem['description_cn'] ?? $legacyItem['notes'] ?? '',
+                    'description_translated' => $legacyItem['description_en'] ?? '',
+                ]]);
                 $normalizedItems[] = [
                     'product_id' => !empty($legacyItem['product_id']) ? (int) $legacyItem['product_id'] : null,
                     'supplier_id' => $supplierId,
@@ -4318,12 +4491,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     'item_width' => null,
                     'item_height' => null,
                     'hs_code' => draftOrderNormalizeHsCode($legacyItem['hs_code'] ?? null),
-                    'description_entries' => draftOrderBuildDescriptionStrings($pdo, [[
-                        'description_text' => $description,
-                        'description_translated' => $description,
-                    ]])['entries'],
-                    'description_cn' => $description ?: null,
-                    'description_en' => $description ?: null,
+                    'description_entries' => $description['entries'],
+                    'description_cn' => $description['description_cn'],
+                    'description_en' => $description['description_en'],
                     'notes' => trim((string) ($legacyItem['notes'] ?? '')) ?: null,
                     'photo_paths' => [],
                     'custom_design_required' => 0,
@@ -4376,7 +4546,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
     if ($method === 'GET') {
         if ($id === null) {
-            jsonResponse(['data' => draftOrderListRows($pdo)]);
+            $filters = draftOrderRequestFilters();
+            [$rows, $meta] = draftOrderListQuery($pdo, $filters, true);
+            jsonResponse(['data' => $rows, 'meta' => $meta, 'filter_options' => draftOrderFilterOptions($pdo, $filters)]);
         }
         if (!ctype_digit((string) $id)) {
             jsonError('Draft order not found', 404);

@@ -1341,13 +1341,31 @@ otification_preferences.php and removing the sidebar link unless the user is an 
 
 - Standardized system XLSX output around the Receiving Procurement Import Template conventions: Arial, blue table headers, metadata labels ending with colons, frozen header rows, print setup, readable widths, typed numeric/date cells, multilingual text, and embedded item photos when available. The supplied master workbook contained no logo drawing or reusable logo asset, so exports use text branding rather than inventing an image.
 - Renamed visible XLSX/export actions to `Download` and added the equivalent Chinese UI translations. The application currently supports English and Chinese UI locales; Arabic workbook content remains Unicode-safe.
-- Added shared, server-authorized bulk downloads to Orders, Receiving, Warehouse Stock, and Draft an Order. One selected record returns XLSX; multiple selected records return a collision-safe ZIP containing one XLSX per record. Selection is current-page only and batches are capped at 100 IDs.
+- Added shared, server-authorized bulk downloads to Orders, Receiving, Warehouse Stock, and Draft an Order. Selected records now return one XLSX with one vertical order section per record. Selection is current-page only and batches are capped at 100 IDs.
 - Cache-busted the Warehouse Stock page renderer with its file modification time. This prevents browsers or production proxies from retaining the pre-selection JavaScript, which previously left the new Select All control disconnected and kept rendering rows without checkboxes.
-- Added `OrderBulkExcelService` and `frontend/js/bulk_excel_download.js` so workbook generation, ZIP cleanup, selection count, disabled/busy states, and hidden-row deselection are centralized.
+- Added `OrderBulkExcelService` and `frontend/js/bulk_excel_download.js` so workbook generation, selection count, disabled/busy states, and hidden-row deselection are centralized.
 - Replaced the Balances CSV export with template-aligned XLSX output and added reusable typed table export support to `OrderExcelService`.
 - Fixed the Warehouse Stock `Received` filter. Modern receiving advances fully received orders to `Confirmed` or `ReadyForConsolidation`, so filtering only stored `ReceivedAtWarehouse` values omitted valid stock. `Warehouse Received` is now a canonical virtual status backed by an active, non-void receipt; the historical stored status remains available as `Legacy Received Status`.
 - Added migration `079_receipt_item_dimension_compatibility.sql`. It safely and idempotently adds nullable `actual_height`, `actual_width`, and `actual_length` to `warehouse_receipt_items` for installations that missed migration 070. Warehouse Stock queries now also inspect the installed schema and select null compatibility aliases during rolling upgrades instead of throwing SQL error 1054.
 - Corrected filtered-result totals and pagination metadata in Orders, Receiving, Warehouse Stock, Containers, Customers, Suppliers, Products, and Balance Transactions. Selected filters persist in URL/page state, clear actions reset them, and exports receive the same filter parameters without page limits.
 - Improved large image exports by hashing duplicate image content and caching compact workbook thumbnails in the system temp directory. This avoids decoding and embedding gigabytes of duplicated uploads while preserving an embedded image for every applicable worksheet row.
 - Permission behavior remains server-side: downloads require the existing module read permission, every selected record is reloaded through the authorized order query, invalid or unavailable IDs are rejected, and direct unauthenticated export calls return 401.
-- Validation included upgraded and fresh migration runs, PHP/JS lint, focused lifecycle/RBAC/import/receiving/hardening suites, filter combinations, full 532-row Warehouse Received export, single/ZIP downloads, workbook archive inspection, embedded media inspection, Arabic/Chinese content checks, and desktop/mobile browser screenshots for all four bulk-download pages.
+- Validation included upgraded and fresh migration runs, PHP/JS lint, focused lifecycle/RBAC/import/receiving/hardening suites, filter combinations, full 532-row Warehouse Received export, workbook archive inspection, embedded media inspection, Arabic/Chinese content checks, and desktop/mobile browser screenshots for all four bulk-download pages.
+
+## 2026-07-21 Bilingual Drafts, Advanced Search, and One-Workbook Batch Export
+
+### What changed
+- Draft Order item cards now expose separate editable English and Chinese descriptions, translate an empty counterpart on blur, provide explicit Translate/Retranslate actions, protect manual corrections from automatic overwrite, and show loading/retry/stale states.
+- Draft saves normalize and complete the description pair server-side through `TranslationService`; saving is rejected when translation is unavailable and either language remains missing. Manual corrections and cached translations remain authoritative.
+- Manual entry, edit/reopen, Draft Order copy, Excel import, shared-carton content, legacy procurement migration, CSV, and XLSX paths preserve both canonical description fields.
+- Draft Order list search now covers both languages and operational item/order/customer/supplier metadata. Advanced status, party, canonical goods-type, brand, creator, created-date, and expected-date filters share the same parameterized query for list/count/pagination and complete filtered downloads.
+- Shared selected-order export now creates one XLSX worksheet. Every order repeats its full header and blue item header, keeps English/Chinese descriptions separate, embeds the main product image in the correct photo cell, and starts subsequent sections after separator rows and a print page break.
+- Translation API calls are limited to authenticated operational roles; manual translation corrections keep their stricter ChinaAdmin/SuperAdmin permission.
+
+### Migration status
+- No new migration is required. `order_items.description_en`, `order_items.description_cn`, translation cache/manual-correction tables, item classifications, and image paths already exist in the canonical schema.
+
+### Configuration and guardrails
+- Configure `TRANSLATION_PROVIDER`, `TRANSLATION_API_URL`, optional `TRANSLATION_API_KEY`, and `TRANSLATION_TIMEOUT_SECONDS`. Disabled/unavailable providers queue or report the attempt and never fabricate translated text.
+- Do not collapse bilingual descriptions back into a generic `description` field in copies, imports, conversions, searches, or exports.
+- Keep the shared batch endpoint authorization and 100-record limit; browser-submitted IDs are not trusted.

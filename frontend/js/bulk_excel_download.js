@@ -124,7 +124,7 @@
                         response,
                         state.selected.size === 1
                             ? "selected_order.xlsx"
-                            : "selected_orders.zip",
+                            : "selected_orders.xlsx",
                     );
                     downloadBlob(await response.blob(), filename);
                     if (typeof window.showToast === "function") {

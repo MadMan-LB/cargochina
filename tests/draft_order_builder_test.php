@@ -9,6 +9,7 @@ $root = dirname(__DIR__);
 require_once $root . '/backend/config/database.php';
 require_once $root . '/backend/services/ReceivingExcelImportService.php';
 require_once $root . '/backend/services/DraftOrderCostService.php';
+require_once $root . '/backend/services/TranslationService.php';
 require_once $root . '/vendor/autoload.php';
 
 try {
@@ -105,6 +106,14 @@ function cleanupCreatedOrder(PDO $pdo, int $orderId, ?string $createdProductDesc
             $pdo->prepare("DELETE FROM products WHERE id = ?")->execute([$productId]);
         }
     }
+}
+
+function bilingualDescriptionEntry(string $english): array
+{
+    return [
+        'description_text' => '测试 ' . $english,
+        'description_translated' => $english,
+    ];
 }
 
 function startDraftCreateProcess(string $root, array $body): array
@@ -217,6 +226,9 @@ test('draft-orders RBAC is operational', function () {
     $expected = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'];
     if (($rbac['draft-orders'] ?? null) !== $expected) {
         throw new Exception('Unexpected draft-orders RBAC mapping');
+    }
+    if (($rbac['translations']['write'] ?? null) !== $expected) {
+        throw new Exception('Translation endpoint is not limited to operational roles');
     }
 });
 
@@ -677,7 +689,7 @@ test('orders handler allows create without expected_ready_date', function () use
     }
 });
 
-test('draft-orders handler allows create without expected_ready_date and auto-fills single description', function () use ($pdo, $root) {
+test('draft-orders handler allows create without expected_ready_date and auto-fills a known single-language description', function () use ($pdo, $root) {
     $customerId = (int) $pdo->query("SELECT id FROM customers ORDER BY id LIMIT 1")->fetchColumn();
     $supplierId = (int) $pdo->query("SELECT id FROM suppliers ORDER BY id LIMIT 1")->fetchColumn();
     if ($customerId <= 0 || $supplierId <= 0) {
@@ -685,6 +697,8 @@ test('draft-orders handler allows create without expected_ready_date and auto-fi
     }
 
     $label = 'Optional draft expected date test ' . bin2hex(random_bytes(4));
+    $translatedLabel = '自动翻译测试 ' . bin2hex(random_bytes(3));
+    (new TranslationService($pdo))->saveManualCorrection($label, 'en', 'zh', $translatedLabel, 1);
     $out = runHandlerScript($root, 'backend/api/handlers/draft-orders.php', 'POST', null, null, [], [
         'customer_id' => $customerId,
         'expected_ready_date' => null,
@@ -733,18 +747,59 @@ test('draft-orders handler allows create without expected_ready_date and auto-fi
         if (trim((string) ($row['description_en'] ?? '')) !== $label) {
             throw new Exception('Expected English-side description to keep the source text');
         }
-        if (trim((string) ($row['description_cn'] ?? '')) === '') {
-            $job = $pdo->prepare("SELECT status FROM translation_jobs WHERE source_hash=? AND source_lang='en' AND target_lang='zh'");
-            $job->execute([hash('sha256', $label)]);
-            if (!in_array((string) $job->fetchColumn(), ['pending', 'failed'], true)) {
-                throw new Exception('Missing translation must be queued without blocking draft creation');
-            }
+        if (trim((string) ($row['description_cn'] ?? '')) !== $translatedLabel) {
+            throw new Exception('Expected the server to populate the known Chinese translation');
         }
         if (!empty($row['required_design'])) {
             throw new Exception('Auto-created product should not default required_design to on');
         }
     } finally {
         cleanupCreatedOrder($pdo, $orderId, $label);
+    }
+});
+
+test('draft-orders handler auto-fills English from a known Chinese-only description', function () use ($pdo, $root) {
+    $customerId = (int) $pdo->query("SELECT id FROM customers ORDER BY id LIMIT 1")->fetchColumn();
+    $supplierId = (int) $pdo->query("SELECT id FROM suppliers ORDER BY id LIMIT 1")->fetchColumn();
+    if ($customerId <= 0 || $supplierId <= 0) throw new Exception('Missing customer or supplier seed data');
+
+    $chinese = '中文单向翻译 ' . bin2hex(random_bytes(3));
+    $english = 'Chinese source translation ' . bin2hex(random_bytes(4));
+    (new TranslationService($pdo))->saveManualCorrection($chinese, 'zh', 'en', $english, 1);
+    $orderId = 0;
+    try {
+        $out = runHandlerScript($root, 'backend/api/handlers/draft-orders.php', 'POST', null, null, [], [
+            'customer_id' => $customerId,
+            'currency' => 'USD',
+            'supplier_sections' => [[
+                'supplier_id' => $supplierId,
+                'items' => [[
+                    'description_entries' => [['description_text' => $chinese]],
+                    'pieces_per_carton' => 1,
+                    'cartons' => 1,
+                    'unit_price' => 1,
+                    'cbm_mode' => 'direct',
+                    'cbm' => 0.01,
+                    'weight' => 0.1,
+                    'photo_paths' => [],
+                    'custom_design_required' => 0,
+                    'custom_design_paths' => [],
+                    'dimensions_scope' => 'carton',
+                ]],
+            ]],
+        ]);
+        $json = json_decode($out, true);
+        $orderId = (int) ($json['data']['id'] ?? 0);
+        if ($orderId <= 0) throw new Exception('Chinese-only draft save failed: ' . substr($out, 0, 200));
+        $stmt = $pdo->prepare('SELECT description_en, description_cn FROM order_items WHERE order_id=? LIMIT 1');
+        $stmt->execute([$orderId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (trim((string) ($row['description_cn'] ?? '')) !== $chinese
+            || trim((string) ($row['description_en'] ?? '')) !== $english) {
+            throw new Exception('Chinese-to-English server completion did not persist both languages');
+        }
+    } finally {
+        if ($orderId > 0) cleanupCreatedOrder($pdo, $orderId, $chinese);
     }
 });
 
@@ -783,6 +838,8 @@ test('standard order creation key replays the first committed result', function 
         if ((int) $stmt->fetchColumn() !== 1) throw new Exception('Creation key produced duplicate orders');
     } finally {
         cleanupCreatedOrder($pdo, $orderId, $label);
+        $pdo->prepare("DELETE FROM translation_manual_corrections WHERE source_hash=? AND source_lang='en' AND target_lang='zh'")
+            ->execute([hash('sha256', $label)]);
     }
 });
 
@@ -814,7 +871,8 @@ test('draft-order create continues item numbers from previous saved order', func
                 'supplier_id' => $supplierId,
                 'items' => [[
                     'description_entries' => [[
-                        'description_text' => $label,
+                        'description_text' => '测试 ' . $label,
+                        'description_translated' => $label,
                     ]],
                     'pieces_per_carton' => 1,
                     'cartons' => 1,
@@ -869,7 +927,7 @@ test('two concurrent draft creates serialize item-number allocation', function (
     $supplierId=(int)$pdo->query('SELECT id FROM suppliers ORDER BY id LIMIT 1')->fetchColumn();
     if(!$customer||$supplierId<=0)return;
     $labels=['Concurrent numbering A '.bin2hex(random_bytes(4)),'Concurrent numbering B '.bin2hex(random_bytes(4))];
-    $payload=function(string $label)use($customer,$supplierId){return ['customer_id'=>(int)$customer['id'],'destination_country_id'=>!empty($customer['country_id'])?(int)$customer['country_id']:null,'currency'=>'USD','supplier_sections'=>[['supplier_id'=>$supplierId,'items'=>[['description_entries'=>[['description_text'=>$label]],'pieces_per_carton'=>1,'cartons'=>1,'unit_price'=>1,'cbm_mode'=>'direct','cbm'=>0.01,'weight'=>0.1,'photo_paths'=>[],'custom_design_required'=>0,'custom_design_paths'=>[],'dimensions_scope'=>'carton']]]]];};
+    $payload=function(string $label)use($customer,$supplierId){return ['customer_id'=>(int)$customer['id'],'destination_country_id'=>!empty($customer['country_id'])?(int)$customer['country_id']:null,'currency'=>'USD','supplier_sections'=>[['supplier_id'=>$supplierId,'items'=>[['description_entries'=>[bilingualDescriptionEntry($label)],'pieces_per_carton'=>1,'cartons'=>1,'unit_price'=>1,'cbm_mode'=>'direct','cbm'=>0.01,'weight'=>0.1,'photo_paths'=>[],'custom_design_required'=>0,'custom_design_paths'=>[],'dimensions_scope'=>'carton']]]]];};
     $created=[];
     try {
         $workers=[startDraftCreateProcess($root,$payload($labels[0])),startDraftCreateProcess($root,$payload($labels[1]))];
@@ -966,7 +1024,7 @@ test('manual draft item numbers persist, drive the next value, and create audit 
     $label='Manual item number '.bin2hex(random_bytes(4));$orderId=0;
     $itemPayload=static fn(string $description,$number,string $source,?int $existingId=null)=>[
         'existing_item_id'=>$existingId,'item_no'=>$number,'item_no_source'=>$source,'item_no_manual'=>$source!=='generated'?1:0,
-        'description_entries'=>[['description_text'=>$description]],'pieces_per_carton'=>1,'cartons'=>1,'unit_price'=>1,
+        'description_entries'=>[bilingualDescriptionEntry($description)],'pieces_per_carton'=>1,'cartons'=>1,'unit_price'=>1,
         'cbm_mode'=>'direct','cbm'=>0.01,'weight'=>0.1,'photo_paths'=>[],'custom_design_required'=>0,'custom_design_paths'=>[],'dimensions_scope'=>'carton'
     ];
     try{
@@ -1000,7 +1058,7 @@ test('manual draft item numbers persist, drive the next value, and create audit 
 test('duplicate imported item numbers retain exact display values and provenance with a warning', function () use ($pdo,$root) {
     $customerId=(int)$pdo->query('SELECT id FROM customers ORDER BY id LIMIT 1')->fetchColumn();$supplierId=(int)$pdo->query('SELECT id FROM suppliers ORDER BY id LIMIT 1')->fetchColumn();
     $label='Imported duplicate '.bin2hex(random_bytes(4));$orderId=0;$value=" MiXeD-ITEM-007\xC2\xA0";
-    $item=static fn(string $description)=>['item_no'=>$value,'item_no_source'=>'imported','item_no_manual'=>1,'description_entries'=>[['description_text'=>$description]],'pieces_per_carton'=>1,'cartons'=>1,'unit_price'=>1,'cbm_mode'=>'direct','cbm'=>0.01,'weight'=>0.1,'photo_paths'=>[],'custom_design_required'=>0,'custom_design_paths'=>[],'dimensions_scope'=>'carton'];
+    $item=static fn(string $description)=>['item_no'=>$value,'item_no_source'=>'imported','item_no_manual'=>1,'description_entries'=>[bilingualDescriptionEntry($description)],'pieces_per_carton'=>1,'cartons'=>1,'unit_price'=>1,'cbm_mode'=>'direct','cbm'=>0.01,'weight'=>0.1,'photo_paths'=>[],'custom_design_required'=>0,'custom_design_paths'=>[],'dimensions_scope'=>'carton'];
     try{
         $json=json_decode(runHandlerScript($root,'backend/api/handlers/draft-orders.php','POST',null,null,[],['customer_id'=>$customerId,'currency'=>'USD','supplier_sections'=>[['supplier_id'=>$supplierId,'items'=>[$item($label.' A'),$item($label.' B')]]]]),true);$orderId=(int)($json['data']['id']??0);
         if($orderId<=0)throw new Exception('Imported duplicate save failed: '.json_encode($json));
@@ -1008,6 +1066,90 @@ test('duplicate imported item numbers retain exact display values and provenance
         if(array_column($rows,'item_no')!==[$value,$value]||array_unique(array_column($rows,'item_no_source'))!==['imported'])throw new Exception('Imported display/provenance changed');
         if(stripos((string)($json['warning']??''),'preserved')===false)throw new Exception('Duplicate import warning missing');
     }finally{if($orderId>0)cleanupCreatedOrder($pdo,$orderId);$pdo->prepare('DELETE FROM product_description_entries WHERE product_id IN (SELECT id FROM products WHERE description_en IN (?,?))')->execute([$label.' A',$label.' B']);$pdo->prepare('DELETE FROM products WHERE description_en IN (?,?)')->execute([$label.' A',$label.' B']);}
+});
+
+test('draft search and advanced filters share exact bilingual, status, party, item and date predicates', function () use ($pdo, $root) {
+    $customerId = (int) $pdo->query('SELECT id FROM customers ORDER BY id LIMIT 1')->fetchColumn();
+    $supplierId = (int) $pdo->query('SELECT id FROM suppliers ORDER BY id LIMIT 1')->fetchColumn();
+    if ($customerId <= 0 || $supplierId <= 0) throw new Exception('Missing search filter fixtures');
+    $token = bin2hex(random_bytes(5));
+    $english = 'Bilingual filter ' . $token;
+    $chinese = '双语筛选' . $token;
+    $brand = 'FilterBrand-' . $token;
+    $code = 'FILTER-SKU-' . $token;
+    $orderId = 0;
+    try {
+        $payload = [
+            'customer_id' => $customerId,
+            'expected_ready_date' => date('Y-m-d'),
+            'currency' => 'USD',
+            'supplier_sections' => [[
+                'supplier_id' => $supplierId,
+                'items' => [[
+                    'description_entries' => [['description_text' => $chinese, 'description_translated' => $english]],
+                    'brand' => $brand,
+                    'materials' => 'Filter material ' . $token,
+                    'copy_normal_goods' => 'dangerous',
+                    'code' => $code,
+                    'pieces_per_carton' => 1,
+                    'cartons' => 1,
+                    'unit_price' => 1,
+                    'cbm_mode' => 'direct',
+                    'cbm' => 0.01,
+                    'weight' => 0.1,
+                    'photo_paths' => [],
+                    'custom_design_required' => 0,
+                    'custom_design_paths' => [],
+                    'dimensions_scope' => 'carton',
+                ]],
+            ]],
+        ];
+        $created = json_decode(runHandlerScript($root, 'backend/api/handlers/draft-orders.php', 'POST', null, null, [], $payload), true);
+        $orderId = (int) ($created['data']['id'] ?? 0);
+        if ($orderId <= 0) throw new Exception('Could not create bilingual filter fixture: ' . json_encode($created));
+
+        foreach ([$english, $chinese, $code] as $query) {
+            $result = json_decode(runHandlerScript($root, 'backend/api/handlers/draft-orders.php', 'GET', null, null, ['q' => $query, 'limit' => 10]), true);
+            $ids = array_map('intval', array_column($result['data'] ?? [], 'id'));
+            if (!in_array($orderId, $ids, true)) throw new Exception('Search did not find the draft for query: ' . $query);
+        }
+
+        $goodsTypeResult = json_decode(runHandlerScript($root, 'backend/api/handlers/draft-orders.php', 'GET', null, null, [
+            'goods_type' => 'dangerous',
+            'q' => 'dangerous',
+            'limit' => 10,
+        ]), true);
+        if (!in_array($orderId, array_map('intval', array_column($goodsTypeResult['data'] ?? [], 'id')), true)) {
+            throw new Exception('Canonical goods-type search/filter did not find the draft');
+        }
+
+        $combined = json_decode(runHandlerScript($root, 'backend/api/handlers/draft-orders.php', 'GET', null, null, [
+            'status' => ['Draft'],
+            'customer_id' => $customerId,
+            'supplier_id' => $supplierId,
+            'goods_type' => 'dangerous',
+            'brand' => $brand,
+            'created_from' => date('Y-m-d'),
+            'created_to' => date('Y-m-d'),
+            'expected_from' => date('Y-m-d'),
+            'expected_to' => date('Y-m-d'),
+            'page' => 1,
+            'limit' => 10,
+        ]), true);
+        $rows = $combined['data'] ?? [];
+        if (count($rows) !== 1 || (int) ($rows[0]['id'] ?? 0) !== $orderId) {
+            throw new Exception('Combined filters returned duplicate or incorrect drafts: ' . json_encode(array_column($rows, 'id')));
+        }
+        if ((int) ($combined['meta']['total'] ?? 0) !== 1 || (int) ($combined['meta']['page'] ?? 0) !== 1) {
+            throw new Exception('Filtered count or pagination metadata does not match the result');
+        }
+        if ((int) ($combined['filter_options']['selected']['customer_id']['id'] ?? 0) !== $customerId
+            || (int) ($combined['filter_options']['selected']['supplier_id']['id'] ?? 0) !== $supplierId) {
+            throw new Exception('Selected customer/supplier filter labels were not retained');
+        }
+    } finally {
+        if ($orderId > 0) cleanupCreatedOrder($pdo, $orderId, $english);
+    }
 });
 
 echo "\nTotal: $passed passed, $failed failed\n";

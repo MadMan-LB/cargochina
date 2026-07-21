@@ -6,6 +6,38 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
+require_once dirname(__DIR__, 2) . '/services/TranslationService.php';
+
+function procurementDraftResolveDescriptionPair(PDO $pdo, array $item): array
+{
+    $english = trim((string) ($item['description_en'] ?? ''));
+    $chinese = trim((string) ($item['description_cn'] ?? ''));
+    $fallback = trim((string) ($item['notes'] ?? ''));
+    $service = new TranslationService($pdo);
+
+    if ($english === '' && $chinese === '' && $fallback !== '') {
+        if ($service->detectLanguage($fallback) === 'zh') {
+            $chinese = $fallback;
+        } else {
+            $english = $fallback;
+        }
+    }
+    if ($english === '' && $chinese !== '') {
+        $english = trim($service->translate($chinese, 'zh', 'en'));
+    }
+    if ($chinese === '' && $english !== '') {
+        $chinese = trim($service->translate($english, 'en', 'zh'));
+    }
+    if ($english === '' || $chinese === '') {
+        jsonError(
+            'Both English and Chinese descriptions are required. Translation is currently unavailable; retry translation or enter the missing language manually.',
+            422,
+            ['items.description' => 'Enter both English and Chinese descriptions, or retry translation.']
+        );
+    }
+
+    return ['description_en' => $english, 'description_cn' => $chinese];
+}
 
 function procurementDraftCopyNormalGoodsDisplay($value): string
 {
@@ -29,7 +61,7 @@ function procurementDraftOutputCsv(array $draft, array $items, string $filename)
     fputcsv($out, [clmsT('Supplier'), (string) ($draft['supplier_name'] ?? '')]);
     fputcsv($out, [clmsT('Status'), clmsStatusLabel((string) ($draft['status'] ?? ''))]);
     fputcsv($out, ['']);
-    fputcsv($out, array_map('clmsT', ['What Brand', 'Copy / Normal Goods', 'Code', 'Line', 'Product / Names', 'Notes', 'Quantity', 'Factory Price', 'Customer Price', 'Total Amount', 'CBM Total', 'Weight Total', 'Express Number', 'Size', 'Photo Count']));
+    fputcsv($out, array_map('clmsT', ['What Brand', 'Copy / Normal Goods', 'Code', 'Line', 'English Description', 'Chinese Description', 'Notes', 'Quantity', 'Factory Price', 'Customer Price', 'Total Amount', 'CBM Total', 'Weight Total', 'Express Number', 'Size', 'Photo Count']));
     foreach ($items as $index => $item) {
         $qty = (float) ($item['quantity'] ?? 0);
         $cbm = (float) ($item['cbm'] ?? 0);
@@ -41,7 +73,8 @@ function procurementDraftOutputCsv(array $draft, array $items, string $filename)
             procurementDraftCopyNormalGoodsDisplay($item['copy_normal_goods'] ?? ''),
             trim((string) ($item['code'] ?? '')),
             'PD-' . (int) ($draft['id'] ?? 0) . '-L' . ($index + 1),
-            trim((string) ($item['description_en'] ?? $item['description_cn'] ?? $item['notes'] ?? '')),
+            trim((string) ($item['description_en'] ?? '')),
+            trim((string) ($item['description_cn'] ?? '')),
             trim((string) ($item['notes'] ?? '')),
             $qty ?: '',
             $unitPrice ?: '',
@@ -86,6 +119,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $draftItems = $items->fetchAll(PDO::FETCH_ASSOC);
         if (empty($draftItems)) jsonError('Draft has no items', 400);
 
+        foreach ($draftItems as &$draftItem) {
+            if ((float) ($draftItem['quantity'] ?? 0) <= 0) continue;
+            $draftItem = array_merge($draftItem, procurementDraftResolveDescriptionPair($pdo, $draftItem));
+        }
+        unset($draftItem);
+
         $supplierId = $draft['supplier_id'] ? (int) $draft['supplier_id'] : null;
         $userId = getAuthUserId();
 
@@ -116,8 +155,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             foreach ($draftItems as $it) {
                 $qty = (float) ($it['quantity'] ?? 0);
                 if ($qty <= 0) continue;
-                $descCn = $it['description_cn'] ?? $it['notes'];
-                $descEn = $it['description_en'] ?? $it['notes'];
+                $descCn = $it['description_cn'];
+                $descEn = $it['description_en'];
                 $cbm = (float) ($it['cbm'] ?? 0) * $qty;
                 $weight = (float) ($it['weight'] ?? 0) * $qty;
                 $unitPrice = (float) ($it['unit_price'] ?? 0);
@@ -179,14 +218,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $cbm = (float) ($it['cbm'] ?? 0);
             $weight = (float) ($it['weight'] ?? 0);
             $unitPrice = (float) ($it['unit_price'] ?? 0);
-            $desc = trim($it['description_en'] ?? $it['description_cn'] ?? $it['notes'] ?? '');
             $excelItems[] = [
                 'item_no'               => 'PD-' . $draft['id'] . '-L' . ($i + 1),
                 'what_brand'            => trim((string) ($it['what_brand'] ?? '')),
                 'copy_normal_goods'     => trim((string) ($it['copy_normal_goods'] ?? '')),
                 'code'                  => trim((string) ($it['code'] ?? '')),
-                'description_en'        => $desc,
-                'description_cn'        => $it['description_cn'] ?? '',
+                'description_en'        => trim((string) ($it['description_en'] ?? '')),
+                'description_cn'        => trim((string) ($it['description_cn'] ?? '')),
                 'quantity'              => $qty,
                 'cartons'               => 1,
                 'qty_per_carton'        => $qty,

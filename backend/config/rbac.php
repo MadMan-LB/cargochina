@@ -60,6 +60,9 @@ return [
     'warehouse-stock' => ['WarehouseStaff', 'ChinaAdmin', 'LebanonAdmin', 'ContainersStaff', 'SuperAdmin'],
     'procurement-drafts' => $operationalRoles,
     'draft-orders' => $operationalRoles,
+    'translations' => [
+        'write' => $operationalRoles,
+    ],
     'business-settings' => ['SuperAdmin'],
     'customer-portal-tokens' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'],
     'design-attachments' => ['ChinaAdmin', 'ChinaEmployee', 'WarehouseStaff', 'SuperAdmin'],

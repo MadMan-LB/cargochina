@@ -13,6 +13,7 @@ use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
 use PhpOffice\PhpSpreadsheet\Worksheet\PageSetup;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class OrderExcelService
@@ -20,7 +21,7 @@ class OrderExcelService
     private string $backendDir;
     private array $workbookImageCache = [];
 
-    private const STANDARD_LAST_COL = 'X';
+    private const STANDARD_LAST_COL = 'AB';
     private const CONTAINER_LAST_COL = 'V';
     private const PHOTO_COLUMN = 'H';
     private const CONTAINER_PHOTO_COLUMN = 'E';
@@ -64,6 +65,56 @@ class OrderExcelService
         $this->prepareWorkbook($spreadsheet);
         (new Xlsx($spreadsheet))->save($path);
         $spreadsheet->disconnectWorksheets();
+    }
+
+    public function exportSelectedOrders(array $entries, string $filename = 'selected_orders.xlsx'): void
+    {
+        $this->outputXlsx($this->buildSelectedOrdersSpreadsheet($entries), $filename);
+    }
+
+    public function saveSelectedOrdersXlsx(array $entries, string $path): void
+    {
+        $spreadsheet = $this->buildSelectedOrdersSpreadsheet($entries);
+        $this->prepareWorkbook($spreadsheet);
+        (new Xlsx($spreadsheet))->save($path);
+        $spreadsheet->disconnectWorksheets();
+    }
+
+    private function buildSelectedOrdersSpreadsheet(array $entries): Spreadsheet
+    {
+        if (!$entries) throw new InvalidArgumentException('No downloadable records were selected.');
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle(substr($this->tr('Selected Orders'), 0, 31));
+        $this->setStandardColumnWidths($sheet);
+        $row = 1;
+        foreach (array_values($entries) as $index => $entry) {
+            $order = is_array($entry['order'] ?? null) ? $entry['order'] : [];
+            $items = is_array($entry['items'] ?? null) ? $entry['items'] : [];
+            if ($index > 0) {
+                $row += 2;
+                $sheet->setBreak('A' . $row, Worksheet::BREAK_ROW);
+            }
+            $row = $this->writeCompanyHeader(
+                $sheet,
+                $row,
+                self::STANDARD_LAST_COL,
+                $this->tr('Order #{id} Goods Details', ['id' => (int) ($order['id'] ?? 0)]),
+                [
+                    [$this->tr('Customer') . ':', self::formatCustomerDisplay($order, $items)],
+                    [$this->tr('Destination Country') . ':', (string) ($order['destination_country_name'] ?? $order['destination_country_code'] ?? '')],
+                    [$this->tr('Expected Ready') . ':', (string) ($order['expected_ready_date'] ?? '')],
+                    [$this->tr('Currency') . ':', (string) ($order['currency'] ?? '')],
+                ],
+                $this->tr('Order Number') . ': ' . (int) ($order['id'] ?? 0) . '    ' . $this->tr('Status') . ': ' . $this->statusText((string) ($order['status'] ?? ''))
+            );
+            $this->writeStandardColumnHeaders($sheet, $row++);
+            $row = $this->writeStandardItems($sheet, $items, $row, $order);
+            $row = $this->writeStandardReceiptFees($sheet, $row, $order, $items);
+            $row = $this->writeStandardOperationalCosts($sheet, $row, $order);
+        }
+        $sheet->freezePane('A9');
+        return $spreadsheet;
     }
 
     private function buildOrderSpreadsheet(array $order, array $items): Spreadsheet
@@ -382,21 +433,25 @@ class OrderExcelService
             'G' => 14,
             'H' => self::PHOTO_COLUMN_WIDTH,
             'I' => 20.14,
-            'J' => 52.14,
-            'K' => 12,
+            'J' => 40,
+            'K' => 34,
             'L' => 12,
             'M' => 12,
-            'N' => 15.29,
+            'N' => 12,
             'O' => 15.29,
             'P' => 15.29,
             'Q' => 15.29,
-            'R' => 15.29,
-            'S' => 9,
+            'R' => 12,
+            'S' => 15.29,
             'T' => 15.29,
-            'U' => 15.29,
+            'U' => 9,
             'V' => 15.29,
-            'W' => 18,
-            'X' => 18,
+            'W' => 15.29,
+            'X' => 15.29,
+            'Y' => 18,
+            'Z' => 18,
+            'AA' => 16,
+            'AB' => 32,
         ];
 
         foreach ($widths as $col => $width) {
@@ -500,21 +555,25 @@ class OrderExcelService
             'G' => 'CODE',
             'H' => 'PHOTO',
             'I' => 'ITEM NO',
-            'J' => 'DESCRIPTION',
-            'K' => 'HEIGHT',
-            'L' => 'WIDTH',
-            'M' => 'LENGTH',
-            'N' => 'TOTAL CTNS',
-            'O' => 'QTY/CTN',
-            'P' => 'TOTAL QTY',
-            'Q' => 'UNIT PRICE',
-            'R' => 'TOTAL AMOUNT',
-            'S' => 'CBM',
-            'T' => 'TOTAL CBM',
-            'U' => 'GWKG',
-            'V' => 'TOTAL GW',
-            'W' => 'express NO',
-            'X' => 'size',
+            'J' => 'ENGLISH DESCRIPTION',
+            'K' => 'CHINESE DESCRIPTION',
+            'L' => 'HEIGHT',
+            'M' => 'WIDTH',
+            'N' => 'LENGTH',
+            'O' => 'TOTAL CTNS',
+            'P' => 'QTY/CTN',
+            'Q' => 'TOTAL QTY',
+            'R' => 'UNIT',
+            'S' => 'UNIT PRICE',
+            'T' => 'TOTAL AMOUNT',
+            'U' => 'CBM',
+            'V' => 'TOTAL CBM',
+            'W' => 'GWKG',
+            'X' => 'TOTAL GW',
+            'Y' => 'EXPRESS NO',
+            'Z' => 'SIZE',
+            'AA' => 'HS CODE',
+            'AB' => 'NOTES',
         ];
 
         foreach ($headers as $col => $label) {
@@ -570,21 +629,25 @@ class OrderExcelService
                 $sheet->setCellValue('F' . $row, $this->copyNormalGoodsText($item));
                 $sheet->setCellValue('G' . $row, $this->itemText($item, 'code'));
                 $sheet->setCellValue('I' . $row, (string) ($item['item_no'] ?? $item['shipping_code'] ?? ''));
-                $sheet->setCellValue('J' . $row, $this->descriptionText($item));
-                $sheet->setCellValue('K' . $row, $this->dimensionValue($item, 'height', 'item_height'));
-                $sheet->setCellValue('L' . $row, $this->dimensionValue($item, 'width', 'item_width'));
-                $sheet->setCellValue('M' . $row, $this->dimensionValue($item, 'length', 'item_length'));
-                $sheet->setCellValue('N' . $row, $cartons ?: '');
-                $sheet->setCellValue('O' . $row, $qtyPerCarton ?: '');
-                $sheet->setCellValue('P' . $row, $quantity ?: '');
-                $sheet->setCellValue('Q' . $row, $unitPrice !== null ? $unitPrice : '');
-                $sheet->setCellValue('R' . $row, ($unitPrice !== null && $quantity > 0) ? round($unitPrice * $quantity, 4) : '');
-                $sheet->setCellValue('S' . $row, $cbmPer);
-                $sheet->setCellValue('T' . $row, round((float) ($item['declared_cbm'] ?? 0), 6));
-                $sheet->setCellValue('U' . $row, $weightPer);
-                $sheet->setCellValue('V' . $row, round((float) ($item['declared_weight'] ?? 0), 4));
-                $sheet->setCellValue('W' . $row, $this->itemText($item, 'express_number'));
-                $sheet->setCellValue('X' . $row, $this->resolveItemSize($item));
+                $sheet->setCellValue('J' . $row, trim((string) ($item['description_en'] ?? '')));
+                $sheet->setCellValue('K' . $row, trim((string) ($item['description_cn'] ?? '')));
+                $sheet->setCellValue('L' . $row, $this->dimensionValue($item, 'height', 'item_height'));
+                $sheet->setCellValue('M' . $row, $this->dimensionValue($item, 'width', 'item_width'));
+                $sheet->setCellValue('N' . $row, $this->dimensionValue($item, 'length', 'item_length'));
+                $sheet->setCellValue('O' . $row, $cartons ?: '');
+                $sheet->setCellValue('P' . $row, $qtyPerCarton ?: '');
+                $sheet->setCellValue('Q' . $row, $quantity ?: '');
+                $sheet->setCellValue('R' . $row, $this->itemText($item, 'unit'));
+                $sheet->setCellValue('S' . $row, $unitPrice !== null ? $unitPrice : '');
+                $sheet->setCellValue('T' . $row, ($unitPrice !== null && $quantity > 0) ? round($unitPrice * $quantity, 4) : '');
+                $sheet->setCellValue('U' . $row, $cbmPer);
+                $sheet->setCellValue('V' . $row, round((float) ($item['declared_cbm'] ?? 0), 6));
+                $sheet->setCellValue('W' . $row, $weightPer);
+                $sheet->setCellValue('X' . $row, round((float) ($item['declared_weight'] ?? 0), 4));
+                $sheet->setCellValue('Y' . $row, $this->itemText($item, 'express_number'));
+                $sheet->setCellValue('Z' . $row, $this->resolveItemSize($item));
+                $sheet->setCellValue('AA' . $row, $this->itemText($item, 'hs_code'));
+                $sheet->setCellValue('AB' . $row, $this->itemText($item, 'notes'));
 
                 $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
                     'font' => ['name' => 'Arial', 'size' => 11],
@@ -596,10 +659,10 @@ class OrderExcelService
                     'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FFFFFF']],
                     'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
                 ]);
-                $sheet->getStyle('K' . $row . ':M' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
-                $sheet->getStyle('Q' . $row . ':R' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
-                $sheet->getStyle('S' . $row . ':T' . $row)->getNumberFormat()->setFormatCode('#,##0.######');
-                $sheet->getStyle('U' . $row . ':V' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
+                $sheet->getStyle('L' . $row . ':N' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
+                $sheet->getStyle('S' . $row . ':T' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
+                $sheet->getStyle('U' . $row . ':V' . $row)->getNumberFormat()->setFormatCode('#,##0.######');
+                $sheet->getStyle('W' . $row . ':X' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
 
                 $sheet->getRowDimension($row)->setRowHeight(self::PHOTO_ROW_HEIGHT_PT);
                 $this->writePhotoCell($sheet, self::PHOTO_COLUMN . $row, $item['image_paths'] ?? []);
@@ -639,11 +702,11 @@ class OrderExcelService
             $notes = trim((string) ($fee['notes'] ?? ''));
 
             $sheet->setCellValue('A' . $row, $label !== '' ? $label : $this->tr('Warehouse fee'));
-            $sheet->setCellValue('R' . $row, $amount);
-            $sheet->setCellValue('S' . $row, $currency);
-            $sheet->setCellValue('T' . $row, $notes);
-            $sheet->mergeCells('A' . $row . ':Q' . $row);
-            $sheet->mergeCells('T' . $row . ':' . self::STANDARD_LAST_COL . $row);
+            $sheet->setCellValue('T' . $row, $amount);
+            $sheet->setCellValue('U' . $row, $currency);
+            $sheet->setCellValue('V' . $row, $notes);
+            $sheet->mergeCells('A' . $row . ':S' . $row);
+            $sheet->mergeCells('V' . $row . ':' . self::STANDARD_LAST_COL . $row);
             $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
                 'font' => ['name' => 'Arial', 'size' => 10],
                 'alignment' => [
@@ -654,8 +717,8 @@ class OrderExcelService
                 'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FFFFFF']],
                 'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
             ]);
-            $sheet->getStyle('R' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
-            $sheet->getStyle('R' . $row . ':S' . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+            $sheet->getStyle('T' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
+            $sheet->getStyle('T' . $row . ':U' . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
             $sheet->getRowDimension($row)->setRowHeight(22);
             $row++;
         }
@@ -671,9 +734,9 @@ class OrderExcelService
         foreach ($summaryRows as $entry) {
             [$label, $amounts, $fill] = $entry;
             $sheet->setCellValue('A' . $row, $this->tr($label));
-            $sheet->setCellValue('R' . $row, $this->formatCurrencyBreakdown($amounts));
-            $sheet->mergeCells('A' . $row . ':Q' . $row);
-            $sheet->mergeCells('R' . $row . ':' . self::STANDARD_LAST_COL . $row);
+            $sheet->setCellValue('T' . $row, $this->formatCurrencyBreakdown($amounts));
+            $sheet->mergeCells('A' . $row . ':S' . $row);
+            $sheet->mergeCells('T' . $row . ':' . self::STANDARD_LAST_COL . $row);
             $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
                 'font' => ['name' => 'Arial', 'size' => 10, 'bold' => true],
                 'alignment' => [
@@ -683,7 +746,7 @@ class OrderExcelService
                 'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => $fill]],
                 'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
             ]);
-            $sheet->getStyle('R' . $row . ':' . self::STANDARD_LAST_COL . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+            $sheet->getStyle('T' . $row . ':' . self::STANDARD_LAST_COL . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
             $sheet->getRowDimension($row)->setRowHeight(22);
             $row++;
         }
@@ -716,32 +779,32 @@ class OrderExcelService
             $provider = (string) ($cost['supplier_name'] ?? $cost['service_provider'] ?? '');
             $detail = trim(implode(' | ', array_filter([$description, $provider, (string) ($cost['responsible_payer'] ?? ''), (string) ($cost['allocation_method'] ?? '')])));
             $sheet->setCellValue('A' . $row, $type);
-            $sheet->setCellValue('R' . $row, (float) ($cost['base_amount'] ?? 0));
-            $sheet->setCellValue('S' . $row, (string) ($cost['base_currency'] ?? ''));
-            $sheet->setCellValue('T' . $row, $detail);
-            $sheet->mergeCells('A' . $row . ':Q' . $row);
-            $sheet->mergeCells('T' . $row . ':' . self::STANDARD_LAST_COL . $row);
+            $sheet->setCellValue('T' . $row, (float) ($cost['base_amount'] ?? 0));
+            $sheet->setCellValue('U' . $row, (string) ($cost['base_currency'] ?? ''));
+            $sheet->setCellValue('V' . $row, $detail);
+            $sheet->mergeCells('A' . $row . ':S' . $row);
+            $sheet->mergeCells('V' . $row . ':' . self::STANDARD_LAST_COL . $row);
             $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
                 'font' => ['name' => 'Arial', 'size' => 10],
                 'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT, 'vertical' => Alignment::VERTICAL_CENTER, 'wrapText' => true],
                 'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FFFFFF']],
                 'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
             ]);
-            $sheet->getStyle('R' . $row)->getNumberFormat()->setFormatCode('#,##0.0000');
+            $sheet->getStyle('T' . $row)->getNumberFormat()->setFormatCode('#,##0.0000');
             $row++;
         }
 
         $sheet->setCellValue('A' . $row, $this->tr('Shipment Charges Total'));
-        $sheet->setCellValue('R' . $row, (float) ($costs['base_total'] ?? 0));
-        $sheet->setCellValue('S' . $row, (string) ($costs['base_currency'] ?? ''));
-        $sheet->mergeCells('A' . $row . ':Q' . $row);
-        $sheet->mergeCells('S' . $row . ':' . self::STANDARD_LAST_COL . $row);
+        $sheet->setCellValue('T' . $row, (float) ($costs['base_total'] ?? 0));
+        $sheet->setCellValue('U' . $row, (string) ($costs['base_currency'] ?? ''));
+        $sheet->mergeCells('A' . $row . ':S' . $row);
+        $sheet->mergeCells('U' . $row . ':' . self::STANDARD_LAST_COL . $row);
         $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
             'font' => ['name' => 'Arial', 'size' => 10, 'bold' => true],
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_YELLOW]],
             'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
         ]);
-        $sheet->getStyle('R' . $row)->getNumberFormat()->setFormatCode('#,##0.0000');
+        $sheet->getStyle('T' . $row)->getNumberFormat()->setFormatCode('#,##0.0000');
         return $row + 1;
     }
 
@@ -1216,12 +1279,13 @@ class OrderExcelService
         ]);
 
         if (!$paths) {
+            $sheet->setCellValue($cell, $this->tr('No photo'));
             return;
         }
 
-        $sourcePath = $this->backendDir . '/' . $paths[0];
+        $sourcePath = $this->resolveWorkbookImageSource($paths[0]);
         if (!is_file($sourcePath) || !is_readable($sourcePath)) {
-            $sheet->setCellValue($cell, $this->tr('{count} photo(s)', ['count' => count($paths)]));
+            $sheet->setCellValue($cell, $this->tr('No photo'));
             return;
         }
 
@@ -1248,9 +1312,36 @@ class OrderExcelService
             $drawing->setOffsetX($offsetX);
             $drawing->setOffsetY($offsetY);
             $drawing->setWorksheet($sheet);
+            $sheet->setCellValue($cell, '');
         } catch (Throwable $e) {
-            $sheet->setCellValue($cell, $this->tr('{count} photo(s)', ['count' => count($paths)]));
+            $sheet->setCellValue($cell, $this->tr('No photo'));
         }
+    }
+
+    private function resolveWorkbookImageSource(string $path): string
+    {
+        if (!preg_match('#^https?://#i', $path)) {
+            $relative = ltrim(str_replace('\\', '/', $path), '/');
+            if (str_contains($relative, '../')) return '';
+            return $this->backendDir . '/' . $relative;
+        }
+        $url = parse_url($path);
+        $host = strtolower((string) ($url['host'] ?? ''));
+        if ($host === '' || in_array($host, ['localhost', '127.0.0.1', '::1'], true)) return '';
+        $ip = gethostbyname($host);
+        if ($ip === $host || filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) return '';
+        $cacheDir = rtrim(sys_get_temp_dir(), '/\\') . DIRECTORY_SEPARATOR . 'clms_excel_remote_images';
+        if (!is_dir($cacheDir) && !@mkdir($cacheDir, 0770, true) && !is_dir($cacheDir)) return '';
+        $target = $cacheDir . DIRECTORY_SEPARATOR . hash('sha256', $path) . '.img';
+        if (is_file($target) && filesize($target) > 0) return $target;
+        $context = stream_context_create(['http' => ['timeout' => 5, 'follow_location' => 0, 'user_agent' => 'CLMS Excel Export/1.0']]);
+        $source = @fopen($path, 'rb', false, $context);
+        if (!$source) return '';
+        $data = stream_get_contents($source, 8 * 1024 * 1024 + 1);
+        fclose($source);
+        if (!is_string($data) || $data === '' || strlen($data) > 8 * 1024 * 1024 || @getimagesizefromstring($data) === false) return '';
+        if (@file_put_contents($target, $data, LOCK_EX) === false) return '';
+        return $target;
     }
 
     private function normalizeImagePaths($imagePaths): array

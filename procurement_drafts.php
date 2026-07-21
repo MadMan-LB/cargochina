@@ -27,11 +27,38 @@ require 'includes/layout.php';
     <div class="draft-action-group draft-page-actions" role="group" aria-label="<?= htmlspecialchars(clmsT('Draft order actions')) ?>">
       <span class="small text-muted align-self-center" id="draftDownloadSelectedCount"><?= htmlspecialchars(clmsT('{count} selected', ['count' => 0])) ?></span>
       <button class="btn btn-success btn-sm" type="button" id="draftDownloadSelectedBtn" disabled><?= htmlspecialchars(clmsT('Download selected')) ?></button>
+      <button class="btn btn-outline-success btn-sm" type="button" id="draftDownloadFilteredBtn"><?= htmlspecialchars(clmsT('Download filtered')) ?></button>
       <button class="btn btn-outline-primary btn-sm" type="button" id="draftOrderImportBtn">Import</button>
       <button class="btn btn-primary btn-sm" type="button" onclick="openDraftOrderBuilder()">+ Draft an Order</button>
     </div>
   </div>
   <div class="card-body">
+    <form id="draftOrderFilters" class="border rounded p-3 mb-3" autocomplete="off">
+      <div class="row g-2 align-items-end">
+        <div class="col-12 col-lg-8">
+          <label class="form-label form-label-sm" for="draftFilterSearch"><?= htmlspecialchars(clmsT('Search')) ?></label>
+          <input type="search" class="form-control form-control-sm" id="draftFilterSearch" placeholder="<?= htmlspecialchars(clmsT('Order, item number, code, English/Chinese description, customer, supplier, brand or materials')) ?>">
+        </div>
+        <div class="col-6 col-lg-2 d-grid"><button class="btn btn-primary btn-sm" type="submit"><?= htmlspecialchars(clmsT('Apply filters')) ?></button></div>
+        <div class="col-6 col-lg-2 d-grid"><button class="btn btn-outline-secondary btn-sm" type="button" id="draftFilterClear"><?= htmlspecialchars(clmsT('Clear filters')) ?></button></div>
+      </div>
+      <details class="mt-3" id="draftAdvancedFilters">
+        <summary class="fw-semibold small"><?= htmlspecialchars(clmsT('Advanced filters')) ?></summary>
+        <div class="row g-2 mt-1">
+          <div class="col-12 col-md-6 col-xl-3"><label class="form-label form-label-sm"><?= htmlspecialchars(clmsT('Customer')) ?></label><input class="form-control form-control-sm" id="draftFilterCustomer" placeholder="<?= htmlspecialchars(clmsT('Search customer')) ?>"><input type="hidden" id="draftFilterCustomerId"></div>
+          <div class="col-12 col-md-6 col-xl-3"><label class="form-label form-label-sm"><?= htmlspecialchars(clmsT('Supplier')) ?></label><input class="form-control form-control-sm" id="draftFilterSupplier" placeholder="<?= htmlspecialchars(clmsT('Search supplier')) ?>"><input type="hidden" id="draftFilterSupplierId"></div>
+          <div class="col-6 col-xl-3"><label class="form-label form-label-sm"><?= htmlspecialchars(clmsT('Goods Type')) ?></label><select class="form-select form-select-sm" id="draftFilterGoodsType"><option value=""><?= htmlspecialchars(clmsT('All goods types')) ?></option><option value="normal"><?= htmlspecialchars(clmsT('Normal Goods')) ?></option><option value="replica"><?= htmlspecialchars(clmsT('Copy Goods')) ?></option><option value="dangerous"><?= htmlspecialchars(clmsT('Dangerous Goods')) ?></option><option value="cosmetics"><?= htmlspecialchars(clmsT('Cosmetics')) ?></option><option value="branded"><?= htmlspecialchars(clmsT('Branded Goods')) ?></option><option value="food"><?= htmlspecialchars(clmsT('Food')) ?></option><option value="other"><?= htmlspecialchars(clmsT('Other')) ?></option></select></div>
+          <div class="col-6 col-xl-3"><label class="form-label form-label-sm"><?= htmlspecialchars(clmsT('Brand')) ?></label><select class="form-select form-select-sm" id="draftFilterBrand"><option value=""><?= htmlspecialchars(clmsT('All brands')) ?></option></select></div>
+          <div class="col-12"><label class="form-label form-label-sm"><?= htmlspecialchars(clmsT('Status')) ?></label><div class="d-flex flex-wrap gap-2" id="draftFilterStatuses"></div></div>
+          <div class="col-6 col-lg-3"><label class="form-label form-label-sm"><?= htmlspecialchars(clmsT('Created from')) ?></label><input type="date" class="form-control form-control-sm" id="draftFilterCreatedFrom"></div>
+          <div class="col-6 col-lg-3"><label class="form-label form-label-sm"><?= htmlspecialchars(clmsT('Created to')) ?></label><input type="date" class="form-control form-control-sm" id="draftFilterCreatedTo"></div>
+          <div class="col-6 col-lg-3"><label class="form-label form-label-sm"><?= htmlspecialchars(clmsT('Expected from')) ?></label><input type="date" class="form-control form-control-sm" id="draftFilterExpectedFrom"></div>
+          <div class="col-6 col-lg-3"><label class="form-label form-label-sm"><?= htmlspecialchars(clmsT('Expected to')) ?></label><input type="date" class="form-control form-control-sm" id="draftFilterExpectedTo"></div>
+          <div class="col-12 col-lg-3 d-none" id="draftFilterCreatorWrap"><label class="form-label form-label-sm"><?= htmlspecialchars(clmsT('Creator')) ?></label><select class="form-select form-select-sm" id="draftFilterCreator"><option value=""><?= htmlspecialchars(clmsT('All creators')) ?></option></select></div>
+        </div>
+      </details>
+      <div class="small text-muted mt-2" id="draftActiveFilterSummary"></div>
+    </form>
     <div id="draftOrdersTable" class="table-responsive">
       <table class="table table-hover table-striped table-sm align-middle">
         <thead>
@@ -49,6 +76,10 @@ require 'includes/layout.php';
         </thead>
         <tbody></tbody>
       </table>
+    </div>
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-2">
+      <small class="text-muted" id="draftPaginationSummary"></small>
+      <div class="btn-group btn-group-sm"><button type="button" class="btn btn-outline-secondary" id="draftPagePrevious"><?= htmlspecialchars(clmsT('Previous')) ?></button><button type="button" class="btn btn-outline-secondary" id="draftPageNext"><?= htmlspecialchars(clmsT('Next')) ?></button></div>
     </div>
   </div>
 </div>

@@ -64,10 +64,14 @@ The CLMS eliminates Excel entirely and replaces it with a controlled system wher
 ### 4.2 Orders (Stage 1)
 - Create order by customer & supplier, with expected ready date
 - Add items with structured fields (qty, cartons, CBM, weight, description, packaging)
-- Automatic translation + suggested matches + validation
+- Separate editable English/Chinese item descriptions, cached automatic translation, manual-correction protection, suggested matches, and server-side bilingual validation
 - Document attachments (supplier invoice, packing list, photos)
 - Audit trail: who changed what and when
 - Role-based restrictions: employees cannot bypass validation rules
+
+Draft Procurement search covers order/item identifiers, both description languages, customer, supplier, brand, materials, and goods type. Advanced filters use canonical statuses/classifications and support customer, supplier, brand, creator (authorized roles only), created dates, and expected dates. The same predicates drive counts, pagination, and full filtered XLSX downloads.
+
+Bulk order downloads from Orders, Receiving, Warehouse Stock, and Draft an Order produce one XLSX worksheet. Every selected order is written as a separate vertical section with a repeated company/order header, repeated blue item header, embedded images, bilingual descriptions, separator rows, and print page breaks. Selected IDs are always reloaded and authorized server-side.
 
 ### 4.3 Warehouse Receiving (Stage 2)
 - Record actual cartons, actual CBM, actual weight at warehouse arrival

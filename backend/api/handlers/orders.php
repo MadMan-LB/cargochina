@@ -1906,7 +1906,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $auditPayload = [
                     'order_ids' => $ids,
                     'record_count' => count($entries),
-                    'format' => count($entries) === 1 ? 'xlsx' : 'zip',
+                    'format' => 'xlsx',
+                    'workbook_layout' => count($entries) > 1 ? 'repeated_order_sections' : 'single_order',
                 ];
                 if (orderTableExists($pdo, 'audit_log')) {
                     $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order', 0, 'bulk_export', ?, ?)")
