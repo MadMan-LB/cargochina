@@ -520,8 +520,8 @@ class OrderExcelService
             if (is_string($value)
                 && preg_match('/^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?$/', $value)
                 && preg_match('/date|ready|received|created|updated|generated/i', $label)) {
-                $timestamp = strtotime($value);
-                $sheet->setCellValue('B' . $row, $timestamp !== false ? ExcelDate::PHPToExcel($timestamp) : $value);
+                $excelDate = $this->excelDateValue($value);
+                $sheet->setCellValue('B' . $row, $excelDate ?? $value);
                 $sheet->getStyle('B' . $row)->getNumberFormat()->setFormatCode(str_contains($value, ':') ? 'yyyy-mm-dd hh:mm:ss' : 'yyyy-mm-dd');
             } else {
                 $sheet->setCellValue('B' . $row, $value);
@@ -1264,6 +1264,16 @@ class OrderExcelService
         }
     }
 
+    private function excelDateValue(string $value): ?float
+    {
+        $normalized = str_replace('T', ' ', trim($value));
+        $format = str_contains($normalized, ':')
+            ? (substr_count($normalized, ':') >= 2 ? '!Y-m-d H:i:s' : '!Y-m-d H:i')
+            : '!Y-m-d';
+        $date = DateTimeImmutable::createFromFormat($format, $normalized);
+        return $date instanceof DateTimeImmutable ? ExcelDate::dateTimeToExcel($date) : null;
+    }
+
     private function writePhotoCell($sheet, string $cell, $imagePaths): void
     {
         $paths = $this->normalizeImagePaths($imagePaths);
@@ -1879,8 +1889,8 @@ class OrderExcelService
                 } elseif (is_string($value)
                     && preg_match('/^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?$/', $value)
                     && preg_match('/date|ready|received|created|updated|generated/i', $header)) {
-                    $timestamp = strtotime($value);
-                    $sheet->setCellValue($cell, $timestamp !== false ? ExcelDate::PHPToExcel($timestamp) : $value);
+                    $excelDate = $this->excelDateValue($value);
+                    $sheet->setCellValue($cell, $excelDate ?? $value);
                     $sheet->getStyle($cell)->getNumberFormat()->setFormatCode(str_contains($value, ':') ? 'yyyy-mm-dd hh:mm:ss' : 'yyyy-mm-dd');
                 } else {
                     $sheet->setCellValue($cell, $value);
