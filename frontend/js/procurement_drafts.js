@@ -2327,6 +2327,32 @@
         );
     }
 
+    function bindDraftHsCodeAutocomplete(input) {
+        if (
+            !input ||
+            input.dataset.hsCodeSearchBound === "1" ||
+            typeof Autocomplete === "undefined"
+        ) {
+            return;
+        }
+        input.dataset.hsCodeSearchBound = "1";
+        input._hsCodeAutocomplete = Autocomplete.init(input, {
+            resource: "hs-code-catalog",
+            searchPath: "",
+            limit: 50,
+            placeholder: draftT("Start typing HS code or tariff name..."),
+            renderItem: (item) =>
+                [item.hs_code, item.name].filter(Boolean).join(" — ") ||
+                item.id ||
+                "",
+            displayValue: (item) => item.hs_code || item.id || "",
+            onSelect: (item) => {
+                input.value = item.hs_code || item.id || "";
+                input.dispatchEvent(new Event("input", { bubbles: true }));
+            },
+        });
+    }
+
     function sharedCartonContentMarkup(contentId) {
         return `
             <div class="draft-shared-carton-row" data-content-id="${contentId}">
@@ -2575,6 +2601,9 @@
 
         bindDraftSharedCartonSupplierAutocomplete(card, row, section);
         syncDraftSharedCartonProductSearch(card, row, section);
+        bindDraftHsCodeAutocomplete(
+            row.querySelector(".draft-shared-content-hs-code"),
+        );
 
         if (initial.supplier_name) {
             if (initial.supplier_id && row._supplierAc) {
@@ -3515,6 +3544,7 @@
         card._photoPaths = (initial.photo_paths || []).slice();
         card._designPaths = (initial.custom_design_paths || []).slice();
         container.appendChild(card);
+        bindDraftHsCodeAutocomplete(card.querySelector(".draft-item-hs-code"));
 
         if (initial.description_entries?.length) {
             setDraftDescriptionValue(card, initial.description_entries);

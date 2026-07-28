@@ -34,7 +34,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
     switch ($method) {
         case 'GET':
-            if (!hasAnyRole(['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'SuperAdmin'])) {
+            if (!hasPermission('hs-code-catalog.read', ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'])) {
                 jsonError('Forbidden', 403);
             }
             if ($id === 'files') {

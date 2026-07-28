@@ -33,7 +33,7 @@ return [
         'write' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'],
     ],
     'hs-code-catalog' => [
-        'read' => ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'SuperAdmin'],
+        'read' => $operationalRoles,
         'write' => ['SuperAdmin'],
     ],
     'containers' => [
