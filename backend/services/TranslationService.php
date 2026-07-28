@@ -5,6 +5,7 @@
  *
  * Providers:
  * - disabled (default): queue work and return an empty missing-language value
+ * - google: Google Cloud Translation Basic v2 using TRANSLATION_API_KEY
  * - libretranslate/generic: JSON POST to TRANSLATION_API_URL
  *
  * Critical business transactions must use translateDetailed() and may persist the
@@ -21,10 +22,14 @@ class TranslationService
     public function __construct(PDO $pdo)
     {
         $this->pdo = $pdo;
-        $this->provider = strtolower(trim((string) ($_ENV['TRANSLATION_PROVIDER'] ?? getenv('TRANSLATION_PROVIDER') ?: 'disabled')));
+        $provider = strtolower(trim((string) ($_ENV['TRANSLATION_PROVIDER'] ?? getenv('TRANSLATION_PROVIDER') ?: 'disabled')));
+        $this->provider = in_array($provider, ['google-cloud', 'google_cloud'], true) ? 'google' : $provider;
         $this->apiUrl = trim((string) ($_ENV['TRANSLATION_API_URL'] ?? getenv('TRANSLATION_API_URL') ?: ''));
         $this->apiKey = trim((string) ($_ENV['TRANSLATION_API_KEY'] ?? getenv('TRANSLATION_API_KEY') ?: ''));
         $this->timeoutSeconds = max(1, min(30, (int) ($_ENV['TRANSLATION_TIMEOUT_SECONDS'] ?? getenv('TRANSLATION_TIMEOUT_SECONDS') ?: 8)));
+        if ($this->provider === 'google' && $this->apiUrl === '') {
+            $this->apiUrl = 'https://translation.googleapis.com/language/translate/v2';
+        }
     }
 
     public function detectLanguage(string $text): string
@@ -70,9 +75,18 @@ class TranslationService
             return ['translated_text' => $cached, 'status' => 'translated', 'source_lang' => $sourceLang, 'target_lang' => $targetLang, 'provenance' => 'cache'];
         }
 
-        if ($this->provider === 'disabled' || $this->apiUrl === '') {
-            $this->queue($hash, $original, $sourceLang, $targetLang, 'pending', 'Translation provider is not configured');
-            return ['translated_text' => '', 'status' => 'pending', 'source_lang' => $sourceLang, 'target_lang' => $targetLang, 'provenance' => 'pending'];
+        $configurationError = $this->configurationError();
+        if ($configurationError !== null) {
+            $this->queue($hash, $original, $sourceLang, $targetLang, 'pending', $configurationError);
+            return [
+                'translated_text' => '',
+                'status' => 'pending',
+                'source_lang' => $sourceLang,
+                'target_lang' => $targetLang,
+                'provenance' => 'pending',
+                'error_code' => 'provider_not_configured',
+                'retryable' => false,
+            ];
         }
 
         try {
@@ -81,12 +95,27 @@ class TranslationService
                 throw new RuntimeException('Translation provider returned an empty value');
             }
             $this->storeSuccess($hash, $original, $translated, $sourceLang, $targetLang);
-            return ['translated_text' => $translated, 'status' => 'translated', 'source_lang' => $sourceLang, 'target_lang' => $targetLang, 'provenance' => 'automatic'];
+            return [
+                'translated_text' => $translated,
+                'status' => 'translated',
+                'source_lang' => $sourceLang,
+                'target_lang' => $targetLang,
+                'provenance' => 'automatic',
+                'retryable' => false,
+            ];
         } catch (Throwable $e) {
             $safeError = mb_substr(get_class($e) . ': ' . $e->getMessage(), 0, 500);
             $this->queue($hash, $original, $sourceLang, $targetLang, 'failed', $safeError);
             $this->safeLog('translation_failed provider=' . $this->provider . ' error=' . $safeError);
-            return ['translated_text' => '', 'status' => 'failed', 'source_lang' => $sourceLang, 'target_lang' => $targetLang, 'provenance' => 'failed'];
+            return [
+                'translated_text' => '',
+                'status' => 'failed',
+                'source_lang' => $sourceLang,
+                'target_lang' => $targetLang,
+                'provenance' => 'failed',
+                'error_code' => 'provider_failed',
+                'retryable' => true,
+            ];
         }
     }
 
@@ -104,13 +133,23 @@ class TranslationService
 
     private function requestProvider(string $text, string $sourceLang, string $targetLang): string
     {
-        $payload = ['q' => $text, 'source' => $sourceLang, 'target' => $targetLang, 'format' => 'text'];
-        if ($this->apiKey !== '') $payload['api_key'] = $this->apiKey;
+        $url = $this->apiUrl;
+        $payload = [
+            'q' => $text,
+            'source' => $this->providerLanguageCode($sourceLang),
+            'target' => $this->providerLanguageCode($targetLang),
+            'format' => 'text',
+        ];
+        if ($this->provider === 'google') {
+            $url .= (str_contains($url, '?') ? '&' : '?') . 'key=' . rawurlencode($this->apiKey);
+        } elseif ($this->apiKey !== '') {
+            $payload['api_key'] = $this->apiKey;
+        }
         $body = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         if ($body === false) throw new RuntimeException('Could not encode translation request');
 
         if (function_exists('curl_init')) {
-            $ch = curl_init($this->apiUrl);
+            $ch = curl_init($url);
             curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => $body, CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_CONNECTTIMEOUT => min(5, $this->timeoutSeconds), CURLOPT_TIMEOUT => $this->timeoutSeconds]);
             $response = curl_exec($ch);
             $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -120,13 +159,58 @@ class TranslationService
             if ($status < 200 || $status >= 300) throw new RuntimeException('Translation provider HTTP ' . $status);
         } else {
             $context = stream_context_create(['http' => ['method' => 'POST', 'header' => "Content-Type: application/json\r\n", 'content' => $body, 'timeout' => $this->timeoutSeconds, 'ignore_errors' => true]]);
-            $response = @file_get_contents($this->apiUrl, false, $context);
+            $response = @file_get_contents($url, false, $context);
             if ($response === false) throw new RuntimeException('Translation network request failed');
+            $statusLine = $http_response_header[0] ?? '';
+            if (preg_match('/\s(\d{3})\s/', $statusLine, $matches) && ((int) $matches[1] < 200 || (int) $matches[1] >= 300)) {
+                throw new RuntimeException('Translation provider HTTP ' . (int) $matches[1]);
+            }
         }
 
         $decoded = json_decode((string) $response, true);
         if (!is_array($decoded)) throw new RuntimeException('Translation provider returned invalid JSON');
-        return (string) ($decoded['translatedText'] ?? $decoded['translated'] ?? $decoded['data']['translatedText'] ?? $decoded['data']['translated'] ?? '');
+        return $this->extractTranslatedText($decoded);
+    }
+
+    private function extractTranslatedText(array $decoded): string
+    {
+        $translated = (string) (
+            $decoded['data']['translations'][0]['translatedText']
+            ?? $decoded['translatedText']
+            ?? $decoded['translated']
+            ?? $decoded['data']['translatedText']
+            ?? $decoded['data']['translated']
+            ?? ''
+        );
+        return html_entity_decode($translated, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    }
+
+    private function configurationError(): ?string
+    {
+        if ($this->provider === '' || $this->provider === 'disabled') {
+            return 'Translation provider is disabled';
+        }
+        if (!in_array($this->provider, ['google', 'libretranslate', 'generic'], true)) {
+            return 'Unsupported translation provider';
+        }
+        if ($this->apiUrl === '') {
+            return 'Translation provider URL is not configured';
+        }
+        if (!preg_match('#^https?://#i', $this->apiUrl)) {
+            return 'Translation provider URL is invalid';
+        }
+        if ($this->provider === 'google' && $this->apiKey === '') {
+            return 'Google Translation API key is not configured';
+        }
+        return null;
+    }
+
+    private function providerLanguageCode(string $lang): string
+    {
+        if ($this->provider === 'google' && $lang === 'zh') {
+            return 'zh-CN';
+        }
+        return $lang;
     }
 
     private function cachedTranslation(string $hash, string $original, string $sourceLang, string $targetLang): ?string

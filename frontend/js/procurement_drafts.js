@@ -2162,7 +2162,18 @@
                 target_lang: sourceLang === "zh" ? "en" : "zh",
             });
             const translated = String(response?.data?.translated || "").trim();
-            if (!translated) throw new Error(draftT("Translation is not available yet. Retry or enter the missing language manually."));
+            if (!translated) {
+                const notConfigured = response?.data?.error_code === "provider_not_configured";
+                const translationError = new Error(
+                    draftT(
+                        notConfigured
+                            ? "Translation service is not configured. Ask an administrator to configure Google Cloud Translation."
+                            : "Translation is not available yet. Retry or enter the missing language manually.",
+                    ),
+                );
+                translationError.retryable = response?.data?.retryable !== false;
+                throw translationError;
+            }
             target.dataset.programmatic = "1";
             target.value = translated;
             target.dataset.manualEdit = "0";
@@ -2177,7 +2188,10 @@
         } catch (error) {
             if (status) {
                 status.className = "draft-description-status text-danger";
-                status.innerHTML = `${escapeHtml(error.message || draftT("Translation failed."))} <button type="button" class="btn btn-link btn-sm p-0 draft-description-retry">${escapeHtml(draftT("Retry"))}</button>`;
+                const retry = error?.retryable === false
+                    ? ""
+                    : ` <button type="button" class="btn btn-link btn-sm p-0 draft-description-retry">${escapeHtml(draftT("Retry"))}</button>`;
+                status.innerHTML = `${escapeHtml(error.message || draftT("Translation failed."))}${retry}`;
                 status.querySelector(".draft-description-retry")?.addEventListener("click", () => translateDraftDescriptionRow(row, sourceLang, true));
             }
         } finally {

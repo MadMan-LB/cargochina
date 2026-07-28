@@ -2376,6 +2376,7 @@ return [
             'Translating...' => '正在翻译...',
             'Translation complete. You can edit either language.' => '翻译完成，您可以编辑任一语言。',
             'Translation is not available yet. Retry or enter the missing language manually.' => '暂时无法翻译，请重试或手动填写缺少的语言。',
+            'Translation service is not configured. Ask an administrator to configure Google Cloud Translation.' => '翻译服务尚未配置。请联系管理员配置 Google Cloud Translation。',
             'Translation failed.' => '翻译失败。',
             'Retry' => '重试',
             'Both English and Chinese descriptions are required. Translation is currently unavailable; retry translation or enter the missing language manually.' => '英文和中文描述都必须填写。当前无法自动翻译，请重试或手动填写缺少的语言。',
