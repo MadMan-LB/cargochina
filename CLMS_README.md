@@ -71,7 +71,7 @@ The CLMS eliminates Excel entirely and replaces it with a controlled system wher
 
 Draft Procurement search covers order/item identifiers, both description languages, customer, supplier, brand, materials, and goods type. Advanced filters use canonical statuses/classifications and support customer, supplier, brand, creator (authorized roles only), created dates, and expected dates. The same predicates drive counts, pagination, and full filtered XLSX downloads.
 
-Bulk order downloads from Orders, Receiving, Warehouse Stock, and Draft an Order produce one XLSX worksheet. Every selected order is written as a separate vertical section with a repeated company/order header, repeated blue item header, embedded images, bilingual descriptions, separator rows, and print page breaks. Selected IDs are always reloaded and authorized server-side.
+Bulk order downloads from Orders, Receiving, Warehouse Stock, and Draft an Order produce one XLSX worksheet. Every selected order is written as a separate vertical section with a repeated company/order header, an English blue item-header row followed by its Chinese equivalent, embedded images, bilingual descriptions, separator rows, and print page breaks. Downloads start immediately without a language prompt. Available images are hydrated from order items, linked products, and active item-level receiving evidence before export. Selected IDs are always reloaded and authorized server-side.
 
 ### 4.3 Warehouse Receiving (Stage 2)
 - Record actual cartons, actual CBM, actual weight at warehouse arrival

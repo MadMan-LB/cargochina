@@ -64,6 +64,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $actualDimensionOuterSql = implode(', ', $actualDimensionOuter);
 
     $imagePathsSelect = warehouseStockHasColumn($pdo, 'order_items', 'image_paths') ? ', oi.image_paths' : ', NULL AS image_paths';
+    $imagePathsSelect .= warehouseStockHasColumn($pdo, 'products', 'image_paths')
+        ? ', p.image_paths AS product_image_paths'
+        : ', NULL AS product_image_paths';
     $sql = "SELECT o.id as order_id, o.customer_id, o.supplier_id, o.status, o.expected_ready_date,
         c.name as customer_name, s.name as supplier_name,
         oi.id as item_id, oi.product_id, oi.item_no, oi.shipping_code, oi.quantity, oi.unit, oi.declared_cbm, oi.declared_weight, oi.item_length, oi.item_width, oi.item_height, oi.description_cn, oi.description_en,
@@ -141,6 +144,18 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
     if ($params) $stmt->execute($params);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $receiptImages = clmsReceiptItemImagePaths(
+        $pdo,
+        array_map(static fn(array $row): int => (int) ($row['item_id'] ?? 0), $rows)
+    );
+    foreach ($rows as &$row) {
+        $row['image_paths'] = clmsMergeImagePathLists(
+            $row['image_paths'] ?? [],
+            $row['product_image_paths'] ?? [],
+            $receiptImages[(int) ($row['item_id'] ?? 0)] ?? []
+        );
+    }
+    unset($row);
     if ($id === 'export') {
         $format = strtolower(trim((string) ($_GET['format'] ?? 'xlsx')));
         if ($format === 'csv') {

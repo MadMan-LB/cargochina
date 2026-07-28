@@ -86,6 +86,9 @@ class ReceivingExcelImportService
             if ((int) $rowNumber <= $headerRowNumber) {
                 continue;
             }
+            if ($this->looksLikeTranslatedHeaderRow($row)) {
+                continue;
+            }
             $supplierMarkerName = $this->supplierMarkerName($row);
             if ($supplierMarkerName !== '') {
                 $currentSupplierName = $supplierMarkerName;
@@ -1363,6 +1366,26 @@ class ReceivingExcelImportService
         $measureScore = count(array_filter($measureFields, static fn($field) => isset($headers[$field])));
 
         return $measureScore > 0 && ($itemScore > 0 || isset($headers['supplier_name']) || isset($headers['supplier_code']));
+    }
+
+    private function looksLikeTranslatedHeaderRow(array $row): bool
+    {
+        $knownLabels = [
+            '供应商', '供应商名称', '品牌', '材质', '什么牌子', '货物类型', '编号', '照片',
+            '货号', '英文描述', '中文描述', '高度', '宽度', '长度', '总箱数', '每箱数量',
+            '总数量', '单位', '单价', '总金额', '总 CBM', '毛重KG', '总毛重', '快递单号',
+            '尺寸', 'HS编码', '备注',
+        ];
+        $matches = 0;
+        foreach ($row as $value) {
+            if (is_array($value) || is_object($value)) {
+                continue;
+            }
+            if (in_array(trim((string) ($value ?? '')), $knownLabels, true)) {
+                $matches++;
+            }
+        }
+        return $matches >= 3;
     }
 
     private function captureTemplateMetadata(array $row, array &$metadata): void

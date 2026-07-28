@@ -1485,7 +1485,10 @@ function draftOrderFetchOrderItemRows(PDO $pdo, int $orderId): array
     $hasSharedCartonEnabled = draftOrderTableHasColumn($pdo, 'order_items', 'shared_carton_enabled');
     $hasSharedCartonCode = draftOrderTableHasColumn($pdo, 'order_items', 'shared_carton_code');
     $hasSharedCartonContents = draftOrderTableHasColumn($pdo, 'order_items', 'shared_carton_contents');
-    $select = "oi.*, s.name as supplier_name, p.hs_code as product_hs_code, p.dimensions_scope as product_dimensions_scope";
+    $productImageSelect = draftOrderTableHasColumn($pdo, 'products', 'image_paths')
+        ? ', p.image_paths as product_image_paths'
+        : '';
+    $select = "oi.*, s.name as supplier_name, p.hs_code as product_hs_code, p.dimensions_scope as product_dimensions_scope$productImageSelect";
     $stmt = $pdo->prepare(
         "SELECT $select
          FROM order_items oi
@@ -1520,8 +1523,13 @@ function draftOrderFetchOrderItemRows(PDO $pdo, int $orderId): array
         }
     }
 
+    $receiptImages = clmsReceiptItemImagePaths($pdo, $itemIds);
     foreach ($items as &$item) {
-        $item['image_paths'] = $item['image_paths'] ? (json_decode($item['image_paths'], true) ?: []) : [];
+        $item['image_paths'] = clmsMergeImagePathLists(
+            $item['image_paths'] ?? [],
+            $item['product_image_paths'] ?? [],
+            $receiptImages[(int) $item['id']] ?? []
+        );
         $item['description_entries'] = draftOrderSplitDescriptionEntries($item['description_cn'] ?? null, $item['description_en'] ?? null);
         $scope = strtolower((string) ($item['product_dimensions_scope'] ?? 'carton'));
         if (!in_array($scope, ['piece', 'carton'], true)) {
@@ -2659,6 +2667,26 @@ function draftOrderImportLooksLikeHeader(array $row): bool
             || isset($map['photo'])
             || isset($map['code'])
         );
+}
+
+function draftOrderImportLooksLikeTranslatedHeader(array $row): bool
+{
+    $knownLabels = [
+        '供应商', '供应商名称', '品牌', '材质', '什么牌子', '货物类型', '编号', '照片',
+        '货号', '英文描述', '中文描述', '高度', '宽度', '长度', '总箱数', '每箱数量',
+        '总数量', '单位', '单价', '总金额', '总 CBM', '毛重KG', '总毛重', '快递单号',
+        '尺寸', 'HS编码', '备注',
+    ];
+    $matches = 0;
+    foreach ($row as $index => $value) {
+        if (!is_int($index) || is_array($value) || is_object($value)) {
+            continue;
+        }
+        if (in_array(trim(draftOrderImportCellString($value)), $knownLabels, true)) {
+            $matches++;
+        }
+    }
+    return $matches >= 3;
 }
 
 function draftOrderImportExcelEnvironmentMessage(string $ext): ?string
@@ -4088,6 +4116,9 @@ function draftOrderImportBuildPayload(PDO $pdo, array $rows, string $filename, a
                 $headerFieldsSeen[$field] = true;
             }
             $sawImportHeader = true;
+            continue;
+        }
+        if (draftOrderImportLooksLikeTranslatedHeader($row)) {
             continue;
         }
 

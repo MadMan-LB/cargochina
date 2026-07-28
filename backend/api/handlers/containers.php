@@ -398,7 +398,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $stmt->execute([$oid]);
                     $order = $stmt->fetch(PDO::FETCH_ASSOC);
                     if (!$order) continue;
-                    $items = normalizeOrderItems(fetchOrderItems($pdo, (int) $oid));
+                    $items = normalizeOrderItems($pdo, fetchOrderItems($pdo, (int) $oid));
                     $ordersWithItems[] = ['order' => $order, 'items' => $items];
                 }
                 $format = strtolower(trim((string) ($_GET['format'] ?? 'xlsx')));

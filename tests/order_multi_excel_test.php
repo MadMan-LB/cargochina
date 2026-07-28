@@ -84,11 +84,13 @@ $item = static function (string $number, string $english, string $chinese, array
 
 $longEnglish = 'Industrial pressure-control assembly ZX-9000, 220V/50Hz, stainless steel 304, tolerance +/-0.05 mm; handle carefully & keep dry during transit.';
 $longChinese = '工业压力控制组件 ZX-9000，220V/50Hz，304 不锈钢，公差 +/-0.05 毫米；运输过程中请小心搬运并保持干燥。';
+$singlePhotoWithFallback = $item('ITEM-16-A', 'Single-photo safety valve', '单图安全阀', ['single']);
+array_unshift($singlePhotoWithFallback['image_paths'], 'tmp/missing-primary-image.png');
 $entries = [
     [
         'order' => ['id' => 16, 'customer_name' => 'English Customer', 'destination_country_name' => 'Lebanon', 'expected_ready_date' => '2026-07-20', 'currency' => 'USD', 'status' => 'Approved'],
         'items' => [
-            $item('ITEM-16-A', 'Single-photo safety valve', '单图安全阀', ['single']),
+            $singlePhotoWithFallback,
             $item('ITEM-16-B', 'Multi-photo pump assembly', '多图泵组件', ['main', 'alternate']),
             $item('ITEM-16-C', 'Item intentionally supplied without a photo', '此商品有意不提供照片'),
         ],
@@ -116,23 +118,36 @@ try {
     $spreadsheet = IOFactory::load($workbookPath);
     multiExcelAssert($spreadsheet->getSheetCount() === 1, 'Selected orders must be in one worksheet.');
     $sheet = $spreadsheet->getActiveSheet();
-    $titles = [];
-    $headerRows = [];
+    $titleRows = [];
+    $englishHeaderRows = [];
+    $chineseHeaderRows = [];
     $itemRows = [];
     for ($row = 1; $row <= $sheet->getHighestRow(); $row++) {
         $a = trim((string) $sheet->getCell('A' . $row)->getValue());
-        if (preg_match('/Order #(16|17|18) /', $a)) $titles[] = $a;
+        if (preg_match('/Order #(16|17|18) /', $a, $match)) $titleRows[(int) $match[1]] = $row;
         if (trim((string) $sheet->getCell('J' . $row)->getValue()) === 'ENGLISH DESCRIPTION'
             && trim((string) $sheet->getCell('K' . $row)->getValue()) === 'CHINESE DESCRIPTION') {
-            $headerRows[] = $row;
+            $englishHeaderRows[] = $row;
+        }
+        if (trim((string) $sheet->getCell('J' . $row)->getValue()) === clmsT('ENGLISH DESCRIPTION', [], 'zh-CN')
+            && trim((string) $sheet->getCell('K' . $row)->getValue()) === clmsT('CHINESE DESCRIPTION', [], 'zh-CN')) {
+            $chineseHeaderRows[] = $row;
         }
         $itemNumber = trim((string) $sheet->getCell('I' . $row)->getValue());
         if (str_starts_with($itemNumber, 'ITEM-')) $itemRows[$itemNumber] = $row;
     }
-    multiExcelAssert(count($titles) === 3, 'Each selected order needs a repeated complete order header.');
-    multiExcelAssert(count($headerRows) === 3, 'Each selected order needs repeated bilingual item headers.');
+    multiExcelAssert(count($titleRows) === 3, 'Each selected order needs a repeated complete order header.');
+    multiExcelAssert(count($englishHeaderRows) === 3, 'Each selected order needs a repeated English item header.');
+    multiExcelAssert(count($chineseHeaderRows) === 3, 'Each selected order needs a repeated Chinese item header.');
+    foreach ($englishHeaderRows as $index => $englishHeaderRow) {
+        multiExcelAssert(
+            ($chineseHeaderRows[$index] ?? 0) === $englishHeaderRow + 1,
+            'The Chinese header must be directly below the English header.'
+        );
+    }
     multiExcelAssert(count($itemRows) === 7, 'Every item from all three orders must be present.');
-    foreach ([5 => '2026-07-20', 19 => '2026-07-21', 32 => '2026-08-01'] as $row => $expectedDate) {
+    foreach ([16 => '2026-07-20', 17 => '2026-07-21', 18 => '2026-08-01'] as $orderId => $expectedDate) {
+        $row = $titleRows[$orderId] + 4;
         $actualDate = ExcelDate::excelToDateTimeObject((float) $sheet->getCell('B' . $row)->getValue())->format('Y-m-d');
         multiExcelAssert($actualDate === $expectedDate, "Expected-ready date shifted in Excel at row {$row}: {$actualDate}");
     }
@@ -167,7 +182,7 @@ try {
         if (!copy($workbookPath, $artifactPath)) throw new RuntimeException('Could not preserve verification workbook.');
         echo 'ARTIFACT: ' . $artifactPath . PHP_EOL;
     }
-    echo "PASS: three selected orders use one worksheet with repeated headers, bilingual descriptions, page breaks, and correctly anchored images\n";
+    echo "PASS: three selected orders use one worksheet with English headers above Chinese headers, bilingual descriptions, page breaks, and correctly anchored images\n";
 } finally {
     @unlink($workbookPath);
     foreach ($imageNames as $imageName) @unlink($backendTempDir . DIRECTORY_SEPARATOR . $imageName);

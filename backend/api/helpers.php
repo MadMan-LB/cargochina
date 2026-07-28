@@ -460,6 +460,83 @@ function normalizeStoredUploadPath(string $filePath, bool $mustExist = true): st
     }
 }
 
+function clmsNormalizeImagePathList($value): array
+{
+    if (is_string($value)) {
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return [];
+        }
+        $decoded = json_decode($trimmed, true);
+        $value = is_array($decoded) ? $decoded : [$trimmed];
+    }
+    if (!is_array($value)) {
+        return [];
+    }
+
+    $paths = [];
+    foreach ($value as $path) {
+        if (is_array($path)) {
+            $path = $path['file_path'] ?? $path['path'] ?? $path['url'] ?? '';
+        }
+        $path = trim((string) $path);
+        if ($path !== '') {
+            $paths[$path] = true;
+        }
+    }
+    return array_keys($paths);
+}
+
+function clmsMergeImagePathLists(...$sources): array
+{
+    $merged = [];
+    foreach ($sources as $source) {
+        foreach (clmsNormalizeImagePathList($source) as $path) {
+            $merged[$path] = true;
+        }
+    }
+    return array_keys($merged);
+}
+
+function clmsReceiptItemImagePaths(PDO $pdo, array $orderItemIds): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $orderItemIds), static fn(int $id): bool => $id > 0)));
+    if (!$ids) {
+        return [];
+    }
+
+    try {
+        $hasVoidedAt = false;
+        $column = $pdo->query("SHOW COLUMNS FROM warehouse_receipts LIKE 'voided_at'");
+        if ($column) {
+            $hasVoidedAt = $column->rowCount() > 0;
+        }
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $sql = "SELECT wri.order_item_id, wrip.file_path
+                FROM warehouse_receipt_item_photos wrip
+                JOIN warehouse_receipt_items wri ON wri.id = wrip.receipt_item_id
+                JOIN warehouse_receipts wr ON wr.id = wri.receipt_id
+                WHERE wri.order_item_id IN ($placeholders)";
+        if ($hasVoidedAt) {
+            $sql .= ' AND wr.voided_at IS NULL';
+        }
+        $sql .= ' ORDER BY wrip.id';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($ids);
+        $paths = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $itemId = (int) ($row['order_item_id'] ?? 0);
+            $path = trim((string) ($row['file_path'] ?? ''));
+            if ($itemId > 0 && $path !== '') {
+                $paths[$itemId][$path] = true;
+            }
+        }
+        return array_map('array_keys', $paths);
+    } catch (Throwable $e) {
+        return [];
+    }
+}
+
 function normalizeStoredUploadPathList(array $paths): array
 {
     $normalized = [];

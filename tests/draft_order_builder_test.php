@@ -597,6 +597,55 @@ test('receiving import carries express number within supplier sections', functio
     }
 });
 
+test('draft and receiving imports skip the Chinese workbook header row', function () use ($pdo, $root) {
+    $draftCsvPath = tempnam(sys_get_temp_dir(), 'draft_bilingual_header_');
+    $receivingCsvPath = tempnam(sys_get_temp_dir(), 'receiving_bilingual_header_');
+
+    $draftFile = fopen($draftCsvPath, 'w');
+    fputcsv($draftFile, ['ITEM NO', 'ENGLISH DESCRIPTION', 'CHINESE DESCRIPTION', 'TOTAL CTNS']);
+    fputcsv($draftFile, ['货号', '英文描述', '中文描述', '总箱数']);
+    fputcsv($draftFile, ['BI-1', 'Bilingual header item', '双语表头商品', '2']);
+    fclose($draftFile);
+
+    $receivingFile = fopen($receivingCsvPath, 'w');
+    fputcsv($receivingFile, ['ITEM NO', 'ENGLISH DESCRIPTION', 'CHINESE DESCRIPTION', 'TOTAL CTNS', 'TOTAL CBM', 'TOTAL GW']);
+    fputcsv($receivingFile, ['货号', '英文描述', '中文描述', '总箱数', '总 CBM', '总毛重']);
+    fputcsv($receivingFile, ['BI-R1', 'Bilingual receiving item', '双语收货商品', '2', '0.4', '8']);
+    fclose($receivingFile);
+
+    try {
+        $out = runHandlerScriptWithUploadedFile(
+            $root,
+            'backend/api/handlers/draft-orders.php',
+            'POST',
+            'import',
+            null,
+            $draftCsvPath,
+            'draft_bilingual_header.csv'
+        );
+        $json = json_decode($out, true);
+        $draftItems = $json['data']['supplier_sections'][0]['items'] ?? [];
+        if (count($draftItems) !== 1 || ($draftItems[0]['item_no'] ?? '') !== 'BI-1') {
+            throw new Exception('Draft import treated the Chinese header as an item row');
+        }
+
+        $preview = (new ReceivingExcelImportService())->previewFromUploadedFile($pdo, [
+            'name' => 'receiving_bilingual_header.csv',
+            'type' => 'text/csv',
+            'tmp_name' => $receivingCsvPath,
+            'error' => UPLOAD_ERR_OK,
+            'size' => filesize($receivingCsvPath),
+        ]);
+        $rawRows = $preview['raw_rows'] ?? [];
+        if (count($rawRows) !== 1 || ($rawRows[0]['item_no'] ?? '') !== 'BI-R1') {
+            throw new Exception('Receiving import treated the Chinese header as an item row');
+        }
+    } finally {
+        @unlink($draftCsvPath);
+        @unlink($receivingCsvPath);
+    }
+});
+
 test('draft-orders import endpoint preserves repeated descriptions and zero-carton pieces', function () use ($pdo, $root) {
     $supplierName = (string) $pdo->query("SELECT name FROM suppliers ORDER BY id LIMIT 1")->fetchColumn();
     if ($supplierName === '') {

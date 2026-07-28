@@ -1369,3 +1369,13 @@ otification_preferences.php and removing the sidebar link unless the user is an 
 - Configure `TRANSLATION_PROVIDER`, `TRANSLATION_API_URL`, optional `TRANSLATION_API_KEY`, and `TRANSLATION_TIMEOUT_SECONDS`. Disabled/unavailable providers queue or report the attempt and never fabricate translated text.
 - Do not collapse bilingual descriptions back into a generic `description` field in copies, imports, conversions, searches, or exports.
 - Keep the shared batch endpoint authorization and 100-record limit; browser-submitted IDs are not trusted.
+
+## 2026-07-27 - Bilingual Excel Headers and Photo Fallbacks
+
+- Standard XLSX downloads start immediately without a language-choice dialog. Order, receiving, warehouse, draft, balance, and container exports use an English column-header row followed directly by the equivalent Chinese header row.
+- Bulk downloads use the same bilingual workbook structure as single and filtered downloads.
+- Draft-order and receiving import parsers skip the translated second header row when a generated bilingual workbook is reused as input.
+- Standard exports now merge available image sources in a deterministic order: order-item images, linked product images, then active non-void item-level receiving evidence. Invalid or stale paths are skipped so a later valid image can still be embedded.
+- Added support for legacy local upload URL/path forms while keeping workbook image resolution inside `backend/uploads`; remote images retain validation, size, timeout, and private-network restrictions.
+- No database migration was required. Existing image columns and receiving photo tables remain the source of truth.
+- Validation: PHP/JS lint passed; the three-order bilingual workbook test passed with English-above-Chinese headers, physical XLSX media, correct anchors, stale-path fallback, page breaks, and a clean no-photo value; production critical, hardening, receiving RBAC, and release preflight suites passed under XAMPP PHP.

@@ -47,6 +47,11 @@ class OrderExcelService
         return function_exists('clmsT') ? clmsT($text, $params) : $text;
     }
 
+    private function trForLocale(string $text, string $locale): string
+    {
+        return function_exists('clmsT') ? clmsT($text, [], $locale) : $text;
+    }
+
     private function statusText(string $status): string
     {
         return function_exists('clmsStatusLabel') ? clmsStatusLabel($status) : $status;
@@ -108,12 +113,12 @@ class OrderExcelService
                 ],
                 $this->tr('Order Number') . ': ' . (int) ($order['id'] ?? 0) . '    ' . $this->tr('Status') . ': ' . $this->statusText((string) ($order['status'] ?? ''))
             );
-            $this->writeStandardColumnHeaders($sheet, $row++);
+            $row = $this->writeStandardColumnHeaders($sheet, $row);
             $row = $this->writeStandardItems($sheet, $items, $row, $order);
             $row = $this->writeStandardReceiptFees($sheet, $row, $order, $items);
             $row = $this->writeStandardOperationalCosts($sheet, $row, $order);
         }
-        $sheet->freezePane('A9');
+        $sheet->freezePane('A10');
         return $spreadsheet;
     }
 
@@ -137,13 +142,12 @@ class OrderExcelService
             ],
             $this->tr('Order Number') . ': ' . (int) ($order['id'] ?? 0) . '    ' . $this->tr('Status') . ': ' . $this->statusText((string) ($order['status'] ?? ''))
         );
-        $this->writeStandardColumnHeaders($sheet, $row);
-        $row++;
+        $row = $this->writeStandardColumnHeaders($sheet, $row);
         $row = $this->writeStandardItems($sheet, $items, $row, $order);
         $row = $this->writeStandardReceiptFees($sheet, $row, $order, $items);
         $this->writeStandardOperationalCosts($sheet, $row, $order);
 
-        $sheet->freezePane('A9');
+        $sheet->freezePane('A10');
         return $spreadsheet;
     }
 
@@ -166,8 +170,7 @@ class OrderExcelService
             ],
             $this->tr('Salameh Global / CargoChina')
         );
-        $this->writeContainerColumnHeaders($sheet, $row);
-        $row++;
+        $row = $this->writeContainerColumnHeaders($sheet, $row);
 
         $sections = $this->buildCustomerSections($ordersWithItems);
         $expenses = is_array($context['expenses'] ?? null) ? $context['expenses'] : [];
@@ -226,7 +229,7 @@ class OrderExcelService
         }
 
         $this->writeOverallTotals($sheet, $overallTotals, $row);
-        $sheet->freezePane('A9');
+        $sheet->freezePane('A10');
 
         $this->outputXlsx($spreadsheet, $filename);
     }
@@ -543,7 +546,7 @@ class OrderExcelService
         return $startRow + 7;
     }
 
-    private function writeStandardColumnHeaders($sheet, int $row): void
+    private function writeStandardColumnHeaders($sheet, int $row): int
     {
         $headers = [
             'A' => 'SUPPLIER',
@@ -576,11 +579,13 @@ class OrderExcelService
             'AB' => 'NOTES',
         ];
 
+        $chineseRow = $row + 1;
         foreach ($headers as $col => $label) {
-            $sheet->setCellValue($col . $row, $this->tr($label));
+            $sheet->setCellValue($col . $row, $this->trForLocale($label, 'en'));
+            $sheet->setCellValue($col . $chineseRow, $this->trForLocale($label, 'zh-CN'));
         }
 
-        $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
+        $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $chineseRow, [
             'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true, 'color' => ['rgb' => 'FFFFFF']],
             'alignment' => [
                 'horizontal' => Alignment::HORIZONTAL_CENTER,
@@ -590,7 +595,10 @@ class OrderExcelService
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::MASTER_TABLE_BLUE]],
             'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
         ]);
-        $sheet->getRowDimension($row)->setRowHeight(54.75);
+        $sheet->getRowDimension($row)->setRowHeight(36);
+        $sheet->getRowDimension($chineseRow)->setRowHeight(36);
+
+        return $chineseRow + 1;
     }
 
     private function writeStandardItems($sheet, array $items, int $startRow, array $order = []): int
@@ -818,7 +826,7 @@ class OrderExcelService
         return implode(' + ', $parts);
     }
 
-    private function writeContainerColumnHeaders($sheet, int $row): void
+    private function writeContainerColumnHeaders($sheet, int $row): int
     {
         $headers = [
             'B' => 'WHAT BRAND',
@@ -844,11 +852,13 @@ class OrderExcelService
             'V' => 'size',
         ];
 
+        $chineseRow = $row + 1;
         foreach ($headers as $col => $label) {
-            $sheet->setCellValue($col . $row, $this->tr($label));
+            $sheet->setCellValue($col . $row, $this->trForLocale($label, 'en'));
+            $sheet->setCellValue($col . $chineseRow, $this->trForLocale($label, 'zh-CN'));
         }
 
-        $this->styleRange($sheet, 'B' . $row . ':' . self::CONTAINER_LAST_COL . $row, [
+        $this->styleRange($sheet, 'B' . $row . ':' . self::CONTAINER_LAST_COL . $chineseRow, [
             'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true, 'color' => ['rgb' => 'FFFFFF']],
             'alignment' => [
                 'horizontal' => Alignment::HORIZONTAL_CENTER,
@@ -858,15 +868,18 @@ class OrderExcelService
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::MASTER_TABLE_BLUE]],
             'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
         ]);
-        $this->styleRange($sheet, 'G' . $row . ':I' . $row, [
+        $this->styleRange($sheet, 'G' . $row . ':I' . $chineseRow, [
             'font' => ['color' => ['rgb' => self::HEADER_BLUE]],
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_YELLOW]],
         ]);
-        $this->styleRange($sheet, 'O' . $row, [
+        $this->styleRange($sheet, 'O' . $row . ':O' . $chineseRow, [
             'font' => ['color' => ['rgb' => self::HEADER_BLUE]],
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => self::LIGHT_YELLOW]],
         ]);
-        $sheet->getRowDimension($row)->setRowHeight(54.75);
+        $sheet->getRowDimension($row)->setRowHeight(36);
+        $sheet->getRowDimension($chineseRow)->setRowHeight(36);
+
+        return $chineseRow + 1;
     }
 
     private function buildCustomerSections(array $ordersWithItems): array
@@ -1293,7 +1306,14 @@ class OrderExcelService
             return;
         }
 
-        $sourcePath = $this->resolveWorkbookImageSource($paths[0]);
+        $sourcePath = '';
+        foreach ($paths as $candidate) {
+            $resolved = $this->resolveWorkbookImageSource($candidate);
+            if (is_file($resolved) && is_readable($resolved)) {
+                $sourcePath = $resolved;
+                break;
+            }
+        }
         if (!is_file($sourcePath) || !is_readable($sourcePath)) {
             $sheet->setCellValue($cell, $this->tr('No photo'));
             return;
@@ -1330,6 +1350,21 @@ class OrderExcelService
 
     private function resolveWorkbookImageSource(string $path): string
     {
+        $urlPath = preg_match('#^https?://#i', $path) ? (string) parse_url($path, PHP_URL_PATH) : $path;
+        $localRelative = ltrim(str_replace('\\', '/', $urlPath), '/');
+        foreach (['cargochina/backend/', 'backend/'] as $prefix) {
+            if (str_starts_with(strtolower($localRelative), $prefix)) {
+                $localRelative = substr($localRelative, strlen($prefix));
+                break;
+            }
+        }
+        if (str_starts_with($localRelative, 'uploads/')) {
+            if (str_contains($localRelative, '../')) return '';
+            $localPath = $this->backendDir . '/' . $localRelative;
+            if (is_file($localPath) && is_readable($localPath)) {
+                return $localPath;
+            }
+        }
         if (!preg_match('#^https?://#i', $path)) {
             $relative = ltrim(str_replace('\\', '/', $path), '/');
             if (str_contains($relative, '../')) return '';
@@ -1739,7 +1774,7 @@ class OrderExcelService
                 ->setFitToWidth(1)
                 ->setFitToHeight(0)
                 ->setPrintArea("A1:{$lastColumn}{$lastRow}")
-                ->setRowsToRepeatAtTopByStartAndEnd(1, min(8, $lastRow));
+                ->setRowsToRepeatAtTopByStartAndEnd(1, min(9, $lastRow));
             $sheet->getPageMargins()
                 ->setTop(0.35)
                 ->setRight(0.25)
@@ -1841,9 +1876,10 @@ class OrderExcelService
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
         $localizedTitle = $this->tr($title);
-        $localizedHeaders = array_map(fn($header) => $this->tr((string) $header), $headers);
+        $englishHeaders = array_map(fn($header) => $this->trForLocale((string) $header, 'en'), $headers);
+        $chineseHeaders = array_map(fn($header) => $this->trForLocale((string) $header, 'zh-CN'), $headers);
         $sheet->setTitle(substr($localizedTitle, 0, 31));
-        $lastColumn = Coordinate::stringFromColumnIndex(max(1, count($localizedHeaders)));
+        $lastColumn = Coordinate::stringFromColumnIndex(max(1, count($englishHeaders)));
         $headerRow = $this->writeCompanyHeader(
             $sheet,
             1,
@@ -1858,10 +1894,12 @@ class OrderExcelService
             $this->tr('Filtered export - complete result set')
         );
 
-        foreach ($localizedHeaders as $index => $header) {
+        $chineseHeaderRow = $headerRow + 1;
+        foreach ($englishHeaders as $index => $header) {
             $column = Coordinate::stringFromColumnIndex($index + 1);
             $sheet->setCellValue($column . $headerRow, $header);
-            $sheet->getStyle($column . $headerRow)->applyFromArray([
+            $sheet->setCellValue($column . $chineseHeaderRow, $chineseHeaders[$index] ?? $header);
+            $sheet->getStyle($column . $headerRow . ':' . $column . $chineseHeaderRow)->applyFromArray([
                 'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true, 'color' => ['rgb' => 'FFFFFF']],
                 'alignment' => [
                     'horizontal' => Alignment::HORIZONTAL_CENTER,
@@ -1875,8 +1913,9 @@ class OrderExcelService
             ]);
         }
         $sheet->getRowDimension($headerRow)->setRowHeight(34);
+        $sheet->getRowDimension($chineseHeaderRow)->setRowHeight(34);
 
-        $rowNumber = $headerRow + 1;
+        $rowNumber = $chineseHeaderRow + 1;
         foreach ($rows as $row) {
             foreach (array_values($row) as $index => $value) {
                 $column = Coordinate::stringFromColumnIndex($index + 1);
@@ -1910,7 +1949,7 @@ class OrderExcelService
             $rowNumber++;
         }
 
-        if ($rowNumber === $headerRow + 1) {
+        if ($rowNumber === $chineseHeaderRow + 1) {
             $sheet->setCellValue('A' . $rowNumber, $this->tr('No rows available.'));
             $sheet->mergeCells("A{$rowNumber}:{$lastColumn}{$rowNumber}");
             $sheet->getStyle("A{$rowNumber}:{$lastColumn}{$rowNumber}")->getAlignment()
@@ -1920,14 +1959,14 @@ class OrderExcelService
             $rowNumber++;
         }
 
-        foreach (range(1, count($localizedHeaders)) as $index) {
+        foreach (range(1, count($englishHeaders)) as $index) {
             $column = Coordinate::stringFromColumnIndex($index);
             if (strcasecmp(trim((string) ($headers[$index - 1] ?? '')), 'Photo') !== 0) {
                 $sheet->getColumnDimension($column)->setAutoSize(true);
             }
         }
-        $sheet->freezePane('A' . ($headerRow + 1));
-        $sheet->setAutoFilter("A{$headerRow}:{$lastColumn}{$headerRow}");
+        $sheet->freezePane('A' . ($chineseHeaderRow + 1));
+        $sheet->setAutoFilter("A{$chineseHeaderRow}:{$lastColumn}{$chineseHeaderRow}");
 
         $this->outputXlsx($spreadsheet, $filename);
     }

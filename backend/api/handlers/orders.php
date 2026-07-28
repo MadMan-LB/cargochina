@@ -96,7 +96,11 @@ function orderDecodeSharedCartonContents(PDO $pdo, array $row): array
 function normalizeOrderItems(PDO $pdo, array $items): array
 {
     foreach ($items as &$it) {
-        $it['image_paths'] = $it['image_paths'] ? json_decode($it['image_paths'], true) : [];
+        $it['image_paths'] = clmsMergeImagePathLists(
+            $it['image_paths'] ?? [],
+            $it['product_image_paths'] ?? [],
+            $it['receipt_image_paths'] ?? []
+        );
         $it['shared_carton_enabled'] = !empty($it['shared_carton_enabled']) ? 1 : 0;
         $it['shared_carton_contents'] = !empty($it['shared_carton_enabled'])
             ? orderDecodeSharedCartonContents($pdo, $it)
@@ -662,6 +666,9 @@ function fetchOrderItemsForOrders(PDO $pdo, array $orderIds): array
             $productAlertCol .= ", COALESCE(oi.hs_code, p.hs_code) as effective_hs_code";
         }
     }
+    if (orderTableHasColumn($pdo, 'products', 'image_paths')) {
+        $productAlertCol .= ", p.image_paths as product_image_paths";
+    }
     if (orderTableHasColumn($pdo, 'order_items', 'shared_carton_enabled')) {
         $productAlertCol .= ", oi.shared_carton_enabled";
     }
@@ -697,8 +704,13 @@ function fetchOrderItemsForOrders(PDO $pdo, array $orderIds): array
     $stmt = $pdo->prepare($sql);
     $stmt->execute($ids);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $receiptImages = clmsReceiptItemImagePaths(
+        $pdo,
+        array_map(static fn(array $row): int => (int) ($row['id'] ?? 0), $rows)
+    );
     $grouped = [];
     foreach ($rows as $row) {
+        $row['receipt_image_paths'] = $receiptImages[(int) ($row['id'] ?? 0)] ?? [];
         $grouped[(int) ($row['order_id'] ?? 0)][] = $row;
     }
 

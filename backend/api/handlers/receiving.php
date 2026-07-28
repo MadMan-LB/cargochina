@@ -197,6 +197,9 @@ function receivingFetchQueueRowsForRequest(PDO $pdo, bool $paginate = true, ?arr
             $itemMetaCols .= ", oi.$column";
         }
     }
+    if (receivingTableHasColumn($pdo, 'products', 'image_paths')) {
+        $itemMetaCols .= ', p.image_paths as product_image_paths';
+    }
     $orderIds = array_values(array_unique(array_map(static fn($row) => (int) ($row['id'] ?? 0), $rows)));
     $orderIds = array_values(array_filter($orderIds, static fn($id) => $id > 0));
     $itemsByOrder = [];
@@ -206,9 +209,19 @@ function receivingFetchQueueRowsForRequest(PDO $pdo, bool $paginate = true, ?arr
         $classificationJoin = receivingTableExists($pdo, 'item_classifications') ? " LEFT JOIN item_classifications ic ON ic.entity_type='order_item' AND ic.entity_id=oi.id" : '';
         $items = $pdo->prepare("SELECT oi.order_id, oi.id, oi.shipping_code$itemMetaCols, oi.cartons, oi.qty_per_carton, oi.quantity, oi.unit_price, oi.total_amount, oi.declared_cbm, oi.declared_weight, oi.item_length, oi.item_width, oi.item_height, oi.description_cn, oi.description_en$itemHsCol$itemAlertCol$classificationSelect FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id$classificationJoin WHERE oi.order_id IN ($itemPlaceholders) ORDER BY oi.order_id ASC, oi.id ASC");
         $items->execute($orderIds);
-        foreach ($items->fetchAll(PDO::FETCH_ASSOC) as $item) {
+        $itemRows = $items->fetchAll(PDO::FETCH_ASSOC);
+        $receiptImages = clmsReceiptItemImagePaths(
+            $pdo,
+            array_map(static fn(array $item): int => (int) ($item['id'] ?? 0), $itemRows)
+        );
+        foreach ($itemRows as $item) {
             $oid = (int) ($item['order_id'] ?? 0);
             unset($item['order_id']);
+            $item['image_paths'] = clmsMergeImagePathLists(
+                $item['image_paths'] ?? [],
+                $item['product_image_paths'] ?? [],
+                $receiptImages[(int) ($item['id'] ?? 0)] ?? []
+            );
             $itemsByOrder[$oid][] = $item;
         }
     }
