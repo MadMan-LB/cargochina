@@ -953,6 +953,14 @@ document.addEventListener("change", function (e) {
     }
 });
 
+window.formatHsCatalogLabel = function (item) {
+    const code = String(item?.hs_code || item?.id || "").trim();
+    const names = [item?.name_en, item?.name_zh, item?.name]
+        .map((value) => String(value || "").trim())
+        .filter((value, index, values) => value && values.indexOf(value) === index);
+    return [code, ...names].filter(Boolean).join(" — ");
+};
+
 document.addEventListener("keydown", function (e) {
     if (
         e.key !== "Enter" ||

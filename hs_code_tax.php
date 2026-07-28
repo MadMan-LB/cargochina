@@ -153,7 +153,9 @@ require 'includes/layout.php';
             <thead>
               <tr>
                 <th>HS Code</th>
-                <th>Name</th>
+                <th>English Name</th>
+                <th>Chinese Name</th>
+                <th>Original Name</th>
                 <th>Category</th>
                 <th>Tariff</th>
                 <th>VAT</th>
@@ -162,7 +164,7 @@ require 'includes/layout.php';
             </thead>
             <tbody id="catalogTableBody">
               <tr>
-                <td colspan="6" class="text-muted text-center py-4">Type to search the imported tariff catalog.</td>
+                <td colspan="8" class="text-muted text-center py-4">Type to search the imported tariff catalog.</td>
               </tr>
             </tbody>
           </table>

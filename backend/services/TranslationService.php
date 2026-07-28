@@ -35,10 +35,13 @@ class TranslationService
     public function detectLanguage(string $text): string
     {
         $hasHan = preg_match('/[\x{3400}-\x{4DBF}\x{4E00}-\x{9FFF}\x{F900}-\x{FAFF}]/u', $text) === 1;
+        $hasArabic = preg_match('/[\x{0600}-\x{06FF}\x{0750}-\x{077F}\x{08A0}-\x{08FF}]/u', $text) === 1;
         $hasLatin = preg_match('/[A-Za-z]/u', $text) === 1;
         if ($hasHan && !$hasLatin) return 'zh';
+        if ($hasArabic && !$hasHan && !$hasLatin) return 'ar';
         if ($hasLatin && !$hasHan) return 'en';
         if ($hasHan) return 'zh';
+        if ($hasArabic) return 'ar';
         return 'en';
     }
 
@@ -119,6 +122,110 @@ class TranslationService
         }
     }
 
+    /**
+     * Translate a list efficiently while preserving cache/manual-correction rules.
+     * Google requests are sent in batches; other providers retain their existing
+     * one-request contract for compatibility.
+     */
+    public function translateBatchDetailed(array $texts, string $sourceLang = 'auto', string $targetLang = 'en'): array
+    {
+        $targetLang = $this->normalizeLang($targetLang, 'en');
+        $results = [];
+        $pendingBySource = [];
+        $configurationError = $this->configurationError();
+
+        foreach (array_values($texts) as $index => $text) {
+            $original = (string) $text;
+            if (trim($original) === '') {
+                $results[$index] = ['translated_text' => '', 'status' => 'empty', 'source_lang' => 'auto', 'target_lang' => $targetLang, 'provenance' => 'original'];
+                continue;
+            }
+
+            $resolvedSource = $this->normalizeLang($sourceLang, 'auto');
+            if ($resolvedSource === 'auto') $resolvedSource = $this->detectLanguage($original);
+            if ($resolvedSource === $targetLang) {
+                $results[$index] = ['translated_text' => $original, 'status' => 'original', 'source_lang' => $resolvedSource, 'target_lang' => $targetLang, 'provenance' => 'original'];
+                continue;
+            }
+
+            $hash = $this->sourceHash($original);
+            $manual = $this->manualCorrection($hash, $resolvedSource, $targetLang);
+            if ($manual !== null) {
+                $results[$index] = ['translated_text' => $manual, 'status' => 'manual', 'source_lang' => $resolvedSource, 'target_lang' => $targetLang, 'provenance' => 'manual'];
+                continue;
+            }
+            $cached = $this->cachedTranslation($hash, $original, $resolvedSource, $targetLang);
+            if ($cached !== null) {
+                $results[$index] = ['translated_text' => $cached, 'status' => 'translated', 'source_lang' => $resolvedSource, 'target_lang' => $targetLang, 'provenance' => 'cache'];
+                continue;
+            }
+            if ($configurationError !== null) {
+                $this->queue($hash, $original, $resolvedSource, $targetLang, 'pending', $configurationError);
+                $results[$index] = [
+                    'translated_text' => '',
+                    'status' => 'pending',
+                    'source_lang' => $resolvedSource,
+                    'target_lang' => $targetLang,
+                    'provenance' => 'pending',
+                    'error_code' => 'provider_not_configured',
+                    'retryable' => false,
+                ];
+                continue;
+            }
+            $pendingBySource[$resolvedSource][] = ['index' => $index, 'text' => $original, 'hash' => $hash];
+        }
+
+        foreach ($pendingBySource as $resolvedSource => $pending) {
+            if ($this->provider !== 'google') {
+                foreach ($pending as $item) {
+                    $results[$item['index']] = $this->translateDetailed($item['text'], $resolvedSource, $targetLang);
+                }
+                continue;
+            }
+
+            foreach (array_chunk($pending, 100) as $chunk) {
+                try {
+                    $translatedValues = $this->requestGoogleBatch(
+                        array_column($chunk, 'text'),
+                        $resolvedSource,
+                        $targetLang
+                    );
+                    foreach ($chunk as $offset => $item) {
+                        $translated = (string) ($translatedValues[$offset] ?? '');
+                        if (trim($translated) === '') throw new RuntimeException('Translation provider returned an incomplete batch');
+                        $this->storeSuccess($item['hash'], $item['text'], $translated, $resolvedSource, $targetLang);
+                        $results[$item['index']] = [
+                            'translated_text' => $translated,
+                            'status' => 'translated',
+                            'source_lang' => $resolvedSource,
+                            'target_lang' => $targetLang,
+                            'provenance' => 'automatic',
+                            'retryable' => false,
+                        ];
+                    }
+                } catch (Throwable $e) {
+                    $safeError = mb_substr(get_class($e) . ': ' . $e->getMessage(), 0, 500);
+                    foreach ($chunk as $item) {
+                        $this->queue($item['hash'], $item['text'], $resolvedSource, $targetLang, 'failed', $safeError);
+                        $results[$item['index']] = [
+                            'translated_text' => '',
+                            'status' => 'failed',
+                            'source_lang' => $resolvedSource,
+                            'target_lang' => $targetLang,
+                            'provenance' => 'failed',
+                            'error_code' => 'provider_failed',
+                            'retryable' => true,
+                        ];
+                    }
+                    $this->safeLog('translation_batch_failed provider=' . $this->provider . ' error=' . $safeError);
+                }
+            }
+        }
+
+        ksort($results);
+        return array_values($results);
+    }
+
     public function saveManualCorrection(string $original, string $sourceLang, string $targetLang, string $translated, ?int $userId): void
     {
         if (trim($original) === '' || trim($translated) === '') throw new InvalidArgumentException('Original and translated text are required');
@@ -172,6 +279,54 @@ class TranslationService
         return $this->extractTranslatedText($decoded);
     }
 
+    private function requestGoogleBatch(array $texts, string $sourceLang, string $targetLang): array
+    {
+        if ($this->provider !== 'google') throw new RuntimeException('Batch translation is only configured for Google');
+        if (!$texts) return [];
+
+        $url = $this->apiUrl . (str_contains($this->apiUrl, '?') ? '&' : '?') . 'key=' . rawurlencode($this->apiKey);
+        $body = json_encode([
+            'q' => array_values($texts),
+            'source' => $this->providerLanguageCode($sourceLang),
+            'target' => $this->providerLanguageCode($targetLang),
+            'format' => 'text',
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($body === false) throw new RuntimeException('Could not encode translation request');
+
+        $decoded = $this->sendJsonRequest($url, $body);
+        $translatedValues = $this->extractTranslatedTexts($decoded);
+        if (count($translatedValues) !== count($texts)) {
+            throw new RuntimeException('Translation provider returned an invalid batch');
+        }
+        return $translatedValues;
+    }
+
+    private function sendJsonRequest(string $url, string $body): array
+    {
+        if (function_exists('curl_init')) {
+            $ch = curl_init($url);
+            curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => $body, CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_CONNECTTIMEOUT => min(5, $this->timeoutSeconds), CURLOPT_TIMEOUT => $this->timeoutSeconds]);
+            $response = curl_exec($ch);
+            $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $error = curl_error($ch);
+            curl_close($ch);
+            if ($response === false || $error !== '') throw new RuntimeException('Translation network request failed');
+            if ($status < 200 || $status >= 300) throw new RuntimeException('Translation provider HTTP ' . $status);
+        } else {
+            $context = stream_context_create(['http' => ['method' => 'POST', 'header' => "Content-Type: application/json\r\n", 'content' => $body, 'timeout' => $this->timeoutSeconds, 'ignore_errors' => true]]);
+            $response = @file_get_contents($url, false, $context);
+            if ($response === false) throw new RuntimeException('Translation network request failed');
+            $statusLine = $http_response_header[0] ?? '';
+            if (preg_match('/\s(\d{3})\s/', $statusLine, $matches) && ((int) $matches[1] < 200 || (int) $matches[1] >= 300)) {
+                throw new RuntimeException('Translation provider HTTP ' . (int) $matches[1]);
+            }
+        }
+
+        $decoded = json_decode((string) $response, true);
+        if (!is_array($decoded)) throw new RuntimeException('Translation provider returned invalid JSON');
+        return $decoded;
+    }
+
     private function extractTranslatedText(array $decoded): string
     {
         $translated = (string) (
@@ -183,6 +338,16 @@ class TranslationService
             ?? ''
         );
         return html_entity_decode($translated, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    }
+
+    private function extractTranslatedTexts(array $decoded): array
+    {
+        $translations = $decoded['data']['translations'] ?? null;
+        if (!is_array($translations)) return [];
+        return array_map(
+            fn($row) => html_entity_decode((string) ($row['translatedText'] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8'),
+            $translations
+        );
     }
 
     private function configurationError(): ?string

@@ -11,6 +11,10 @@ IF NOT EXISTS hs_code_tariff_catalog
 (20) NOT NULL,
     name VARCHAR
 (500) NULL,
+    name_en VARCHAR
+(500) NULL,
+    name_zh VARCHAR
+(500) NULL,
     category VARCHAR
 (255) NULL,
     tariff_rate VARCHAR
@@ -28,6 +32,7 @@ IF NOT EXISTS hs_code_tariff_catalog
     source_file VARCHAR
 (255) NULL,
     imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    translated_at DATETIME NULL,
     INDEX idx_hs_code
 (hs_code),
     INDEX idx_hs_code_like

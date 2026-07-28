@@ -155,10 +155,14 @@ require 'includes/layout.php';
                         </select>
                 </div>
                 <div class="col-md-6 d-flex align-items-end">
-                        <button type="button" class="btn btn-outline-primary" id="hsCatalogImportBtn">Import / Update</button>
+                        <div class="d-flex flex-wrap gap-2">
+                                <button type="button" class="btn btn-outline-primary" id="hsCatalogImportBtn">Import / Update</button>
+                                <button type="button" class="btn btn-outline-success" id="hsCatalogTranslateBtn">Translate missing English / Chinese</button>
+                        </div>
                 </div>
         </div>
         <div id="hsCatalogImportStatus" class="small text-muted"></div>
+        <div id="hsCatalogTranslateStatus" class="small text-muted mt-1"></div>
         <hr>
         <h5 class="mb-3 text-danger">Training Data Reset</h5>
         <div class="alert alert-warning small">

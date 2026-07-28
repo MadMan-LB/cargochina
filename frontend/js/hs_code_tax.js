@@ -282,12 +282,12 @@ async function loadCatalogSearch() {
             hsT("Search by the opening digits of an HS code or by the start of a name/category."),
         );
         tbody.innerHTML =
-            `<tr><td colspan="6" class="text-muted text-center py-4">${escapeHsHtml(hsT("Type to search the imported tariff catalog."))}</td></tr>`;
+            `<tr><td colspan="8" class="text-muted text-center py-4">${escapeHsHtml(hsT("Type to search the imported tariff catalog."))}</td></tr>`;
         return;
     }
     setCatalogSearchSummary(hsT("Searching the imported tariff catalog..."));
     tbody.innerHTML =
-        `<tr><td colspan="6" class="text-muted text-center py-4">${escapeHsHtml(hsT("Loading..."))}</td></tr>`;
+        `<tr><td colspan="8" class="text-muted text-center py-4">${escapeHsHtml(hsT("Loading..."))}</td></tr>`;
     try {
         const res = await hsCodeTaxApi(
             "GET",
@@ -306,7 +306,7 @@ async function loadCatalogSearch() {
                 hsT('No catalog entries found for "{query}". Import data from Admin → Configuration → HS Code Tariff Catalog if needed.', { query: q }),
             );
             tbody.innerHTML =
-                `<tr><td colspan="6" class="text-muted text-center py-4">${escapeHsHtml(hsT("No catalog entries found. Import data from Admin → Configuration → HS Code Tariff Catalog."))}</td></tr>`;
+                `<tr><td colspan="8" class="text-muted text-center py-4">${escapeHsHtml(hsT("No catalog entries found. Import data from Admin → Configuration → HS Code Tariff Catalog."))}</td></tr>`;
             return;
         }
         setCatalogSearchSummary(
@@ -319,6 +319,8 @@ async function loadCatalogSearch() {
                 (r) => `
           <tr>
             <td><code>${escapeHsHtml(r.hs_code)}</code></td>
+            <td>${escapeHsHtml(r.name_en || "—")}</td>
+            <td>${escapeHsHtml(r.name_zh || "—")}</td>
             <td>${escapeHsHtml(r.name || "—")}</td>
             <td>${escapeHsHtml(r.category || "—")}</td>
             <td>${escapeHsHtml(r.tariff_rate || "—")}</td>
@@ -328,7 +330,7 @@ async function loadCatalogSearch() {
             )
             .join("");
     } catch (error) {
-        tbody.innerHTML = `<tr><td colspan="6" class="text-danger text-center py-4">${escapeHsHtml(hsT(error.message))}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="text-danger text-center py-4">${escapeHsHtml(hsT(error.message))}</td></tr>`;
     }
 }
 
@@ -346,7 +348,8 @@ function setupHsCodeCatalogAutocomplete(inputId, extraOnSelect) {
         limit: 50,
         placeholder: hsT("Start typing HS code or tariff name..."),
         renderItem: (item) =>
-            [item.hs_code, item.name].filter(Boolean).join(" — ") ||
+            window.formatHsCatalogLabel?.(item) ||
+            [item.hs_code, item.name_en, item.name_zh, item.name].filter(Boolean).join(" — ") ||
             item.id ||
             "",
         displayValue: (item) => item.hs_code || item.id || "",

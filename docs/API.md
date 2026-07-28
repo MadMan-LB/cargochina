@@ -46,9 +46,10 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 - `DELETE /products/{id}` — Delete
 
 ## HS Code Tariff Catalog (Lebanon customs reference)
-- `GET /hs-code-catalog?q=...&limit=...` — Search catalog for autocomplete and catalog lookup. Numeric HS-code queries match from the opening digits first (normalized to ignore dots/spaces), while text queries rank prefix matches before contains matches. Returns `{data: [{id, hs_code, name, category, tariff_rate, vat, section_name}], meta: {total, returned, limit, truncated, match_mode}}`. Used by Products page filter/HS field and HS Code Tax catalog/estimator fields.
+- `GET /hs-code-catalog?q=...&limit=...` — Search catalog for autocomplete and catalog lookup. Numeric HS-code queries match from the opening digits first (normalized to ignore dots/spaces). Text queries search stored original, English, and Chinese tariff names and rank prefix matches before contains matches. Returns `{data: [{id, hs_code, name, name_en, name_zh, category, tariff_rate, vat, section_name}], meta: {total, returned, limit, truncated, match_mode}}`. Used by Products, Draft an Order, and HS Code Tax fields.
 - `GET /hs-code-catalog/files` — List CSV files in `hs codes/` folder (SuperAdmin only)
-- `POST /hs-code-catalog/import` — Import `{source?: "filename.csv"}` from `hs codes/` folder. Default: lebanon_customs_tariffs.csv. Truncates and reloads. **SuperAdmin only.**
+- `POST /hs-code-catalog/import` — Import `{source?: "filename.csv"}` from `hs codes/` folder. Default: lebanon_customs_tariffs.csv. Existing English/Chinese translations are preserved when the HS code and source name are unchanged; CSV columns `name_en`/`english_name` and `name_zh`/`chinese_name` are accepted. **SuperAdmin only.**
+- `POST /hs-code-catalog/translate` — Batch-populate missing `name_en` and `name_zh` values using the configured translation provider and translation cache. Body supports `{limit?: 100}`. **SuperAdmin only.**
 
 ## Translations
 - `POST /translations` — Lookup/translate `{text, source_lang?, target_lang?}` — returns `{translated}`

@@ -6,6 +6,9 @@ document.addEventListener("DOMContentLoaded", () => {
         .getElementById("hsCatalogImportBtn")
         ?.addEventListener("click", runHsCatalogImport);
     document
+        .getElementById("hsCatalogTranslateBtn")
+        ?.addEventListener("click", runHsCatalogTranslation);
+    document
         .getElementById("trainingResetRefreshBtn")
         ?.addEventListener("click", loadTrainingResetSummary);
     document
@@ -147,6 +150,62 @@ async function runHsCatalogImport() {
     } catch (e) {
         status.textContent = typeof t === "function" ? t("Error: {message}", { message: e.message || "Import failed" }) : "Error: " + (e.message || "Import failed");
         showToast(e.message, "danger");
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function runHsCatalogTranslation() {
+    const btn = document.getElementById("hsCatalogTranslateBtn");
+    const status = document.getElementById("hsCatalogTranslateStatus");
+    if (!btn || !status || btn.disabled) return;
+
+    btn.disabled = true;
+    let totalProcessed = 0;
+    let totalUpdated = 0;
+    let totalTranslatedValues = 0;
+    let remaining = null;
+    const startedAt = performance.now();
+    status.textContent = t("Preparing bilingual HS catalog...");
+
+    try {
+        for (let batch = 0; batch < 1000; batch += 1) {
+            const res = await api("POST", "/hs-code-catalog/translate", { limit: 100 });
+            const data = res.data || {};
+            const processed = Number(data.processed || 0);
+            const updated = Number(data.updated || 0);
+            const translatedValues = Number(data.translated_values || 0);
+            remaining = Number(data.remaining || 0);
+            totalProcessed += processed;
+            totalUpdated += updated;
+            totalTranslatedValues += translatedValues;
+
+            status.textContent = t(
+                "Translated {values} name(s); {remaining} tariff row(s) remain.",
+                { values: totalTranslatedValues, remaining },
+            );
+
+            if (remaining === 0 || processed === 0) break;
+            if (updated === 0) {
+                const errors = Array.isArray(data.errors) ? data.errors : [];
+                if (errors.includes("provider_not_configured")) {
+                    throw new Error(t("Translation provider is not configured. Set TRANSLATION_PROVIDER and TRANSLATION_API_KEY in .env."));
+                }
+                throw new Error(t("No tariff names were translated. Check the translation provider and retry."));
+            }
+        }
+
+        const seconds = ((performance.now() - startedAt) / 1000).toFixed(1);
+        status.textContent = remaining === 0
+            ? t("HS catalog is searchable in English and Chinese. {values} name(s) translated in {seconds}s.", {
+                values: totalTranslatedValues,
+                seconds,
+            })
+            : t("Translation paused with {remaining} tariff row(s) remaining.", { remaining });
+        showToast(status.textContent, remaining === 0 ? "success" : "warning");
+    } catch (error) {
+        status.textContent = t("Error: {message}", { message: error.message || t("Translation failed") });
+        showToast(error.message || t("Translation failed"), "danger");
     } finally {
         btn.disabled = false;
     }

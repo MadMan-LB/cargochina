@@ -5,6 +5,17 @@
 
 ---
 
+## 2026-07-28 Bilingual HS Tariff Catalog Search
+
+- Added migration `080_hs_code_catalog_bilingual_names.sql` with nullable `name_en`, `name_zh`, and `translated_at` fields while preserving the imported original tariff name.
+- HS catalog search now matches normalized HS-code prefixes plus original, English, and Chinese tariff names. Safe autocomplete results expose all three names to Products, Draft an Order, and HS Code Tax users with existing operational page access.
+- Added a SuperAdmin Configuration action that batch-translates missing tariff names through the configured translation provider. Google requests are sent in batches of up to 100 and continue to use the shared cache, manual-correction, retry-queue, timeout, and secret-handling rules.
+- Arabic source-name detection was added to `TranslationService`; no translation is fabricated when the provider is disabled or unavailable.
+- HS catalog CSV refresh now accepts optional bilingual-name columns and preserves existing translations when the HS code and original source name are unchanged. The refresh is transactional so a failed import restores the previous catalog.
+- Local verification applied migration 080 and confirmed 6,131 source catalog rows. Translation coverage remains empty until production configures `TRANSLATION_PROVIDER` and `TRANSLATION_API_KEY` in `.env`.
+
+---
+
 ## 2026-07-08 Receiving Customer Fees, Balances Lookup, and UI Hardening
 
 - Added migration `071_warehouse_receipt_customer_fees.sql` with `warehouse_receipt_fees` to store customer-facing fees entered during warehouse receiving, such as pallet fees.

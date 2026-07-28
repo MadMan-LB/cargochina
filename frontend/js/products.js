@@ -122,7 +122,8 @@ function setupProductFilters() {
             limit: 50,
             placeholder: "Start typing HS code prefix...",
             renderItem: (item) =>
-                [item.hs_code, item.name].filter(Boolean).join(" — ") ||
+                window.formatHsCatalogLabel?.(item) ||
+                [item.hs_code, item.name_en, item.name_zh, item.name].filter(Boolean).join(" — ") ||
                 item.id ||
                 "",
             displayValue: (item) => item.hs_code || item.id || "",
@@ -392,7 +393,8 @@ function setupProductHsCodeAutocomplete() {
         limit: 50,
         placeholder: "Start typing HS code prefix...",
         renderItem: (item) =>
-            [item.hs_code, item.name].filter(Boolean).join(" — ") ||
+            window.formatHsCatalogLabel?.(item) ||
+            [item.hs_code, item.name_en, item.name_zh, item.name].filter(Boolean).join(" — ") ||
             item.id ||
             "",
         displayValue: (item) => item.hs_code || item.id || "",

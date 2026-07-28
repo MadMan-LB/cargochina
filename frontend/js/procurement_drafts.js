@@ -2342,7 +2342,8 @@
             limit: 50,
             placeholder: draftT("Start typing HS code or tariff name..."),
             renderItem: (item) =>
-                [item.hs_code, item.name].filter(Boolean).join(" — ") ||
+                window.formatHsCatalogLabel?.(item) ||
+                [item.hs_code, item.name_en, item.name_zh, item.name].filter(Boolean).join(" — ") ||
                 item.id ||
                 "",
             displayValue: (item) => item.hs_code || item.id || "",
