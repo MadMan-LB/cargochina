@@ -1367,7 +1367,7 @@ otification_preferences.php and removing the sidebar link unless the user is an 
 
 ### What changed
 - Draft Order item cards now expose separate editable English and Chinese descriptions, translate an empty counterpart on blur, provide explicit Translate/Retranslate actions, protect manual corrections from automatic overwrite, and show loading/retry/stale states.
-- Draft saves normalize and complete the description pair server-side through `TranslationService`; saving is rejected when translation is unavailable and either language remains missing. Manual corrections and cached translations remain authoritative.
+- Draft saves require at least one description language and preserve the entered side. Missing-language completion is deferred to submission/export through `TranslationService`; provider failure queues the work without blocking submission. Manual corrections and cached translations remain authoritative.
 - Manual entry, edit/reopen, Draft Order copy, Excel import, shared-carton content, legacy procurement migration, CSV, and XLSX paths preserve both canonical description fields.
 - Draft Order list search now covers both languages and operational item/order/customer/supplier metadata. Advanced status, party, canonical goods-type, brand, creator, created-date, and expected-date filters share the same parameterized query for list/count/pagination and complete filtered downloads.
 - Shared selected-order export now creates one XLSX worksheet. Every order repeats its full header and blue item header, keeps English/Chinese descriptions separate, embeds the main product image in the correct photo cell, and starts subsequent sections after separator rows and a print page break.
@@ -1390,3 +1390,12 @@ otification_preferences.php and removing the sidebar link unless the user is an 
 - Added support for legacy local upload URL/path forms while keeping workbook image resolution inside `backend/uploads`; remote images retain validation, size, timeout, and private-network restrictions.
 - No database migration was required. Existing image columns and receiving photo tables remain the source of truth.
 - Validation: PHP/JS lint passed; the three-order bilingual workbook test passed with English-above-Chinese headers, physical XLSX media, correct anchors, stale-path fallback, page breaks, and a clean no-photo value; production critical, hardening, receiving RBAC, and release preflight suites passed under XAMPP PHP.
+
+## 2026-08-03 - Draft Lifecycle Scope and Deferred Description Translation
+
+- Draft an Order list/count/filter/export queries now show only `Draft`, `Submitted`, `Confirmed`, and `Approved` procurement orders. Later warehouse/consolidation lifecycle records remain available in their operational pages and direct authorized order views.
+- Draft items may be saved and submitted with either an English or Chinese description. Every item still requires at least one language, enforced server-side at submission.
+- Added `OrderItemDescriptionService` to batch-complete only missing description fields after submission and before item-detail Excel generation. Existing English/Chinese values are never overwritten; failed provider work remains queued and does not roll back a valid submission.
+- Chinese Description now appears before English Description in normal and shared-carton Draft Order item editors. Both fields and manual Translate/Retranslate controls remain available.
+- Orders list sorting now uses `created_at DESC, id DESC`, so newly created orders consistently appear before older records regardless of expected-ready date.
+- No database migration was required; canonical nullable `order_items.description_en` and `order_items.description_cn` columns are reused.

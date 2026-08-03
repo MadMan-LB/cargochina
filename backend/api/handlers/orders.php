@@ -16,6 +16,7 @@ require_once dirname(__DIR__, 2) . '/services/OrderReceivingService.php';
 require_once dirname(__DIR__, 2) . '/services/DraftOrderCostService.php';
 require_once dirname(__DIR__, 2) . '/services/ShipmentAccountingService.php';
 require_once dirname(__DIR__, 2) . '/services/ItemNumberReservationService.php';
+require_once dirname(__DIR__, 2) . '/services/OrderItemDescriptionService.php';
 
 function orderSupportsSharedCartons(PDO $pdo): bool
 {
@@ -889,7 +890,7 @@ function fetchOrdersListRowsForRequest(PDO $pdo, bool $paginate = false, ?array 
         $countStmt->execute($params);
         $total = (int) $countStmt->fetchColumn();
     }
-    $sql .= " ORDER BY o.expected_ready_date IS NULL ASC, o.expected_ready_date ASC, o.created_at DESC, o.id DESC";
+    $sql .= " ORDER BY o.created_at DESC, o.id DESC";
     if ($paginate && !$requiresPostFilterPagination) {
         $sql .= ' LIMIT ' . ($limit + 1) . ' OFFSET ' . $offset;
     }
@@ -934,6 +935,12 @@ function fetchOrdersListRowsForRequest(PDO $pdo, bool $paginate = false, ?array 
 function orderBuildExcelEntry(PDO $pdo, int $orderId): ?array
 {
     if ($orderId <= 0) return null;
+
+    try {
+        (new OrderItemDescriptionService($pdo))->completeMissingForOrder($orderId);
+    } catch (Throwable $e) {
+        logClms('order_export_translation_failed', ['order_id' => $orderId, 'error' => $e->getMessage()]);
+    }
 
     $supplierColumns = 's.name as supplier_name, s.phone as supplier_phone, s.factory_location as supplier_factory';
     if (orderTableHasColumn($pdo, 'suppliers', 'address')) $supplierColumns .= ', s.address as supplier_address';
@@ -2180,6 +2187,18 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     if ((int) $si->fetchColumn() === 0) {
                         jsonError('Order must have at least one item to submit', 400);
                     }
+                    $descriptionService = null;
+                    if ((string) ($order['order_type'] ?? '') === 'draft_procurement') {
+                        $descriptionService = new OrderItemDescriptionService($pdo);
+                        $missingDescriptions = $descriptionService->findItemsWithoutDescription((int) $id);
+                        if ($missingDescriptions) {
+                            jsonError(
+                                'Each draft-order item needs an English or Chinese description before submission.',
+                                400,
+                                ['items.description' => 'Enter at least one description language for every item.']
+                            );
+                        }
+                    }
                     $config = require dirname(__DIR__, 2) . '/config/config.php';
                     $minPhotos = (int) ($config['min_photos_per_item'] ?? 0);
                     $submitWarning = null;
@@ -2206,6 +2225,24 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, user_id) VALUES ('order',?,'submit',?)")->execute([$id, $userId]);
                     (new NotificationService($pdo))->notifyOrderSubmitted((int) $id);
                     $response = ['data' => ['status' => 'Submitted']];
+                    if ($descriptionService !== null) {
+                        try {
+                            $translation = $descriptionService->completeMissingForOrder((int) $id);
+                            $response['data']['description_translation'] = $translation;
+                            if (($translation['pending'] ?? 0) > 0) {
+                                $translationWarning = 'Some missing description translations are queued and will be retried during export.';
+                                $submitWarning = $submitWarning
+                                    ? $submitWarning . ' ' . $translationWarning
+                                    : $translationWarning;
+                            }
+                        } catch (Throwable $e) {
+                            logClms('draft_order_submit_translation_failed', ['order_id' => (int) $id, 'error' => $e->getMessage()]);
+                            $translationWarning = 'The order was submitted, but missing description translations could not be completed yet.';
+                            $submitWarning = $submitWarning
+                                ? $submitWarning . ' ' . $translationWarning
+                                : $translationWarning;
+                        }
+                    }
                     if ($submitWarning) {
                         $response['warning'] = $submitWarning;
                     }

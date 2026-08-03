@@ -11,7 +11,7 @@ require_once dirname(__DIR__, 2) . '/services/NotificationService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderCountryService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderItemNumberingService.php';
 require_once dirname(__DIR__, 2) . '/services/ItemNumberReservationService.php';
-require_once dirname(__DIR__, 2) . '/services/TranslationService.php';
+require_once dirname(__DIR__, 2) . '/services/OrderItemDescriptionService.php';
 require_once dirname(__DIR__, 2) . '/services/ItemClassificationService.php';
 require_once dirname(__DIR__, 2) . '/services/DraftOrderCostService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
@@ -214,37 +214,9 @@ function draftOrderResolveDestinationCountryId(PDO $pdo, int $customerId, array 
     );
 }
 
-function draftOrderTranslationService(PDO $pdo): TranslationService
-{
-    static $instances = [];
-
-    $key = spl_object_id($pdo);
-    if (!isset($instances[$key])) {
-        $instances[$key] = new TranslationService($pdo);
-    }
-
-    return $instances[$key];
-}
-
 function draftOrderContainsChinese(string $text): bool
 {
     return preg_match('/[\x{4e00}-\x{9fff}]/u', $text) === 1;
-}
-
-function draftOrderTranslateText(PDO $pdo, string $text, string $sourceLang, string $targetLang): string
-{
-    $text = trim($text);
-    if ($text === '') {
-        return '';
-    }
-
-    $sourceLang = strtolower(substr(trim($sourceLang), 0, 2)) ?: 'auto';
-    $targetLang = strtolower(substr(trim($targetLang), 0, 2)) ?: 'en';
-    if ($sourceLang === $targetLang) {
-        return $text;
-    }
-
-    return draftOrderTranslationService($pdo)->translate($text, $sourceLang, $targetLang);
 }
 
 function draftOrderNormalizeDescriptionPair(PDO $pdo, string $text, string $translated): array
@@ -274,19 +246,6 @@ function draftOrderNormalizeDescriptionPair(PDO $pdo, string $text, string $tran
                 'description_translated' => $text,
             ];
         }
-        if ($text === $translated) {
-            if ($textHasChinese) {
-                return [
-                    'description_text' => $text,
-                    'description_translated' => draftOrderTranslateText($pdo, $text, 'zh', 'en'),
-                ];
-            }
-            return [
-                'description_text' => draftOrderTranslateText($pdo, $text, 'en', 'zh'),
-                'description_translated' => $text,
-            ];
-        }
-
         return [
             'description_text' => $text,
             'description_translated' => $translated,
@@ -297,12 +256,12 @@ function draftOrderNormalizeDescriptionPair(PDO $pdo, string $text, string $tran
     if (draftOrderContainsChinese($source)) {
         return [
             'description_text' => $source,
-            'description_translated' => draftOrderTranslateText($pdo, $source, 'zh', 'en'),
+            'description_translated' => '',
         ];
     }
 
     return [
-        'description_text' => draftOrderTranslateText($pdo, $source, 'en', 'zh'),
+        'description_text' => '',
         'description_translated' => $source,
     ];
 }
@@ -348,13 +307,6 @@ function draftOrderBuildDescriptionStrings(PDO $pdo, array $entries): array
             continue;
         }
         $pair = draftOrderNormalizeDescriptionPair($pdo, $text, $translated);
-        if (trim((string) ($pair['description_text'] ?? '')) === '' || trim((string) ($pair['description_translated'] ?? '')) === '') {
-            jsonError(
-                'Both English and Chinese descriptions are required. Translation is currently unavailable; retry translation or enter the missing language manually.',
-                422,
-                ['items.description' => 'Enter both English and Chinese descriptions, or retry translation.']
-            );
-        }
         $normalized[] = $pair;
         $cnParts[] = $pair['description_text'];
         $enParts[] = $pair['description_translated'];
@@ -1900,8 +1852,9 @@ function draftOrderBuildExportRows(array $sections): array
 
 function draftOrderListQuery(PDO $pdo, array $filters, bool $paginate = true): array
 {
-    $where = ["o.order_type = 'draft_procurement'"];
-    $params = [];
+    $visibleStatuses = ['Draft', 'Submitted', 'Confirmed', 'Approved'];
+    $where = ["o.order_type = 'draft_procurement'", 'o.status IN (?,?,?,?)'];
+    $params = $visibleStatuses;
     $q = trim((string) ($filters['q'] ?? ''));
     if ($q !== '') {
         $like = '%' . $q . '%';
@@ -1924,7 +1877,10 @@ function draftOrderListQuery(PDO $pdo, array $filters, bool $paginate = true): a
     }
     $statuses = $filters['status'] ?? [];
     if (!is_array($statuses)) $statuses = preg_split('/\s*,\s*/', (string) $statuses) ?: [];
-    $statuses = array_values(array_unique(array_filter(array_map('trim', $statuses))));
+    $statuses = array_values(array_intersect(
+        $visibleStatuses,
+        array_unique(array_filter(array_map('trim', $statuses)))
+    ));
     if ($statuses) {
         $where[] = 'o.status IN (' . implode(',', array_fill(0, count($statuses), '?')) . ')';
         array_push($params, ...$statuses);
@@ -2013,7 +1969,7 @@ function draftOrderListQuery(PDO $pdo, array $filters, bool $paginate = true): a
 
 function draftOrderFilterOptions(PDO $pdo, array $filters = []): array
 {
-    $statuses = $pdo->query("SELECT DISTINCT status FROM orders WHERE order_type='draft_procurement' AND status IS NOT NULL AND status<>'' ORDER BY status")->fetchAll(PDO::FETCH_COLUMN);
+    $statuses = ['Draft', 'Submitted', 'Confirmed', 'Approved'];
     $brands = $pdo->query("SELECT DISTINCT COALESCE(NULLIF(TRIM(brand),''), NULLIF(TRIM(what_brand),'')) brand FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE o.order_type='draft_procurement' HAVING brand IS NOT NULL ORDER BY brand LIMIT 200")->fetchAll(PDO::FETCH_COLUMN);
     $creators = [];
     if (hasAnyRole(['SuperAdmin', 'ChinaAdmin', 'LebanonAdmin'])) {
@@ -2138,6 +2094,11 @@ function draftOrderExportCsv(PDO $pdo, int $orderId): void
 
 function draftOrderBuildExcelEntry(PDO $pdo, int $orderId): array
 {
+    try {
+        (new OrderItemDescriptionService($pdo))->completeMissingForOrder($orderId);
+    } catch (Throwable $e) {
+        logClms('draft_order_export_translation_failed', ['order_id' => $orderId, 'error' => $e->getMessage()]);
+    }
     $order = draftOrderFetchOrderPayload($pdo, $orderId);
     $excelItems = [];
 

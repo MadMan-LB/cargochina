@@ -22,17 +22,11 @@ function procurementDraftResolveDescriptionPair(PDO $pdo, array $item): array
             $english = $fallback;
         }
     }
-    if ($english === '' && $chinese !== '') {
-        $english = trim($service->translate($chinese, 'zh', 'en'));
-    }
-    if ($chinese === '' && $english !== '') {
-        $chinese = trim($service->translate($english, 'en', 'zh'));
-    }
-    if ($english === '' || $chinese === '') {
+    if ($english === '' && $chinese === '') {
         jsonError(
-            'Both English and Chinese descriptions are required. Translation is currently unavailable; retry translation or enter the missing language manually.',
+            'An English or Chinese description is required.',
             422,
-            ['items.description' => 'Enter both English and Chinese descriptions, or retry translation.']
+            ['items.description' => 'Enter at least one description language.']
         );
     }
 

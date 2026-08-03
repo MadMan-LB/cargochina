@@ -2115,17 +2115,17 @@
               <div class="draft-description-language-grid">
                 <div>
                   <div class="d-flex align-items-center justify-content-between gap-2 mb-1">
-                    <label class="form-label form-label-sm mb-0">${escapeHtml(draftT("English Description"))}</label>
-                    <button type="button" class="btn btn-link btn-sm p-0 draft-description-translate" data-source-lang="en">${escapeHtml(draftT(en ? "Retranslate" : "Translate"))}</button>
-                  </div>
-                  <textarea rows="2" class="form-control form-control-sm draft-item-description-entry-input draft-description-en" lang="en" placeholder="${escapeHtml(draftT("English product description"))}">${escapeHtml(en)}</textarea>
-                </div>
-                <div>
-                  <div class="d-flex align-items-center justify-content-between gap-2 mb-1">
                     <label class="form-label form-label-sm mb-0">${escapeHtml(draftT("Chinese Description"))}</label>
                     <button type="button" class="btn btn-link btn-sm p-0 draft-description-translate" data-source-lang="zh">${escapeHtml(draftT(cn ? "Retranslate" : "Translate"))}</button>
                   </div>
                   <textarea rows="2" class="form-control form-control-sm draft-description-cn" lang="zh" placeholder="${escapeHtml(draftT("Chinese product description"))}">${escapeHtml(cn)}</textarea>
+                </div>
+                <div>
+                  <div class="d-flex align-items-center justify-content-between gap-2 mb-1">
+                    <label class="form-label form-label-sm mb-0">${escapeHtml(draftT("English Description"))}</label>
+                    <button type="button" class="btn btn-link btn-sm p-0 draft-description-translate" data-source-lang="en">${escapeHtml(draftT(en ? "Retranslate" : "Translate"))}</button>
+                  </div>
+                  <textarea rows="2" class="form-control form-control-sm draft-item-description-entry-input draft-description-en" lang="en" placeholder="${escapeHtml(draftT("English product description"))}">${escapeHtml(en)}</textarea>
                 </div>
               </div>
               <div class="d-flex justify-content-between align-items-center gap-2 mt-1">
@@ -2373,8 +2373,8 @@
                 </div>
                 <div class="col-12 col-xl-4">
                   <div class="row g-1">
-                    <div class="col-12 col-md-6"><div class="d-flex justify-content-between"><label class="form-label draft-item-label">${escapeHtml(draftT("English Description"))}</label><button type="button" class="btn btn-link btn-sm p-0 draft-description-translate" data-source-lang="en">${escapeHtml(draftT("Translate"))}</button></div><input type="text" class="form-control form-control-sm draft-shared-content-description-input draft-description-en" lang="en" placeholder="${escapeHtml(draftT("English description"))}"></div>
                     <div class="col-12 col-md-6"><div class="d-flex justify-content-between"><label class="form-label draft-item-label">${escapeHtml(draftT("Chinese Description"))}</label><button type="button" class="btn btn-link btn-sm p-0 draft-description-translate" data-source-lang="zh">${escapeHtml(draftT("Translate"))}</button></div><input type="text" class="form-control form-control-sm draft-shared-content-description-cn draft-description-cn" lang="zh" placeholder="${escapeHtml(draftT("Chinese description"))}"></div>
+                    <div class="col-12 col-md-6"><div class="d-flex justify-content-between"><label class="form-label draft-item-label">${escapeHtml(draftT("English Description"))}</label><button type="button" class="btn btn-link btn-sm p-0 draft-description-translate" data-source-lang="en">${escapeHtml(draftT("Translate"))}</button></div><input type="text" class="form-control form-control-sm draft-shared-content-description-input draft-description-en" lang="en" placeholder="${escapeHtml(draftT("English description"))}"></div>
                   </div>
                   <input type="hidden" class="draft-shared-content-product-id">
                   <div class="form-text draft-shared-content-meta"></div><small class="draft-description-status text-muted" aria-live="polite"></small>

@@ -738,7 +738,7 @@ test('orders handler allows create without expected_ready_date', function () use
     }
 });
 
-test('draft-orders handler allows create without expected_ready_date and auto-fills a known single-language description', function () use ($pdo, $root) {
+test('draft-order submit completes a known Chinese translation from an English-only description', function () use ($pdo, $root) {
     $customerId = (int) $pdo->query("SELECT id FROM customers ORDER BY id LIMIT 1")->fetchColumn();
     $supplierId = (int) $pdo->query("SELECT id FROM suppliers ORDER BY id LIMIT 1")->fetchColumn();
     if ($customerId <= 0 || $supplierId <= 0) {
@@ -796,18 +796,35 @@ test('draft-orders handler allows create without expected_ready_date and auto-fi
         if (trim((string) ($row['description_en'] ?? '')) !== $label) {
             throw new Exception('Expected English-side description to keep the source text');
         }
-        if (trim((string) ($row['description_cn'] ?? '')) !== $translatedLabel) {
-            throw new Exception('Expected the server to populate the known Chinese translation');
+        if (trim((string) ($row['description_cn'] ?? '')) !== '') {
+            throw new Exception('Draft save should defer a missing translation until submission');
         }
         if (!empty($row['required_design'])) {
             throw new Exception('Auto-created product should not default required_design to on');
+        }
+
+        $submit = json_decode(runHandlerScript(
+            $root,
+            'backend/api/handlers/orders.php',
+            'POST',
+            (string) $orderId,
+            'submit'
+        ), true);
+        if (($submit['data']['status'] ?? '') !== 'Submitted') {
+            throw new Exception('English-only draft did not submit successfully');
+        }
+        $rowStmt->execute([$orderId]);
+        $submittedRow = $rowStmt->fetch(PDO::FETCH_ASSOC);
+        if (trim((string) ($submittedRow['description_en'] ?? '')) !== $label
+            || trim((string) ($submittedRow['description_cn'] ?? '')) !== $translatedLabel) {
+            throw new Exception('Submission did not complete and persist the missing Chinese translation');
         }
     } finally {
         cleanupCreatedOrder($pdo, $orderId, $label);
     }
 });
 
-test('draft-orders handler auto-fills English from a known Chinese-only description', function () use ($pdo, $root) {
+test('draft-order submit completes a known English translation from a Chinese-only description', function () use ($pdo, $root) {
     $customerId = (int) $pdo->query("SELECT id FROM customers ORDER BY id LIMIT 1")->fetchColumn();
     $supplierId = (int) $pdo->query("SELECT id FROM suppliers ORDER BY id LIMIT 1")->fetchColumn();
     if ($customerId <= 0 || $supplierId <= 0) throw new Exception('Missing customer or supplier seed data');
@@ -844,11 +861,93 @@ test('draft-orders handler auto-fills English from a known Chinese-only descript
         $stmt->execute([$orderId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if (trim((string) ($row['description_cn'] ?? '')) !== $chinese
-            || trim((string) ($row['description_en'] ?? '')) !== $english) {
-            throw new Exception('Chinese-to-English server completion did not persist both languages');
+            || trim((string) ($row['description_en'] ?? '')) !== '') {
+            throw new Exception('Chinese-only draft save did not preserve the entered language');
+        }
+        $submit = json_decode(runHandlerScript(
+            $root,
+            'backend/api/handlers/orders.php',
+            'POST',
+            (string) $orderId,
+            'submit'
+        ), true);
+        if (($submit['data']['status'] ?? '') !== 'Submitted') {
+            throw new Exception('Chinese-only draft did not submit successfully');
+        }
+        $stmt->execute([$orderId]);
+        $submittedRow = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (trim((string) ($submittedRow['description_cn'] ?? '')) !== $chinese
+            || trim((string) ($submittedRow['description_en'] ?? '')) !== $english) {
+            throw new Exception('Submission did not complete and persist the missing English translation');
         }
     } finally {
         if ($orderId > 0) cleanupCreatedOrder($pdo, $orderId, $chinese);
+    }
+});
+
+test('draft-order submission is not blocked when translation is unavailable', function () use ($pdo, $root) {
+    $customerId = (int) $pdo->query("SELECT id FROM customers ORDER BY id LIMIT 1")->fetchColumn();
+    $supplierId = (int) $pdo->query("SELECT id FROM suppliers ORDER BY id LIMIT 1")->fetchColumn();
+    if ($customerId <= 0 || $supplierId <= 0) throw new Exception('Missing customer or supplier seed data');
+
+    $previousProvider = getenv('TRANSLATION_PROVIDER');
+    putenv('TRANSLATION_PROVIDER=disabled');
+    $_ENV['TRANSLATION_PROVIDER'] = 'disabled';
+    $english = 'Pending translation ' . bin2hex(random_bytes(6));
+    $orderId = 0;
+    try {
+        $created = json_decode(runHandlerScript($root, 'backend/api/handlers/draft-orders.php', 'POST', null, null, [], [
+            'customer_id' => $customerId,
+            'currency' => 'USD',
+            'supplier_sections' => [[
+                'supplier_id' => $supplierId,
+                'items' => [[
+                    'description_entries' => [['description_translated' => $english]],
+                    'pieces_per_carton' => 1,
+                    'cartons' => 1,
+                    'unit_price' => 1,
+                    'cbm_mode' => 'direct',
+                    'cbm' => 0.01,
+                    'weight' => 0.1,
+                    'photo_paths' => [],
+                    'custom_design_required' => 0,
+                    'custom_design_paths' => [],
+                    'dimensions_scope' => 'carton',
+                ]],
+            ]],
+        ]), true);
+        $orderId = (int) ($created['data']['id'] ?? 0);
+        if ($orderId <= 0) throw new Exception('English-only draft save failed: ' . json_encode($created));
+
+        $submitted = json_decode(runHandlerScript(
+            $root,
+            'backend/api/handlers/orders.php',
+            'POST',
+            (string) $orderId,
+            'submit'
+        ), true);
+        if (($submitted['data']['status'] ?? '') !== 'Submitted') {
+            throw new Exception('Unavailable translation provider blocked submission: ' . json_encode($submitted));
+        }
+        if ((int) ($submitted['data']['description_translation']['pending'] ?? 0) < 1) {
+            throw new Exception('Missing translation was not reported as pending');
+        }
+        $stmt = $pdo->prepare('SELECT description_en, description_cn FROM order_items WHERE order_id=? LIMIT 1');
+        $stmt->execute([$orderId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (trim((string) ($row['description_en'] ?? '')) !== $english
+            || trim((string) ($row['description_cn'] ?? '')) !== '') {
+            throw new Exception('Pending translation changed or duplicated the entered description');
+        }
+    } finally {
+        if ($orderId > 0) cleanupCreatedOrder($pdo, $orderId, $english);
+        if ($previousProvider === false) {
+            putenv('TRANSLATION_PROVIDER');
+            unset($_ENV['TRANSLATION_PROVIDER']);
+        } else {
+            putenv('TRANSLATION_PROVIDER=' . $previousProvider);
+            $_ENV['TRANSLATION_PROVIDER'] = $previousProvider;
+        }
     }
 });
 
@@ -889,6 +988,52 @@ test('standard order creation key replays the first committed result', function 
         cleanupCreatedOrder($pdo, $orderId, $label);
         $pdo->prepare("DELETE FROM translation_manual_corrections WHERE source_hash=? AND source_lang='en' AND target_lang='zh'")
             ->execute([hash('sha256', $label)]);
+    }
+});
+
+test('orders list is sorted newest first', function () use ($pdo, $root) {
+    $customerId = (int) $pdo->query("SELECT id FROM customers ORDER BY id LIMIT 1")->fetchColumn();
+    $supplierId = (int) $pdo->query("SELECT id FROM suppliers ORDER BY id LIMIT 1")->fetchColumn();
+    if ($customerId <= 0 || $supplierId <= 0) throw new Exception('Missing order sorting fixtures');
+
+    $createdIds = [];
+    try {
+        foreach (['older' => '2098-12-30 10:00:00', 'newer' => '2098-12-31 10:00:00'] as $name => $createdAt) {
+            $label = 'Newest-first ' . $name . ' ' . bin2hex(random_bytes(4));
+            $created = json_decode(runHandlerScript($root, 'backend/api/handlers/orders.php', 'POST', null, null, [], [
+                'customer_id' => $customerId,
+                'supplier_id' => $supplierId,
+                'currency' => 'USD',
+                'items' => [[
+                    'description_en' => $label,
+                    'description_cn' => '排序测试 ' . $label,
+                    'quantity' => 1,
+                    'unit' => 'pieces',
+                    'declared_cbm' => 0.01,
+                    'declared_weight' => 0.1,
+                    'unit_price' => 1,
+                    'total_amount' => 1,
+                ]],
+            ]), true);
+            $orderId = (int) ($created['data']['id'] ?? 0);
+            if ($orderId <= 0) throw new Exception('Could not create order sorting fixture');
+            $createdIds[$name] = $orderId;
+            $pdo->prepare('UPDATE orders SET created_at=? WHERE id=?')->execute([$createdAt, $orderId]);
+        }
+
+        $result = json_decode(runHandlerScript($root, 'backend/api/handlers/orders.php', 'GET', null, null, [
+            'customer_id' => $customerId,
+            'order_type' => 'standard',
+            'limit' => 100,
+        ]), true);
+        $ids = array_map('intval', array_column($result['data'] ?? [], 'id'));
+        $newerPosition = array_search($createdIds['newer'], $ids, true);
+        $olderPosition = array_search($createdIds['older'], $ids, true);
+        if ($newerPosition === false || $olderPosition === false || $newerPosition >= $olderPosition) {
+            throw new Exception('Orders are not returned newest to oldest: ' . json_encode($ids));
+        }
+    } finally {
+        foreach ($createdIds as $orderId) cleanupCreatedOrder($pdo, $orderId);
     }
 });
 
@@ -1195,6 +1340,18 @@ test('draft search and advanced filters share exact bilingual, status, party, it
         if ((int) ($combined['filter_options']['selected']['customer_id']['id'] ?? 0) !== $customerId
             || (int) ($combined['filter_options']['selected']['supplier_id']['id'] ?? 0) !== $supplierId) {
             throw new Exception('Selected customer/supplier filter labels were not retained');
+        }
+        if (($combined['filter_options']['statuses'] ?? []) !== ['Draft', 'Submitted', 'Confirmed', 'Approved']) {
+            throw new Exception('Draft-order status choices are not limited to the intended four statuses');
+        }
+
+        $pdo->prepare("UPDATE orders SET status='ReadyForConsolidation' WHERE id=?")->execute([$orderId]);
+        $hidden = json_decode(runHandlerScript($root, 'backend/api/handlers/draft-orders.php', 'GET', null, null, [
+            'q' => $code,
+            'limit' => 10,
+        ]), true);
+        if (in_array($orderId, array_map('intval', array_column($hidden['data'] ?? [], 'id')), true)) {
+            throw new Exception('A draft outside Draft/Submitted/Confirmed/Approved remained visible');
         }
     } finally {
         if ($orderId > 0) cleanupCreatedOrder($pdo, $orderId, $english);
