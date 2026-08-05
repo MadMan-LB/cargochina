@@ -214,13 +214,24 @@ function receivingFetchQueueRowsForRequest(PDO $pdo, bool $paginate = true, ?arr
             $pdo,
             array_map(static fn(array $item): int => (int) ($item['id'] ?? 0), $itemRows)
         );
+        $orderReceiptImages = clmsOrderReceiptImagePaths($pdo, $orderIds);
+        $firstItemByOrder = [];
+        foreach ($itemRows as $itemRow) {
+            $itemOrderId = (int) ($itemRow['order_id'] ?? 0);
+            if ($itemOrderId > 0 && !isset($firstItemByOrder[$itemOrderId])) {
+                $firstItemByOrder[$itemOrderId] = (int) ($itemRow['id'] ?? 0);
+            }
+        }
         foreach ($itemRows as $item) {
             $oid = (int) ($item['order_id'] ?? 0);
             unset($item['order_id']);
             $item['image_paths'] = clmsMergeImagePathLists(
                 $item['image_paths'] ?? [],
                 $item['product_image_paths'] ?? [],
-                $receiptImages[(int) ($item['id'] ?? 0)] ?? []
+                $receiptImages[(int) ($item['id'] ?? 0)] ?? [],
+                (int) ($item['id'] ?? 0) === ($firstItemByOrder[$oid] ?? 0)
+                    ? ($orderReceiptImages[$oid] ?? [])
+                    : []
             );
             $itemsByOrder[$oid][] = $item;
         }

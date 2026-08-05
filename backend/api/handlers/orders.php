@@ -709,11 +709,21 @@ function fetchOrderItemsForOrders(PDO $pdo, array $orderIds): array
         $pdo,
         array_map(static fn(array $row): int => (int) ($row['id'] ?? 0), $rows)
     );
+    $orderReceiptImages = clmsOrderReceiptImagePaths($pdo, $ids);
     $grouped = [];
     foreach ($rows as $row) {
         $row['receipt_image_paths'] = $receiptImages[(int) ($row['id'] ?? 0)] ?? [];
         $grouped[(int) ($row['order_id'] ?? 0)][] = $row;
     }
+    foreach ($grouped as $orderId => &$orderItems) {
+        if ($orderItems && !empty($orderReceiptImages[$orderId])) {
+            $orderItems[0]['receipt_image_paths'] = clmsMergeImagePathLists(
+                $orderItems[0]['receipt_image_paths'] ?? [],
+                $orderReceiptImages[$orderId]
+            );
+        }
+    }
+    unset($orderItems);
 
     return $grouped;
 }

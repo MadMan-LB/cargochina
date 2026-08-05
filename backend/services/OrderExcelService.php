@@ -274,7 +274,7 @@ class OrderExcelService
 
             return [
                 (int) ($row['id'] ?? 0),
-                $items[0]['image_paths'] ?? [],
+                $this->collectItemImagePaths($items),
                 (string) ($row['order_type'] ?? 'standard'),
                 self::formatCustomerDisplay($row, $items),
                 $supplierDisplay,
@@ -353,7 +353,7 @@ class OrderExcelService
 
             return [
                 (int) ($row['id'] ?? 0),
-                $items[0]['image_paths'] ?? [],
+                $this->collectItemImagePaths($items),
                 self::formatCustomerDisplay($row, $items),
                 (string) ($row['supplier_name'] ?? ''),
                 (string) ($row['supplier_phone'] ?? ''),
@@ -1350,25 +1350,59 @@ class OrderExcelService
 
     private function resolveWorkbookImageSource(string $path): string
     {
-        $urlPath = preg_match('#^https?://#i', $path) ? (string) parse_url($path, PHP_URL_PATH) : $path;
-        $localRelative = ltrim(str_replace('\\', '/', $urlPath), '/');
-        foreach (['cargochina/backend/', 'backend/'] as $prefix) {
+        $path = trim(html_entity_decode($path, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        if ($path === '' || str_starts_with(strtolower($path), 'data:')) {
+            return '';
+        }
+
+        $isRemote = preg_match('#^https?://#i', $path) === 1;
+        $localCandidate = $path;
+        if ($isRemote) {
+            $query = (string) parse_url($path, PHP_URL_QUERY);
+            if ($query !== '') {
+                parse_str($query, $queryValues);
+                foreach (['path', 'file_path', 'file', 'image'] as $queryKey) {
+                    if (isset($queryValues[$queryKey]) && is_string($queryValues[$queryKey]) && trim($queryValues[$queryKey]) !== '') {
+                        $localCandidate = rawurldecode(trim($queryValues[$queryKey]));
+                        break;
+                    }
+                }
+            }
+            if ($localCandidate === $path) {
+                $localCandidate = rawurldecode((string) parse_url($path, PHP_URL_PATH));
+            }
+        }
+
+        $backendRoot = realpath($this->backendDir) ?: $this->backendDir;
+        $backendPrefix = rtrim(str_replace('\\', '/', $backendRoot), '/') . '/';
+        $absoluteCandidate = realpath($localCandidate);
+        if ($absoluteCandidate !== false && is_file($absoluteCandidate) && is_readable($absoluteCandidate)) {
+            $absoluteNormalized = str_replace('\\', '/', $absoluteCandidate);
+            if (str_starts_with(strtolower($absoluteNormalized . (is_dir($absoluteCandidate) ? '/' : '')), strtolower($backendPrefix))) {
+                return $absoluteCandidate;
+            }
+        }
+
+        $localRelative = ltrim(str_replace('\\', '/', $localCandidate), '/');
+        $projectDirectory = strtolower(basename(dirname($this->backendDir)));
+        foreach ([$projectDirectory . '/backend/', 'cargochina/backend/', 'backend/', $projectDirectory . '/'] as $prefix) {
             if (str_starts_with(strtolower($localRelative), $prefix)) {
                 $localRelative = substr($localRelative, strlen($prefix));
                 break;
             }
         }
-        if (str_starts_with($localRelative, 'uploads/')) {
-            if (str_contains($localRelative, '../')) return '';
-            $localPath = $this->backendDir . '/' . $localRelative;
-            if (is_file($localPath) && is_readable($localPath)) {
+        if (str_contains($localRelative, '../') || str_contains($localRelative, "\0")) {
+            return '';
+        }
+        $localPath = realpath($this->backendDir . '/' . $localRelative);
+        if ($localPath !== false && is_file($localPath) && is_readable($localPath)) {
+            $localNormalized = str_replace('\\', '/', $localPath);
+            if (str_starts_with(strtolower($localNormalized), strtolower($backendPrefix))) {
                 return $localPath;
             }
         }
-        if (!preg_match('#^https?://#i', $path)) {
-            $relative = ltrim(str_replace('\\', '/', $path), '/');
-            if (str_contains($relative, '../')) return '';
-            return $this->backendDir . '/' . $relative;
+        if (!$isRemote) {
+            return '';
         }
         $url = parse_url($path);
         $host = strtolower((string) ($url['host'] ?? ''));
@@ -1391,18 +1425,49 @@ class OrderExcelService
 
     private function normalizeImagePaths($imagePaths): array
     {
-        if (is_string($imagePaths)) {
-            $decoded = json_decode($imagePaths, true);
-            $imagePaths = is_array($decoded) ? $decoded : [];
-        }
+        $paths = [];
+        $collect = function ($value) use (&$collect, &$paths): void {
+            if (is_string($value)) {
+                $value = trim($value);
+                if ($value === '') return;
+                if (($value[0] ?? '') === '[' || ($value[0] ?? '') === '{') {
+                    $decoded = json_decode($value, true);
+                    if (is_array($decoded)) {
+                        $collect($decoded);
+                        return;
+                    }
+                }
+                $paths[$value] = true;
+                return;
+            }
+            if (!is_array($value)) return;
 
-        if (!is_array($imagePaths)) {
-            return [];
-        }
+            foreach (['file_path', 'path', 'url', 'image_path', 'photo_path'] as $pathKey) {
+                if (isset($value[$pathKey]) && is_string($value[$pathKey])) {
+                    $collect($value[$pathKey]);
+                }
+            }
+            foreach ($value as $key => $nested) {
+                if (in_array((string) $key, ['file_path', 'path', 'url', 'image_path', 'photo_path'], true)) continue;
+                if (is_array($nested) || is_string($nested)) {
+                    $collect($nested);
+                }
+            }
+        };
+        $collect($imagePaths);
+        return array_keys($paths);
+    }
 
-        return array_values(array_filter(array_map(function ($path): string {
-            return trim((string) $path);
-        }, $imagePaths), 'strlen'));
+    private function collectItemImagePaths(array $items): array
+    {
+        $paths = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) continue;
+            foreach ($this->normalizeImagePaths($item['image_paths'] ?? []) as $path) {
+                $paths[$path] = true;
+            }
+        }
+        return array_keys($paths);
     }
 
     private function itemText(array $item, string $key): string

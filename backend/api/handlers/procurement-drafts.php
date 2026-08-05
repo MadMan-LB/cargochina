@@ -194,7 +194,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $draft = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$draft) jsonError('Draft not found', 404);
         $chk = $pdo->query("SHOW COLUMNS FROM products LIKE 'image_paths'");
-        $imgCol = ($chk && $chk->rowCount() > 0) ? 'p.image_paths,' : '';
+        $imgCol = ($chk && $chk->rowCount() > 0) ? 'p.image_paths AS product_image_paths,' : '';
         $chkDim = $pdo->query("SHOW COLUMNS FROM products LIKE 'dimensions_scope'");
         $dimCol = ($chkDim && $chkDim->rowCount() > 0) ? 'p.dimensions_scope,' : '';
         $itemsStmt = $pdo->prepare("SELECT pdi.*, p.description_cn, p.description_en, p.cbm, p.weight, p.unit_price, $imgCol $dimCol p.pieces_per_carton FROM procurement_draft_items pdi LEFT JOIN products p ON pdi.product_id = p.id WHERE pdi.draft_id = ? ORDER BY pdi.sort_order, pdi.id");
@@ -229,7 +229,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 'supplier_name'          => $orderLike['supplier_name'],
                 'express_number'         => trim((string) ($it['express_number'] ?? '')),
                 'size'                   => trim((string) ($it['size'] ?? '')),
-                'image_paths'            => !empty($it['image_paths']) ? (is_string($it['image_paths']) ? json_decode($it['image_paths'], true) : $it['image_paths']) : [],
+                'image_paths'            => clmsMergeImagePathLists(
+                    $it['image_paths'] ?? [],
+                    $it['product_image_paths'] ?? []
+                ),
                 'dimensions_scope'      => $it['dimensions_scope'] ?? 'piece',
                 'product_dimensions_scope' => $it['dimensions_scope'] ?? 'piece',
             ];

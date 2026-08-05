@@ -537,6 +537,44 @@ function clmsReceiptItemImagePaths(PDO $pdo, array $orderItemIds): array
     }
 }
 
+function clmsOrderReceiptImagePaths(PDO $pdo, array $orderIds): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $orderIds), static fn(int $id): bool => $id > 0)));
+    if (!$ids) {
+        return [];
+    }
+
+    try {
+        $hasVoidedAt = false;
+        $column = $pdo->query("SHOW COLUMNS FROM warehouse_receipts LIKE 'voided_at'");
+        if ($column) {
+            $hasVoidedAt = $column->rowCount() > 0;
+        }
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $sql = "SELECT wr.order_id, wrp.file_path
+                FROM warehouse_receipt_photos wrp
+                JOIN warehouse_receipts wr ON wr.id = wrp.receipt_id
+                WHERE wr.order_id IN ($placeholders)";
+        if ($hasVoidedAt) {
+            $sql .= ' AND wr.voided_at IS NULL';
+        }
+        $sql .= ' ORDER BY wr.received_at DESC, wrp.id ASC';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($ids);
+        $paths = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $orderId = (int) ($row['order_id'] ?? 0);
+            $path = trim((string) ($row['file_path'] ?? ''));
+            if ($orderId > 0 && $path !== '') {
+                $paths[$orderId][$path] = true;
+            }
+        }
+        return array_map('array_keys', $paths);
+    } catch (Throwable $e) {
+        return [];
+    }
+}
+
 function normalizeStoredUploadPathList(array $paths): array
 {
     $normalized = [];

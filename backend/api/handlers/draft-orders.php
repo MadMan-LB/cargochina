@@ -1476,11 +1476,14 @@ function draftOrderFetchOrderItemRows(PDO $pdo, int $orderId): array
     }
 
     $receiptImages = clmsReceiptItemImagePaths($pdo, $itemIds);
+    $orderReceiptImages = clmsOrderReceiptImagePaths($pdo, [$orderId]);
+    $firstItemId = isset($items[0]['id']) ? (int) $items[0]['id'] : 0;
     foreach ($items as &$item) {
         $item['image_paths'] = clmsMergeImagePathLists(
             $item['image_paths'] ?? [],
             $item['product_image_paths'] ?? [],
-            $receiptImages[(int) $item['id']] ?? []
+            $receiptImages[(int) $item['id']] ?? [],
+            (int) $item['id'] === $firstItemId ? ($orderReceiptImages[$orderId] ?? []) : []
         );
         $item['description_entries'] = draftOrderSplitDescriptionEntries($item['description_cn'] ?? null, $item['description_en'] ?? null);
         $scope = strtolower((string) ($item['product_dimensions_scope'] ?? 'carton'));

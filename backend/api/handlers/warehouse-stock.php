@@ -25,6 +25,57 @@ function warehouseStockHasColumn(PDO $pdo, string $table, string $column): bool
     return $cache[$key];
 }
 
+function warehouseStockStatusGroups(): array
+{
+    return [
+        'InTransit' => ['InTransitToWarehouse'],
+        'InWarehouse' => ['ReceivedAtWarehouse', 'AwaitingCustomerConfirmation', 'Confirmed', 'ReadyForConsolidation'],
+    ];
+}
+
+function warehouseStockNormalizeStateFilters($value): array
+{
+    $values = is_array($value) ? $value : (trim((string) $value) !== '' ? [$value] : []);
+    $aliases = [
+        'intransit' => 'InTransit',
+        'intransittowarehouse' => 'InTransit',
+        'inwarehouse' => 'InWarehouse',
+        'warehousereceived' => 'InWarehouse',
+        'receivedatwarehouse' => 'InWarehouse',
+        'awaitingcustomerconfirmation' => 'InWarehouse',
+        'confirmed' => 'InWarehouse',
+        'readyforconsolidation' => 'InWarehouse',
+    ];
+    $states = [];
+    foreach ($values as $state) {
+        $key = strtolower(preg_replace('/[^a-z0-9]+/i', '', trim((string) $state)));
+        if (isset($aliases[$key])) {
+            $states[$aliases[$key]] = true;
+        }
+    }
+    return array_keys($states);
+}
+
+function warehouseStockSearchExpressions(PDO $pdo): array
+{
+    $expressions = [
+        'oi.description_cn',
+        'oi.description_en',
+        'p.description_cn',
+        'p.description_en',
+        'oi.item_no',
+        'oi.shipping_code',
+        'c.name',
+        "COALESCE(s.name,'')",
+    ];
+    foreach (['code', 'brand', 'materials', 'express_number'] as $searchColumn) {
+        if (warehouseStockHasColumn($pdo, 'order_items', $searchColumn)) {
+            $expressions[] = "oi.$searchColumn";
+        }
+    }
+    return $expressions;
+}
+
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
     if (!getAuthUserId()) jsonError('Unauthorized', 401);
@@ -35,12 +86,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $customerId = $_GET['customer_id'] ?? null;
     $supplierId = $_GET['supplier_id'] ?? null;
     $containerId = $_GET['container_id'] ?? null;
-    $statusParam = $_GET['status'] ?? null;
-    $statuses = is_array($statusParam)
-        ? array_values(array_filter(array_map('trim', $statusParam), 'strlen'))
-        : (trim((string) $statusParam) !== '' ? [trim((string) $statusParam)] : []);
-    $statusMode = strtolower(trim((string) ($_GET['status_mode'] ?? 'include')));
-    $statusMode = $statusMode === 'exclude' ? 'exclude' : 'include';
+    $statuses = warehouseStockNormalizeStateFilters($_GET['status'] ?? null);
     $q = trim($_GET['q'] ?? '');
     $itemType = clmsNormalizeItemTypeFilter($_GET['item_type'] ?? null);
 
@@ -67,7 +113,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $imagePathsSelect .= warehouseStockHasColumn($pdo, 'products', 'image_paths')
         ? ', p.image_paths AS product_image_paths'
         : ', NULL AS product_image_paths';
-    $sql = "SELECT o.id as order_id, o.customer_id, o.supplier_id, o.status, o.expected_ready_date,
+    $warehouseStatusGroups = warehouseStockStatusGroups();
+    $allStockStatuses = array_merge($warehouseStatusGroups['InTransit'], $warehouseStatusGroups['InWarehouse']);
+    $baseStatusPlaceholders = implode(',', array_fill(0, count($allStockStatuses), '?'));
+    $sql = "SELECT o.id as order_id, o.customer_id, o.supplier_id, o.status,
+        CASE WHEN o.status = 'InTransitToWarehouse' THEN 'InTransit' ELSE 'InWarehouse' END AS warehouse_state,
+        o.expected_ready_date,
         c.name as customer_name, s.name as supplier_name,
         oi.id as item_id, oi.product_id, oi.item_no, oi.shipping_code, oi.quantity, oi.unit, oi.declared_cbm, oi.declared_weight, oi.item_length, oi.item_width, oi.item_height, oi.description_cn, oi.description_en,
         p.description_cn as product_desc_cn, p.description_en as product_desc_en,
@@ -86,8 +137,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             SELECT wri.order_item_id, SUM(wri.actual_cbm) item_actual_cbm, SUM(wri.actual_weight) item_actual_weight, SUM(wri.actual_cartons) item_actual_cartons, SUM(wri.actual_quantity) item_actual_quantity$actualDimensionSelect
             FROM warehouse_receipt_items wri JOIN warehouse_receipts rw ON rw.id=wri.receipt_id$activeReceiptItemWhere GROUP BY wri.order_item_id
         ) ria ON ria.order_item_id=oi.id
-        WHERE o.status IN ('InTransitToWarehouse','ReceivedAtWarehouse','AwaitingCustomerConfirmation','Confirmed','ReadyForConsolidation')";
-    $params = [];
+        WHERE o.status IN ($baseStatusPlaceholders)";
+    $params = $allStockStatuses;
     if ($customerId) {
         $sql .= " AND o.customer_id = ?";
         $params[] = $customerId;
@@ -100,34 +151,25 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $sql .= " AND EXISTS (SELECT 1 FROM shipment_draft_orders sdo JOIN shipment_drafts sd ON sdo.shipment_draft_id = sd.id WHERE sdo.order_id = o.id AND sd.container_id = ?)";
         $params[] = $containerId;
     }
-    if (!empty($statuses)) {
-        $receivedSelected = in_array('WarehouseReceived', $statuses, true);
-        $storedStatuses = array_values(array_filter(
-            $statuses,
-            static fn(string $status): bool => $status !== 'WarehouseReceived'
-        ));
-        $statusClauses = [];
-        if ($receivedSelected) {
-            $receiptPredicate = 'EXISTS (SELECT 1 FROM warehouse_receipts wsf WHERE wsf.order_id = o.id'
-                . ($receiptHasVoidedAt ? ' AND wsf.voided_at IS NULL' : '') . ')';
-            $statusClauses[] = $receiptPredicate;
+    if ($statuses && count($statuses) < count($warehouseStatusGroups)) {
+        $storedStatuses = [];
+        foreach ($statuses as $state) {
+            $storedStatuses = array_merge($storedStatuses, $warehouseStatusGroups[$state] ?? []);
         }
         if ($storedStatuses) {
             $placeholders = implode(',', array_fill(0, count($storedStatuses), '?'));
-            $statusClauses[] = "o.status IN ($placeholders)";
+            $sql .= " AND o.status IN ($placeholders)";
             $params = array_merge($params, $storedStatuses);
-        }
-        if ($statusClauses) {
-            $combinedStatus = '(' . implode(' OR ', $statusClauses) . ')';
-            $sql .= $statusMode === 'exclude'
-                ? " AND NOT $combinedStatus"
-                : " AND $combinedStatus";
         }
     }
     if ($q) {
         $like = clmsSearchLike($q);
-        $sql .= " AND (" . clmsUtf8SearchExpr('oi.description_cn') . " LIKE ? OR " . clmsUtf8SearchExpr('oi.description_en') . " LIKE ? OR " . clmsUtf8SearchExpr('c.name') . " LIKE ? OR " . clmsUtf8SearchExpr("COALESCE(s.name,'')") . " LIKE ?)";
-        $params = array_merge($params, [$like, $like, $like, $like]);
+        $searchExpressions = warehouseStockSearchExpressions($pdo);
+        $sql .= ' AND (' . implode(' OR ', array_map(
+            static fn(string $expression): string => clmsUtf8SearchExpr("COALESCE($expression, '')") . ' LIKE ?',
+            $searchExpressions
+        )) . ')';
+        $params = array_merge($params, array_fill(0, count($searchExpressions), $like));
     }
     if ($itemType !== null && warehouseStockHasColumn($pdo, 'item_classifications', 'item_type_code')) {
         $sql .= ' AND ic.item_type_code=?'; $params[] = $itemType;
@@ -148,11 +190,26 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $pdo,
         array_map(static fn(array $row): int => (int) ($row['item_id'] ?? 0), $rows)
     );
-    foreach ($rows as &$row) {
+    $orderReceiptImages = clmsOrderReceiptImagePaths(
+        $pdo,
+        array_map(static fn(array $row): int => (int) ($row['order_id'] ?? 0), $rows)
+    );
+    $firstRowByOrder = [];
+    foreach ($rows as $index => $row) {
+        $rowOrderId = (int) ($row['order_id'] ?? 0);
+        if ($rowOrderId > 0 && !isset($firstRowByOrder[$rowOrderId])) {
+            $firstRowByOrder[$rowOrderId] = $index;
+        }
+    }
+    foreach ($rows as $index => &$row) {
+        $rowOrderId = (int) ($row['order_id'] ?? 0);
         $row['image_paths'] = clmsMergeImagePathLists(
             $row['image_paths'] ?? [],
             $row['product_image_paths'] ?? [],
-            $receiptImages[(int) ($row['item_id'] ?? 0)] ?? []
+            $receiptImages[(int) ($row['item_id'] ?? 0)] ?? [],
+            ($firstRowByOrder[$rowOrderId] ?? -1) === $index
+                ? ($orderReceiptImages[$rowOrderId] ?? [])
+                : []
         );
     }
     unset($row);

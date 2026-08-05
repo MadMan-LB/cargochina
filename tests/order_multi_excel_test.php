@@ -86,12 +86,22 @@ $longEnglish = 'Industrial pressure-control assembly ZX-9000, 220V/50Hz, stainle
 $longChinese = '工业压力控制组件 ZX-9000，220V/50Hz，304 不锈钢，公差 +/-0.05 毫米；运输过程中请小心搬运并保持干燥。';
 $singlePhotoWithFallback = $item('ITEM-16-A', 'Single-photo safety valve', '单图安全阀', ['single']);
 array_unshift($singlePhotoWithFallback['image_paths'], 'tmp/missing-primary-image.png');
+$singlePhotoWithFallback['image_paths'][1] = '/cargochina/backend/' . $singlePhotoWithFallback['image_paths'][1];
+$multiPhoto = $item('ITEM-16-B', 'Multi-photo pump assembly', '多图泵组件', []);
+$multiPhoto['image_paths'] = [
+    ['file_path' => 'tmp/' . $imageNames['main']],
+    ['url' => 'tmp/' . $imageNames['alternate']],
+];
+$thumbnailUrlItem = $item('ITEM-18-A', 'Technical enclosure IP67 (R&D sample #42)', 'IP67 技术外壳（研发样品 #42）', []);
+$thumbnailUrlItem['image_paths'] = [
+    'http://localhost/cargochina/backend/thumb.php?path=' . rawurlencode('tmp/' . $imageNames['main']) . '&w=96&h=96',
+];
 $entries = [
     [
         'order' => ['id' => 16, 'customer_name' => 'English Customer', 'destination_country_name' => 'Lebanon', 'expected_ready_date' => '2026-07-20', 'currency' => 'USD', 'status' => 'Approved'],
         'items' => [
             $singlePhotoWithFallback,
-            $item('ITEM-16-B', 'Multi-photo pump assembly', '多图泵组件', ['main', 'alternate']),
+            $multiPhoto,
             $item('ITEM-16-C', 'Item intentionally supplied without a photo', '此商品有意不提供照片'),
         ],
     ],
@@ -105,13 +115,20 @@ $entries = [
     [
         'order' => ['id' => 18, 'customer_name' => 'عميل بيروت / Beirut Customer', 'destination_country_name' => 'United Arab Emirates', 'expected_ready_date' => '2026-08-01', 'currency' => 'USD', 'status' => 'Submitted'],
         'items' => [
-            $item('ITEM-18-A', 'Technical enclosure IP67 (R&D sample #42)', 'IP67 技术外壳（研发样品 #42）', ['main']),
+            $thumbnailUrlItem,
             $item('ITEM-18-B', 'No-photo spare parts: bolts, washers & seals', '无照片备件：螺栓、垫圈和密封件'),
         ],
     ],
 ];
 
 try {
+    $collectItemImages = new ReflectionMethod(OrderExcelService::class, 'collectItemImagePaths');
+    $summaryPaths = $collectItemImages->invoke(new OrderExcelService(), [
+        $item('SUMMARY-NO-PHOTO', 'No photo first', '首项无图'),
+        $singlePhotoWithFallback,
+    ]);
+    multiExcelAssert(count($summaryPaths) === 2, 'Summary exports did not search beyond the first item for a usable photo.');
+
     (new OrderExcelService())->saveSelectedOrdersXlsx($entries, $workbookPath);
     multiExcelAssert(is_file($workbookPath) && filesize($workbookPath) > 0, 'Workbook was not created.');
 

@@ -30,12 +30,8 @@ require 'includes/layout.php';
         </div>
         <div class="filter-chip-grid" id="filterStatusList">
           <?php foreach ([
-            'InTransitToWarehouse' => 'Partially Received / In Transit',
-            'WarehouseReceived' => 'Received',
-            'ReceivedAtWarehouse' => 'Legacy Received Status',
-            'AwaitingCustomerConfirmation' => 'Legacy Awaiting Confirmation',
-            'Confirmed' => 'Confirmed',
-            'ReadyForConsolidation' => 'Ready for Consolidation',
+            'InWarehouse' => clmsT('In warehouse'),
+            'InTransit' => clmsT('In transit'),
           ] as $statusValue => $statusLabel): ?>
             <div class="form-check filter-chip">
               <input class="form-check-input stock-status-filter" type="checkbox" value="<?= htmlspecialchars($statusValue) ?>" id="stockStatus<?= htmlspecialchars($statusValue) ?>" onchange="updateStockStatusFilterSummary();loadStock()">
@@ -43,19 +39,11 @@ require 'includes/layout.php';
             </div>
           <?php endforeach; ?>
         </div>
-        <div class="row g-2 mt-1">
-          <div class="col-6">
-            <select class="form-select form-select-sm" id="filterStatusMode" onchange="updateStockStatusFilterSummary();loadStock()">
-              <option value="include">Include selected</option>
-              <option value="exclude">Exclude selected</option>
-            </select>
-          </div>
-          <div class="col-6 d-flex align-items-center">
-            <small class="text-muted" id="filterStatusSummary">All statuses</small>
-          </div>
+        <div class="mt-2">
+          <small class="text-muted" id="filterStatusSummary"><?= htmlspecialchars(clmsT('All statuses')) ?></small>
         </div>
       </div>
-      <div class="col-md-2"><label class="form-label small">Search</label><input type="text" class="form-control form-control-sm" id="filterQ" placeholder="Description..."></div>
+      <div class="col-md-2"><label class="form-label small"><?= htmlspecialchars(clmsT('Search')) ?></label><input type="search" class="form-control form-control-sm" id="filterQ" placeholder="<?= htmlspecialchars(clmsT('Description, item no, code...')) ?>"></div>
       <div class="col-md-2"><label class="form-label small"><?= htmlspecialchars(clmsT('Item Type')) ?></label><select class="form-select form-select-sm" id="filterStockItemType"><option value=""><?= htmlspecialchars(clmsT('All types')) ?></option><option value="normal"><?= htmlspecialchars(clmsT('Normal')) ?></option><option value="replica"><?= htmlspecialchars(clmsT('Copy / replica')) ?></option><option value="cosmetics"><?= htmlspecialchars(clmsT('Cosmetics')) ?></option><option value="branded"><?= htmlspecialchars(clmsT('Branded')) ?></option><option value="food"><?= htmlspecialchars(clmsT('Food')) ?></option><option value="dangerous"><?= htmlspecialchars(clmsT('Dangerous')) ?></option><option value="other"><?= htmlspecialchars(clmsT('Other')) ?></option><option value="unclassified"><?= htmlspecialchars(clmsT('Needs classification')) ?></option></select></div>
       <div class="col-md-2 d-flex flex-wrap align-items-end gap-2"><button class="btn btn-primary btn-sm" onclick="loadStock()">Apply</button><button class="btn btn-outline-secondary btn-sm" onclick="clearWarehouseStockFilters()"><?= htmlspecialchars(clmsT('Clear filters')) ?></button><button class="btn btn-outline-success btn-sm" onclick="exportWarehouseStockXlsx()"><?= htmlspecialchars(clmsT('Download')) ?></button></div>
     </div>

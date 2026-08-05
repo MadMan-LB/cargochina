@@ -35,6 +35,8 @@
     }
 
     function stockStatusDisplay(status) {
+        if (status === "InWarehouse") return stockT("In warehouse");
+        if (status === "InTransit") return stockT("In transit");
         return typeof statusLabel === "function" ? statusLabel(status) : status;
     }
 
@@ -43,14 +45,11 @@
         const cid = document.getElementById("filterCustomerId").value;
         const sid = document.getElementById("filterSupplierId").value;
         const statuses = getSelectedStockStatuses();
-        const statusMode =
-            document.getElementById("filterStatusMode")?.value || "include";
         const q = document.getElementById("filterQ").value.trim();
         const itemType = document.getElementById("filterStockItemType")?.value || "";
         if (cid) params.set("customer_id", cid);
         if (sid) params.set("supplier_id", sid);
         statuses.forEach((status) => params.append("status[]", status));
-        if (statuses.length) params.set("status_mode", statusMode);
         if (q) params.set("q", q);
         if (itemType) params.set("item_type", itemType);
         return params;
@@ -76,36 +75,28 @@
         const summaryEl = document.getElementById("filterStatusSummary");
         if (!summaryEl) return;
         const selected = getSelectedStockStatuses();
-        const mode = document.getElementById("filterStatusMode")?.value || "include";
         if (!selected.length) {
             summaryEl.textContent = stockT("All statuses");
             return;
         }
-        summaryEl.textContent =
-            (mode === "exclude"
-                ? stockT("Excluding:")
-                : stockT("Including:")) +
-            " " +
-            selected.map(stockStatusDisplay).join(", ");
+        summaryEl.textContent = selected.map(stockStatusDisplay).join(", ");
     };
 
-    function setStockStatusFilter(statuses = [], mode = "include") {
+    function setStockStatusFilter(statuses = []) {
         const selected = new Set((statuses || []).map(String));
         document.querySelectorAll(".stock-status-filter").forEach((el) => {
             el.checked = selected.has(el.value);
         });
-        const modeEl = document.getElementById("filterStatusMode");
-        if (modeEl) modeEl.value = mode === "exclude" ? "exclude" : "include";
         window.updateStockStatusFilterSummary();
     }
 
     window.clearStockStatusFilter = function () {
-        setStockStatusFilter([], "include");
+        setStockStatusFilter([]);
         loadStock();
     };
 
     window.clearWarehouseStockFilters = function () {
-        setStockStatusFilter([], "include");
+        setStockStatusFilter([]);
         stockCustomerAc?.setValue(null);
         stockSupplierAc?.setValue(null);
         ["filterCustomerId", "filterSupplierId", "filterQ", "filterStockItemType"].forEach((id) => {
@@ -167,7 +158,7 @@
                 <td><a href="/cargochina/orders.php?id=${r.order_id}">#${r.order_id}</a></td>
                 <td>${escapeHtml(r.customer_name || "")}</td>
                 <td>${escapeHtml(r.supplier_name || "—")}</td>
-                <td><span class="badge bg-secondary">${escapeHtml(stockStatusDisplay(r.status || ""))}</span></td>
+                <td><span class="badge bg-secondary">${escapeHtml(stockStatusDisplay(r.warehouse_state || r.status || ""))}</span></td>
                 <td>${escapeHtml(r.description_en || r.description_cn || r.product_desc_en || r.product_desc_cn || "—")}</td>
                 <td>${r.item_actual_quantity || r.quantity || "—"}</td>
                 <td>${r.declared_cbm != null ? formatStockCbm(r.declared_cbm, 2) : "—"}</td>
@@ -324,7 +315,17 @@
         stockOffset = Math.max(0, parseInt(urlParams.get("offset") || "0", 10) || 0);
         const statusFromUrl = urlParams.getAll("status[]");
         const legacyStatus = urlParams.get("status");
-        const statusMode = urlParams.get("status_mode") || "include";
+        const legacyStateMap = {
+            InTransitToWarehouse: "InTransit",
+            WarehouseReceived: "InWarehouse",
+            ReceivedAtWarehouse: "InWarehouse",
+            AwaitingCustomerConfirmation: "InWarehouse",
+            Confirmed: "InWarehouse",
+            ReadyForConsolidation: "InWarehouse",
+        };
+        const restoredStatuses = (statusFromUrl.length ? statusFromUrl : (legacyStatus ? [legacyStatus] : []))
+            .map((status) => legacyStateMap[status] || status)
+            .filter((status, index, values) => ["InWarehouse", "InTransit"].includes(status) && values.indexOf(status) === index);
         const restoredValues = {
             filterCustomerId: urlParams.get("customer_id") || "",
             filterSupplierId: urlParams.get("supplier_id") || "",
@@ -337,10 +338,8 @@
         });
         if (restoredValues.filterCustomerId) document.getElementById("filterCustomerSearch").value = `#${restoredValues.filterCustomerId}`;
         if (restoredValues.filterSupplierId) document.getElementById("filterSupplierSearch").value = `#${restoredValues.filterSupplierId}`;
-        if (statusFromUrl.length) {
-            setStockStatusFilter(statusFromUrl, statusMode);
-        } else if (legacyStatus) {
-            setStockStatusFilter([legacyStatus], statusMode);
+        if (restoredStatuses.length) {
+            setStockStatusFilter(restoredStatuses);
         } else {
             window.updateStockStatusFilterSummary();
         }
@@ -381,6 +380,21 @@
                     document.getElementById("filterSupplierId").value = "";
                 });
         }
+        let stockSearchTimer = null;
+        document.getElementById("filterQ")?.addEventListener("input", () => {
+            window.clearTimeout(stockSearchTimer);
+            stockSearchTimer = window.setTimeout(() => {
+                stockOffset = 0;
+                window.loadStock();
+            }, 350);
+        });
+        document.getElementById("filterQ")?.addEventListener("keydown", (event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            window.clearTimeout(stockSearchTimer);
+            stockOffset = 0;
+            window.loadStock();
+        });
         document.getElementById("stockPrevPage")?.addEventListener("click",()=>{stockOffset=Math.max(0,stockOffset-stockPageSize);window.loadStock();});
         document.getElementById("stockNextPage")?.addEventListener("click",()=>{stockOffset+=stockPageSize;window.loadStock();});
         loadStock();

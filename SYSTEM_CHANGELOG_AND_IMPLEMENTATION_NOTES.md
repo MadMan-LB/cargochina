@@ -1399,3 +1399,12 @@ otification_preferences.php and removing the sidebar link unless the user is an 
 - Chinese Description now appears before English Description in normal and shared-carton Draft Order item editors. Both fields and manual Translate/Retranslate controls remain available.
 - Orders list sorting now uses `created_at DESC, id DESC`, so newly created orders consistently appear before older records regardless of expected-ready date.
 - No database migration was required; canonical nullable `order_items.description_en` and `order_items.description_cn` columns are reused.
+
+## 2026-08-05 - Excel Photo Coverage and Warehouse Stock Search
+
+- Unified order, Draft Order, legacy procurement draft, Receiving, Container, and Warehouse Stock Excel photo hydration. Exports now consider order-item uploads, product images, item-level receipt evidence, and active order-level receipt evidence in that order, including legacy URL/path and structured photo-record formats.
+- Hardened workbook image resolution so only readable files inside the application backend are embedded locally; stale or unsafe paths are skipped and the next valid image is used. Summary exports now inspect every item instead of assuming the first item has a photo.
+- Simplified Warehouse Stock filtering to two operational states: `In warehouse` and `In transit`. Legacy status query values are normalized to the appropriate state so bookmarked links remain usable.
+- Expanded Warehouse Stock search to the same descriptions shown in the list, including order-item and linked-product English/Chinese descriptions, plus item number, code, brand, materials, express number, customer, supplier, and shipping code.
+- Added debounced description search and English/Chinese labels for the new filter states. No database migration was required; existing item image, receipt photo, product description, and order status fields remain canonical.
+- Validation includes XLSX archive/media inspection using live local order, Draft Order, and Receiving data; shared workbook anchor tests; and a DB-backed Warehouse Stock endpoint test for displayed-description search and both state filters.
