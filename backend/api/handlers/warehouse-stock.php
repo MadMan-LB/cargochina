@@ -113,6 +113,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $imagePathsSelect .= warehouseStockHasColumn($pdo, 'products', 'image_paths')
         ? ', p.image_paths AS product_image_paths'
         : ', NULL AS product_image_paths';
+    $imagePathsSelect .= warehouseStockHasColumn($pdo, 'order_items', 'shared_carton_enabled')
+        ? ', oi.shared_carton_enabled'
+        : ', 0 AS shared_carton_enabled';
+    $imagePathsSelect .= warehouseStockHasColumn($pdo, 'order_items', 'shared_carton_contents')
+        ? ', oi.shared_carton_contents'
+        : ', NULL AS shared_carton_contents';
     $warehouseStatusGroups = warehouseStockStatusGroups();
     $allStockStatuses = array_merge($warehouseStatusGroups['InTransit'], $warehouseStatusGroups['InWarehouse']);
     $baseStatusPlaceholders = implode(',', array_fill(0, count($allStockStatuses), '?'));
@@ -203,14 +209,19 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     }
     foreach ($rows as $index => &$row) {
         $rowOrderId = (int) ($row['order_id'] ?? 0);
+        $sharedCartonImages = !empty($row['shared_carton_enabled'])
+            ? clmsSharedCartonImagePaths($pdo, $row['shared_carton_contents'] ?? null)
+            : [];
         $row['image_paths'] = clmsMergeImagePathLists(
             $row['image_paths'] ?? [],
             $row['product_image_paths'] ?? [],
+            $sharedCartonImages,
             $receiptImages[(int) ($row['item_id'] ?? 0)] ?? [],
             ($firstRowByOrder[$rowOrderId] ?? -1) === $index
                 ? ($orderReceiptImages[$rowOrderId] ?? [])
                 : []
         );
+        unset($row['shared_carton_contents']);
     }
     unset($row);
     if ($id === 'export') {
@@ -222,7 +233,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             foreach($rows as $row) fputcsv($out,[$row['order_id'],$row['customer_name'],$row['supplier_name'],$row['status'],$row['item_id'],$row['description_en'],$row['description_cn'],$row['item_type_code']??'unclassified',$row['quantity'],$row['item_actual_quantity'],$row['item_actual_cartons'],$row['item_actual_cbm'],$row['item_actual_weight'],$row['item_actual_height'],$row['item_actual_width'],$row['item_actual_length']]);
             fclose($out); exit;
         }
-        (new OrderExcelService())->exportWarehouseStockSummary($rows, 'warehouse_stock_' . date('Ymd_His') . '.xlsx');
+        (new OrderExcelService($pdo))->exportWarehouseStockSummary($rows, 'warehouse_stock_' . date('Ymd_His') . '.xlsx');
     }
     $hasMore=count($rows)>$limit; if($hasMore)$rows=array_slice($rows,0,$limit);
     jsonResponse(['data' => $rows, 'meta'=>['limit'=>$limit,'offset'=>$offset,'total'=>$total,'has_more'=>$hasMore]]);

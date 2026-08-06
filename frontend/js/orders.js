@@ -506,7 +506,11 @@ function getOrderDisplayRows(order) {
                     getOrderItemSupplierNames(item, orderSupplier).join(", ") ||
                     "—",
             ).trim(),
-            imagePaths: [],
+            imagePaths: Array.isArray(content?.image_paths)
+                ? content.image_paths
+                : Array.isArray(content?.photo_paths)
+                  ? content.photo_paths
+                  : [],
             productAlert: "",
             isCartonSummary: false,
         }));

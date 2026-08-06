@@ -2396,6 +2396,12 @@
                   <div class="draft-item-computed draft-shared-content-total-amount">0</div>
                 </div>
                 <div class="col-12 col-sm-6 col-xl-2">
+                  <label class="form-label draft-item-label">${escapeHtml(draftT("Photo"))}</label>
+                  <div class="draft-item-photos draft-shared-content-photos"></div>
+                  <input type="file" class="d-none draft-shared-content-photo-upload" accept="image/*" multiple>
+                  <button type="button" class="btn btn-outline-primary btn-sm w-100 mt-1 draft-shared-content-photo-add">${escapeHtml(draftT("+ Add"))}</button>
+                </div>
+                <div class="col-12 col-sm-6 col-xl-2">
                   <label class="form-label draft-item-label">HS Code</label>
                   <input type="text" class="form-control form-control-sm draft-shared-content-hs-code" placeholder="${escapeHtml(draftT("HS code"))}">
                 </div>
@@ -2495,6 +2501,25 @@
 
         row.querySelector(".draft-shared-content-product-id").value =
             product.id || "";
+        const productImages = Array.isArray(product.image_paths)
+            ? product.image_paths
+            : [];
+        const previousProductImages = new Set(
+            Array.isArray(row._linkedProductPhotoPaths)
+                ? row._linkedProductPhotoPaths
+                : [],
+        );
+        row._photoPaths = (row._photoPaths || []).filter(
+            (path) => !previousProductImages.has(path),
+        );
+        row._linkedProductPhotoPaths = productImages.slice();
+        row._photoPaths = Array.from(
+            new Set([...(row._photoPaths || []), ...productImages]),
+        );
+        renderDraftPhotoThumbs(
+            row.querySelector(".draft-shared-content-photos"),
+            row._photoPaths,
+        );
         const entries =
             product.description_entries && product.description_entries.length
                 ? product.description_entries
@@ -2599,6 +2624,16 @@
         wrapper.innerHTML = sharedCartonContentMarkup(++sharedCartonContentIndex);
         const row = wrapper.firstElementChild;
         container.appendChild(row);
+        row._photoPaths = Array.isArray(initial.image_paths)
+            ? initial.image_paths.slice()
+            : Array.isArray(initial.photo_paths)
+              ? initial.photo_paths.slice()
+              : [];
+        row._linkedProductPhotoPaths = Array.isArray(
+            initial.product_image_paths,
+        )
+            ? initial.product_image_paths.slice()
+            : [];
 
         bindDraftSharedCartonSupplierAutocomplete(card, row, section);
         syncDraftSharedCartonProductSearch(card, row, section);
@@ -2666,6 +2701,21 @@
         ]
             .filter(Boolean)
             .join(" · ");
+        renderDraftPhotoThumbs(
+            row.querySelector(".draft-shared-content-photos"),
+            row._photoPaths,
+        );
+        const sharedPhotoInput = row.querySelector(
+            ".draft-shared-content-photo-upload",
+        );
+        row.querySelector(".draft-shared-content-photo-add")?.addEventListener(
+            "click",
+            () => sharedPhotoInput?.click(),
+        );
+        sharedPhotoInput?.addEventListener("change", async () => {
+            await uploadSharedCartonPhotoFiles(row, sharedPhotoInput.files);
+            sharedPhotoInput.value = "";
+        });
 
         [row.querySelector(".draft-description-en"), row.querySelector(".draft-description-cn")].forEach((input) => {
             input?.addEventListener("input", () => {
@@ -3152,6 +3202,23 @@
         card._photoPaths = paths;
         renderDraftPhotoThumbs(card.querySelector(".draft-item-photos"), paths);
         clearDraftInvalidTarget(card.querySelector(".draft-item-photo-panel"));
+    }
+
+    async function uploadSharedCartonPhotoFiles(row, files) {
+        const button = row.querySelector(".draft-shared-content-photo-add");
+        if (button) button.disabled = true;
+        try {
+            const uploaded = await uploadFiles(files, true);
+            row._photoPaths = Array.from(
+                new Set([...(row._photoPaths || []), ...uploaded]),
+            );
+            renderDraftPhotoThumbs(
+                row.querySelector(".draft-shared-content-photos"),
+                row._photoPaths,
+            );
+        } finally {
+            if (button) button.disabled = false;
+        }
     }
 
     function extensionFromImageMime(type = "") {
@@ -4156,6 +4223,9 @@
                 row.querySelector(".draft-shared-content-width")?.value || null,
             length:
                 row.querySelector(".draft-shared-content-length")?.value || null,
+            image_paths: Array.isArray(row._photoPaths)
+                ? row._photoPaths.slice()
+                : [],
             description_entries: collectDraftSharedCartonDescription(row),
             notes:
                 row.querySelector(".draft-shared-content-notes")?.value?.trim() ||

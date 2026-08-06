@@ -4,6 +4,10 @@ require_once __DIR__ . '/OrderExcelService.php';
 
 final class OrderBulkExcelService
 {
+    public function __construct(private ?PDO $pdo = null)
+    {
+    }
+
     public function output(array $entries, string $prefix = 'orders'): void
     {
         if (!$entries) {
@@ -11,7 +15,7 @@ final class OrderBulkExcelService
         }
 
         $stamp = date('Ymd_His');
-        $service = new OrderExcelService();
+        $service = new OrderExcelService($this->pdo);
         if (count($entries) === 1) {
             $entry = reset($entries);
             $filename = $this->safeFilename((string) ($entry['filename'] ?? ($prefix . '_' . $stamp . '.xlsx')));

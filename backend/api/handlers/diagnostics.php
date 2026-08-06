@@ -10,6 +10,7 @@
 require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__, 3) . '/includes/sidebar_permissions.php';
 require_once dirname(__DIR__, 2) . '/services/NotificationService.php';
+require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
 
 function diagnosticsTableExists(PDO $pdo, string $table): bool
 {
@@ -48,6 +49,93 @@ function diagnosticsCountRows(PDO $pdo, string $table): ?int
 return function (string $method, ?string $id, ?string $action, array $input) {
     requireRole(['SuperAdmin']);
     $pdo = getDb();
+
+    if ($id === 'excel-images' && $method === 'GET' && ctype_digit((string) $action)) {
+        $orderId = (int) $action;
+        if ($orderId <= 0) {
+            jsonError('Invalid order ID.', 422);
+        }
+        $orderStmt = $pdo->prepare('SELECT id, order_type, status FROM orders WHERE id = ? LIMIT 1');
+        $orderStmt->execute([$orderId]);
+        $order = $orderStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$order) {
+            jsonError('Order not found.', 404);
+        }
+
+        $itemImageColumn = diagnosticsTableHasColumn($pdo, 'order_items', 'image_paths')
+            ? 'oi.image_paths'
+            : 'NULL AS image_paths';
+        $itemStmt = $pdo->prepare(
+            "SELECT oi.id, oi.product_id, oi.item_no, $itemImageColumn
+             FROM order_items oi
+             WHERE oi.order_id = ?
+             ORDER BY oi.id"
+        );
+        $itemStmt->execute([$orderId]);
+        $excelService = new OrderExcelService($pdo);
+        $items = [];
+        $readyCount = 0;
+        foreach ($itemStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $diagnostic = $excelService->diagnoseImageCandidates($row['image_paths'] ?? [], [
+                'scope' => 'diagnostic',
+                'order_id' => $orderId,
+                'order_item_id' => (int) ($row['id'] ?? 0),
+                'product_id' => (int) ($row['product_id'] ?? 0),
+                'item_no' => (string) ($row['item_no'] ?? ''),
+            ]);
+            if (($diagnostic['status'] ?? '') === 'ready') {
+                $readyCount++;
+            }
+            $items[] = [
+                'order_item_id' => (int) ($row['id'] ?? 0),
+                'product_id' => (int) ($row['product_id'] ?? 0),
+                'item_no' => (string) ($row['item_no'] ?? ''),
+            ] + $diagnostic;
+        }
+
+        $projectRoot = dirname(__DIR__, 3);
+        $sourceFiles = [
+            'helpers' => __DIR__ . '/../helpers.php',
+            'excel_service' => dirname(__DIR__, 2) . '/services/OrderExcelService.php',
+            'draft_orders_handler' => __DIR__ . '/draft-orders.php',
+            'orders_handler' => __DIR__ . '/orders.php',
+        ];
+        $fingerprints = [];
+        foreach ($sourceFiles as $name => $path) {
+            $fingerprints[$name] = is_file($path)
+                ? substr((string) hash_file('sha256', $path), 0, 16)
+                : null;
+        }
+        $opcacheStatus = function_exists('opcache_get_status') ? @opcache_get_status(false) : false;
+        $uploadDir = $projectRoot . '/backend/uploads';
+        $tempDir = sys_get_temp_dir();
+
+        jsonResponse(['data' => [
+            'order' => [
+                'id' => (int) $order['id'],
+                'order_type' => (string) ($order['order_type'] ?? ''),
+                'status' => (string) ($order['status'] ?? ''),
+            ],
+            'summary' => [
+                'item_count' => count($items),
+                'items_with_usable_images' => $readyCount,
+                'items_without_usable_images' => count($items) - $readyCount,
+            ],
+            'items' => $items,
+            'environment' => [
+                'pipeline_version' => OrderExcelService::IMAGE_PIPELINE_VERSION,
+                'gd_loaded' => extension_loaded('gd'),
+                'zip_loaded' => class_exists('ZipArchive'),
+                'upload_directory_exists' => is_dir($uploadDir),
+                'upload_directory_readable' => is_dir($uploadDir) && is_readable($uploadDir),
+                'temporary_directory_writable' => is_dir($tempDir) && is_writable($tempDir),
+                'opcache_enabled' => is_array($opcacheStatus) && !empty($opcacheStatus['opcache_enabled']),
+                'opcache_validate_timestamps' => filter_var(ini_get('opcache.validate_timestamps'), FILTER_VALIDATE_BOOLEAN),
+                'opcache_revalidate_freq' => (int) ini_get('opcache.revalidate_freq'),
+            ],
+            'source_fingerprints' => $fingerprints,
+        ]]);
+    }
 
     if ($id === 'notification-delivery-log') {
         if ($method === 'GET') {

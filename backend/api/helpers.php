@@ -498,6 +498,82 @@ function clmsMergeImagePathLists(...$sources): array
     return array_keys($merged);
 }
 
+function clmsProductImagePaths(PDO $pdo, array $productIds): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $productIds), static fn(int $id): bool => $id > 0)));
+    if (!$ids) {
+        return [];
+    }
+
+    try {
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $pdo->prepare("SELECT id, image_paths FROM products WHERE id IN ($placeholders)");
+        $stmt->execute($ids);
+        $paths = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $productId = (int) ($row['id'] ?? 0);
+            if ($productId > 0) {
+                $paths[$productId] = clmsNormalizeImagePathList($row['image_paths'] ?? []);
+            }
+        }
+        return $paths;
+    } catch (Throwable $e) {
+        return [];
+    }
+}
+
+function clmsHydrateSharedCartonImagePaths(PDO $pdo, array $contents): array
+{
+    $productImages = clmsProductImagePaths($pdo, array_map(
+        static fn($content): int => is_array($content) ? (int) ($content['product_id'] ?? 0) : 0,
+        $contents
+    ));
+
+    foreach ($contents as &$content) {
+        if (!is_array($content)) {
+            $content = [];
+            continue;
+        }
+        $productId = (int) ($content['product_id'] ?? 0);
+        $content['product_image_paths'] = $productImages[$productId] ?? [];
+        $content['image_paths'] = clmsMergeImagePathLists(
+            $content['image_paths'] ?? [],
+            $content['photo_paths'] ?? [],
+            $content['product_image_paths']
+        );
+    }
+    unset($content);
+
+    return $contents;
+}
+
+function clmsCollectSharedCartonImagePaths(array $contents): array
+{
+    $paths = [];
+    foreach ($contents as $content) {
+        if (!is_array($content)) {
+            continue;
+        }
+        $paths = clmsMergeImagePathLists(
+            $paths,
+            $content['image_paths'] ?? [],
+            $content['photo_paths'] ?? []
+        );
+    }
+    return $paths;
+}
+
+function clmsSharedCartonImagePaths(PDO $pdo, $contents): array
+{
+    if (is_string($contents)) {
+        $contents = json_decode($contents, true) ?: [];
+    }
+    if (!is_array($contents) || !$contents) {
+        return [];
+    }
+    return clmsCollectSharedCartonImagePaths(clmsHydrateSharedCartonImagePaths($pdo, $contents));
+}
+
 function clmsReceiptItemImagePaths(PDO $pdo, array $orderItemIds): array
 {
     $ids = array_values(array_unique(array_filter(array_map('intval', $orderItemIds), static fn(int $id): bool => $id > 0)));
@@ -575,14 +651,14 @@ function clmsOrderReceiptImagePaths(PDO $pdo, array $orderIds): array
     }
 }
 
-function normalizeStoredUploadPathList(array $paths): array
+function normalizeStoredUploadPathList(array $paths, bool $mustExist = true): array
 {
     $normalized = [];
     foreach ($paths as $path) {
         if (!is_string($path) || trim($path) === '') {
             continue;
         }
-        $normalized[] = normalizeStoredUploadPath($path);
+        $normalized[] = normalizeStoredUploadPath($path, $mustExist);
     }
     return array_values(array_unique($normalized));
 }

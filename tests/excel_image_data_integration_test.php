@@ -43,8 +43,39 @@ try {
         $entry = orderBuildExcelEntry($pdo, $orderId);
         imageDataAssert(is_array($entry), "Order {$orderId} could not be prepared for Excel.");
         $path = $tempDir . DIRECTORY_SEPARATOR . "order_{$orderId}.xlsx";
-        (new OrderExcelService())->saveOrderXlsx($entry['order'], $entry['items'], $path);
+        (new OrderExcelService($pdo))->saveOrderXlsx($entry['order'], $entry['items'], $path);
         imageDataAssert(imageDataMediaCount($path) > 0, "Order {$orderId} workbook contains no embedded image media.");
+
+        $omittedPayloadItems = $entry['items'];
+        foreach ($omittedPayloadItems as &$omittedPayloadItem) {
+            $omittedPayloadItem['image_paths'] = [];
+        }
+        unset($omittedPayloadItem);
+        $fallbackPath = $tempDir . DIRECTORY_SEPARATOR . "order_{$orderId}_canonical_fallback.xlsx";
+        (new OrderExcelService($pdo))->saveOrderXlsx($entry['order'], $omittedPayloadItems, $fallbackPath);
+        imageDataAssert(
+            imageDataMediaCount($fallbackPath) > 0,
+            "Order {$orderId} workbook did not recover canonical images when its payload omitted image paths."
+        );
+        $diagnosticItem = null;
+        foreach ($entry['items'] as $candidateItem) {
+            if (clmsNormalizeImagePathList($candidateItem['image_paths'] ?? [])) {
+                $diagnosticItem = $candidateItem;
+                break;
+            }
+        }
+        imageDataAssert(is_array($diagnosticItem), "Order {$orderId} has no diagnostic image item.");
+        $diagnostic = (new OrderExcelService($pdo))->diagnoseImageCandidates([], [
+            'order_id' => $orderId,
+            'order_item_id' => (int) ($diagnosticItem['id'] ?? 0),
+            'product_id' => (int) ($diagnosticItem['product_id'] ?? 0),
+        ]);
+        imageDataAssert(
+            ($diagnostic['status'] ?? '') === 'ready'
+                && (int) ($diagnostic['canonical_candidate_count'] ?? 0) > 0
+                && (int) ($diagnostic['usable_candidate_count'] ?? 0) > 0,
+            "Order {$orderId} canonical image diagnostic did not report a usable fallback."
+        );
         $tested[] = "order #{$orderId}";
     }
 
@@ -62,7 +93,7 @@ try {
     if ($draftId > 0) {
         $entry = draftOrderBuildExcelEntry($pdo, $draftId);
         $path = $tempDir . DIRECTORY_SEPARATOR . "draft_{$draftId}.xlsx";
-        (new OrderExcelService())->saveOrderXlsx($entry['order'], $entry['items'], $path);
+        (new OrderExcelService($pdo))->saveOrderXlsx($entry['order'], $entry['items'], $path);
         imageDataAssert(imageDataMediaCount($path) > 0, "Draft order {$draftId} workbook contains no embedded image media.");
         $tested[] = "draft order #{$draftId}";
     }
@@ -80,7 +111,7 @@ try {
         $entry = orderBuildExcelEntry($pdo, $receiptOrderId);
         imageDataAssert(is_array($entry), "Received order {$receiptOrderId} could not be prepared for Excel.");
         $path = $tempDir . DIRECTORY_SEPARATOR . "receiving_{$receiptOrderId}.xlsx";
-        (new OrderExcelService())->saveOrderXlsx($entry['order'], $entry['items'], $path);
+        (new OrderExcelService($pdo))->saveOrderXlsx($entry['order'], $entry['items'], $path);
         imageDataAssert(imageDataMediaCount($path) > 0, "Receiving workbook for order {$receiptOrderId} contains no embedded receipt image media.");
         $tested[] = "receiving order #{$receiptOrderId}";
     }

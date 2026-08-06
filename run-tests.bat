@@ -7,7 +7,7 @@ echo Running all tests...
 echo.
 
 set FAILED=0
-for %%f in (upload_test search_test smoke_test draft_order_builder_test item_numbering_service_test notification_target_service_test checkpoint10_approved_rules_test production_critical_audit_test production_release_preflight_test hs_code_catalog_test user_test lifecycle_test financial_test expense_test consolidation_test item_capture_test suppliers_contact_test tracking_push_idempotency_test tracking_push_retry_test phase2_integration_test production_hardening_test regression_receive_variance_test) do (
+for %%f in (upload_test search_test smoke_test draft_order_builder_test item_numbering_service_test notification_target_service_test checkpoint10_approved_rules_test production_critical_audit_test production_release_preflight_test hs_code_catalog_test user_test lifecycle_test financial_test expense_test consolidation_test item_capture_test suppliers_contact_test tracking_push_idempotency_test tracking_push_retry_test phase2_integration_test production_hardening_test regression_receive_variance_test order_multi_excel_test excel_image_data_integration_test shared_carton_excel_image_test) do (
   echo === %%f ===
   "%PHP%" "%~dp0tests\%%f.php"
   if errorlevel 1 set FAILED=1

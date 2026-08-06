@@ -29,6 +29,18 @@ require 'includes/layout.php';
   </div>
 </div>
 
+<div class="card mb-4">
+  <div class="card-header">Excel Image Health</div>
+  <div class="card-body">
+    <div class="input-group input-group-sm mb-3" style="max-width: 420px;">
+      <span class="input-group-text">Order ID</span>
+      <input type="number" class="form-control" id="excelImageOrderId" min="1" inputmode="numeric" placeholder="e.g. 4">
+      <button type="button" class="btn btn-outline-primary" id="excelImageHealthBtn" onclick="loadExcelImageHealth()">Check</button>
+    </div>
+    <div id="excelImageHealth" class="small text-muted">Check the same order shown in the Orders page before testing its workbook.</div>
+  </div>
+</div>
+
 <div class="card">
   <div class="card-header">Notification Delivery Log</div>
   <div class="card-body">

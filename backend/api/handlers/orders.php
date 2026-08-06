@@ -65,6 +65,7 @@ function orderDecodeSharedCartonContents(PDO $pdo, array $row): array
         return [];
     }
 
+    $decoded = clmsHydrateSharedCartonImagePaths($pdo, $decoded);
     $supplierNames = orderLookupSupplierNames($pdo, array_map(
         static fn(array $content): int => (int) ($content['supplier_id'] ?? 0),
         $decoded
@@ -97,16 +98,18 @@ function orderDecodeSharedCartonContents(PDO $pdo, array $row): array
 function normalizeOrderItems(PDO $pdo, array $items): array
 {
     foreach ($items as &$it) {
-        $it['image_paths'] = clmsMergeImagePathLists(
-            $it['image_paths'] ?? [],
-            $it['product_image_paths'] ?? [],
-            $it['receipt_image_paths'] ?? []
-        );
         $it['shared_carton_enabled'] = !empty($it['shared_carton_enabled']) ? 1 : 0;
         $it['shared_carton_contents'] = !empty($it['shared_carton_enabled'])
             ? orderDecodeSharedCartonContents($pdo, $it)
             : [];
+        $it['image_paths'] = clmsMergeImagePathLists(
+            $it['image_paths'] ?? [],
+            $it['product_image_paths'] ?? [],
+            clmsCollectSharedCartonImagePaths($it['shared_carton_contents']),
+            $it['receipt_image_paths'] ?? []
+        );
     }
+    unset($it);
     return $items;
 }
 
@@ -1641,7 +1644,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     outputOrdersListCsv($rows);
                 }
                 require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
-                (new OrderExcelService())->exportOrdersListSummary(
+                (new OrderExcelService($pdo))->exportOrdersListSummary(
                     $rows,
                     'orders_' . date('Ymd_His') . '.xlsx'
                 );
@@ -1655,7 +1658,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if ($format === 'csv') {
                     outputOrderCsv($order, $items, 'order_' . (int) $id . '.csv');
                 }
-                (new OrderExcelService())->exportOrder($order, $items, $entry['filename']);
+                (new OrderExcelService($pdo))->exportOrder($order, $items, $entry['filename']);
             }
             if ($id === null) {
                 $meta = [];
@@ -1943,7 +1946,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         ->execute([json_encode($auditPayload, JSON_UNESCAPED_UNICODE), getAuthUserId()]);
                 }
                 logClms('orders_bulk_export', $auditPayload + ['user_id' => getAuthUserId()]);
-                (new OrderBulkExcelService())->output($entries, 'selected_orders');
+                (new OrderBulkExcelService($pdo))->output($entries, 'selected_orders');
             }
             if ($id === null) {
                 $customerId = (int) ($input['customer_id'] ?? 0);

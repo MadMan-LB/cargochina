@@ -379,6 +379,15 @@ Any AI/engineer working on this system must follow these operating rules:
 ## 16) DECISION_LOG (keep updating)
 > Capture CEO/ops decisions. Newest on top.
 
+- 2026-08-05 - Production Excel image resolution and shared-carton photos
+  - Decision: Orders, Draft Orders, Receiving, Warehouse Stock, and Containers use one image precedence: item image, linked-product image, item-level receipt evidence, then applicable order-level receipt evidence.
+  - Decision: Shared-carton child image paths persist in the existing JSON metadata; legacy children dynamically hydrate from `product_id`. Missing real images remain non-blocking and export as `No photo` with sanitized diagnostics.
+  - Decision: The shared Excel layer performs a final canonical database lookup by trusted item/product IDs when a payload omits photos or only supplies stale paths. A SuperAdmin-only Excel Image Health diagnostic identifies missing/unreadable media and mixed deployment/OPcache conditions without exposing filenames or server paths.
+  - Deployment: `backend/uploads/*` is intentionally Git-ignored. Code and user-uploaded media must be backed up and deployed/synchronized as separate matched artifacts with filename case and PHP-FPM read permissions preserved.
+  - Rationale: Prevent valid fallback images from being lost to stale paths and ensure contained products retain their own photos without attaching another item's evidence.
+  - Impacted modules/states: shared-carton create/edit/reopen, Orders detail, Draft/Order/Receiving/Warehouse/Container Excel exports, local and safe remote image resolution
+  - Migration: none; reuses `order_items.image_paths`, `products.image_paths`, receiving evidence tables, and existing shared-carton JSON.
+
 - 2026-07-03 - Draft Order good type / dangerous goods
   - Decision: Draft Order item good type supports three canonical values: `Normal`, `Dangerous`, and `Copy`, shown to users as Normal Goods, Dangerous Goods, and Copy Goods.
   - Decision: The Excel/template/user-facing label is `Good Type`, but old `Copy / Normal Goods` aliases stay supported for backwards-compatible imports.

@@ -2,6 +2,11 @@ document.addEventListener("DOMContentLoaded", () => {
     loadConfigHealth();
     loadBalancesDeploymentHealth();
     loadDeliveryLog();
+    document
+        .getElementById("excelImageOrderId")
+        ?.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") loadExcelImageHealth();
+        });
 });
 
 async function loadConfigHealth() {
@@ -132,6 +137,82 @@ async function loadBalancesDeploymentHealth() {
         target.innerHTML = renderKeyValueTable(rows);
     } catch (e) {
         target.innerHTML = `<span class="badge bg-danger">Error: ${escapeHtml(e.message)}</span>`;
+    }
+}
+
+async function loadExcelImageHealth() {
+    const orderId = Number(
+        document.getElementById("excelImageOrderId")?.value || 0,
+    );
+    const target = document.getElementById("excelImageHealth");
+    const button = document.getElementById("excelImageHealthBtn");
+    if (!target || !Number.isInteger(orderId) || orderId < 1) {
+        if (target)
+            target.innerHTML =
+                '<span class="text-danger">Enter a valid order ID.</span>';
+        return;
+    }
+
+    target.innerHTML = '<span class="badge bg-secondary">Checking...</span>';
+    if (button) button.disabled = true;
+    try {
+        const res = await api("GET", `/diagnostics/excel-images/${orderId}`);
+        const d = res.data || {};
+        const summary = d.summary || {};
+        const environment = d.environment || {};
+        const itemRows = (d.items || [])
+            .map((item) => {
+                const reasons = Object.entries(item.reason_counts || {})
+                    .map(([reason, count]) => `${reason}: ${count}`)
+                    .join(", ");
+                return `<tr>
+                    <td>${escapeHtml(String(item.order_item_id || "-"))}</td>
+                    <td>${escapeHtml(item.item_no || "-")}</td>
+                    <td>${escapeHtml(String(item.product_id || "-"))}</td>
+                    <td>${diagnosticBadge(item.status === "ready", item.status === "ready" ? "Ready" : "Unavailable")}</td>
+                    <td>${escapeHtml(String(item.provided_candidate_count || 0))}</td>
+                    <td>${escapeHtml(String(item.canonical_candidate_count || 0))}</td>
+                    <td>${escapeHtml(String(item.usable_candidate_count || 0))}</td>
+                    <td>${escapeHtml(reasons || "-")}</td>
+                </tr>`;
+            })
+            .join("");
+        const environmentMarkup = [
+            diagnosticBadge(!!environment.gd_loaded, "GD"),
+            diagnosticBadge(!!environment.zip_loaded, "ZIP"),
+            diagnosticBadge(
+                !!environment.upload_directory_exists,
+                "uploads exists",
+            ),
+            diagnosticBadge(
+                !!environment.upload_directory_readable,
+                "uploads readable",
+            ),
+            diagnosticBadge(
+                !!environment.temporary_directory_writable,
+                "temp writable",
+            ),
+        ].join(" ");
+        const fingerprints = Object.entries(d.source_fingerprints || {})
+            .map(([name, value]) => `${name}: ${value || "missing"}`)
+            .join(" · ");
+        target.innerHTML = `
+            <div class="d-flex flex-wrap gap-2 mb-2">
+                <span class="badge bg-primary">Pipeline ${escapeHtml(environment.pipeline_version || "-")}</span>
+                <span class="badge ${Number(summary.items_without_usable_images || 0) === 0 ? "bg-success" : "bg-danger"}">${escapeHtml(String(summary.items_with_usable_images || 0))} / ${escapeHtml(String(summary.item_count || 0))} item(s) ready</span>
+                <span class="badge ${environment.opcache_enabled ? "bg-warning text-dark" : "bg-secondary"}">OPcache ${environment.opcache_enabled ? "enabled" : "disabled"}</span>
+            </div>
+            <div class="mb-2">${environmentMarkup}</div>
+            <div class="table-responsive mb-2"><table class="table table-sm align-middle mb-0">
+                <thead><tr><th>Item ID</th><th>Item No</th><th>Product ID</th><th>Status</th><th>Payload</th><th>Canonical</th><th>Usable</th><th>Reasons</th></tr></thead>
+                <tbody>${itemRows || '<tr><td colspan="8" class="text-muted">No order items.</td></tr>'}</tbody>
+            </table></div>
+            <div class="text-muted text-break"><strong>Source fingerprints:</strong> ${escapeHtml(fingerprints || "-")}</div>
+            <div class="text-muted"><strong>OPcache:</strong> validate timestamps ${environment.opcache_validate_timestamps ? "on" : "off"}, revalidate every ${escapeHtml(String(environment.opcache_revalidate_freq ?? "-"))} second(s).</div>`;
+    } catch (e) {
+        target.innerHTML = `<span class="text-danger">${escapeHtml(e.message || "Could not check Excel image health.")}</span>`;
+    } finally {
+        if (button) button.disabled = false;
     }
 }
 

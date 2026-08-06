@@ -1273,10 +1273,10 @@ function balancesCreateTransaction(PDO $pdo, array $input): array
     return $row;
 }
 
-function balancesExportXlsx(string $filename, string $title, array $headers, array $rows): void
+function balancesExportXlsx(PDO $pdo, string $filename, string $title, array $headers, array $rows): void
 {
     require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
-    (new OrderExcelService())->exportTable($title, $headers, $rows, $filename);
+    (new OrderExcelService($pdo))->exportTable($title, $headers, $rows, $filename);
 }
 
 return function (string $method, ?string $id, ?string $action, array $input) {
@@ -1345,6 +1345,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     ];
                 }
                 balancesExportXlsx(
+                    $pdo,
                     $dataset . '_balances_' . date('Ymd_His') . '.xlsx',
                     $dataset === 'customers' ? 'Customer Balances' : 'Supplier Balances',
                     ['Name', 'Phone', 'Currency', 'Current Balance', 'Total Paid', 'Total Due', 'Last Payment Date', 'Status'],
@@ -1370,6 +1371,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     ];
                 }
                 balancesExportXlsx(
+                    $pdo,
                     'balance_documents_' . date('Ymd_His') . '.xlsx',
                     'Balance Documents',
                     ['Document No.', 'Document Type', 'Date', 'Type', 'Name', 'Amount', 'Currency', 'Payment Method', 'Linked Order', 'Reference Number', 'Recorded By'],
@@ -1395,6 +1397,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 ];
             }
             balancesExportXlsx(
+                $pdo,
                 'balance_transactions_' . date('Ymd_His') . '.xlsx',
                 'Balance Transactions',
                 ['Date', 'Type', 'Name', 'Transaction Type', 'Amount', 'Currency', 'Payment Method', 'Account Number', 'Linked Order', 'Reference Number', 'Recorded By', 'Notes'],

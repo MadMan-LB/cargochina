@@ -197,6 +197,13 @@ function receivingFetchQueueRowsForRequest(PDO $pdo, bool $paginate = true, ?arr
             $itemMetaCols .= ", oi.$column";
         }
     }
+    $sharedCartonEnabledSelect = receivingTableHasColumn($pdo, 'order_items', 'shared_carton_enabled')
+        ? ', oi.shared_carton_enabled'
+        : ', 0 AS shared_carton_enabled';
+    $sharedCartonContentsSelect = receivingTableHasColumn($pdo, 'order_items', 'shared_carton_contents')
+        ? ', oi.shared_carton_contents'
+        : ', NULL AS shared_carton_contents';
+    $itemMetaCols .= $sharedCartonEnabledSelect . $sharedCartonContentsSelect;
     if (receivingTableHasColumn($pdo, 'products', 'image_paths')) {
         $itemMetaCols .= ', p.image_paths as product_image_paths';
     }
@@ -225,14 +232,19 @@ function receivingFetchQueueRowsForRequest(PDO $pdo, bool $paginate = true, ?arr
         foreach ($itemRows as $item) {
             $oid = (int) ($item['order_id'] ?? 0);
             unset($item['order_id']);
+            $sharedCartonImages = !empty($item['shared_carton_enabled'])
+                ? clmsSharedCartonImagePaths($pdo, $item['shared_carton_contents'] ?? null)
+                : [];
             $item['image_paths'] = clmsMergeImagePathLists(
                 $item['image_paths'] ?? [],
                 $item['product_image_paths'] ?? [],
+                $sharedCartonImages,
                 $receiptImages[(int) ($item['id'] ?? 0)] ?? [],
                 (int) ($item['id'] ?? 0) === ($firstItemByOrder[$oid] ?? 0)
                     ? ($orderReceiptImages[$oid] ?? [])
                     : []
             );
+            unset($item['shared_carton_contents']);
             $itemsByOrder[$oid][] = $item;
         }
     }
@@ -619,7 +631,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             receivingOutputQueueCsv($rows);
         }
         require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
-        (new OrderExcelService())->exportReceivingQueueSummary(
+        (new OrderExcelService($pdo))->exportReceivingQueueSummary(
             $rows,
             'receiving_queue_' . date('Ymd_His') . '.xlsx'
         );

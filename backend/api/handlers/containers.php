@@ -406,7 +406,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if ($format === 'csv') {
                     outputContainerOrdersCsv($container, $ordersWithItems);
                 }
-                (new OrderExcelService())->exportOrders(
+                (new OrderExcelService($pdo))->exportOrders(
                     $ordersWithItems,
                     'container_' . $code . '_orders_' . date('Ymd_His') . '.xlsx',
                     [

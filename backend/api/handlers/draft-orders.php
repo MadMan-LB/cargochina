@@ -440,6 +440,24 @@ function draftOrderNormalizeSharedCartonContents(PDO $pdo, array $rawContents, i
         }
 
         $itemNumberSource = draftOrderNormalizeItemNumberSource($rawContent);
+        $productImagePaths = clmsNormalizeImagePathList($product['image_paths'] ?? []);
+        $explicitImagePaths = [];
+        foreach (clmsMergeImagePathLists(
+            $rawContent['image_paths'] ?? [],
+            $rawContent['photo_paths'] ?? []
+        ) as $candidate) {
+            if (in_array($candidate, $productImagePaths, true)) {
+                continue;
+            }
+            try {
+                $meta = clmsResolveStoredUploadPathMeta($candidate, false);
+                $explicitImagePaths[] = (string) $meta['normalized'];
+            } catch (Throwable $e) {
+                jsonError('A contained item photo reference is invalid.', 400, [
+                    'shared_carton_contents.image_paths' => 'Select or upload the contained item photo again.',
+                ]);
+            }
+        }
         $normalized[] = [
             'product_id' => !empty($rawContent['product_id']) ? (int) $rawContent['product_id'] : null,
             'supplier_id' => $supplierId,
@@ -467,6 +485,7 @@ function draftOrderNormalizeSharedCartonContents(PDO $pdo, array $rawContents, i
             'description_entries' => $description['entries'],
             'description_cn' => $description['description_cn'],
             'description_en' => $description['description_en'],
+            'image_paths' => clmsMergeImagePathLists($explicitImagePaths, $productImagePaths),
             'notes' => trim((string) ($rawContent['notes'] ?? '')) ?: null,
         ];
     }
@@ -529,6 +548,7 @@ function draftOrderDecodeSharedCartonContents(PDO $pdo, array $item): array
         return [];
     }
 
+    $decoded = clmsHydrateSharedCartonImagePaths($pdo, $decoded);
     $supplierIds = array_values(array_unique(array_filter(array_map(
         static fn(array $row): int => (int) ($row['supplier_id'] ?? 0),
         $decoded
@@ -1709,8 +1729,18 @@ function draftOrderBuildExportRows(array $sections): array
     foreach ($sections as $section) {
         foreach (($section['items'] ?? []) as $item) {
             if (!empty($item['shared_carton_enabled']) && !empty($item['shared_carton_contents'])) {
+                $sharedContentImages = [];
+                foreach ($item['shared_carton_contents'] as $content) {
+                    $sharedContentImages = clmsMergeImagePathLists(
+                        $sharedContentImages,
+                        $content['image_paths'] ?? [],
+                        $content['photo_paths'] ?? []
+                    );
+                }
                 $rows[] = [
                     'row_type' => 'shared_carton_summary',
+                    'source_item_id' => (int) ($item['id'] ?? 0),
+                    'product_id' => !empty($item['product_id']) ? (int) $item['product_id'] : null,
                     'supplier_id' => $section['supplier_id'] ?? null,
                     'supplier_name' => $section['supplier_name'] ?? '',
                     'item_no' => $item['shared_carton_code'] ?: $item['shipping_code'] ?: '',
@@ -1741,7 +1771,7 @@ function draftOrderBuildExportRows(array $sections): array
                     'total_weight' => round((float) (($item['weight'] ?? 0) * (($item['dimensions_scope'] ?? 'carton') === 'carton' ? (float) ($item['cartons'] ?? 0) : (float) ($item['quantity'] ?? 0))), 4),
                     'custom_design_required' => !empty($item['custom_design_required']) ? 'Yes' : 'No',
                     'notes' => $item['notes'] ?? '',
-                    'image_paths' => $item['photo_paths'] ?? [],
+                    'image_paths' => clmsMergeImagePathLists($item['photo_paths'] ?? [], $sharedContentImages),
                     'carton_note' => $item['shared_carton_code'] ? ('Shared carton ' . $item['shared_carton_code']) : 'Shared carton',
                 ];
 
@@ -1759,6 +1789,8 @@ function draftOrderBuildExportRows(array $sections): array
                         : (isset($content['unit_price']) && $content['unit_price'] !== null ? (float) $content['unit_price'] : null);
                     $rows[] = [
                         'row_type' => 'shared_carton_content',
+                        'source_item_id' => (int) ($item['id'] ?? 0),
+                        'product_id' => !empty($content['product_id']) ? (int) $content['product_id'] : null,
                         'supplier_id' => $content['supplier_id'] ?? ($section['supplier_id'] ?? null),
                         'supplier_name' => $content['supplier_name'] ?? ($section['supplier_name'] ?? ''),
                         // The row type already identifies shared-carton contents. Keep the
@@ -1791,7 +1823,10 @@ function draftOrderBuildExportRows(array $sections): array
                         'total_weight' => '',
                         'custom_design_required' => '',
                         'notes' => $content['notes'] ?? '',
-                        'image_paths' => [],
+                        'image_paths' => clmsMergeImagePathLists(
+                            $content['image_paths'] ?? [],
+                            $content['photo_paths'] ?? []
+                        ),
                         'carton_note' => $item['shared_carton_code'] ? ('Shared carton ' . $item['shared_carton_code']) : 'Shared carton',
                     ];
                 }
@@ -1814,6 +1849,8 @@ function draftOrderBuildExportRows(array $sections): array
                 : (isset($item['unit_price']) && $item['unit_price'] !== null ? (float) $item['unit_price'] : null);
             $rows[] = [
                 'row_type' => 'item',
+                'source_item_id' => (int) ($item['id'] ?? 0),
+                'product_id' => !empty($item['product_id']) ? (int) $item['product_id'] : null,
                 'supplier_id' => $section['supplier_id'] ?? null,
                 'supplier_name' => $section['supplier_name'] ?? '',
                 'item_no' => $item['item_no'] ?: '',
@@ -2108,6 +2145,8 @@ function draftOrderBuildExcelEntry(PDO $pdo, int $orderId): array
     foreach (draftOrderBuildExportRows($order['supplier_sections']) as $row) {
         $isSummary = ($row['row_type'] ?? '') === 'shared_carton_summary';
         $excelItems[] = [
+            'id' => (int) ($row['source_item_id'] ?? 0),
+            'product_id' => !empty($row['product_id']) ? (int) $row['product_id'] : null,
             'item_no' => $row['item_no'] ?? '',
             'shipping_code' => '',
             'what_brand' => $row['what_brand'] ?? '',
@@ -2151,7 +2190,7 @@ function draftOrderBuildExcelEntry(PDO $pdo, int $orderId): array
 function draftOrderExportXlsx(PDO $pdo, int $orderId): void
 {
     $entry = draftOrderBuildExcelEntry($pdo, $orderId);
-    (new OrderExcelService())->exportOrder($entry['order'], $entry['items'], $entry['filename']);
+    (new OrderExcelService($pdo))->exportOrder($entry['order'], $entry['items'], $entry['filename']);
 }
 
 function draftOrderImportCellString($value): string
@@ -3977,6 +4016,7 @@ function draftOrderImportBuildSharedContent(PDO $pdo, array $row, array $map, ar
         'description_entries' => $item['description_entries'],
         'description_cn' => '',
         'description_en' => '',
+        'image_paths' => $item['photo_paths'] ?? [],
         'notes' => null,
     ];
 }
@@ -4379,7 +4419,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         [$rows] = draftOrderListQuery($pdo, draftOrderRequestFilters(), false);
         if (!$rows) jsonError('No draft orders match the active filters.', 404);
         $entries = array_map(static fn(array $row): array => draftOrderBuildExcelEntry($pdo, (int) $row['id']), $rows);
-        (new OrderBulkExcelService())->output($entries, 'filtered_draft_orders');
+        (new OrderBulkExcelService($pdo))->output($entries, 'filtered_draft_orders');
     }
 
     if ($method === 'POST' && $id === 'import' && $action === null) {

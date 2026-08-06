@@ -2516,6 +2516,14 @@ body.d-flex {
   max-width: 100%;
 }
 
+#draftOrderModal .draft-shared-content-photos {
+  grid-template-columns: repeat(auto-fit, minmax(52px, 64px));
+}
+
+#draftOrderModal .draft-shared-content-photos .draft-item-photo-thumb {
+  max-width: 64px;
+}
+
 #draftOrderModal .draft-item-photo-thumb {
   position: relative;
   overflow: hidden;

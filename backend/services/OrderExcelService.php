@@ -19,7 +19,14 @@ use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 class OrderExcelService
 {
     private string $backendDir;
+    private ?PDO $pdo;
+    private bool $pdoResolutionAttempted = false;
     private array $workbookImageCache = [];
+    private array $workbookImageResolutionCache = [];
+    private array $workbookContextImageCache = [];
+    private array $workbookImageDiagnosticKeys = [];
+
+    public const IMAGE_PIPELINE_VERSION = '2026.08.05.2';
 
     private const STANDARD_LAST_COL = 'AB';
     private const CONTAINER_LAST_COL = 'V';
@@ -37,9 +44,11 @@ class OrderExcelService
     private const SOFT_GREEN = 'E2F0D9';
     private const MASTER_TABLE_BLUE = '2563EB';
 
-    public function __construct()
+    public function __construct(?PDO $pdo = null)
     {
         $this->backendDir = dirname(__DIR__);
+        $this->pdo = $pdo;
+        $this->pdoResolutionAttempted = $pdo instanceof PDO;
     }
 
     private function tr(string $text, array $params = []): string
@@ -604,6 +613,7 @@ class OrderExcelService
     private function writeStandardItems($sheet, array $items, int $startRow, array $order = []): int
     {
         $row = $startRow;
+        $this->primeCanonicalImageContexts($items, (int) ($order['id'] ?? 0));
 
         foreach ($this->groupItemsBySupplier($items, $order) as $group) {
             if ($group['supplier_name'] !== '' || $group['supplier_phone'] !== '' || $group['supplier_info'] !== '') {
@@ -673,7 +683,13 @@ class OrderExcelService
                 $sheet->getStyle('W' . $row . ':X' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
 
                 $sheet->getRowDimension($row)->setRowHeight(self::PHOTO_ROW_HEIGHT_PT);
-                $this->writePhotoCell($sheet, self::PHOTO_COLUMN . $row, $item['image_paths'] ?? []);
+                $this->writePhotoCell($sheet, self::PHOTO_COLUMN . $row, $item['image_paths'] ?? [], [
+                    'scope' => 'order',
+                    'order_id' => (int) ($order['id'] ?? 0),
+                    'order_item_id' => (int) ($item['id'] ?? 0),
+                    'product_id' => (int) ($item['product_id'] ?? 0),
+                    'item_no' => (string) ($item['item_no'] ?? $item['shipping_code'] ?? ''),
+                ]);
                 $row++;
             }
         }
@@ -951,6 +967,7 @@ class OrderExcelService
 
     private function writeContainerItems($sheet, array $items, array $order, int $row, array &$sectionTotals, array &$overallTotals): int
     {
+        $this->primeCanonicalImageContexts($items, (int) ($order['id'] ?? 0));
         foreach ($this->groupItemsBySupplier($items, $order) as $group) {
             if ($group['supplier_name'] !== '' || $group['supplier_phone'] !== '' || $group['supplier_info'] !== '') {
                 $row = $this->writeSupplierGroupHeader(
@@ -1024,7 +1041,13 @@ class OrderExcelService
                 $sheet->getStyle('Q' . $row . ':R' . $row)->getNumberFormat()->setFormatCode('#,##0.######');
                 $sheet->getStyle('S' . $row . ':T' . $row)->getNumberFormat()->setFormatCode('#,##0.####');
                 $sheet->getRowDimension($row)->setRowHeight(self::PHOTO_ROW_HEIGHT_PT);
-                $this->writePhotoCell($sheet, self::CONTAINER_PHOTO_COLUMN . $row, $item['image_paths'] ?? []);
+                $this->writePhotoCell($sheet, self::CONTAINER_PHOTO_COLUMN . $row, $item['image_paths'] ?? [], [
+                    'scope' => 'container_order',
+                    'order_id' => (int) ($order['id'] ?? 0),
+                    'order_item_id' => (int) ($item['id'] ?? 0),
+                    'product_id' => (int) ($item['product_id'] ?? 0),
+                    'item_no' => (string) ($item['item_no'] ?? $item['shipping_code'] ?? ''),
+                ]);
 
                 $sectionTotals['cartons'] += $cartons;
                 $sectionTotals['quantity'] += $quantity;
@@ -1287,7 +1310,7 @@ class OrderExcelService
         return $date instanceof DateTimeImmutable ? ExcelDate::dateTimeToExcel($date) : null;
     }
 
-    private function writePhotoCell($sheet, string $cell, $imagePaths): void
+    private function writePhotoCell($sheet, string $cell, $imagePaths, array $context = []): void
     {
         $paths = $this->normalizeImagePaths($imagePaths);
         $sheet->getStyle($cell)->applyFromArray([
@@ -1301,22 +1324,72 @@ class OrderExcelService
             'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
         ]);
 
-        if (!$paths) {
-            $sheet->setCellValue($cell, $this->tr('No photo'));
-            return;
+        $sourcePath = '';
+        $reasons = [];
+        $attempted = [];
+        $resolveCandidates = function (array $candidates) use (&$sourcePath, &$reasons, &$attempted): void {
+            foreach ($candidates as $candidate) {
+                if ($sourcePath !== '' || isset($attempted[$candidate])) {
+                    continue;
+                }
+                $attempted[$candidate] = true;
+                $outcome = $this->resolveWorkbookImageSourceOutcome($candidate);
+                if (($outcome['path'] ?? '') !== '') {
+                    $sourcePath = (string) $outcome['path'];
+                    return;
+                }
+                $reason = (string) ($outcome['reason'] ?? 'unavailable');
+                $reasons[$reason] = ($reasons[$reason] ?? 0) + 1;
+            }
+        };
+        $resolveCandidates($paths);
+
+        $usedCanonicalFallback = false;
+        if ($sourcePath === '') {
+            $canonicalPaths = $this->resolveCanonicalImagePathsForContext($context);
+            $newCanonicalPaths = array_values(array_filter(
+                $canonicalPaths,
+                static fn(string $candidate): bool => !isset($attempted[$candidate])
+            ));
+            if ($newCanonicalPaths) {
+                $usedCanonicalFallback = true;
+                $paths = $this->normalizeImagePaths([$paths, $newCanonicalPaths]);
+                $resolveCandidates($newCanonicalPaths);
+            }
         }
 
-        $sourcePath = '';
-        foreach ($paths as $candidate) {
-            $resolved = $this->resolveWorkbookImageSource($candidate);
-            if (is_file($resolved) && is_readable($resolved)) {
-                $sourcePath = $resolved;
-                break;
-            }
+        if (!$paths) {
+            $sheet->setCellValue($cell, $this->tr('No photo'));
+            $this->logWorkbookImageDiagnostic('excel_image_unavailable', $context, 'no_candidates', 0);
+            return;
         }
         if (!is_file($sourcePath) || !is_readable($sourcePath)) {
             $sheet->setCellValue($cell, $this->tr('No photo'));
+            $this->logWorkbookImageDiagnostic(
+                'excel_image_unavailable',
+                $context,
+                'all_candidates_unavailable',
+                count($paths),
+                $reasons
+            );
             return;
+        }
+        if ($usedCanonicalFallback) {
+            $this->logWorkbookImageDiagnostic(
+                'excel_image_fallback_used',
+                $context,
+                'canonical_db_fallback_used',
+                count($paths),
+                $reasons
+            );
+        } elseif ($reasons) {
+            $this->logWorkbookImageDiagnostic(
+                'excel_image_fallback_used',
+                $context,
+                'later_candidate_used',
+                count($paths),
+                $reasons
+            );
         }
 
         try {
@@ -1345,14 +1418,231 @@ class OrderExcelService
             $sheet->setCellValue($cell, '');
         } catch (Throwable $e) {
             $sheet->setCellValue($cell, $this->tr('No photo'));
+            $this->logWorkbookImageDiagnostic('excel_image_unavailable', $context, 'drawing_failed', count($paths));
         }
+    }
+
+    private function database(): ?PDO
+    {
+        if ($this->pdo instanceof PDO) {
+            return $this->pdo;
+        }
+        if ($this->pdoResolutionAttempted) {
+            return null;
+        }
+        $this->pdoResolutionAttempted = true;
+        if (!function_exists('getDb')) {
+            return null;
+        }
+        try {
+            $pdo = getDb();
+            if ($pdo instanceof PDO) {
+                $this->pdo = $pdo;
+            }
+        } catch (Throwable $e) {
+            $this->pdo = null;
+        }
+        return $this->pdo;
+    }
+
+    private function primeCanonicalImageContexts(array $items, int $orderId): void
+    {
+        $targets = [];
+        $orderItemIds = [];
+        $productIds = [];
+        foreach ($items as $item) {
+            if (!is_array($item) || $this->normalizeImagePaths($item['image_paths'] ?? [])) {
+                continue;
+            }
+            $orderItemId = max(0, (int) ($item['id'] ?? 0));
+            $productId = max(0, (int) ($item['product_id'] ?? 0));
+            if ($orderItemId === 0 && $productId === 0) {
+                continue;
+            }
+            $cacheKey = $orderId . '|' . $orderItemId . '|' . $productId;
+            if (array_key_exists($cacheKey, $this->workbookContextImageCache)) {
+                continue;
+            }
+            $targets[$cacheKey] = [
+                'order_item_id' => $orderItemId,
+                'product_id' => $productId,
+            ];
+            if ($orderItemId > 0) {
+                $orderItemIds[$orderItemId] = true;
+            }
+            if ($productId > 0) {
+                $productIds[$productId] = true;
+            }
+        }
+        if (!$targets) {
+            return;
+        }
+
+        $pdo = $this->database();
+        if (!$pdo) {
+            foreach (array_keys($targets) as $cacheKey) {
+                $this->workbookContextImageCache[$cacheKey] = [];
+            }
+            return;
+        }
+
+        $itemRows = [];
+        if ($orderItemIds) {
+            try {
+                $ids = array_keys($orderItemIds);
+                $placeholders = implode(',', array_fill(0, count($ids), '?'));
+                $stmt = $pdo->prepare(
+                    "SELECT id, order_id, product_id, image_paths
+                     FROM order_items
+                     WHERE id IN ($placeholders)"
+                );
+                $stmt->execute($ids);
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                    if ($orderId > 0 && (int) ($row['order_id'] ?? 0) !== $orderId) {
+                        continue;
+                    }
+                    $itemRows[(int) $row['id']] = $row;
+                    $linkedProductId = max(0, (int) ($row['product_id'] ?? 0));
+                    if ($linkedProductId > 0) {
+                        $productIds[$linkedProductId] = true;
+                    }
+                }
+            } catch (Throwable $e) {
+                $itemRows = [];
+            }
+        }
+
+        $receiptMap = $orderItemIds ? clmsReceiptItemImagePaths($pdo, array_keys($orderItemIds)) : [];
+        $productMap = $productIds ? clmsProductImagePaths($pdo, array_keys($productIds)) : [];
+        foreach ($targets as $cacheKey => $target) {
+            $orderItemId = $target['order_item_id'];
+            $contextProductId = $target['product_id'];
+            $row = $itemRows[$orderItemId] ?? [];
+            $linkedProductId = max(0, (int) ($row['product_id'] ?? 0));
+            $sameLogicalItem = $contextProductId === 0
+                || $linkedProductId === 0
+                || $contextProductId === $linkedProductId;
+            $itemPaths = $sameLogicalItem
+                ? clmsNormalizeImagePathList($row['image_paths'] ?? [])
+                : [];
+            $receiptPaths = $sameLogicalItem ? ($receiptMap[$orderItemId] ?? []) : [];
+            $productId = $contextProductId > 0 ? $contextProductId : $linkedProductId;
+            $this->workbookContextImageCache[$cacheKey] = clmsMergeImagePathLists(
+                $itemPaths,
+                $productMap[$productId] ?? [],
+                $receiptPaths
+            );
+        }
+    }
+
+    private function resolveCanonicalImagePathsForContext(array $context): array
+    {
+        $orderId = max(0, (int) ($context['order_id'] ?? 0));
+        $orderItemId = max(0, (int) ($context['order_item_id'] ?? 0));
+        $contextProductId = max(0, (int) ($context['product_id'] ?? 0));
+        if ($orderItemId === 0 && $contextProductId === 0) {
+            return [];
+        }
+
+        $cacheKey = $orderId . '|' . $orderItemId . '|' . $contextProductId;
+        if (array_key_exists($cacheKey, $this->workbookContextImageCache)) {
+            return $this->workbookContextImageCache[$cacheKey];
+        }
+        $pdo = $this->database();
+        if (!$pdo) {
+            return $this->workbookContextImageCache[$cacheKey] = [];
+        }
+
+        $itemImagePaths = [];
+        $receiptImagePaths = [];
+        $linkedProductId = 0;
+        if ($orderItemId > 0) {
+            try {
+                $sql = 'SELECT product_id, image_paths FROM order_items WHERE id = ?';
+                $params = [$orderItemId];
+                if ($orderId > 0) {
+                    $sql .= ' AND order_id = ?';
+                    $params[] = $orderId;
+                }
+                $stmt = $pdo->prepare($sql . ' LIMIT 1');
+                $stmt->execute($params);
+                $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+                $linkedProductId = max(0, (int) ($row['product_id'] ?? 0));
+
+                // Shared-carton children retain the parent order_item_id while carrying
+                // their own product_id. Never borrow the parent image for a child row.
+                $sameLogicalItem = $contextProductId === 0
+                    || $linkedProductId === 0
+                    || $contextProductId === $linkedProductId;
+                if ($sameLogicalItem) {
+                    $itemImagePaths = clmsNormalizeImagePathList($row['image_paths'] ?? []);
+                    $receiptMap = clmsReceiptItemImagePaths($pdo, [$orderItemId]);
+                    $receiptImagePaths = $receiptMap[$orderItemId] ?? [];
+                }
+            } catch (Throwable $e) {
+                $linkedProductId = 0;
+            }
+        }
+
+        $productId = $contextProductId > 0 ? $contextProductId : $linkedProductId;
+        $productImagePaths = [];
+        if ($productId > 0) {
+            $productMap = clmsProductImagePaths($pdo, [$productId]);
+            $productImagePaths = $productMap[$productId] ?? [];
+        }
+
+        return $this->workbookContextImageCache[$cacheKey] = clmsMergeImagePathLists(
+            $itemImagePaths,
+            $productImagePaths,
+            $receiptImagePaths
+        );
+    }
+
+    public function diagnoseImageCandidates($imagePaths, array $context = []): array
+    {
+        $provided = $this->normalizeImagePaths($imagePaths);
+        $canonical = $this->resolveCanonicalImagePathsForContext($context);
+        $all = $this->normalizeImagePaths([$provided, $canonical]);
+        $reasonCounts = [];
+        $usable = 0;
+        foreach ($all as $candidate) {
+            $outcome = $this->resolveWorkbookImageSourceOutcome($candidate);
+            if (($outcome['path'] ?? '') !== '') {
+                $usable++;
+                continue;
+            }
+            $reason = (string) ($outcome['reason'] ?? 'unavailable');
+            $reasonCounts[$reason] = ($reasonCounts[$reason] ?? 0) + 1;
+        }
+
+        ksort($reasonCounts);
+        return [
+            'pipeline_version' => self::IMAGE_PIPELINE_VERSION,
+            'provided_candidate_count' => count($provided),
+            'canonical_candidate_count' => count($canonical),
+            'candidate_count' => count($all),
+            'usable_candidate_count' => $usable,
+            'status' => $usable > 0 ? 'ready' : 'unavailable',
+            'reason_counts' => $reasonCounts,
+        ];
     }
 
     private function resolveWorkbookImageSource(string $path): string
     {
+        return (string) ($this->resolveWorkbookImageSourceOutcome($path)['path'] ?? '');
+    }
+
+    private function resolveWorkbookImageSourceOutcome(string $path): array
+    {
         $path = trim(html_entity_decode($path, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
-        if ($path === '' || str_starts_with(strtolower($path), 'data:')) {
-            return '';
+        if ($path === '') {
+            return ['path' => '', 'reason' => 'empty_path'];
+        }
+        if (isset($this->workbookImageResolutionCache[$path])) {
+            return $this->workbookImageResolutionCache[$path];
+        }
+        if (str_starts_with(strtolower($path), 'data:')) {
+            return $this->workbookImageResolutionCache[$path] = ['path' => '', 'reason' => 'data_uri_not_allowed'];
         }
 
         $isRemote = preg_match('#^https?://#i', $path) === 1;
@@ -1379,11 +1669,12 @@ class OrderExcelService
         if ($absoluteCandidate !== false && is_file($absoluteCandidate) && is_readable($absoluteCandidate)) {
             $absoluteNormalized = str_replace('\\', '/', $absoluteCandidate);
             if (str_starts_with(strtolower($absoluteNormalized . (is_dir($absoluteCandidate) ? '/' : '')), strtolower($backendPrefix))) {
-                return $absoluteCandidate;
+                return $this->workbookImageResolutionCache[$path] = $this->validateWorkbookImageFile($absoluteCandidate);
             }
         }
 
-        $localRelative = ltrim(str_replace('\\', '/', $localCandidate), '/');
+        $localRelative = ltrim(str_replace('\\', '/', rawurldecode($localCandidate)), '/');
+        $localRelative = preg_replace('#/+#', '/', $localRelative) ?? $localRelative;
         $projectDirectory = strtolower(basename(dirname($this->backendDir)));
         foreach ([$projectDirectory . '/backend/', 'cargochina/backend/', 'backend/', $projectDirectory . '/'] as $prefix) {
             if (str_starts_with(strtolower($localRelative), $prefix)) {
@@ -1392,35 +1683,238 @@ class OrderExcelService
             }
         }
         if (str_contains($localRelative, '../') || str_contains($localRelative, "\0")) {
-            return '';
+            return $this->workbookImageResolutionCache[$path] = ['path' => '', 'reason' => 'unsafe_path'];
         }
         $localPath = realpath($this->backendDir . '/' . $localRelative);
+        if ($localPath === false) {
+            $localPath = $this->resolveBackendPathCaseInsensitive($localRelative);
+        }
         if ($localPath !== false && is_file($localPath) && is_readable($localPath)) {
             $localNormalized = str_replace('\\', '/', $localPath);
             if (str_starts_with(strtolower($localNormalized), strtolower($backendPrefix))) {
-                return $localPath;
+                return $this->workbookImageResolutionCache[$path] = $this->validateWorkbookImageFile($localPath);
             }
         }
         if (!$isRemote) {
-            return '';
+            return $this->workbookImageResolutionCache[$path] = ['path' => '', 'reason' => 'local_file_unavailable'];
         }
         $url = parse_url($path);
+        if (!is_array($url)) {
+            return $this->workbookImageResolutionCache[$path] = ['path' => '', 'reason' => 'invalid_remote_url'];
+        }
         $host = strtolower((string) ($url['host'] ?? ''));
-        if ($host === '' || in_array($host, ['localhost', '127.0.0.1', '::1'], true)) return '';
+        if ($host === '' || in_array($host, ['localhost', '127.0.0.1', '::1'], true)) {
+            return $this->workbookImageResolutionCache[$path] = ['path' => '', 'reason' => 'remote_host_blocked'];
+        }
         $ip = gethostbyname($host);
-        if ($ip === $host || filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) return '';
+        if ($ip === $host || filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
+            return $this->workbookImageResolutionCache[$path] = ['path' => '', 'reason' => 'remote_address_blocked'];
+        }
         $cacheDir = rtrim(sys_get_temp_dir(), '/\\') . DIRECTORY_SEPARATOR . 'clms_excel_remote_images';
-        if (!is_dir($cacheDir) && !@mkdir($cacheDir, 0770, true) && !is_dir($cacheDir)) return '';
+        if (!is_dir($cacheDir) && !@mkdir($cacheDir, 0770, true) && !is_dir($cacheDir)) {
+            return $this->workbookImageResolutionCache[$path] = ['path' => '', 'reason' => 'remote_cache_unavailable'];
+        }
         $target = $cacheDir . DIRECTORY_SEPARATOR . hash('sha256', $path) . '.img';
-        if (is_file($target) && filesize($target) > 0) return $target;
-        $context = stream_context_create(['http' => ['timeout' => 5, 'follow_location' => 0, 'user_agent' => 'CLMS Excel Export/1.0']]);
-        $source = @fopen($path, 'rb', false, $context);
-        if (!$source) return '';
-        $data = stream_get_contents($source, 8 * 1024 * 1024 + 1);
-        fclose($source);
-        if (!is_string($data) || $data === '' || strlen($data) > 8 * 1024 * 1024 || @getimagesizefromstring($data) === false) return '';
-        if (@file_put_contents($target, $data, LOCK_EX) === false) return '';
-        return $target;
+        if (is_file($target) && filesize($target) > 0) {
+            $cached = $this->validateWorkbookImageFile($target);
+            if (($cached['path'] ?? '') !== '') {
+                return $this->workbookImageResolutionCache[$path] = $cached;
+            }
+            @unlink($target);
+        }
+
+        $download = $this->downloadRemoteWorkbookImage($path, $host, $ip, (int) ($url['port'] ?? 0));
+        if (($download['data'] ?? '') === '') {
+            return $this->workbookImageResolutionCache[$path] = [
+                'path' => '',
+                'reason' => (string) ($download['reason'] ?? 'remote_fetch_failed'),
+            ];
+        }
+        if (@file_put_contents($target, $download['data'], LOCK_EX) === false) {
+            return $this->workbookImageResolutionCache[$path] = ['path' => '', 'reason' => 'remote_cache_write_failed'];
+        }
+        $outcome = $this->validateWorkbookImageFile($target);
+        if (($outcome['path'] ?? '') === '') {
+            @unlink($target);
+        }
+        return $this->workbookImageResolutionCache[$path] = $outcome;
+    }
+
+    private function resolveBackendPathCaseInsensitive(string $relativePath)
+    {
+        $segments = array_values(array_filter(explode('/', trim($relativePath, '/')), static fn(string $part): bool => $part !== ''));
+        if (!$segments || in_array('..', $segments, true) || in_array('.', $segments, true)) {
+            return false;
+        }
+
+        $current = realpath($this->backendDir);
+        if ($current === false) {
+            return false;
+        }
+        foreach ($segments as $segment) {
+            $exact = $current . DIRECTORY_SEPARATOR . $segment;
+            if (file_exists($exact)) {
+                $current = $exact;
+                continue;
+            }
+            $entries = @scandir($current);
+            if (!is_array($entries)) {
+                return false;
+            }
+            $match = null;
+            foreach ($entries as $entry) {
+                if ($entry !== '.' && $entry !== '..' && strcasecmp($entry, $segment) === 0) {
+                    $match = $entry;
+                    break;
+                }
+            }
+            if ($match === null) {
+                return false;
+            }
+            $current .= DIRECTORY_SEPARATOR . $match;
+        }
+
+        $resolved = realpath($current);
+        if ($resolved === false) {
+            return false;
+        }
+        $backendRoot = realpath($this->backendDir);
+        $resolvedNormalized = str_replace('\\', '/', $resolved);
+        $backendPrefix = rtrim(str_replace('\\', '/', (string) $backendRoot), '/') . '/';
+        return $backendRoot !== false && str_starts_with(strtolower($resolvedNormalized), strtolower($backendPrefix))
+            ? $resolved
+            : false;
+    }
+
+    private function validateWorkbookImageFile(string $path): array
+    {
+        if (!is_file($path)) {
+            return ['path' => '', 'reason' => 'local_file_missing'];
+        }
+        if (!is_readable($path)) {
+            return ['path' => '', 'reason' => 'local_file_unreadable'];
+        }
+        $size = @filesize($path);
+        if ($size === false || $size <= 0) {
+            return ['path' => '', 'reason' => 'empty_file'];
+        }
+        if ($size > 25 * 1024 * 1024) {
+            return ['path' => '', 'reason' => 'image_too_large'];
+        }
+        $info = @getimagesize($path);
+        if (!is_array($info)) {
+            return ['path' => '', 'reason' => 'invalid_image_content'];
+        }
+        $mime = strtolower((string) ($info['mime'] ?? ''));
+        $directMimes = ['image/jpeg', 'image/png', 'image/gif'];
+        $convertMimes = ['image/webp', 'image/bmp', 'image/x-ms-bmp'];
+        if (!in_array($mime, $directMimes, true) && !in_array($mime, $convertMimes, true)) {
+            return ['path' => '', 'reason' => 'unsupported_image_type'];
+        }
+        if (in_array($mime, $convertMimes, true)
+            && (!extension_loaded('gd') || !function_exists('imagecreatefromstring'))) {
+            return ['path' => '', 'reason' => 'image_conversion_unavailable'];
+        }
+        return ['path' => $path, 'reason' => 'ok', 'mime' => $mime];
+    }
+
+    private function downloadRemoteWorkbookImage(string $url, string $host, string $ip, int $port = 0): array
+    {
+        $limit = 8 * 1024 * 1024;
+        if (extension_loaded('curl') && function_exists('curl_init')) {
+            $data = '';
+            $tooLarge = false;
+            $handle = curl_init($url);
+            if ($handle === false) {
+                return ['data' => '', 'reason' => 'remote_fetch_failed'];
+            }
+            $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+            $resolvedPort = $port > 0 ? $port : ($scheme === 'https' ? 443 : 80);
+            curl_setopt_array($handle, [
+                CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_CONNECTTIMEOUT => 3,
+                CURLOPT_TIMEOUT => 6,
+                CURLOPT_USERAGENT => 'CLMS Excel Export/1.0',
+                CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+                CURLOPT_RESOLVE => [$host . ':' . $resolvedPort . ':' . $ip],
+                CURLOPT_WRITEFUNCTION => static function ($curl, string $chunk) use (&$data, &$tooLarge, $limit): int {
+                    if (strlen($data) + strlen($chunk) > $limit) {
+                        $tooLarge = true;
+                        return 0;
+                    }
+                    $data .= $chunk;
+                    return strlen($chunk);
+                },
+            ]);
+            $success = curl_exec($handle);
+            $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+            curl_close($handle);
+            if ($tooLarge) {
+                return ['data' => '', 'reason' => 'remote_image_too_large'];
+            }
+            if ($success === false || $status < 200 || $status >= 300 || $data === '') {
+                return ['data' => '', 'reason' => 'remote_fetch_failed'];
+            }
+        } else {
+            $streamContext = stream_context_create(['http' => [
+                'timeout' => 6,
+                'follow_location' => 0,
+                'ignore_errors' => false,
+                'user_agent' => 'CLMS Excel Export/1.0',
+            ]]);
+            $source = @fopen($url, 'rb', false, $streamContext);
+            if (!$source) {
+                return ['data' => '', 'reason' => 'remote_fetch_failed'];
+            }
+            $data = stream_get_contents($source, $limit + 1);
+            fclose($source);
+            if (!is_string($data) || $data === '') {
+                return ['data' => '', 'reason' => 'remote_fetch_failed'];
+            }
+            if (strlen($data) > $limit) {
+                return ['data' => '', 'reason' => 'remote_image_too_large'];
+            }
+        }
+
+        if (@getimagesizefromstring($data) === false) {
+            return ['data' => '', 'reason' => 'remote_invalid_image'];
+        }
+        return ['data' => $data, 'reason' => 'ok'];
+    }
+
+    private function logWorkbookImageDiagnostic(
+        string $event,
+        array $context,
+        string $reason,
+        int $candidateCount,
+        array $reasonCounts = []
+    ): void {
+        $safe = [
+            'scope' => substr(preg_replace('/[^a-z0-9_-]+/i', '', (string) ($context['scope'] ?? 'excel')) ?: 'excel', 0, 40),
+            'order_id' => max(0, (int) ($context['order_id'] ?? 0)),
+            'order_item_id' => max(0, (int) ($context['order_item_id'] ?? 0)),
+            'product_id' => max(0, (int) ($context['product_id'] ?? 0)),
+            'item_no' => substr(trim((string) ($context['item_no'] ?? '')), 0, 80),
+            'reason' => substr(preg_replace('/[^a-z0-9_-]+/i', '', $reason) ?: 'unavailable', 0, 60),
+            'candidate_count' => max(0, $candidateCount),
+        ];
+        if ($reasonCounts) {
+            $safe['reason_counts'] = [];
+            foreach ($reasonCounts as $key => $count) {
+                $safeKey = substr(preg_replace('/[^a-z0-9_-]+/i', '', (string) $key) ?: 'unavailable', 0, 60);
+                $safe['reason_counts'][$safeKey] = max(0, (int) $count);
+            }
+            ksort($safe['reason_counts']);
+        }
+        $encoded = json_encode($safe, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+        $key = $event . '|' . hash('sha256', is_string($encoded) ? $encoded : serialize($safe));
+        if (isset($this->workbookImageDiagnosticKeys[$key])) {
+            return;
+        }
+        $this->workbookImageDiagnosticKeys[$key] = true;
+        if (function_exists('logClms')) {
+            logClms($event, $safe);
+        }
     }
 
     private function normalizeImagePaths($imagePaths): array
@@ -1821,6 +2315,7 @@ class OrderExcelService
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment; filename="' . preg_replace('/[^a-zA-Z0-9_.-]/', '_', $filename) . '"');
         header('Cache-Control: no-cache, no-store, must-revalidate');
+        header('X-CLMS-Excel-Image-Pipeline: ' . self::IMAGE_PIPELINE_VERSION);
         $writer->save('php://output');
         exit;
     }
@@ -1987,7 +2482,10 @@ class OrderExcelService
                 $cell = $column . $rowNumber;
                 $header = (string) ($headers[$index] ?? '');
                 if (strcasecmp(trim($header), 'Photo') === 0) {
-                    $this->writePhotoCell($sheet, $cell, $value);
+                    $this->writePhotoCell($sheet, $cell, $value, [
+                        'scope' => 'table_export',
+                        'item_no' => 'row-' . $rowNumber,
+                    ]);
                     $sheet->getColumnDimension($column)->setWidth(self::PHOTO_COLUMN_WIDTH);
                     $sheet->getRowDimension($rowNumber)->setRowHeight(self::PHOTO_ROW_HEIGHT_PT);
                 } elseif (is_string($value)
