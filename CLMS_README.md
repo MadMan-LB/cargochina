@@ -379,6 +379,12 @@ Any AI/engineer working on this system must follow these operating rules:
 ## 16) DECISION_LOG (keep updating)
 > Capture CEO/ops decisions. Newest on top.
 
+- 2026-08-06 - Fileinfo-independent Excel image embedding
+  - Root cause: production could resolve and validate item photos, but PhpSpreadsheet `Drawing::setPath()` then called `mime_content_type()`. On PHP installations without the Fileinfo function, that runtime error was caught by the exporter and surfaced as a valid workbook containing `No photo`.
+  - Decision: the shared Excel service tests the complete embed pipeline, retries later canonical candidates, and falls back to a bounded GD-backed `MemoryDrawing` when file drawings are unavailable or rejected. Missing genuine source images remain non-blocking.
+  - Diagnostics: Excel Image Health now distinguishes source-readable from embeddable candidates and reports Fileinfo, memory-drawing support, PHP version, runtime fallback reasons, and PhpSpreadsheet drawing-class fingerprints.
+  - Migration: none; no data model changed.
+
 - 2026-08-05 - Production Excel image resolution and shared-carton photos
   - Decision: Orders, Draft Orders, Receiving, Warehouse Stock, and Containers use one image precedence: item image, linked-product image, item-level receipt evidence, then applicable order-level receipt evidence.
   - Decision: Shared-carton child image paths persist in the existing JSON metadata; legacy children dynamically hydrate from `product_id`. Missing real images remain non-blocking and export as `No photo` with sanitized diagnostics.

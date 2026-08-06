@@ -12,6 +12,7 @@ use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
+use PhpOffice\PhpSpreadsheet\Worksheet\MemoryDrawing;
 use PhpOffice\PhpSpreadsheet\Worksheet\PageSetup;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -26,7 +27,7 @@ class OrderExcelService
     private array $workbookContextImageCache = [];
     private array $workbookImageDiagnosticKeys = [];
 
-    public const IMAGE_PIPELINE_VERSION = '2026.08.05.2';
+    public const IMAGE_PIPELINE_VERSION = '2026.08.06.1';
 
     private const STANDARD_LAST_COL = 'AB';
     private const CONTAINER_LAST_COL = 'V';
@@ -1312,7 +1313,7 @@ class OrderExcelService
 
     private function writePhotoCell($sheet, string $cell, $imagePaths, array $context = []): void
     {
-        $paths = $this->normalizeImagePaths($imagePaths);
+        $providedPaths = $this->normalizeImagePaths($imagePaths);
         $sheet->getStyle($cell)->applyFromArray([
             'font' => ['name' => 'Arial', 'size' => 11],
             'alignment' => [
@@ -1324,28 +1325,75 @@ class OrderExcelService
             'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => self::BORDER_COLOR]]],
         ]);
 
-        $sourcePath = '';
+        $photoColumn = preg_replace('/\d+$/', '', $cell) ?: self::PHOTO_COLUMN;
+        $columnWidth = (float) $sheet->getColumnDimension($photoColumn)->getWidth();
+        try {
+            $defaultFont = $sheet->getParent()->getDefaultStyle()->getFont();
+            $columnWidthPx = SharedDrawing::cellDimensionToPixels($columnWidth, $defaultFont);
+            $heightPx = SharedDrawing::pointsToPixels(self::PHOTO_ROW_HEIGHT_PT);
+        } catch (Throwable $e) {
+            // PhpSpreadsheet has changed this helper signature across releases.
+            $columnWidthPx = max(64, (int) round(max(1.0, $columnWidth) * 7 + 5));
+            $heightPx = max(64, (int) round(self::PHOTO_ROW_HEIGHT_PT * 96 / 72));
+            $this->logWorkbookImageDiagnostic(
+                'excel_image_runtime_fallback',
+                $context,
+                'drawing_dimension_api_fallback',
+                count($providedPaths)
+            );
+        }
+        $imageWidthPx = max(32, (int) floor($columnWidthPx * self::PHOTO_IMAGE_SCALE));
+        $imageHeightPx = max(32, (int) floor($heightPx * self::PHOTO_IMAGE_SCALE));
+        $offsetX = max(0, (int) floor(($columnWidthPx - $imageWidthPx) / 2));
+        $offsetY = max(0, (int) floor(($heightPx - $imageHeightPx) / 2));
+
+        $drawing = null;
+        $drawingMode = '';
+        $drawingFallbackReason = '';
         $reasons = [];
         $attempted = [];
-        $resolveCandidates = function (array $candidates) use (&$sourcePath, &$reasons, &$attempted): void {
+        $resolveCandidates = function (array $candidates) use (
+            &$drawing,
+            &$drawingMode,
+            &$drawingFallbackReason,
+            &$reasons,
+            &$attempted,
+            $imageWidthPx,
+            $imageHeightPx
+        ): void {
             foreach ($candidates as $candidate) {
-                if ($sourcePath !== '' || isset($attempted[$candidate])) {
+                if ($drawing !== null || isset($attempted[$candidate])) {
                     continue;
                 }
                 $attempted[$candidate] = true;
                 $outcome = $this->resolveWorkbookImageSourceOutcome($candidate);
-                if (($outcome['path'] ?? '') !== '') {
-                    $sourcePath = (string) $outcome['path'];
+                $sourcePath = (string) ($outcome['path'] ?? '');
+                if ($sourcePath === '') {
+                    $reason = (string) ($outcome['reason'] ?? 'unavailable');
+                    $reasons[$reason] = ($reasons[$reason] ?? 0) + 1;
+                    continue;
+                }
+
+                $embed = $this->createWorkbookDrawingOutcome(
+                    $sourcePath,
+                    $imageWidthPx * 2,
+                    $imageHeightPx * 2
+                );
+                if (($embed['drawing'] ?? null) !== null) {
+                    $drawing = $embed['drawing'];
+                    $drawingMode = (string) ($embed['mode'] ?? 'file');
+                    $drawingFallbackReason = (string) ($embed['fallback_reason'] ?? '');
                     return;
                 }
-                $reason = (string) ($outcome['reason'] ?? 'unavailable');
+                $reason = (string) ($embed['reason'] ?? 'drawing_unavailable');
                 $reasons[$reason] = ($reasons[$reason] ?? 0) + 1;
             }
         };
-        $resolveCandidates($paths);
+        $resolveCandidates($providedPaths);
 
         $usedCanonicalFallback = false;
-        if ($sourcePath === '') {
+        $canonicalPaths = [];
+        if ($drawing === null) {
             $canonicalPaths = $this->resolveCanonicalImagePathsForContext($context);
             $newCanonicalPaths = array_values(array_filter(
                 $canonicalPaths,
@@ -1353,22 +1401,22 @@ class OrderExcelService
             ));
             if ($newCanonicalPaths) {
                 $usedCanonicalFallback = true;
-                $paths = $this->normalizeImagePaths([$paths, $newCanonicalPaths]);
                 $resolveCandidates($newCanonicalPaths);
             }
         }
+        $paths = $this->normalizeImagePaths([$providedPaths, $canonicalPaths]);
 
         if (!$paths) {
             $sheet->setCellValue($cell, $this->tr('No photo'));
             $this->logWorkbookImageDiagnostic('excel_image_unavailable', $context, 'no_candidates', 0);
             return;
         }
-        if (!is_file($sourcePath) || !is_readable($sourcePath)) {
+        if ($drawing === null) {
             $sheet->setCellValue($cell, $this->tr('No photo'));
             $this->logWorkbookImageDiagnostic(
                 'excel_image_unavailable',
                 $context,
-                'all_candidates_unavailable',
+                'all_candidates_not_embeddable',
                 count($paths),
                 $reasons
             );
@@ -1391,23 +1439,17 @@ class OrderExcelService
                 $reasons
             );
         }
+        if ($drawingMode === 'memory') {
+            $this->logWorkbookImageDiagnostic(
+                'excel_image_runtime_fallback',
+                $context,
+                $drawingFallbackReason !== '' ? $drawingFallbackReason : 'memory_drawing_used',
+                count($paths),
+                $reasons
+            );
+        }
 
         try {
-            $defaultFont = $sheet->getParent()->getDefaultStyle()->getFont();
-            $photoColumn = preg_replace('/\d+$/', '', $cell) ?: self::PHOTO_COLUMN;
-            $columnWidthPx = SharedDrawing::cellDimensionToPixels(
-                $sheet->getColumnDimension($photoColumn)->getWidth(),
-                $defaultFont
-            );
-            $heightPx = SharedDrawing::pointsToPixels(self::PHOTO_ROW_HEIGHT_PT);
-            $imageWidthPx = max(32, (int) floor($columnWidthPx * self::PHOTO_IMAGE_SCALE));
-            $imageHeightPx = max(32, (int) floor($heightPx * self::PHOTO_IMAGE_SCALE));
-            $offsetX = max(0, (int) floor(($columnWidthPx - $imageWidthPx) / 2));
-            $offsetY = max(0, (int) floor(($heightPx - $imageHeightPx) / 2));
-            $path = $this->workbookImagePath($sourcePath, $imageWidthPx * 2, $imageHeightPx * 2);
-
-            $drawing = new Drawing();
-            $drawing->setPath($path);
             $drawing->setCoordinates($cell);
             $drawing->setResizeProportional(false);
             $drawing->setWidth($imageWidthPx);
@@ -1418,7 +1460,7 @@ class OrderExcelService
             $sheet->setCellValue($cell, '');
         } catch (Throwable $e) {
             $sheet->setCellValue($cell, $this->tr('No photo'));
-            $this->logWorkbookImageDiagnostic('excel_image_unavailable', $context, 'drawing_failed', count($paths));
+            $this->logWorkbookImageDiagnostic('excel_image_unavailable', $context, 'worksheet_attachment_failed', count($paths));
         }
     }
 
@@ -1604,11 +1646,26 @@ class OrderExcelService
         $canonical = $this->resolveCanonicalImagePathsForContext($context);
         $all = $this->normalizeImagePaths([$provided, $canonical]);
         $reasonCounts = [];
-        $usable = 0;
+        $fallbackCounts = [];
+        $sourceUsable = 0;
+        $embeddable = 0;
         foreach ($all as $candidate) {
             $outcome = $this->resolveWorkbookImageSourceOutcome($candidate);
-            if (($outcome['path'] ?? '') !== '') {
-                $usable++;
+            $sourcePath = (string) ($outcome['path'] ?? '');
+            if ($sourcePath !== '') {
+                $sourceUsable++;
+                $embed = $this->createWorkbookDrawingOutcome($sourcePath, 180, 140);
+                if (($embed['drawing'] ?? null) !== null) {
+                    $embeddable++;
+                    $fallbackReason = (string) ($embed['fallback_reason'] ?? '');
+                    if (($embed['mode'] ?? '') === 'memory' && $fallbackReason !== '') {
+                        $fallbackCounts[$fallbackReason] = ($fallbackCounts[$fallbackReason] ?? 0) + 1;
+                    }
+                    unset($embed['drawing']);
+                    continue;
+                }
+                $reason = (string) ($embed['reason'] ?? 'drawing_unavailable');
+                $reasonCounts[$reason] = ($reasonCounts[$reason] ?? 0) + 1;
                 continue;
             }
             $reason = (string) ($outcome['reason'] ?? 'unavailable');
@@ -1616,14 +1673,18 @@ class OrderExcelService
         }
 
         ksort($reasonCounts);
+        ksort($fallbackCounts);
         return [
             'pipeline_version' => self::IMAGE_PIPELINE_VERSION,
             'provided_candidate_count' => count($provided),
             'canonical_candidate_count' => count($canonical),
             'candidate_count' => count($all),
-            'usable_candidate_count' => $usable,
-            'status' => $usable > 0 ? 'ready' : 'unavailable',
+            'source_usable_candidate_count' => $sourceUsable,
+            'usable_candidate_count' => $embeddable,
+            'embeddable_candidate_count' => $embeddable,
+            'status' => $embeddable > 0 ? 'ready' : 'unavailable',
             'reason_counts' => $reasonCounts,
+            'runtime_fallback_counts' => $fallbackCounts,
         ];
     }
 
@@ -2343,6 +2404,93 @@ class OrderExcelService
                 ->setHeader(0.15)
                 ->setFooter(0.15);
             $sheet->getPageSetup()->setHorizontalCentered(true);
+        }
+    }
+
+    private function createWorkbookDrawingOutcome(string $sourcePath, int $targetWidth, int $targetHeight): array
+    {
+        $preparedPath = $sourcePath;
+        $fallbackReason = '';
+        try {
+            $preparedPath = $this->workbookImagePath($sourcePath, $targetWidth, $targetHeight);
+        } catch (Throwable $e) {
+            $fallbackReason = 'thumbnail_preparation_failed';
+        }
+
+        if (!is_file($preparedPath) || !is_readable($preparedPath)) {
+            return ['drawing' => null, 'reason' => 'prepared_image_unavailable'];
+        }
+
+        $preparedInfo = @getimagesize($preparedPath);
+        $preparedMime = is_array($preparedInfo) ? strtolower((string) ($preparedInfo['mime'] ?? '')) : '';
+        $fileDrawingMimes = ['image/jpeg', 'image/png', 'image/gif'];
+        if (in_array($preparedMime, $fileDrawingMimes, true) && function_exists('mime_content_type')) {
+            try {
+                $drawing = new Drawing();
+                $drawing->setPath($preparedPath);
+                return [
+                    'drawing' => $drawing,
+                    'mode' => 'file',
+                    'reason' => 'ok',
+                    'fallback_reason' => $fallbackReason,
+                ];
+            } catch (Throwable $e) {
+                $fallbackReason = 'file_drawing_rejected';
+            }
+        } elseif (!function_exists('mime_content_type')) {
+            $fallbackReason = 'fileinfo_unavailable';
+        } elseif ($preparedMime !== '') {
+            $fallbackReason = 'file_drawing_conversion_required';
+        }
+
+        if (!extension_loaded('gd') || !function_exists('imagecreatefromstring')) {
+            return [
+                'drawing' => null,
+                'reason' => $fallbackReason !== '' ? $fallbackReason : 'memory_drawing_unavailable',
+            ];
+        }
+
+        $sourceData = @file_get_contents($preparedPath);
+        if (!is_string($sourceData) || $sourceData === '') {
+            return ['drawing' => null, 'reason' => 'memory_image_read_failed'];
+        }
+        $imageResource = @imagecreatefromstring($sourceData);
+        unset($sourceData);
+        if ($imageResource === false) {
+            return ['drawing' => null, 'reason' => 'memory_image_decode_failed'];
+        }
+
+        if (function_exists('imagepng')) {
+            $renderingFunction = MemoryDrawing::RENDERING_PNG;
+            $mimeType = MemoryDrawing::MIMETYPE_PNG;
+        } elseif (function_exists('imagejpeg')) {
+            $renderingFunction = MemoryDrawing::RENDERING_JPEG;
+            $mimeType = MemoryDrawing::MIMETYPE_JPEG;
+        } else {
+            @imagedestroy($imageResource);
+            return ['drawing' => null, 'reason' => 'memory_image_encoder_unavailable'];
+        }
+
+        $drawing = null;
+        try {
+            $drawing = new MemoryDrawing();
+            $drawing->setImageResource($imageResource);
+            $drawing->setRenderingFunction($renderingFunction);
+            $drawing->setMimeType($mimeType);
+
+            return [
+                'drawing' => $drawing,
+                'mode' => 'memory',
+                'reason' => 'ok',
+                'fallback_reason' => $fallbackReason !== '' ? $fallbackReason : 'memory_drawing_used',
+            ];
+        } catch (Throwable $e) {
+            if ($drawing instanceof MemoryDrawing) {
+                unset($drawing);
+            } else {
+                @imagedestroy($imageResource);
+            }
+            return ['drawing' => null, 'reason' => 'memory_drawing_creation_failed'];
         }
     }
 

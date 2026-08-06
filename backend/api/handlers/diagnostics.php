@@ -99,6 +99,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             'excel_service' => dirname(__DIR__, 2) . '/services/OrderExcelService.php',
             'draft_orders_handler' => __DIR__ . '/draft-orders.php',
             'orders_handler' => __DIR__ . '/orders.php',
+            'phpspreadsheet_drawing' => $projectRoot . '/vendor/phpoffice/phpspreadsheet/src/PhpSpreadsheet/Worksheet/Drawing.php',
+            'phpspreadsheet_memory_drawing' => $projectRoot . '/vendor/phpoffice/phpspreadsheet/src/PhpSpreadsheet/Worksheet/MemoryDrawing.php',
         ];
         $fingerprints = [];
         foreach ($sourceFiles as $name => $path) {
@@ -124,8 +126,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             'items' => $items,
             'environment' => [
                 'pipeline_version' => OrderExcelService::IMAGE_PIPELINE_VERSION,
+                'php_version' => PHP_VERSION,
                 'gd_loaded' => extension_loaded('gd'),
                 'zip_loaded' => class_exists('ZipArchive'),
+                'fileinfo_available' => function_exists('mime_content_type'),
+                'memory_drawing_available' => extension_loaded('gd')
+                    && function_exists('imagecreatefromstring')
+                    && (function_exists('imagepng') || function_exists('imagejpeg')),
                 'upload_directory_exists' => is_dir($uploadDir),
                 'upload_directory_readable' => is_dir($uploadDir) && is_readable($uploadDir),
                 'temporary_directory_writable' => is_dir($tempDir) && is_writable($tempDir),

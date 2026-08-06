@@ -165,6 +165,9 @@ async function loadExcelImageHealth() {
                 const reasons = Object.entries(item.reason_counts || {})
                     .map(([reason, count]) => `${reason}: ${count}`)
                     .join(", ");
+                const fallbacks = Object.entries(item.runtime_fallback_counts || {})
+                    .map(([reason, count]) => `${reason}: ${count}`)
+                    .join(", ");
                 return `<tr>
                     <td>${escapeHtml(String(item.order_item_id || "-"))}</td>
                     <td>${escapeHtml(item.item_no || "-")}</td>
@@ -172,14 +175,21 @@ async function loadExcelImageHealth() {
                     <td>${diagnosticBadge(item.status === "ready", item.status === "ready" ? "Ready" : "Unavailable")}</td>
                     <td>${escapeHtml(String(item.provided_candidate_count || 0))}</td>
                     <td>${escapeHtml(String(item.canonical_candidate_count || 0))}</td>
+                    <td>${escapeHtml(String(item.source_usable_candidate_count || 0))}</td>
                     <td>${escapeHtml(String(item.usable_candidate_count || 0))}</td>
                     <td>${escapeHtml(reasons || "-")}</td>
+                    <td>${escapeHtml(fallbacks || "-")}</td>
                 </tr>`;
             })
             .join("");
         const environmentMarkup = [
             diagnosticBadge(!!environment.gd_loaded, "GD"),
             diagnosticBadge(!!environment.zip_loaded, "ZIP"),
+            diagnosticBadge(!!environment.fileinfo_available, "Fileinfo"),
+            diagnosticBadge(
+                !!environment.memory_drawing_available,
+                "memory fallback",
+            ),
             diagnosticBadge(
                 !!environment.upload_directory_exists,
                 "uploads exists",
@@ -199,13 +209,14 @@ async function loadExcelImageHealth() {
         target.innerHTML = `
             <div class="d-flex flex-wrap gap-2 mb-2">
                 <span class="badge bg-primary">Pipeline ${escapeHtml(environment.pipeline_version || "-")}</span>
+                <span class="badge bg-secondary">PHP ${escapeHtml(environment.php_version || "-")}</span>
                 <span class="badge ${Number(summary.items_without_usable_images || 0) === 0 ? "bg-success" : "bg-danger"}">${escapeHtml(String(summary.items_with_usable_images || 0))} / ${escapeHtml(String(summary.item_count || 0))} item(s) ready</span>
                 <span class="badge ${environment.opcache_enabled ? "bg-warning text-dark" : "bg-secondary"}">OPcache ${environment.opcache_enabled ? "enabled" : "disabled"}</span>
             </div>
             <div class="mb-2">${environmentMarkup}</div>
             <div class="table-responsive mb-2"><table class="table table-sm align-middle mb-0">
-                <thead><tr><th>Item ID</th><th>Item No</th><th>Product ID</th><th>Status</th><th>Payload</th><th>Canonical</th><th>Usable</th><th>Reasons</th></tr></thead>
-                <tbody>${itemRows || '<tr><td colspan="8" class="text-muted">No order items.</td></tr>'}</tbody>
+                <thead><tr><th>Item ID</th><th>Item No</th><th>Product ID</th><th>Status</th><th>Payload</th><th>Canonical</th><th>Source</th><th>Embeddable</th><th>Failures</th><th>Runtime fallback</th></tr></thead>
+                <tbody>${itemRows || '<tr><td colspan="10" class="text-muted">No order items.</td></tr>'}</tbody>
             </table></div>
             <div class="text-muted text-break"><strong>Source fingerprints:</strong> ${escapeHtml(fingerprints || "-")}</div>
             <div class="text-muted"><strong>OPcache:</strong> validate timestamps ${environment.opcache_validate_timestamps ? "on" : "off"}, revalidate every ${escapeHtml(String(environment.opcache_revalidate_freq ?? "-"))} second(s).</div>`;

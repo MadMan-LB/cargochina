@@ -29,6 +29,7 @@ if (!mkdir($tempDir, 0770, true) && !is_dir($tempDir)) {
 }
 
 $tested = [];
+$verificationSource = null;
 try {
     $orderId = (int) ($pdo->query(
         "SELECT DISTINCT o.id
@@ -45,6 +46,7 @@ try {
         $path = $tempDir . DIRECTORY_SEPARATOR . "order_{$orderId}.xlsx";
         (new OrderExcelService($pdo))->saveOrderXlsx($entry['order'], $entry['items'], $path);
         imageDataAssert(imageDataMediaCount($path) > 0, "Order {$orderId} workbook contains no embedded image media.");
+        $verificationSource = $path;
 
         $omittedPayloadItems = $entry['items'];
         foreach ($omittedPayloadItems as &$omittedPayloadItem) {
@@ -73,9 +75,15 @@ try {
         imageDataAssert(
             ($diagnostic['status'] ?? '') === 'ready'
                 && (int) ($diagnostic['canonical_candidate_count'] ?? 0) > 0
-                && (int) ($diagnostic['usable_candidate_count'] ?? 0) > 0,
-            "Order {$orderId} canonical image diagnostic did not report a usable fallback."
+                && (int) ($diagnostic['embeddable_candidate_count'] ?? 0) > 0,
+            "Order {$orderId} canonical image diagnostic did not report an embeddable fallback."
         );
+        if (!function_exists('mime_content_type')) {
+            imageDataAssert(
+                array_sum($diagnostic['runtime_fallback_counts'] ?? []) > 0,
+                "Order {$orderId} did not report the Fileinfo-independent memory drawing fallback."
+            );
+        }
         $tested[] = "order #{$orderId}";
     }
 
@@ -117,6 +125,15 @@ try {
     }
 
     imageDataAssert($tested !== [], 'No image-bearing local records were available for Excel integration testing.');
+    if (getenv('CLMS_KEEP_WORKBOOK') === '1' && is_string($verificationSource) && is_file($verificationSource)) {
+        $verificationDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'output' . DIRECTORY_SEPARATOR . 'verification';
+        if (!is_dir($verificationDir) && !mkdir($verificationDir, 0770, true) && !is_dir($verificationDir)) {
+            throw new RuntimeException('Could not create the workbook verification directory.');
+        }
+        $verificationPath = $verificationDir . DIRECTORY_SEPARATOR . 'excel_image_fileinfo_fallback_verification.xlsx';
+        imageDataAssert(copy($verificationSource, $verificationPath), 'Could not preserve the Fileinfo fallback workbook.');
+        echo 'ARTIFACT: ' . $verificationPath . PHP_EOL;
+    }
     echo 'PASS: embedded image media verified from live local data for ' . implode(', ', $tested) . PHP_EOL;
 } finally {
     foreach (glob($tempDir . DIRECTORY_SEPARATOR . '*.xlsx') ?: [] as $file) @unlink($file);

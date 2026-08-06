@@ -14,6 +14,11 @@ for %%f in (upload_test search_test smoke_test draft_order_builder_test item_num
   echo.
 )
 
+echo === excel_image_fileinfo_fallback ===
+"%PHP%" -d disable_functions=mime_content_type "%~dp0tests\excel_image_data_integration_test.php"
+if errorlevel 1 set FAILED=1
+echo.
+
 if %FAILED%==0 (
   echo All tests passed.
 ) else (
