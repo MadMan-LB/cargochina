@@ -329,6 +329,24 @@ function hasPermission(string $permissionKey, array $defaultRoles = []): bool
     return clmsUserCan($permissionKey, $defaultRoles, null, getAuthUserId(), getUserRoles());
 }
 
+/** Use the same live, request-scoped page policy as the sidebar and page guard. */
+function hasPageAccess(string ...$pageIds): bool
+{
+    require_once dirname(__DIR__, 2) . '/includes/sidebar_permissions.php';
+    $userId = getAuthUserId();
+    if (!$userId) return false;
+    $roles = getUserRoles();
+    foreach ($pageIds as $pageId) {
+        if (clmsCanRolesAccessPage($roles, $pageId, null, $userId)) return true;
+    }
+    return false;
+}
+
+function requirePageAccess(string ...$pageIds): void
+{
+    if (!hasPageAccess(...$pageIds)) jsonError('Forbidden', 403);
+}
+
 function requireAuth(): int
 {
     $userId = getAuthUserId();

@@ -64,7 +64,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     if (!$userId) {
         jsonError('Unauthorized', 401);
     }
-    if (!hasAnyRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin', 'WarehouseStaff'])) {
+    requirePageAccess('expenses');
+    if ($method !== 'GET' && !hasAnyRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin', 'WarehouseStaff'])) {
         jsonError('Forbidden', 403);
     }
 

@@ -79,7 +79,8 @@ function warehouseStockSearchExpressions(PDO $pdo): array
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
     if (!getAuthUserId()) jsonError('Unauthorized', 401);
-    if (!hasAnyRole(['WarehouseStaff', 'ChinaAdmin', 'LebanonAdmin', 'ContainersStaff', 'SuperAdmin'])) jsonError('Forbidden', 403);
+    requirePageAccess('warehouse_stock');
+    if ($method !== 'GET') requireRole(['WarehouseStaff', 'ChinaAdmin', 'LebanonAdmin', 'ContainersStaff', 'SuperAdmin']);
 
     if ($method !== 'GET') jsonError('Method not allowed', 405);
 

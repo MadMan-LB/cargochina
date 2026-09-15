@@ -750,7 +750,7 @@
         const supplierName =
             section._supplierAc?.getSelected?.()?.name ||
             section.querySelector(".draft-section-supplier")?.value?.trim() ||
-            draftT("New supplier section");
+            draftT("Choose a supplier below");
         const amount =
             section.querySelector(".draft-section-amount")?.textContent || "0.00";
         const currency =
@@ -768,6 +768,8 @@
         if (body) body.classList.toggle("d-none", collapsed);
         if (button) {
             button.textContent = collapsed ? draftT("Expand") : draftT("Collapse");
+            button.setAttribute("aria-expanded", String(!collapsed));
+            button.setAttribute("aria-controls", `draftSupplierBody${section.dataset.sectionId}`);
         }
         if (label) {
             label.textContent = buildDraftSupplierSectionLabel(section, collapsed);
@@ -965,7 +967,7 @@
             draftT("Draft an Order");
         document.getElementById("draftOrderModalSubtitle").textContent =
             draftT(
-                "One customer, multiple supplier sections, compact item cards, live totals.",
+                "Choose a customer, add suppliers and products, then review totals and save.",
             );
         document.getElementById("draftOrderSections").innerHTML = "";
         document.getElementById("draftOrderTotalAmount").textContent = "0";
@@ -1929,40 +1931,153 @@
             });
     }
 
+    // Presentation only: display numbering is independent of stored item numbers.
+    let draftUxFieldIndex = 0;
+    let draftScrollGeneration = 0;
+
+    function connectDraftLabels(root) {
+        root.querySelectorAll("label:not([for])").forEach((label) => {
+            const parent = label.parentElement;
+            const field = parent.querySelector("input:not([type=hidden]):not([type=file]), textarea, select");
+            if (!field || parent.querySelectorAll("label").length > 1) return;
+            if (!field.id) field.id = `draftUxField${++draftUxFieldIndex}`;
+            label.htmlFor = field.id;
+        });
+        root.querySelectorAll(".draft-description-language-grid > div").forEach((col) => {
+            const label = col.querySelector("label");
+            const field = col.querySelector("textarea");
+            if (!label || !field) return;
+            if (!field.id) field.id = `draftUxField${++draftUxFieldIndex}`;
+            label.htmlFor = field.id;
+        });
+    }
+
+    function refreshDraftPresentation() {
+        document.querySelectorAll(".draft-order-section").forEach((section, sectionPosition) => {
+            const supplierLabel = draftT("Supplier #{number}", {number: sectionPosition + 1});
+            section.querySelector(".draft-section-number").textContent = supplierLabel;
+            const cards = Array.from(section.querySelectorAll(".draft-order-item-card"));
+            section.querySelector(".draft-section-empty").classList.toggle("d-none", cards.length > 0);
+            const supplierName = section.querySelector(".draft-section-supplier").value.trim();
+            cards.forEach((card, productPosition) => {
+                card.querySelector(".draft-product-number").textContent = draftT("Product #{number}", {number: productPosition + 1});
+                const description = Array.from(card.querySelectorAll(".draft-description-en, .draft-description-cn"))
+                    .map((field) => field.value.trim()).find(Boolean);
+                card.querySelector(".draft-product-name").textContent = description || draftT("Enter product details below");
+                card.querySelector(".draft-product-owner").textContent = supplierName ? `${supplierLabel} — ${supplierName}` : supplierLabel;
+                const autoCbm = card.dataset.cbmAutoDerived === "1";
+                card.querySelector(".draft-item-cbm").classList.toggle("is-calculated", autoCbm);
+                const source = card.querySelector(".draft-cbm-source");
+                if (source) source.textContent = autoCbm ? draftT("Calculated from dimensions; you can override it.") : draftT("Enter CBM or all three dimensions in cm.");
+            });
+            connectDraftLabels(section);
+        });
+        const amount = document.getElementById("draftOrderFooterAmount");
+        if (amount) amount.textContent = document.getElementById("draftOrderTotalAmount").textContent;
+        const currency = document.getElementById("draftOrderFooterCurrency");
+        if (currency) currency.textContent = document.getElementById("draftOrderTotalCurrency").textContent;
+    }
+
+    function revealDraftEntry(entry, focusTarget) {
+        const generation = ++draftScrollGeneration;
+        const section = entry.closest(".draft-order-section");
+        if (section) {
+            section.dataset.collapsed = "0";
+            syncDraftSectionCollapse(section);
+        }
+        const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        // Focus during the click, not a later frame that could steal focus from
+        // a user who has already moved on to another field.
+        focusTarget?.focus({preventScroll: true});
+        // Wait for insertion/expansion to be laid out before measuring the actual
+        // modal scroller. Focusing AFTER starting a smooth scroll can cancel it.
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            if (generation !== draftScrollGeneration || !entry.isConnected || !entry.getClientRects().length) return;
+            const scroller = entry.closest(".draft-order-builder-body");
+            if (!scroller) return;
+            entry.classList.add("draft-new-entry");
+            const padding = parseFloat(getComputedStyle(scroller).scrollPaddingTop) || 0;
+            const top = scroller.scrollTop + entry.getBoundingClientRect().top - scroller.getBoundingClientRect().top - scroller.clientTop - padding;
+            scroller.scrollTo({top: Math.max(0, top), behavior: reducedMotion ? "auto" : "smooth"});
+            window.setTimeout(() => entry.classList.remove("draft-new-entry"), 1800);
+        }));
+    }
+
+    function draftProductHasEnteredData(card) {
+        if (card.dataset.existingItemId || card._photoPaths?.length || card._designPaths?.length) return true;
+        return Array.from(card.querySelectorAll("input:not([type=hidden]):not([type=file]), textarea, select")).some((field) => {
+            if (field.type === "checkbox") return field.checked;
+            if (field.classList.contains("draft-item-item-no") && card.dataset.itemNoSource === "generated") return false;
+            if (field.classList.contains("draft-item-unit") && field.value === "pieces") return false;
+            return field.value.trim() !== "";
+        });
+    }
+
+    function confirmDraftRemoval(title, message, actionLabel) {
+        let dialog = document.getElementById("draftRemovalDialog");
+        if (!dialog) {
+            dialog = document.createElement("dialog");
+            dialog.id = "draftRemovalDialog";
+            dialog.className = "draft-removal-dialog";
+            dialog.setAttribute("aria-labelledby", "draftRemovalTitle");
+            dialog.setAttribute("aria-describedby", "draftRemovalMessage");
+            dialog.innerHTML = '<h5 id="draftRemovalTitle"></h5><p id="draftRemovalMessage"></p><div class="d-flex justify-content-end flex-wrap gap-2"><button type="button" class="btn btn-outline-secondary" data-removal-cancel autofocus></button><button type="button" class="btn btn-danger" data-removal-confirm></button></div>';
+            document.getElementById("draftOrderModal").appendChild(dialog);
+        }
+        dialog.querySelector("h5").textContent = title;
+        dialog.querySelector("p").textContent = message;
+        dialog.querySelector("[data-removal-cancel]").textContent = draftT("Cancel");
+        dialog.querySelector("[data-removal-confirm]").textContent = actionLabel;
+        return new Promise((resolve) => {
+            dialog.returnValue = "cancel";
+            dialog.querySelector("[data-removal-cancel]").onclick = () => dialog.close("cancel");
+            dialog.querySelector("[data-removal-confirm]").onclick = () => dialog.close("remove");
+            dialog.addEventListener("close", () => resolve(dialog.returnValue === "remove"), {once: true});
+            dialog.showModal();
+        });
+    }
+
     function sectionMarkup(sectionId) {
         return `
             <div class="card draft-order-section" data-section-id="${sectionId}">
               <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <div class="d-flex align-items-center gap-2 flex-wrap">
-                  <span class="fw-semibold draft-section-title">${escapeHtml(draftT("Supplier Section"))}</span>
-                  <input type="text" class="form-control form-control-sm draft-section-supplier" placeholder="${escapeHtml(draftT("Type to search supplier..."))}" style="width:min(320px, 100%)" autocomplete="off">
+                <div class="draft-section-heading">
+                  <span class="draft-section-number"></span>
+                  <span class="fw-semibold draft-section-title">${escapeHtml(draftT("Choose a supplier below"))}</span>
+                  <div class="draft-section-select">
+                  <label class="form-label mb-0 w-100" for="draftSupplier${sectionId}">${escapeHtml(draftT("Supplier *"))}</label>
+                  <input id="draftSupplier${sectionId}" type="text" class="form-control form-control-sm draft-section-supplier" placeholder="${escapeHtml(draftT("Type to search supplier..."))}" autocomplete="off">
                   <input type="hidden" class="draft-section-supplier-id">
-                  <button type="button" class="btn btn-outline-primary btn-sm draft-item-action" data-builder-action="quick-add-supplier" title="${escapeHtml(draftT("Quick add supplier"))}">+</button>
+                  <button type="button" class="btn btn-outline-primary btn-sm draft-item-action" data-builder-action="quick-add-supplier" title="${escapeHtml(draftT("Quick add supplier"))}">${escapeHtml(draftT("+ New supplier"))}</button>
+                  </div>
                 </div>
                 <div class="draft-section-actions">
                   <small class="text-muted"><span class="draft-section-amount">0</span> <span class="draft-section-currency">USD</span> · <span class="draft-section-qty">0</span> qty · <span class="draft-section-cbm">0</span> CBM · <span class="draft-section-weight">0</span> kg</small>
+                  <button type="button" class="btn btn-outline-primary btn-sm draft-item-action draft-add-product" data-builder-action="add-item">${escapeHtml(draftT("+ Add Product"))}</button>
                   <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="collapse-section">${escapeHtml(draftT("Collapse"))}</button>
                   <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action draft-icon-action" data-builder-action="move-up" title="${escapeHtml(draftT("Move section up"))}" aria-label="${escapeHtml(draftT("Move section up"))}">↑</button>
                   <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action draft-icon-action" data-builder-action="move-down" title="${escapeHtml(draftT("Move section down"))}" aria-label="${escapeHtml(draftT("Move section down"))}">↓</button>
-                  <button type="button" class="btn btn-outline-danger btn-sm draft-item-action" data-builder-action="remove-section">${escapeHtml(draftT("Remove Section"))}</button>
+                  <button type="button" class="btn btn-outline-danger btn-sm draft-item-action" data-builder-action="remove-section">${escapeHtml(draftT("Remove Supplier"))}</button>
                 </div>
               </div>
-              <div class="card-body">
+              <div class="card-body" id="draftSupplierBody${sectionId}">
+                <div class="draft-section-empty d-none">${escapeHtml(draftT("No products added yet. Use + Add Product to begin."))}</div>
                 <div class="draft-section-items d-flex flex-column gap-3"></div>
-                <button type="button" class="btn btn-outline-primary btn-sm mt-3 draft-item-action" data-builder-action="add-item">${escapeHtml(draftT("+ Add Item"))}</button>
+                <button type="button" class="btn btn-outline-primary btn-sm mt-3 draft-item-action draft-add-product" data-builder-action="add-item">${escapeHtml(draftT("+ Add Product"))}</button>
               </div>
             </div>
         `;
     }
 
-    function addDraftOrderSection(initial = {}) {
+    function addDraftOrderSection(initial = {}, options = {}) {
         const sections = document.getElementById("draftOrderSections");
         if (!sections) return;
         const wrapper = document.createElement("div");
         const sectionId = ++sectionIndex;
         wrapper.innerHTML = sectionMarkup(sectionId);
         const section = wrapper.firstElementChild;
-        sections.appendChild(section);
+        if (options.prepend) sections.prepend(section);
+        else sections.appendChild(section);
 
         const supplierInput = section.querySelector(".draft-section-supplier");
         const supplierIdInput = section.querySelector(".draft-section-supplier-id");
@@ -2008,12 +2123,13 @@
                 syncDraftSectionCollapse(section);
             });
         section
-            .querySelector('[data-builder-action="add-item"]')
-            ?.addEventListener("click", () => addDraftOrderItem(section));
+            .querySelectorAll('[data-builder-action="add-item"]')
+            .forEach((button) => button.addEventListener("click", () => addDraftOrderItem(section, {}, {prepend: true, reveal: true})));
         section
             .querySelector('[data-builder-action="remove-section"]')
-            ?.addEventListener("click", () => {
-                if (!window.confirm(draftT("Remove this supplier section and all of its items?"))) return;
+            ?.addEventListener("click", async () => {
+                const populated = supplierInput.value.trim() || Array.from(section.querySelectorAll(".draft-order-item-card")).some(draftProductHasEnteredData);
+                if (populated && !await confirmDraftRemoval(`${draftT("Remove")} ${section.querySelector(".draft-section-number").textContent}?`, draftT("This supplier and all entered product information will be removed from the draft."), draftT("Remove Supplier"))) return;
                 section.remove();
                 renumberDraftItems();
                 updateDraftOrderTotals();
@@ -2033,6 +2149,7 @@
         }
         updateDraftOrderTotals();
         syncDraftSectionCollapse(section);
+        if (options.reveal) revealDraftEntry(section, supplierInput);
     }
 
     function moveDraftSection(section, direction) {
@@ -2250,6 +2367,7 @@
         container.appendChild(row);
         attachDraftDescriptionRowEvents(card, row);
         syncDraftPrimaryDescriptionInput(card, card.closest(".draft-order-section"));
+        connectDraftLabels(card);
         if (focus) {
             row.querySelector(".draft-item-description-entry-input")?.focus();
         }
@@ -2937,28 +3055,28 @@
     function itemMarkup(idx) {
         return `
             <div class="border rounded p-3 draft-order-item-card" data-item-id="${idx}" data-dimensions-scope="carton">
-              <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+              <div class="draft-product-header d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
                 <div>
-                  <div class="fw-semibold text-dark">Item Line</div>
-                  <small class="text-muted">Compact draft item with photo, description, auto numbering, and live totals.</small>
+                  <div class="draft-product-number"></div><div class="draft-product-name"></div>
+                  <small class="draft-product-owner"></small>
                 </div>
-                <button type="button" class="btn btn-outline-danger btn-sm draft-item-action" data-builder-action="remove-item">Remove Item</button>
+                <button type="button" class="btn btn-outline-danger btn-sm draft-item-action" data-builder-action="remove-item">Remove Product</button>
               </div>
               <div class="row g-2 align-items-start">
                 <div class="col-12 col-xl-3 col-xxl-2">
                   <div class="draft-item-sidebar">
                     <div class="draft-item-panel draft-item-photo-panel">
-                      <label class="form-label form-label-sm">Photo</label>
+                      <div class="form-label form-label-sm">Photo (Optional)</div>
                       <div class="draft-item-photos"></div>
                       <input type="file" class="d-none draft-item-photo-upload" accept="image/*" multiple>
                       <input type="file" class="d-none draft-item-photo-camera" accept="image/*" capture="environment">
                       <div class="d-grid gap-2 mt-2">
-                        <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action draft-item-photo-btn" data-builder-action="upload-photo">+ Add</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action draft-item-photo-btn" data-builder-action="upload-photo">+ Add Photo</button>
                         <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="camera-photo">Camera</button>
                         <button type="button" class="btn btn-outline-secondary btn-sm draft-item-action" data-builder-action="paste-photo">Paste</button>
                       </div>
                     </div>
-                    <div class="draft-item-stats draft-item-sidebar-stats">
+                    <div class="draft-calculated-note">Product totals · Calculated</div><div class="draft-item-stats draft-item-sidebar-stats">
                       <div class="draft-item-stat">
                         <span class="draft-item-stat-label">Total Qty</span>
                         <div class="draft-item-computed draft-item-total-qty">0</div>
@@ -2991,7 +3109,7 @@
                         <div class="form-text">${escapeHtml(draftT("Suggested automatically; you can type, paste, replace, or clear it."))}</div>
                         <input type="hidden" class="draft-item-shipping-code">
                         <div class="draft-item-identity-hs-wrap">
-                          <label class="form-label form-label-sm mt-2">Optional HS Code</label>
+                          <label class="form-label form-label-sm mt-2">HS Code (Optional)</label>
                           <input type="text" class="form-control form-control-sm draft-item-hs-code" placeholder="HS code">
                         </div>
                       </div>
@@ -3062,7 +3180,7 @@
                             </div>
                             <div class="col-12 col-sm-6 col-xl-1">
                               <label class="form-label draft-item-label">${escapeHtml(draftT("Size"))}</label>
-                              <input type="text" class="form-control form-control-sm draft-item-size" placeholder="${escapeHtml(draftT("L x W x H"))}">
+                              <input type="text" class="form-control form-control-sm draft-item-size" placeholder="${escapeHtml(draftT("Length × Width × Height"))}">
                             </div>
                           </div>
                         </div>
@@ -3070,11 +3188,11 @@
                           <div class="draft-item-subgrid-title">Packaging</div>
                           <div class="row g-2">
                             <div class="col-6 col-md-3">
-                              <label class="form-label draft-item-label">Total Cartons</label>
+                              <label class="form-label draft-item-label">Total Cartons *</label>
                               <input type="number" step="1" min="0" class="form-control form-control-sm draft-item-cartons" placeholder="0">
                             </div>
                             <div class="col-6 col-md-3">
-                              <label class="form-label draft-item-label">Pieces / Carton</label>
+                              <label class="form-label draft-item-label">Pieces / Carton *</label>
                               <input type="number" step="0.0001" min="0" class="form-control form-control-sm draft-item-pieces-per-carton" placeholder="0">
                             </div>
                             <div class="col-6 col-md-3">
@@ -3082,7 +3200,7 @@
                               <input type="text" maxlength="20" class="form-control form-control-sm draft-item-unit" placeholder="pieces">
                             </div>
                             <div class="col-6 col-md-3">
-                              <label class="form-label draft-item-label">Total Qty</label>
+                              <div class="form-label draft-item-label">Total Qty · Calculated</div>
                               <div class="draft-item-computed draft-item-total-qty-inline">0</div>
                             </div>
                           </div>
@@ -3091,11 +3209,11 @@
                           <div class="draft-item-subgrid-title">Pricing</div>
                           <div class="row g-2">
                             <div class="col-6">
-                              <label class="form-label draft-item-label">Factory Price</label>
+                              <label class="form-label draft-item-label">Factory Price (Optional)</label>
                               <input type="number" step="0.0001" min="0" class="form-control form-control-sm draft-item-unit-price" placeholder="0">
                             </div>
                             <div class="col-6">
-                              <label class="form-label draft-item-label">Total Amount</label>
+                              <div class="form-label draft-item-label">Total Amount · Calculated</div>
                               <div class="draft-item-computed draft-item-total-amount-inline">0</div>
                             </div>
                           </div>
@@ -3106,6 +3224,7 @@
                     <div class="col-12">
                       <div class="draft-item-panel draft-item-volume-panel">
                         <div class="draft-item-subgrid-title mb-2">Volume & Weight</div>
+                        <div class="draft-cbm-source mb-2"></div>
                         <div class="draft-item-volume-fields">
                           <div class="draft-item-volume-field">
                             <label class="form-label draft-item-label">CBM</label>
@@ -3113,30 +3232,30 @@
                           </div>
                           <span class="draft-item-or">or</span>
                           <div class="draft-item-volume-field">
-                            <label class="form-label draft-item-label">Length</label>
+                            <label class="form-label draft-item-label">Length (cm)</label>
                             <input type="number" step="0.01" min="0" class="form-control form-control-sm draft-item-length" placeholder="L">
                           </div>
                           <div class="draft-item-volume-field">
-                            <label class="form-label draft-item-label">Width</label>
+                            <label class="form-label draft-item-label">Width (cm)</label>
                             <input type="number" step="0.01" min="0" class="form-control form-control-sm draft-item-width" placeholder="W">
                           </div>
                           <div class="draft-item-volume-field">
-                            <label class="form-label draft-item-label">Height</label>
+                            <label class="form-label draft-item-label">Height (cm)</label>
                             <input type="number" step="0.01" min="0" class="form-control form-control-sm draft-item-height" placeholder="H">
                           </div>
                           <div class="draft-item-volume-field">
-                            <label class="form-label draft-item-label">Weight (kg)</label>
+                            <label class="form-label draft-item-label">Weight (kg, Optional)</label>
                             <input type="number" step="0.0001" min="0" class="form-control form-control-sm draft-item-weight" placeholder="Weight">
                           </div>
                           <div class="draft-item-volume-field">
-                            <label class="form-label draft-item-label">Customer Price</label>
-                            <input type="number" step="0.0001" min="0" class="form-control form-control-sm draft-item-customer-price" placeholder="Export">
+                            <label class="form-label draft-item-label">Customer Price (Optional)</label>
+                            <input type="number" step="0.0001" min="0" class="form-control form-control-sm draft-item-customer-price" placeholder="Selling price per unit">
                           </div>
                         </div>
                       </div>
                     </div>
                     <div class="col-12">
-                      <div class="draft-item-panel draft-item-design-panel">
+                      <div class="draft-item-panel draft-item-design-panel"><div class="draft-item-panel-title">Additional Information</div>
                         <div class="form-check mb-2">
                           <input class="form-check-input draft-item-custom-design-required" type="checkbox" id="draftItemCustomDesign${idx}">
                           <label class="form-check-label fw-semibold" for="draftItemCustomDesign${idx}">Custom design</label>
@@ -3151,7 +3270,7 @@
                           <input type="file" class="d-none draft-item-design-upload" accept="image/*,application/pdf,.pdf" multiple>
                           <div class="draft-item-design-files d-flex flex-wrap gap-2 mt-3"></div>
                         </div>
-                        <label class="form-label form-label-sm mt-3">Item notes</label>
+                        <label class="form-label form-label-sm mt-3">Item Notes (Optional)</label>
                         <textarea class="form-control form-control-sm draft-item-notes" rows="2" placeholder="Optional item notes..."></textarea>
                       </div>
                     </div>
@@ -3492,6 +3611,7 @@
             fmtCbm(totalCbm);
         document.getElementById("draftOrderTotalWeight").textContent =
             fmtWeight(totalWeight);
+        refreshDraftPresentation();
     }
 
     async function populateFromProduct(card, productSummary) {
@@ -3602,7 +3722,7 @@
         );
     }
 
-    function addDraftOrderItem(section, initial = {}) {
+    function addDraftOrderItem(section, initial = {}, options = {}) {
         const container = section.querySelector(".draft-section-items");
         const idx = ++itemIndex;
         const wrapper = document.createElement("div");
@@ -3611,7 +3731,8 @@
         card.dataset.existingItemId = initial.existing_item_id || initial.id || "";
         card._photoPaths = (initial.photo_paths || []).slice();
         card._designPaths = (initial.custom_design_paths || []).slice();
-        container.appendChild(card);
+        if (options.prepend) container.prepend(card);
+        else container.appendChild(card);
         bindDraftHsCodeAutocomplete(card.querySelector(".draft-item-hs-code"));
 
         if (initial.description_entries?.length) {
@@ -3694,8 +3815,8 @@
 
         card.querySelector('[data-builder-action="remove-item"]')?.addEventListener(
             "click",
-            () => {
-                if (!window.confirm(draftT("Remove this item?"))) return;
+            async () => {
+                if (draftProductHasEnteredData(card) && !await confirmDraftRemoval(`${draftT("Remove")} ${card.querySelector(".draft-product-number").textContent}?`, draftT("The entered product information will be removed from this draft."), draftT("Remove Product"))) return;
                 card.remove();
                 renumberDraftItems();
                 updateDraftOrderTotals();
@@ -3838,6 +3959,9 @@
         syncDraftItemCbmFromDimensions(card);
         updateDraftItemTotals(card);
         renumberDraftItems();
+        connectDraftLabels(card);
+        card.addEventListener("input", refreshDraftPresentation);
+        if (options.reveal) revealDraftEntry(card, card.querySelector(".draft-item-item-no"));
     }
 
     function addDraftQuickSupplierPaymentLink(rowData = {}) {
@@ -4255,6 +4379,8 @@
                     "border-danger",
                     "draft-save-invalid-box",
                 );
+                el.removeAttribute("aria-invalid");
+                removeDraftErrorDescription(el);
                 delete el.dataset.draftSaveInvalid;
             });
         document
@@ -4304,6 +4430,13 @@
         summary.classList.remove("d-none");
     }
 
+    function removeDraftErrorDescription(field) {
+        const ids = (field.getAttribute("aria-describedby") || "").split(/\s+/).filter((id) => id && id !== field.dataset.draftErrorId);
+        if (ids.length) field.setAttribute("aria-describedby", ids.join(" "));
+        else field.removeAttribute("aria-describedby");
+        delete field.dataset.draftErrorId;
+    }
+
     function clearDraftInvalidTarget(target) {
         const field =
             typeof target === "string" ? document.querySelector(target) : target;
@@ -4323,6 +4456,8 @@
         }
         feedbackSiblings.forEach((el) => el.remove());
         targets.forEach((el) => {
+            el.removeAttribute("aria-invalid");
+            removeDraftErrorDescription(el);
             el.classList.remove(
                 "is-invalid",
                 "border-danger",
@@ -4353,6 +4488,7 @@
         clearDraftInvalidTarget(field);
         const isField = field.matches?.("input, textarea, select");
         field.dataset.draftSaveInvalid = "1";
+        field.setAttribute("aria-invalid", "true");
         field.classList.add(isField ? "is-invalid" : "border-danger");
         if (!isField) field.classList.add("draft-save-invalid-box");
         const card = field.closest(".draft-order-item-card");
@@ -4361,6 +4497,9 @@
         if (section) section.classList.add("draft-save-invalid-section");
         const feedback = document.createElement("div");
         feedback.className = "invalid-feedback d-block draft-save-invalid-feedback";
+        feedback.id = `draftUxError${++draftUxFieldIndex}`;
+        field.dataset.draftErrorId = feedback.id;
+        field.setAttribute("aria-describedby", [field.getAttribute("aria-describedby"), feedback.id].filter(Boolean).join(" "));
         feedback.textContent = message || draftT("This field needs attention.");
         if (isField) {
             field.insertAdjacentElement("afterend", feedback);
@@ -4381,11 +4520,7 @@
             field.matches?.("input, textarea, select, button")
                 ? field
                 : field.querySelector("input, textarea, select, button");
-        window.setTimeout(
-            () => field.scrollIntoView({ behavior: "smooth", block: "center" }),
-            60,
-        );
-        setTimeout(() => focusTarget?.focus?.({ preventScroll: true }), 250);
+        revealDraftEntry(field, focusTarget);
     }
 
     function bindDraftValidationAutoClear(root) {

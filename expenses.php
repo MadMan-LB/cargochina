@@ -3,6 +3,7 @@ require_once 'includes/auth_check.php';
 require_once 'includes/page_guard.php';
 requireRoleForPage(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin', 'WarehouseStaff']);
 $userRoles = $_SESSION['user_roles'] ?? [];
+$canWriteExpenses = !empty(array_intersect($userRoles, ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin', 'WarehouseStaff']));
 $isWarehouseOnly = in_array('WarehouseStaff', $userRoles) && !array_intersect($userRoles, ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin']);
 if ($isWarehouseOnly) {
     header('Location: /cargochina/warehouse/expenses.php');
@@ -18,7 +19,11 @@ require 'includes/layout.php';
 <div class="card mb-4">
   <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <span>Expense List</span>
-    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#expenseModal" onclick="openExpenseForm()">+ Add Expense</button>
+    <?php if ($canWriteExpenses): ?>
+      <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#expenseModal" onclick="openExpenseForm()">+ Add Expense</button>
+    <?php else: ?>
+      <span class="badge bg-light text-dark">View only</span>
+    <?php endif; ?>
   </div>
   <div class="card-body">
     <div class="row mb-3 g-2 form-row-responsive">
@@ -36,7 +41,7 @@ require 'includes/layout.php';
       </div>
     </div>
     <div class="mb-3" id="expenseSummary"></div>
-    <div id="expensesTable" class="table-responsive">
+    <div id="expensesTable" class="table-responsive" data-can-write="<?= $canWriteExpenses ? '1' : '0' ?>">
       <table class="table table-hover table-striped table-sm align-middle mb-0">
         <thead>
           <tr>

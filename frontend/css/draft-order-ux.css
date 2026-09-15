@@ -1,0 +1,814 @@
+/* Draft builder presentation only. Field order and calculation hooks stay in the existing markup. */
+#draftOrderModal {
+  --draft-ink: #172b4d;
+  --draft-muted: #52647a;
+  --draft-line: #d6e0eb;
+  --draft-blue: #1d4ed8;
+  --draft-navy: #183858;
+}
+
+#draftOrderModal .modal-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: #f2f5f9;
+}
+
+#draftOrderModal .modal-header,
+#draftOrderModal .modal-footer {
+  flex-shrink: 0;
+  padding: 0.85rem 1.25rem;
+  border-color: var(--draft-line);
+}
+
+#draftOrderModal .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 1.25rem;
+  overflow-y: auto;
+  scroll-padding-block: 1rem;
+}
+
+#draftOrderModal .modal-header > div,
+#draftOrderModal .row > *,
+#draftOrderModal .draft-item-volume-field,
+#draftOrderModal .draft-section-heading,
+#draftOrderModal .draft-product-header > div,
+#draftOrderModal .draft-section-select {
+  min-width: 0;
+}
+
+#draftOrderModal .modal-title {
+  font-weight: 700;
+  color: var(--draft-ink);
+}
+
+#draftOrderModal .draft-builder-intro {
+  margin-bottom: 1rem;
+  color: var(--draft-muted);
+  line-height: 1.5;
+}
+
+#draftOrderModal .draft-step-label {
+  display: block;
+  margin-bottom: 0.4rem;
+  color: var(--draft-ink);
+  font-size: 0.88rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+#draftOrderModal .draft-order-meta-card,
+#draftOrderModal .draft-order-totals-card {
+  border: 1px solid var(--draft-line);
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+#draftOrderModal .draft-order-meta-card .card-body,
+#draftOrderModal .draft-order-totals-card .card-body {
+  padding: 1.15rem;
+}
+
+#draftOrderModal .draft-suppliers-toolbar {
+  margin-block: 1.5rem 1rem;
+}
+
+#draftOrderModal .draft-supplier-add-bottom {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+/* Keep the existing five supplier themes and their lighter product shades. */
+#draftOrderModal #draftOrderSections > .draft-order-section {
+  --draft-section-shadow: none;
+  --draft-item-shadow: none;
+  border: 1px solid var(--draft-section-border);
+  border-radius: 12px;
+  background: var(--draft-section-bg);
+  box-shadow: none;
+  overflow: visible;
+}
+
+#draftOrderModal #draftOrderSections > .draft-order-section > .card-header {
+  padding: 1rem 1.15rem;
+  border: 0;
+  border-radius: 11px 11px 0 0;
+  background: var(--draft-section-header-bg);
+  box-shadow: inset 0 4px 0 var(--draft-section-accent);
+  color: var(--draft-ink);
+  gap: 1rem !important;
+}
+
+#draftOrderModal #draftOrderSections > .draft-order-section > .card-body {
+  padding: 1.15rem;
+  border-radius: 0 0 11px 11px;
+  background: transparent;
+}
+
+#draftOrderModal #draftOrderSections > .draft-order-section-collapsed > .card-header {
+  border-radius: 11px;
+}
+
+#draftOrderModal .draft-section-heading {
+  flex: 1 1 22rem;
+}
+
+#draftOrderModal .draft-section-number {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: var(--draft-ink);
+  font-size: 0.8rem;
+  font-weight: 750;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+#draftOrderModal #draftOrderSections .draft-section-title {
+  display: block;
+  color: var(--draft-ink) !important;
+  font-size: 1.15rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+#draftOrderModal .draft-section-select {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 36rem;
+  margin-top: 0.75rem;
+}
+
+#draftOrderModal .draft-section-select .form-label {
+  color: var(--draft-ink) !important;
+}
+
+#draftOrderModal .draft-section-select .draft-section-supplier,
+#draftOrderModal .draft-section-select .autocomplete-wrapper {
+  flex: 1 1 15rem;
+  min-width: 0;
+  width: auto !important;
+  max-width: 100%;
+}
+
+#draftOrderModal .draft-section-actions {
+  flex: 0 1 auto;
+  max-width: 100%;
+  gap: 0.45rem;
+}
+
+#draftOrderModal #draftOrderSections .card-header small,
+#draftOrderModal #draftOrderSections .card-header .text-muted {
+  color: var(--draft-muted) !important;
+  font-size: 0.86rem;
+  line-height: 1.65;
+}
+
+#draftOrderModal .draft-section-actions .btn-outline-secondary {
+  color: var(--draft-ink);
+  border-color: #8aa6c2;
+  background: transparent;
+}
+
+#draftOrderModal .draft-section-actions .btn-outline-secondary:hover {
+  background: #fff;
+}
+
+#draftOrderModal .card-header [data-builder-action="remove-section"] {
+  color: #a12626;
+  background: transparent;
+  border-color: transparent;
+}
+
+#draftOrderModal .card-header [data-builder-action="remove-section"]:hover {
+  color: #fff;
+  background: #983a3a;
+  border-color: #dc9999;
+}
+
+#draftOrderModal .draft-add-product,
+#draftOrderModal #draftOrderAddSectionBtn,
+#draftOrderModal .draft-supplier-add-bottom .btn,
+#draftOrderModal .card-header [data-builder-action="quick-add-supplier"] {
+  color: #1745a7;
+  border-color: #a9c1ed;
+  background: #f0f6ff;
+  font-weight: 650;
+}
+
+#draftOrderModal .draft-add-product:hover,
+#draftOrderModal #draftOrderAddSectionBtn:hover,
+#draftOrderModal .draft-supplier-add-bottom .btn:hover,
+#draftOrderModal .card-header [data-builder-action="quick-add-supplier"]:hover {
+  color: #12337c;
+  border-color: #658bd3;
+  background: #dceaff;
+}
+
+#draftOrderModal .draft-section-empty {
+  padding: 1.75rem 1rem;
+  border: 1px dashed #9fb5cc;
+  border-radius: 8px;
+  background: #fff;
+  text-align: center;
+  color: var(--draft-muted);
+}
+
+#draftOrderModal #draftOrderSections .draft-order-item-card {
+  padding: 1.1rem !important;
+  border: 1px solid var(--draft-item-border) !important;
+  border-radius: 10px !important;
+  background: var(--draft-item-bg);
+  border-left: 4px solid var(--draft-section-accent) !important;
+  box-shadow: none;
+}
+
+#draftOrderModal #draftOrderSections .draft-order-item-card::before {
+  content: none;
+}
+
+#draftOrderModal .draft-product-header {
+  margin: -0.05rem 0 1rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 2px solid #dde6f0;
+}
+
+#draftOrderModal .draft-product-number {
+  color: var(--draft-ink);
+  font-size: 0.88rem;
+  font-weight: 750;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+#draftOrderModal .draft-product-name {
+  margin-top: 0.15rem;
+  color: var(--draft-ink);
+  font-size: 1.03rem;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+#draftOrderModal .draft-product-owner {
+  color: var(--draft-muted);
+  font-size: 0.83rem;
+  overflow-wrap: anywhere;
+}
+
+/* Inside a product, headings and spacing replace layers of bordered cards. */
+#draftOrderModal .draft-item-panel,
+#draftOrderModal .draft-item-subgrid-block {
+  padding: 0.75rem 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+#draftOrderModal .draft-item-identity-panel,
+#draftOrderModal .draft-item-descriptions-panel,
+#draftOrderModal .draft-item-photo-panel {
+  padding-top: 0;
+}
+
+#draftOrderModal .draft-item-subgrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.15rem;
+  padding: 0;
+}
+
+#draftOrderModal .draft-item-subgrid-block,
+#draftOrderModal .draft-item-volume-panel,
+#draftOrderModal .draft-item-design-panel,
+#draftOrderModal .draft-shared-carton-panel {
+  border-top: 1px solid var(--draft-line);
+  padding-block: 0.9rem;
+}
+
+#draftOrderModal .draft-item-panel-title,
+#draftOrderModal .draft-item-subgrid-title {
+  margin-bottom: 0.7rem;
+  font-size: 0.83rem;
+  font-weight: 750;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+#draftOrderModal .draft-item-subgrid-block > .row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.8rem;
+  margin: 0;
+}
+
+#draftOrderModal .draft-item-subgrid-block > .row > * {
+  width: auto;
+  padding: 0;
+  margin: 0;
+}
+
+#draftOrderModal .draft-item-subgrid-block:nth-child(3) > .row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+#draftOrderModal .draft-item-volume-fields {
+  grid-template-columns: minmax(0, 1.1fr) auto repeat(3, minmax(0, 1fr)) minmax(0, 1.1fr);
+  align-items: start;
+  gap: 0.7rem;
+}
+
+#draftOrderModal .draft-item-volume-fields .form-control {
+  width: 100%;
+  max-width: none;
+}
+
+#draftOrderModal .draft-item-volume-fields > .draft-item-volume-field:last-child {
+  grid-column: 1 / span 3;
+}
+
+#draftOrderModal .draft-item-or {
+  align-self: center;
+  min-width: 2rem;
+  height: 2rem;
+  margin-top: 1.75rem;
+  background: #edf2f7;
+  color: var(--draft-muted);
+}
+
+#draftOrderModal .draft-item-sidebar {
+  align-content: start;
+  gap: 0.75rem;
+  height: auto;
+}
+
+#draftOrderModal .draft-item-stat {
+  padding: 0.6rem;
+  border: 0;
+  border-radius: 6px;
+  background: #edf2f7;
+}
+
+#draftOrderModal .draft-item-computed,
+#draftOrderModal input[readonly]:not([type="hidden"]),
+#draftOrderModal .draft-item-cbm.is-calculated {
+  min-height: 40px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #edf2f7;
+  color: var(--draft-ink);
+  font-size: 0.95rem;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  box-shadow: none;
+}
+
+#draftOrderModal .draft-item-stat .draft-item-computed {
+  min-height: 1.5rem;
+  padding: 0;
+}
+
+#draftOrderModal .draft-item-stat-label {
+  color: var(--draft-muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+}
+
+#draftOrderModal .draft-calculated-note,
+#draftOrderModal .draft-cbm-source {
+  margin-top: 0.3rem;
+  color: var(--draft-muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+#draftOrderModal .form-label {
+  margin-bottom: 0.35rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+#draftOrderModal .form-control,
+#draftOrderModal .form-select {
+  max-width: 100%;
+  min-height: 40px;
+  border-color: #aebed0;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+#draftOrderModal .form-control::placeholder {
+  color: #687c93;
+  opacity: 1;
+}
+
+#draftOrderModal .text-muted,
+#draftOrderModal .form-text,
+#draftOrderModal small {
+  color: var(--draft-muted) !important;
+}
+
+#draftOrderModal .btn {
+  min-height: 40px;
+  max-width: 100%;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+#draftOrderModal .btn:focus-visible,
+#draftOrderModal .btn-close:focus-visible,
+#draftOrderModal .form-control:focus,
+#draftOrderModal .form-select:focus,
+#draftOrderModal .form-check-input:focus {
+  outline: 3px solid #74a7ff;
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+#draftOrderModal .form-check {
+  min-height: 2rem;
+}
+
+#draftOrderModal .form-check-label {
+  cursor: pointer;
+}
+
+#draftOrderModal .draft-order-totals-card {
+  border-top: 3px solid var(--draft-navy);
+}
+
+#draftOrderModal .draft-order-totals-card strong,
+#draftOrderModal .draft-footer-total strong {
+  font-variant-numeric: tabular-nums;
+}
+
+#draftOrderModal .modal-footer {
+  position: static;
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  margin: 0;
+  width: 100%;
+  padding-bottom: max(0.8rem, env(safe-area-inset-bottom));
+  box-shadow: 0 -2px 8px rgb(23 43 77 / 5%);
+}
+
+#draftOrderModal .modal-footer > * {
+  margin: 0;
+}
+
+#draftOrderModal .draft-footer-total {
+  min-width: 0;
+  color: var(--draft-muted);
+  overflow-wrap: anywhere;
+}
+
+#draftOrderModal .draft-footer-total strong {
+  color: var(--draft-ink);
+  font-size: 1.12rem;
+}
+
+#draftOrderModal .draft-footer-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+#draftOrderModal #draftOrderSaveBtn {
+  min-height: 44px;
+  padding-inline: 1.25rem;
+  font-weight: 700;
+}
+
+#draftOrderModal .draft-footer-buttons [data-bs-dismiss="modal"] {
+  color: #33465b;
+  background: #fff;
+  border-color: #b7c4d2;
+}
+
+#draftOrderModal .draft-save-invalid-feedback {
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
+#draftOrderModal #draftOrderSections .draft-order-item-card.draft-save-invalid-scope {
+  border-color: #dc3545 !important;
+}
+
+#draftOrderModal .draft-save-invalid-box,
+#draftOrderModal .is-invalid {
+  scroll-margin-block: 1rem;
+}
+
+#draftOrderModal .draft-new-entry {
+  scroll-margin-block: 1rem;
+  animation: draft-entry-highlight 1.6s ease-out;
+}
+
+#draftOrderModal .draft-removal-dialog {
+  width: 28rem;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100dvh - 2rem);
+  margin: auto;
+  padding: 1.5rem;
+  border: 1px solid #c5d0dd;
+  border-radius: 12px;
+  background: #fff;
+  color: var(--draft-ink);
+  box-shadow: 0 18px 70px rgb(15 23 42 / 28%);
+  overflow-y: auto;
+}
+
+#draftOrderModal .draft-removal-dialog::backdrop {
+  background: rgb(15 23 42 / 48%);
+}
+
+#draftOrderModal .draft-removal-dialog h5 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+#draftOrderModal .draft-removal-dialog p {
+  margin-bottom: 1.25rem;
+  color: var(--draft-muted);
+  line-height: 1.5;
+}
+
+#draftOrderModal .draft-removal-dialog .btn {
+  min-height: 44px;
+}
+
+#draftOrderModal .draft-removal-dialog .draft-removal-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin: 0;
+}
+
+@keyframes draft-entry-highlight {
+  0%, 35% { outline: 3px solid #6398ef; outline-offset: 3px; }
+  100% { outline: 3px solid transparent; outline-offset: 3px; }
+}
+
+@media (min-width: 1200px) and (max-width: 1599.98px) {
+  #draftOrderModal .draft-order-item-card > .row > .col-xl-3 {
+    width: 22%;
+  }
+
+  #draftOrderModal .draft-order-item-card > .row > .col-xl-9 {
+    width: 78%;
+  }
+
+  #draftOrderModal .draft-item-subgrid-block:first-child > .row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  #draftOrderModal .draft-order-item-card > .row > .col-xl-9 > .row > .col-lg-3 {
+    width: 34%;
+  }
+
+  #draftOrderModal .draft-order-item-card > .row > .col-xl-9 > .row > .col-lg-9 {
+    width: 66%;
+  }
+}
+
+@media (max-width: 1199.98px) {
+  #draftOrderModal .draft-item-sidebar {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1rem;
+    margin-bottom: 0.8rem;
+  }
+
+  #draftOrderModal .draft-item-photo-panel > .d-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  #draftOrderModal .draft-order-item-card > .row > .col-xl-9 > .row > .col-lg-3,
+  #draftOrderModal .draft-order-item-card > .row > .col-xl-9 > .row > .col-lg-9 {
+    width: 100%;
+  }
+
+  #draftOrderModal .draft-item-subgrid-block:first-child > .row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  #draftOrderModal .draft-item-volume-fields {
+    grid-template-columns: minmax(0, 1.1fr) auto repeat(3, minmax(0, 1fr));
+  }
+
+  #draftOrderModal .draft-item-volume-fields > .draft-item-volume-field:nth-last-child(2) {
+    grid-column: 1 / span 2;
+  }
+
+  #draftOrderModal .draft-item-volume-fields > .draft-item-volume-field:last-child {
+    grid-column: 3 / -1;
+  }
+}
+
+@media (max-width: 991.98px) {
+  #draftOrderModal .draft-section-heading {
+    flex-basis: 100%;
+  }
+
+  #draftOrderModal .draft-section-actions {
+    justify-content: flex-start;
+    width: 100%;
+    margin-left: 0;
+  }
+
+  #draftOrderModal .draft-section-actions small {
+    text-align: left;
+  }
+
+  #draftOrderModal .draft-item-subgrid-block > .row,
+  #draftOrderModal .draft-item-subgrid-block:first-child > .row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #draftOrderModal .draft-description-language-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 767.98px) {
+  #draftOrderModal .modal-header,
+  #draftOrderModal .modal-footer {
+    padding-inline: 0.85rem;
+  }
+
+  #draftOrderModal .modal-body {
+    padding: 0.85rem;
+  }
+
+  #draftOrderModal .btn,
+  #draftOrderModal .btn-sm,
+  #draftOrderModal .form-control,
+  #draftOrderModal .form-select,
+  #draftOrderModal .draft-section-actions .btn {
+    min-height: 44px;
+  }
+
+  #draftOrderModal .form-control,
+  #draftOrderModal .form-select {
+    font-size: 1rem;
+  }
+
+  #draftOrderModal .btn-close {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+    margin: 0 -0.35rem 0 0.5rem;
+  }
+
+  #draftOrderModal .draft-section-actions .btn {
+    flex: 0 1 auto;
+  }
+
+  #draftOrderModal .draft-item-sidebar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #draftOrderModal .draft-item-sidebar-stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  #draftOrderModal .draft-item-volume-fields {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  #draftOrderModal .draft-item-volume-fields > .draft-item-volume-field:first-child {
+    grid-column: 1 / -1;
+  }
+
+  #draftOrderModal .draft-item-volume-fields > .draft-item-or {
+    grid-column: 1 / -1;
+    justify-self: start;
+    margin: 0;
+  }
+
+  #draftOrderModal .draft-item-volume-fields > .draft-item-volume-field:nth-last-child(2),
+  #draftOrderModal .draft-item-volume-fields > .draft-item-volume-field:last-child {
+    grid-column: 1 / -1;
+  }
+
+  #draftOrderModal .draft-item-photo-remove,
+  #draftOrderModal .draft-item-description-remove {
+    min-width: 44px;
+  }
+
+  #draftOrderModal .draft-footer-buttons {
+    margin-left: auto;
+  }
+}
+
+@media (max-width: 575.98px) {
+  #draftOrderModal .modal-header {
+    padding-block: 0.55rem;
+  }
+
+  #draftOrderModal .modal-title {
+    font-size: 1.08rem;
+  }
+
+  #draftOrderModal .modal-header small {
+    font-size: 0.78rem;
+  }
+
+  #draftOrderModal .modal-body {
+    padding-inline: 0.55rem;
+  }
+
+  #draftOrderModal .draft-order-meta-card .card-body,
+  #draftOrderModal .draft-order-totals-card .card-body,
+  #draftOrderModal #draftOrderSections > .draft-order-section > .card-header,
+  #draftOrderModal #draftOrderSections > .draft-order-section > .card-body {
+    padding: 0.8rem;
+  }
+
+  #draftOrderModal #draftOrderSections .draft-order-item-card {
+    padding: 0.7rem !important;
+  }
+
+  #draftOrderModal .draft-section-select {
+    max-width: none;
+  }
+
+  #draftOrderModal .draft-section-select .draft-section-supplier,
+  #draftOrderModal .draft-section-select .autocomplete-wrapper {
+    flex-basis: 100%;
+    width: 100% !important;
+  }
+
+  #draftOrderModal .draft-item-subgrid-block > .row,
+  #draftOrderModal .draft-item-subgrid-block:first-child > .row,
+  #draftOrderModal .draft-item-subgrid-block:nth-child(3) > .row,
+  #draftOrderModal .draft-item-volume-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #draftOrderModal .draft-item-volume-fields > * {
+    grid-column: 1 !important;
+  }
+
+  #draftOrderModal .draft-item-sidebar-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #draftOrderModal .draft-product-header {
+    align-items: flex-start !important;
+  }
+
+  #draftOrderModal .draft-product-header > div {
+    flex: 1 1 100%;
+  }
+
+  #draftOrderModal .draft-footer-total {
+    flex: 1 1 100%;
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: 0.5rem;
+  }
+
+  #draftOrderModal .draft-footer-total strong {
+    margin-inline-start: auto;
+  }
+
+  #draftOrderModal .draft-footer-buttons {
+    flex: 1 1 100%;
+  }
+
+  #draftOrderModal .draft-footer-buttons [data-bs-dismiss="modal"] {
+    flex: 0 0 auto;
+  }
+
+  #draftOrderModal #draftOrderSaveBtn {
+    flex: 1 1 auto;
+  }
+
+  #draftOrderModal .modal-footer {
+    gap: 0.4rem;
+    padding-top: 0.6rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #draftOrderModal .modal-body {
+    scroll-behavior: auto;
+  }
+
+  #draftOrderModal .draft-new-entry {
+    animation: none;
+    outline: 3px solid #6398ef;
+    outline-offset: 3px;
+  }
+}

@@ -85,6 +85,8 @@ function draftOrderNormalizeItemText($value, int $maxLength = 150): ?string
 function draftOrderNormalizeItemNumberSource(array $input): string
 {
     $source = strtolower(trim((string) ($input['item_no_source'] ?? '')));
+    // Older clients may send a stale generated source alongside a manual flag.
+    if (!empty($input['item_no_manual']) && $source !== 'imported') return 'manual';
     if (in_array($source, ['generated', 'manual', 'imported'], true)) return $source;
     return !empty($input['item_no_manual']) ? 'manual' : 'generated';
 }
@@ -1180,6 +1182,23 @@ function draftOrderAssertUniqueItemNumbers(PDO $pdo, int $customerId, array $ite
     return array_values(array_unique($warnings));
 }
 
+function draftOrderPreserveItemNumber(array $item, array $old): array
+{
+    $oldValue = (string) ($old['item_no'] ?? '');
+    $newValue = (string) ($item['item_no'] ?? '');
+    $oldSource = draftOrderNormalizeItemNumberSource($old);
+    if ($newValue === $oldValue) {
+        // Persisted identifiers (including generated ones) never need reallocation.
+        $item['item_no_preserve'] = 1;
+        if ($oldSource !== 'generated') $item['item_no_source'] = $oldSource;
+    } elseif (($item['item_no_source'] ?? 'generated') === 'generated') {
+        // An existing row's edited identifier is an override, even from an older UI.
+        $item['item_no_source'] = 'manual';
+    }
+    $item['item_no_manual'] = ($item['item_no_source'] ?? 'generated') !== 'generated' ? 1 : 0;
+    return $item;
+}
+
 function draftOrderPreserveExistingNumbers(PDO $pdo, int $orderId, array $items): array
 {
     $sourceSelect = draftOrderTableHasColumn($pdo, 'order_items', 'item_no_source') ? 'item_no_source' : "'generated' AS item_no_source";
@@ -1192,18 +1211,15 @@ function draftOrderPreserveExistingNumbers(PDO $pdo, int $orderId, array $items)
         $existingId=(int)($item['existing_item_id']??0);
         $old=$existing[$existingId]??null;
         if(!$old) continue;
-        $oldSource=in_array((string)($old['item_no_source']??''),['generated','manual','imported'],true)?(string)$old['item_no_source']:'generated';
-        if(empty($item['item_no_source'])) $item['item_no_source']=$oldSource;
-        if(($item['item_no_source']??'generated')==='generated' && (string)($item['item_no']??'')===(string)($old['item_no']??'')) $item['item_no_preserve']=1;
+        $item = draftOrderPreserveItemNumber($item, $old);
 
         $oldContents=json_decode((string)($old['shared_carton_contents']??''),true);
         if(!is_array($oldContents)) $oldContents=[];
-        foreach(($item['shared_carton_contents']??[]) as $index=>&$content){
+        if (!isset($item['shared_carton_contents']) || !is_array($item['shared_carton_contents'])) continue;
+        foreach($item['shared_carton_contents'] as $index=>&$content){
             $oldContent=$oldContents[$index]??null;
             if(!is_array($oldContent)) continue;
-            $oldContentSource=in_array((string)($oldContent['item_no_source']??''),['generated','manual','imported'],true)?(string)$oldContent['item_no_source']:'generated';
-            if(empty($content['item_no_source'])) $content['item_no_source']=$oldContentSource;
-            if(($content['item_no_source']??'generated')==='generated' && (string)($content['item_no']??'')===(string)($oldContent['item_no']??'')) $content['item_no_preserve']=1;
+            $content = draftOrderPreserveItemNumber($content, $oldContent);
         }
         unset($content);
     }
@@ -1568,7 +1584,7 @@ function draftOrderBuildSupplierSections(array $items): array
             'id' => (int) $item['id'],
             'existing_item_id' => (int) $item['id'],
             'product_id' => (!empty($item['shared_carton_enabled']) ? null : (!empty($item['product_id']) ? (int) $item['product_id'] : null)),
-            'item_no' => !empty($item['shared_carton_enabled']) ? null : ($item['item_no'] ?: null),
+            'item_no' => !empty($item['shared_carton_enabled']) ? null : ($item['item_no'] ?? null),
             'item_no_source' => in_array((string) ($item['item_no_source'] ?? ''), ['generated', 'manual', 'imported'], true) ? $item['item_no_source'] : 'generated',
             'item_no_manual' => in_array((string) ($item['item_no_source'] ?? ''), ['manual', 'imported'], true) ? 1 : 0,
             'shipping_code' => $item['shipping_code'] ?: null,
@@ -1853,7 +1869,7 @@ function draftOrderBuildExportRows(array $sections): array
                 'product_id' => !empty($item['product_id']) ? (int) $item['product_id'] : null,
                 'supplier_id' => $section['supplier_id'] ?? null,
                 'supplier_name' => $section['supplier_name'] ?? '',
-                'item_no' => $item['item_no'] ?: '',
+                'item_no' => $item['item_no'] ?? '',
                 'what_brand' => $item['what_brand'] ?? '',
                 'brand' => $item['brand'] ?? $item['what_brand'] ?? '',
                 'materials' => $item['materials'] ?? '',
@@ -2093,7 +2109,7 @@ function draftOrderExportCsv(PDO $pdo, int $orderId): void
                 $item['what_brand'] ?? '',
                 draftOrderCopyNormalGoodsDisplay($item['copy_normal_goods'] ?? ''),
                 $item['code'] ?? '',
-                $item['item_no'] ?: '',
+                $item['item_no'] ?? '',
                 $item['description_en'] ?? $item['description'] ?? '',
                 $item['description_cn'] ?? $item['description'] ?? '',
                 $item['notes'] ?? '',

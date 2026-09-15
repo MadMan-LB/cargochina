@@ -154,8 +154,9 @@
         <td>${r.container_code || (r.container_id ? "#" + r.container_id : "—")}</td>
         <td class="small text-muted">${escapeHtml((r.notes || "").slice(0, 40))}${(r.notes || "").length > 40 ? "…" : ""}</td>
         <td>
-          <button class="btn btn-sm btn-outline-primary" onclick="editExpense(${r.id})">Edit</button>
-          <button class="btn btn-sm btn-outline-danger" onclick="deleteExpense(${r.id})">Delete</button>
+          ${document.getElementById("expensesTable")?.dataset.canWrite !== "0" ? `
+          <button type="button" class="btn btn-sm btn-outline-primary" onclick="editExpense(${r.id})">Edit</button>
+          <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteExpense(${r.id})">Delete</button>` : '<span class="text-muted">View only</span>'}
         </td>
       </tr>
     `,

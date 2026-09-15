@@ -15,6 +15,7 @@ $canCreateDraftCustomers = clmsUserCan(
 );
 require 'includes/layout.php';
 ?>
+<link rel="stylesheet" href="<?= htmlspecialchars($basePath) ?>/frontend/css/draft-order-ux.css?v=<?= filemtime(__DIR__ . '/frontend/css/draft-order-ux.css') ?>">
 <h1 class="mb-3">Draft an Order</h1>
 <p class="text-muted mb-4">Build one customer order across multiple suppliers with a compact, order-style layout, photo-first item cards, and live totals.</p>
 
@@ -159,13 +160,13 @@ require 'includes/layout.php';
   </div>
 </div>
 
-<div class="modal fade" id="draftOrderModal" tabindex="-1">
+<div class="modal fade" id="draftOrderModal" tabindex="-1" aria-labelledby="draftOrderModalTitle">
   <div class="modal-dialog modal-fullscreen">
     <div class="modal-content">
       <div class="modal-header">
         <div>
           <h5 class="modal-title mb-1" id="draftOrderModalTitle">Draft an Order</h5>
-          <small class="text-muted" id="draftOrderModalSubtitle">One customer, multiple supplier sections, compact item cards, live totals.</small>
+          <small class="text-muted" id="draftOrderModalSubtitle">Choose a customer, add suppliers and products, then review totals and save.</small>
         </div>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
@@ -175,9 +176,13 @@ require 'includes/layout.php';
           <input type="hidden" id="draftOrderEditable" value="1">
           <div class="card mb-4 draft-order-meta-card">
             <div class="card-body">
+              <div class="draft-builder-intro mb-3">
+                <h6 class="draft-step-label">1 · Order Information</h6>
+                <small class="text-muted">Start with the customer. Fields marked * are required.</small>
+              </div>
               <div class="row g-3">
                 <div class="col-12 col-lg-4">
-                  <label class="form-label">Customer *</label>
+                  <label class="form-label" for="draftOrderCustomer">Customer *</label>
                   <div class="input-group input-group-sm">
                     <input type="text" class="form-control form-control-sm" id="draftOrderCustomer" placeholder="Type to search customer..." autocomplete="off">
                     <?php if ($canCreateDraftCustomers): ?>
@@ -186,23 +191,23 @@ require 'includes/layout.php';
                   </div>
                 </div>
                 <div class="col-12 col-md-4 col-lg-3">
-                  <label class="form-label">Country / Destination</label>
+                  <label class="form-label" id="draftDestinationLabel" for="draftOrderDestinationCountry">Country / Destination</label>
                   <input type="hidden" id="draftOrderDestinationCountryId">
                   <div id="draftOrderDestinationCountryInputWrap">
                     <input type="text" class="form-control form-control-sm" id="draftOrderDestinationCountry" placeholder="Search country..." autocomplete="off">
                   </div>
                   <div id="draftOrderDestinationCountrySelectWrap" class="d-none">
-                    <select class="form-select form-select-sm" id="draftOrderDestinationCountrySelect">
+                    <select class="form-select form-select-sm" id="draftOrderDestinationCountrySelect" aria-labelledby="draftDestinationLabel">
                       <option value="">Select country...</option>
                     </select>
                   </div>
                 </div>
                 <div class="col-12 col-md-4 col-lg-2">
-                  <label class="form-label">Expected Ready</label>
+                  <label class="form-label" for="draftOrderExpectedDate">Expected Ready (Optional)</label>
                   <input type="date" class="form-control form-control-sm" id="draftOrderExpectedDate">
                 </div>
                 <div class="col-12 col-md-4 col-lg-3">
-                  <label class="form-label">Currency *</label>
+                  <label class="form-label" for="draftOrderCurrency">Currency *</label>
                   <select class="form-select form-select-sm" id="draftOrderCurrency">
                      <option value="RMB">RMB</option>
                      <option value="USD">USD</option>
@@ -210,7 +215,7 @@ require 'includes/layout.php';
                   </select>
                 </div>
                 <div class="col-12">
-                  <label class="form-label">High Alert Notes</label>
+                  <label class="form-label" for="draftOrderHighAlertNotes">High Alert Notes (Optional)</label>
                   <textarea class="form-control form-control-sm" id="draftOrderHighAlertNotes" rows="2" placeholder="Special handling, urgent notes, fragile warnings..."></textarea>
                 </div>
               </div>
@@ -220,24 +225,28 @@ require 'includes/layout.php';
             </div>
           </div>
 
-          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+          <div class="draft-suppliers-toolbar d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
             <div>
-              <div class="fw-semibold text-dark">Supplier Sections</div>
-              <small class="text-muted">Photo-first item cards, auto item numbers, compact fields, and supplier-level totals stay live while you build.</small>
+              <h6 class="draft-step-label">2 · Suppliers &amp; Products</h6>
+              <small class="text-muted">Choose each supplier, then enter their products. New entries appear at the top.</small>
             </div>
             <div class="draft-action-group" role="group" aria-label="<?= htmlspecialchars(clmsT('Supplier section actions')) ?>">
               <button type="button" class="btn btn-outline-primary btn-sm" id="draftOrderModalImportBtn">Import</button>
-              <button type="button" class="btn btn-outline-primary btn-sm" id="draftOrderAddSectionBtn" onclick="addDraftOrderSection()">+ Add Supplier Section</button>
+              <button type="button" class="btn btn-outline-primary btn-sm" id="draftOrderAddSectionBtn" data-builder-action="add-section" onclick="addDraftOrderSection({}, {prepend: true, reveal: true})">+ Add Supplier</button>
             </div>
           </div>
 
           <div id="draftOrderSections" class="d-flex flex-column gap-4"></div>
+          <div class="draft-supplier-add-bottom mt-3">
+            <button type="button" class="btn btn-outline-primary" data-builder-action="add-section" onclick="addDraftOrderSection({}, {prepend: true, reveal: true})">+ Add Supplier</button>
+            <small class="text-muted">Adds a new supplier at the top and takes you there.</small>
+          </div>
 
-          <div class="card mt-4">
+          <div class="card mt-4 draft-order-totals-card">
             <div class="card-body d-flex justify-content-between align-items-center flex-wrap gap-3">
               <div>
-                <div class="fw-semibold">Order Totals</div>
-                <small class="text-muted">Auto-calculated across all supplier sections.</small>
+                <h6 class="draft-step-label">3 · Order Totals</h6>
+                <small class="text-muted">Calculated from all suppliers. Review, then save your draft.</small>
               </div>
               <div class="d-flex gap-4 flex-wrap">
                 <div><strong id="draftOrderTotalAmount">0</strong> <span class="text-muted" id="draftOrderTotalCurrency">USD</span></div>
@@ -250,8 +259,11 @@ require 'includes/layout.php';
         </form>
       </div>
       <div class="modal-footer draft-modal-actions">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-        <button type="button" class="btn btn-primary" id="draftOrderSaveBtn" onclick="saveDraftOrder()">Save Draft Order</button>
+        <div class="draft-footer-total"><span>Order Total</span> <strong id="draftOrderFooterAmount">0</strong> <span id="draftOrderFooterCurrency">RMB</span></div>
+        <div class="draft-footer-buttons">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+          <button type="button" class="btn btn-primary" id="draftOrderSaveBtn" onclick="saveDraftOrder()">Save Draft Order</button>
+        </div>
       </div>
     </div>
   </div>

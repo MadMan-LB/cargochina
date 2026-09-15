@@ -190,7 +190,8 @@ function financialsBuildOrderItemAnalysis(PDO $pdo, array $orderIds): array
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
     if (!getAuthUserId()) jsonError('Unauthorized', 401);
-    if (!hasAnyRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'])) jsonError('Forbidden', 403);
+    requirePageAccess('financials');
+    if ($method !== 'GET') requireRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin']);
 
     if ($method !== 'GET') jsonError('Method not allowed', 405);
 

@@ -122,12 +122,21 @@ if (!in_array($resource, $publicResources)) {
     }
 
     $resourcePermissions = $rbac[$resource] ?? null;
+    // Read-only dependencies shared by these pages. Page access is not a write grant.
+    $pageReadDependencies = [
+        'containers' => ['containers', 'assign_container', 'consolidation', 'pipeline', 'calendar', 'expenses'],
+        'hs-code-tax' => ['hs_code_tax'],
+    ];
+    $usesPageReadAccess = $method === 'GET' && isset($pageReadDependencies[$resource]);
+    if ($usesPageReadAccess && !hasPageAccess(...$pageReadDependencies[$resource])) {
+        jsonError('Forbidden', 403);
+    }
     $permissionKey = $method === 'GET' ? 'read' : 'write';
     $skipGenericPermission = ($resource === 'orders' && (in_array($action, ['approve', 'receive', 'confirm'], true) || ($method === 'POST' && $id === 'bulk-export')))
         || ($resource === 'customers' && ($method === 'GET' || ($method === 'POST' && ($id === null || $id === 'import'))))
         || $resource === 'balances';
     if (
-        !$skipGenericPermission &&
+        !$skipGenericPermission && !$usesPageReadAccess &&
         is_array($resourcePermissions) &&
         array_key_exists($permissionKey, $resourcePermissions) &&
         !hasPermission($resource . '.' . $permissionKey, $resourcePermissions[$permissionKey] ?? [])
@@ -223,12 +232,12 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'expenses' && !hasAnyRole($rbac['expenses'] ?? ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'])) {
+    if ($resource === 'expenses' && (!hasPageAccess('expenses') || ($method !== 'GET' && !hasAnyRole($rbac['expenses'] ?? [])))) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'financials' && !hasAnyRole($rbac['financials'] ?? [])) {
+    if ($resource === 'financials' && (!hasPageAccess('financials') || ($method !== 'GET' && !hasAnyRole($rbac['financials'] ?? [])))) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
@@ -238,7 +247,7 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'warehouse-stock' && !hasAnyRole($rbac['warehouse-stock'] ?? [])) {
+    if ($resource === 'warehouse-stock' && (!hasPageAccess('warehouse_stock') || ($method !== 'GET' && !hasAnyRole($rbac['warehouse-stock'] ?? [])))) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
