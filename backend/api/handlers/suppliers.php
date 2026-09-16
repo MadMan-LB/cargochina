@@ -465,28 +465,28 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $managementReadRoles = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'FieldStaff', 'SuperAdmin'];
     $financeRoles = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'SuperAdmin'];
     $interactionRoles = ['ChinaAdmin', 'ChinaEmployee', 'FieldStaff', 'SuperAdmin'];
-    $canViewFinancials = hasAnyRole($financeRoles);
+    $canViewFinancials = hasPermission('suppliers.finance', $financeRoles);
 
     if ($method === 'GET') {
-        requireRole($readRoles);
+        requirePermission('suppliers.read', $readRoles);
     } elseif ($method === 'PUT' || $method === 'DELETE') {
-        requireRole($buyerRoles);
+        requirePermission('suppliers.write', $buyerRoles);
     } elseif ($method === 'POST') {
         if ($id === 'import') {
-            requireRole($buyerRoles);
+            requirePermission('suppliers.import', $buyerRoles);
         } elseif ($id && $action === 'interactions') {
-            requireRole($interactionRoles);
+            requirePermission('suppliers.interactions', $interactionRoles);
         } elseif ($id && in_array($action, ['payments', 'balance'], true)) {
-            requireRole($financeRoles);
+            requirePermission('suppliers.finance', $financeRoles);
         } else {
-            requireRole($buyerRoles);
+            requirePermission('suppliers.create', $buyerRoles);
         }
     }
 
     switch ($method) {
         case 'GET':
             if ($id === 'wechat-qr-duplicate') {
-                requireRole($buyerRoles);
+                requirePermission('suppliers.create', $buyerRoles);
                 $content = normalizeSupplierQrText($_GET['content'] ?? '');
                 $excludeId = !empty($_GET['exclude_id']) ? (int) $_GET['exclude_id'] : null;
                 if ($content === null) {
@@ -512,7 +512,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 jsonResponse(['data' => $rows]);
             }
-            requirePermission('suppliers.manage.read', $managementReadRoles);
+            requirePermission($id === null ? 'suppliers.manage.read' : 'suppliers.details.read', $managementReadRoles);
             if ($id === null) {
                 $q = clmsNormalizeSearchQuery($_GET['q'] ?? '');
                 $paymentStatus = trim($_GET['payment_status'] ?? '');
@@ -581,7 +581,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $row['reliability_score'] = calcSupplierScore($pdo, (int) $id);
 
             if ($action === 'balance') {
-                requireRole($financeRoles);
+                requirePermission('suppliers.finance', $financeRoles);
                 $settlementExpr = supplierSettlementDeltaExpr($pdo);
                 $stmt = $pdo->prepare("SELECT currency, SUM(amount) as total_paid, SUM(COALESCE(invoice_amount,amount)) as total_invoiced, SUM($settlementExpr) as total_discount FROM supplier_payments WHERE supplier_id = ? GROUP BY currency");
                 $stmt->execute([$id]);

@@ -123,7 +123,7 @@ require 'includes/layout.php';
   </div>
   <div class="card-body">
     <div class="alert alert-info py-2 small mb-3">
-      A user with multiple roles sees the union of pages enabled across those roles. All registered CLMS pages are shown below for each role, while Super Admin-only administration pages stay visible but locked for non-SuperAdmin roles. Page visibility here controls navigation and direct page access; sensitive actions inside modules still follow their own workflow permissions.
+      A user with multiple roles receives the union of enabled pages. Enabling a page grants its normal workflow and required customer, supplier, and other data lookups, including all customers (not only customers created by that employee). Unrelated page actions and Super Admin-only administration remain protected. Warehouse-specific restrictions still apply.
     </div>
     <div id="sidebarAccessLoading" class="text-center py-4 text-muted">Loading sidebar access…</div>
     <div id="sidebarAccessGrid" class="row g-3 d-none"></div>

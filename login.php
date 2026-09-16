@@ -29,7 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $_SESSION['user_name'] = $user['name'];
       $_SESSION['user_roles'] = $user['roles'];
       $roles = $_SESSION['user_roles'];
-      header('Location: ' . clmsGetAccessibleHomeUrl($roles, $pdo));
+      header('Location: ' . clmsGetAccessibleHomeUrl($roles, $pdo, (int) $user['user_id']));
       exit;
     } catch (AuthenticationException $e) {
       $error = clmsT($e->getMessage());

@@ -125,6 +125,13 @@ function clmsUserCanSeeAllCustomers(PDO $pdo, ?int $userId = null, ?array $roleC
     if (!$userId) {
         return false;
     }
+    // Page grants include the customer data used by that workflow. The explicit
+    // creator exceptions remain a fallback for users without such a page grant.
+    require_once __DIR__ . '/sidebar_permissions.php';
+    $customerPages = clmsPageCapabilityMap()['customers.read'];
+    if (array_intersect($customerPages, clmsGetEffectivePageIdsForRoles($roleCodes, $pdo, $userId))) {
+        return true;
+    }
     $scope = clmsGetCustomerVisibilityException($pdo, $userId);
     return !empty($scope['can_see_all_customers']);
 }

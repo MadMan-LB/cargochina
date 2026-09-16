@@ -11,7 +11,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
     $userId = getAuthUserId();
     if (!$userId) jsonError('Unauthorized', 401);
-    if (!hasAnyRole(['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'SuperAdmin', 'WarehouseStaff'])) jsonError('Forbidden', 403);
+    requirePermission('internal-messages');
 
     switch ($method) {
         case 'GET':

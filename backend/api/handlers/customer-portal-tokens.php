@@ -11,7 +11,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
     $userId = getAuthUserId();
     if (!$userId) jsonError('Unauthorized', 401);
-    if (!hasAnyRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'])) jsonError('Forbidden', 403);
+    requirePermission('customer-portal-tokens');
 
     switch ($method) {
         case 'POST':

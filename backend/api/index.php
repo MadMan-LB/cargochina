@@ -122,21 +122,25 @@ if (!in_array($resource, $publicResources)) {
     }
 
     $resourcePermissions = $rbac[$resource] ?? null;
-    // Read-only dependencies shared by these pages. Page access is not a write grant.
-    $pageReadDependencies = [
-        'containers' => ['containers', 'assign_container', 'consolidation', 'pipeline', 'calendar', 'expenses'],
-        'hs-code-tax' => ['hs_code_tax'],
-    ];
-    $usesPageReadAccess = $method === 'GET' && isset($pageReadDependencies[$resource]);
-    if ($usesPageReadAccess && !hasPageAccess(...$pageReadDependencies[$resource])) {
-        jsonError('Forbidden', 403);
-    }
+    // Shared capability policy includes the data dependencies of granted pages.
     $permissionKey = $method === 'GET' ? 'read' : 'write';
+    if ($resource === 'products' && $method === 'POST' && $id === null) {
+        requirePermission('products.create');
+    }
+    if ($resource === 'containers' && $action === 'assign-orders') {
+        requirePermission('containers.assign');
+    }
+    if ($resource === 'customers' && $method === 'POST' && $action === 'deposits') {
+        requirePermission('customers.finance');
+    }
     $skipGenericPermission = ($resource === 'orders' && (in_array($action, ['approve', 'receive', 'confirm'], true) || ($method === 'POST' && $id === 'bulk-export')))
         || ($resource === 'customers' && ($method === 'GET' || ($method === 'POST' && ($id === null || $id === 'import'))))
+        || ($resource === 'products' && $method === 'POST' && $id === null)
+        || ($resource === 'containers' && $action === 'assign-orders')
+        || ($resource === 'customers' && $method === 'POST' && $action === 'deposits')
         || $resource === 'balances';
     if (
-        !$skipGenericPermission && !$usesPageReadAccess &&
+        !$skipGenericPermission &&
         is_array($resourcePermissions) &&
         array_key_exists($permissionKey, $resourcePermissions) &&
         !hasPermission($resource . '.' . $permissionKey, $resourcePermissions[$permissionKey] ?? [])
@@ -160,7 +164,7 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if (($resource === 'config' && ($id === 'container-presets' || $id === 'eta-offsets')) && !hasAnyRole($rbac['containers']['read'] ?? ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'])) {
+    if (($resource === 'config' && ($id === 'container-presets' || $id === 'eta-offsets')) && !hasPermission('containers.read')) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
@@ -173,9 +177,7 @@ if (!in_array($resource, $publicResources)) {
     if ($resource === 'customers' && $method === 'GET') {
         $userRoles = getUserRoles();
         $isLookup = $id === 'lookup' || $action === 'lookup';
-        $allowed = $isLookup
-            ? true
-            : (hasPermission('customers.read', $rbac['customers']['read'] ?? []) || clmsCanRolesAccessPage($userRoles, 'customers', null, $userId));
+        $allowed = hasPermission($isLookup ? 'customers.lookup' : 'customers.read');
         if (!$allowed) {
             http_response_code(403);
             echo json_encode(['error' => true, 'message' => 'Forbidden']);
@@ -192,22 +194,22 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'suppliers' && $id === 'import' && !hasAnyRole(['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'])) {
+    if ($resource === 'suppliers' && $id === 'import' && !hasPermission('suppliers.import')) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'products' && $id === 'import' && !hasAnyRole(['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'])) {
+    if ($resource === 'products' && $id === 'import' && !hasPermission('products.write')) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'shipment-drafts' && $action === 'push' && !hasAnyRole($rbac['shipment-drafts']['push'] ?? [])) {
+    if ($resource === 'shipment-drafts' && $action === 'push' && !hasPermission('shipment-drafts.push')) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'shipment-drafts' && $action === 'finalize' && !hasAnyRole($rbac['shipment-drafts']['finalize'] ?? [])) {
+    if ($resource === 'shipment-drafts' && $action === 'finalize' && !hasPermission('shipment-drafts.finalize')) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
@@ -232,7 +234,7 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'expenses' && (!hasPageAccess('expenses') || ($method !== 'GET' && !hasAnyRole($rbac['expenses'] ?? [])))) {
+    if ($resource === 'expenses' && !hasPageAccess('expenses')) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
@@ -242,7 +244,7 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'internal-messages' && !hasAnyRole($rbac['internal-messages'] ?? [])) {
+    if ($resource === 'internal-messages' && !hasPermission('internal-messages')) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
@@ -262,12 +264,12 @@ if (!in_array($resource, $publicResources)) {
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'customer-portal-tokens' && !hasAnyRole($rbac['customer-portal-tokens'] ?? [])) {
+    if ($resource === 'customer-portal-tokens' && !hasPermission('customer-portal-tokens')) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;
     }
-    if ($resource === 'design-attachments' && !hasAnyRole($rbac['design-attachments'] ?? [])) {
+    if ($resource === 'design-attachments' && !hasPermission('design-attachments')) {
         http_response_code(403);
         echo json_encode(['error' => true, 'message' => 'Forbidden']);
         exit;

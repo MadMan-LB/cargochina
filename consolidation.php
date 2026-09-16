@@ -2,7 +2,7 @@
 require_once 'includes/auth_check.php';
 require_once 'includes/page_guard.php';
 requireRoleForPage(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin', 'ContainersStaff']);
-$canManageContainers = in_array('SuperAdmin', $_SESSION['user_roles'] ?? [], true);
+$canManageContainers = clmsUserCan('containers.write');
 $currentPage = 'consolidation';
 $pageTitle = 'Consolidation';
 require 'includes/layout.php';

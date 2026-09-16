@@ -3,7 +3,7 @@ require_once 'includes/auth_check.php';
 require_once 'includes/page_guard.php';
 requireRoleForPage(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin', 'WarehouseStaff']);
 $userRoles = $_SESSION['user_roles'] ?? [];
-$canWriteExpenses = !empty(array_intersect($userRoles, ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin', 'WarehouseStaff']));
+$canWriteExpenses = clmsUserCan('expenses.write');
 $isWarehouseOnly = in_array('WarehouseStaff', $userRoles) && !array_intersect($userRoles, ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin']);
 if ($isWarehouseOnly) {
     header('Location: /cargochina/warehouse/expenses.php');

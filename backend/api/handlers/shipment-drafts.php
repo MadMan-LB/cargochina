@@ -37,8 +37,7 @@ function shipmentDraftFetchVisibleOrder(PDO $pdo, int $orderId): array
 }
 
 return function (string $method, ?string $id, ?string $action, array $input) {
-    requirePageAccess('consolidation', 'assign_container', 'containers', 'pipeline');
-    if ($method !== 'GET') requireRole(['ChinaAdmin', 'LebanonAdmin', 'ContainersStaff', 'SuperAdmin']);
+    requirePermission($method === 'GET' ? 'shipment-drafts.read' : 'shipment-drafts.write');
     $pdo = getDb();
     $userId = getAuthUserId() ?? 1;
 

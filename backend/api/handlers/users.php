@@ -28,7 +28,7 @@ function buildUserPermissionOverrideRegistry(PDO $pdo): array
         $key = clmsNormalizePermissionKey('page:' . $pageId);
         $registry[$key] = [
             'key' => $key,
-            'label' => 'View ' . ($meta['title'] ?? $pageId) . ' page',
+            'label' => 'Access ' . ($meta['title'] ?? $pageId) . ' page and workflow',
             'description' => $meta['description'] ?? '',
             'section' => 'Pages',
             'default_roles' => !empty($meta['superadmin_only']) ? ['SuperAdmin'] : array_values(array_unique(array_merge($meta['default_roles'] ?? [], ['SuperAdmin']))),

@@ -9,7 +9,7 @@ require_once dirname(__DIR__, 2) . '/services/TrainingDataResetService.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
     $pdo = getDb();
-    if ($id !== 'receiving' && $id !== 'upload' && $id !== 'container-presets' && $id !== 'eta-offsets') {
+    if ($method !== 'GET' || ($id !== 'receiving' && $id !== 'upload' && $id !== 'container-presets' && $id !== 'eta-offsets')) {
         requireRole(['SuperAdmin']);
     }
 

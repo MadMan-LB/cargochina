@@ -614,7 +614,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         case 'POST':
             // Shortcut: assign orders directly to a container, handling draft creation automatically
             if ($id && $action === 'assign-orders') {
-                requireRole(['ChinaAdmin', 'LebanonAdmin', 'ContainersStaff', 'SuperAdmin']);
+                requirePermission('containers.assign');
                 $orderIds = array_map('intval', $input['order_ids'] ?? []);
                 $force    = !empty($input['force']); // allow even if over capacity
                 if (empty($orderIds)) jsonError('order_ids required', 400);

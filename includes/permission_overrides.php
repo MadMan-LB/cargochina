@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/../backend/config/database.php';
+require_once __DIR__ . '/page_capabilities.php';
 
 function clmsPermissionOverridesTableExists(?PDO $pdo = null): bool
 {
@@ -93,6 +94,20 @@ function clmsUserCan(string $permissionKey, array $defaultRoles = [], ?PDO $pdo 
 
     if (in_array('SuperAdmin', $roleCodes, true)) {
         return true;
+    }
+    $permissionKey = clmsNormalizePermissionKey($permissionKey);
+    $pages = clmsPageCapabilityMap()[$permissionKey] ?? null;
+    if (str_starts_with($permissionKey, 'page:')) {
+        $pages = [substr($permissionKey, 5)];
+    }
+    if ($pages !== null) {
+        require_once __DIR__ . '/sidebar_permissions.php';
+        $userId = $userId ?: clmsGetCurrentUserIdFromSession();
+        $effectivePages = clmsGetEffectivePageIdsForRoles($roleCodes, $pdo, $userId);
+        // Explicit action grants remain supported, but legacy role allowlists
+        // must not restore a page/capability revoked in role page settings.
+        return (bool) array_intersect($pages, $effectivePages)
+            || (!str_starts_with($permissionKey, 'page:') && clmsUserHasPermissionOverride($permissionKey, $userId, $pdo));
     }
     if ($defaultRoles && clmsRolesGrantPermission($roleCodes, $defaultRoles)) {
         return true;

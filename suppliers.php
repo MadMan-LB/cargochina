@@ -5,6 +5,7 @@ requireRoleForPage(['ChinaAdmin', 'ChinaEmployee', 'FieldStaff', 'SuperAdmin']);
 $currentPage = 'suppliers';
 $pageTitle = 'Suppliers';
 require 'includes/layout.php';
+$isBuyer = clmsUserCan('suppliers.write');
 ?>
 <h1 class="mb-4">Suppliers</h1>
 <div class="card mb-3">

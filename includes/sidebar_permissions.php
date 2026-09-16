@@ -494,11 +494,6 @@ function clmsGetEffectivePageIdsForRoles(array $roleCodes, ?PDO $pdo = null, ?in
             }
         }
     }
-    foreach (clmsAlwaysOperationalPageIds() as $pageId) {
-        if (isset($registry[$pageId]) && empty($registry[$pageId]['superadmin_only'])) {
-            $visible[$pageId] = true;
-        }
-    }
 
     return array_values(array_filter($orderedRegistryIds, static fn($pageId) => isset($visible[$pageId])));
 }
