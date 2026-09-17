@@ -45,5 +45,5 @@ require 'includes/layout.php';
     </div>
   </div>
 </div>
-<?php $pageScript = 'frontend/js/admin_tracking_push.js';
+<?php $pageScript = 'frontend/js/admin_tracking_push.js?v=' . filemtime(__DIR__ . '/frontend/js/admin_tracking_push.js');
 require 'includes/footer.php'; ?>

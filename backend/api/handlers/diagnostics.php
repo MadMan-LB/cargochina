@@ -66,7 +66,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             ? 'oi.image_paths'
             : 'NULL AS image_paths';
         $itemStmt = $pdo->prepare(
-            "SELECT oi.id, oi.product_id, oi.item_no, $itemImageColumn
+            "SELECT oi.id, oi.product_id, oi.item_no, oi.item_number, $itemImageColumn
              FROM order_items oi
              WHERE oi.order_id = ?
              ORDER BY oi.id"
@@ -90,6 +90,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 'order_item_id' => (int) ($row['id'] ?? 0),
                 'product_id' => (int) ($row['product_id'] ?? 0),
                 'item_no' => (string) ($row['item_no'] ?? ''),
+                'item_number' => $row['item_number'] ?? null,
             ] + $diagnostic;
         }
 

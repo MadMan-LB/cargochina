@@ -4,6 +4,7 @@ require_once dirname(__DIR__, 2) . '/vendor/autoload.php';
 require_once dirname(__DIR__) . '/api/helpers.php';
 
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Shared\Drawing as SharedDrawing;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -29,8 +30,8 @@ class OrderExcelService
 
     public const IMAGE_PIPELINE_VERSION = '2026.08.06.1';
 
-    private const STANDARD_LAST_COL = 'AB';
-    private const CONTAINER_LAST_COL = 'V';
+    private const STANDARD_LAST_COL = 'AC';
+    private const CONTAINER_LAST_COL = 'W';
     private const PHOTO_COLUMN = 'H';
     private const CONTAINER_PHOTO_COLUMN = 'E';
     private const PHOTO_COLUMN_WIDTH = 21;
@@ -50,6 +51,48 @@ class OrderExcelService
         $this->backendDir = dirname(__DIR__);
         $this->pdo = $pdo;
         $this->pdoResolutionAttempted = $pdo instanceof PDO;
+    }
+
+    public static function sharedCartonIdentifierRows(array $entries): array
+    {
+        $rows = [];
+        foreach ($entries as $entry) foreach ($entry['items'] ?? [] as $item) {
+            if (empty($item['shared_carton_enabled'])) continue;
+            $contents = $item['shared_carton_contents'] ?? [];
+            if (is_string($contents)) $contents = json_decode($contents, true) ?: [];
+            if (!is_array($contents)) continue;
+            foreach ($contents as $content) {
+                if (!is_array($content)) continue;
+                $rows[] = [
+                    'order_id' => $entry['order']['id'] ?? null,
+                    'parent_item_id' => $item['id'] ?? $item['source_item_id'] ?? null,
+                    'carton_code' => $item['shared_carton_code'] ?? '',
+                    'item_no' => $content['item_no'] ?? '',
+                    'item_number' => $content['item_number'] ?? '',
+                    'description' => $content['description_en'] ?? $content['description_cn'] ?? '',
+                ];
+            }
+        }
+        return $rows;
+    }
+
+    private function appendSharedCartonIdentifiersSheet(Spreadsheet $spreadsheet, array $entries): void
+    {
+        $rows = self::sharedCartonIdentifierRows($entries);
+        if (!$rows) return;
+        // Identification only: do not expand/recalculate existing financial/cargo rows.
+        $sheet = $spreadsheet->createSheet();
+        $sheet->setTitle('Shared carton identifiers');
+        $headers = ['Order ID','Order Item ID','Carton Code','I.I.N','Item Number','Description'];
+        foreach ($headers as $i => $header) $sheet->setCellValue(Coordinate::stringFromColumnIndex($i+1).'1', $this->tr($header));
+        foreach ($rows as $i => $row) foreach (array_values($row) as $j => $value) {
+            $sheet->setCellValueExplicit(Coordinate::stringFromColumnIndex($j+1).($i+2), (string) ($value ?? ''), DataType::TYPE_STRING);
+        }
+        $sheet->getStyle('A1:F1')->getFont()->setBold(true);
+        foreach (range('A','F') as $column) $sheet->getColumnDimension($column)->setWidth($column === 'F' ? 45 : 22);
+        $sheet->getStyle('A1:F'.(count($rows)+1))->getAlignment()->setWrapText(true);
+        $sheet->freezePane('A2');
+        $spreadsheet->setActiveSheetIndex(0);
     }
 
     private function tr(string $text, array $params = []): string
@@ -129,6 +172,7 @@ class OrderExcelService
             $row = $this->writeStandardOperationalCosts($sheet, $row, $order);
         }
         $sheet->freezePane('A10');
+        $this->appendSharedCartonIdentifiersSheet($spreadsheet, $entries);
         return $spreadsheet;
     }
 
@@ -158,6 +202,7 @@ class OrderExcelService
         $this->writeStandardOperationalCosts($sheet, $row, $order);
 
         $sheet->freezePane('A10');
+        $this->appendSharedCartonIdentifiersSheet($spreadsheet, [['order'=>$order,'items'=>$items]]);
         return $spreadsheet;
     }
 
@@ -240,6 +285,8 @@ class OrderExcelService
 
         $this->writeOverallTotals($sheet, $overallTotals, $row);
         $sheet->freezePane('A10');
+
+        $this->appendSharedCartonIdentifiersSheet($spreadsheet, $ordersWithItems);
 
         $this->outputXlsx($spreadsheet, $filename);
     }
@@ -390,7 +437,7 @@ class OrderExcelService
             'Status',
             'Item',
             'Shipping Code',
-            'Item No',
+            'I.I.N',
             'Item Type',
             'Quantity',
             'Actual Quantity',
@@ -401,6 +448,7 @@ class OrderExcelService
             'Actual Height',
             'Actual Width',
             'Actual Length',
+            'Item Number',
         ];
 
         $bodyRows = array_map(function (array $row): array {
@@ -423,9 +471,22 @@ class OrderExcelService
                 $row['item_actual_height'] ?? $row['height'] ?? $row['item_height'] ?? null,
                 $row['item_actual_width'] ?? $row['width'] ?? $row['item_width'] ?? null,
                 $row['item_actual_length'] ?? $row['length'] ?? $row['item_length'] ?? null,
+                (string) ($row['item_number'] ?? ''),
             ];
         }, $rows);
 
+        foreach ($rows as $row) foreach ($row['item_identifiers'] ?? [] as $content) {
+            $reference = array_fill(0, count($headers), '');
+            $reference[0] = $row['order_id'] ?? '';
+            $reference[1] = [];
+            $reference[2] = $row['customer_name'] ?? '';
+            $reference[3] = $row['supplier_name'] ?? '';
+            $reference[4] = $this->statusText((string) ($row['status'] ?? ''));
+            $reference[5] = $this->tr('Contained item') . ': ' . ($content['description_en'] ?? $content['description_cn'] ?? '');
+            $reference[7] = $content['item_no'] ?? '';
+            $reference[18] = $content['item_number'] ?? '';
+            $bodyRows[] = $reference; // No duplicated stock quantities/weights.
+        }
         $this->exportSimpleTable('Warehouse Stock', $headers, $bodyRows, $filename);
     }
 
@@ -465,6 +526,7 @@ class OrderExcelService
             'Z' => 18,
             'AA' => 16,
             'AB' => 32,
+            'AC' => 22,
         ];
 
         foreach ($widths as $col => $width) {
@@ -497,6 +559,7 @@ class OrderExcelService
             'T' => 12,
             'U' => 18,
             'V' => 18,
+            'W' => 22,
         ];
 
         foreach ($widths as $col => $width) {
@@ -567,7 +630,7 @@ class OrderExcelService
             'F' => 'GOOD TYPE',
             'G' => 'CODE',
             'H' => 'PHOTO',
-            'I' => 'ITEM NO',
+            'I' => 'I.I.N',
             'J' => 'ENGLISH DESCRIPTION',
             'K' => 'CHINESE DESCRIPTION',
             'L' => 'HEIGHT',
@@ -587,6 +650,7 @@ class OrderExcelService
             'Z' => 'SIZE',
             'AA' => 'HS CODE',
             'AB' => 'NOTES',
+            'AC' => 'Item Number',
         ];
 
         $chineseRow = $row + 1;
@@ -647,7 +711,8 @@ class OrderExcelService
                 $sheet->setCellValue('E' . $row, $this->itemText($item, 'what_brand'));
                 $sheet->setCellValue('F' . $row, $this->copyNormalGoodsText($item));
                 $sheet->setCellValue('G' . $row, $this->itemText($item, 'code'));
-                $sheet->setCellValue('I' . $row, (string) ($item['item_no'] ?? $item['shipping_code'] ?? ''));
+                $sheet->setCellValueExplicit('I' . $row, (string) ($item['item_no'] ?? $item['shipping_code'] ?? ''), DataType::TYPE_STRING);
+                $sheet->setCellValueExplicit('AC' . $row, (string) ($item['item_number'] ?? ''), DataType::TYPE_STRING);
                 $sheet->setCellValue('J' . $row, trim((string) ($item['description_en'] ?? '')));
                 $sheet->setCellValue('K' . $row, trim((string) ($item['description_cn'] ?? '')));
                 $sheet->setCellValue('L' . $row, $this->dimensionValue($item, 'height', 'item_height'));
@@ -850,7 +915,7 @@ class OrderExcelService
             'C' => 'GOOD TYPE',
             'D' => 'CODE',
             'E' => 'PHOTO',
-            'F' => 'ITEM NO',
+            'F' => 'I.I.N',
             'G' => 'SUPPLIER',
             'H' => 'SUPPLIER PHONE',
             'I' => 'ACCOUNT NB',
@@ -867,6 +932,7 @@ class OrderExcelService
             'T' => 'TOTAL GW',
             'U' => 'express NO',
             'V' => 'size',
+            'W' => 'Item Number',
         ];
 
         $chineseRow = $row + 1;
@@ -1003,7 +1069,8 @@ class OrderExcelService
                 $sheet->setCellValue('B' . $row, $this->itemText($item, 'what_brand'));
                 $sheet->setCellValue('C' . $row, $this->copyNormalGoodsText($item));
                 $sheet->setCellValue('D' . $row, $this->itemText($item, 'code'));
-                $sheet->setCellValue('F' . $row, (string) ($item['item_no'] ?? $item['shipping_code'] ?? ''));
+                $sheet->setCellValueExplicit('F' . $row, (string) ($item['item_no'] ?? $item['shipping_code'] ?? ''), DataType::TYPE_STRING);
+                $sheet->setCellValueExplicit('W' . $row, (string) ($item['item_number'] ?? ''), DataType::TYPE_STRING);
                 $sheet->setCellValue('G' . $row, (string) ($item['supplier_name'] ?? $group['supplier_name'] ?? $order['supplier_name'] ?? ''));
                 $sheet->setCellValue('H' . $row, $supplierPhone);
                 $sheet->setCellValue('I' . $row, $accountNumber !== '' ? $accountNumber : $group['supplier_info']);
@@ -2642,6 +2709,8 @@ class OrderExcelService
                     $excelDate = $this->excelDateValue($value);
                     $sheet->setCellValue($cell, $excelDate ?? $value);
                     $sheet->getStyle($cell)->getNumberFormat()->setFormatCode(str_contains($value, ':') ? 'yyyy-mm-dd hh:mm:ss' : 'yyyy-mm-dd');
+                } elseif (in_array(strtolower(trim($header)), ['item number', 'i.i.n'], true)) {
+                    $sheet->setCellValueExplicit($cell, (string) ($value ?? ''), DataType::TYPE_STRING);
                 } else {
                     $sheet->setCellValue($cell, $value);
                 }

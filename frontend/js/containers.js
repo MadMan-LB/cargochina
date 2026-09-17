@@ -585,7 +585,7 @@ async function viewContainer(id, code) {
               <td>${escHtml(o.supplier_name || "—")}</td>
               <td>${escHtml(o.expected_ready_date || "—")}</td>
               <td>${sBadge}</td>
-              <td class="text-end">${o.items || 0}</td>
+              <td class="text-end">${o.items || 0}${o.item_identifiers?.length ? `<details class="small text-start mt-1"><summary>${escHtml(typeof t === "function" ? t("Item Identification") : "Item Identification")}</summary>${o.item_identifiers.map(item => `<div class="border-top py-1 text-break">${escHtml(itemIdentifierText(item))}<div class="text-muted">${escHtml(item.description_en || item.description_cn || "")}</div></div>`).join("")}</details>` : ""}</td>
               <td class="text-end">${fmtContainerQty(o.total_ctns || 0, 2)}</td>
               <td class="text-end">${fmtContainerQty(o.total_qty || 0, 2)}</td>
               <td class="text-end">${fmtContainerCbm(o.total_cbm || 0, 3)}</td>

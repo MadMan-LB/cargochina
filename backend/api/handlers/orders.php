@@ -315,6 +315,7 @@ function orderNormalizeOptionalDecimal($value, string $label): ?float
 
 function orderNormalizeItemMetadataValue(string $column, array $item)
 {
+    if ($column === 'item_number') return clmsPackingListItemNumber($item['item_number'] ?? null);
     if (in_array($column, ['length', 'width', 'height'], true)) {
         $legacy = 'item_' . $column;
         return orderNormalizeOptionalDecimal($item[$column] ?? $item[$legacy] ?? null, ucfirst($column));
@@ -451,6 +452,20 @@ function validateOrderItemSupplierIds(PDO $pdo, array $items): void
 
 function normalizeOrderItemsForPersistence(PDO $pdo, int $customerId, ?int $destinationCountryId, ?int $defaultSupplierId, array $items, ?string $currentStatus = 'Draft', ?int $excludeOrderId = null): array
 {
+    // Older clients may omit this additive field on update. Preserve it by item ID,
+    // never by the packing-list value (duplicates are deliberately valid).
+    if ($excludeOrderId && orderTableHasColumn($pdo, 'order_items', 'item_number')) {
+        $stmt = $pdo->prepare('SELECT id, item_number FROM order_items WHERE order_id=?');
+        $stmt->execute([$excludeOrderId]);
+        $existingNumbers = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+        foreach ($items as &$item) {
+            $existingId = (int) ($item['existing_item_id'] ?? $item['id'] ?? 0);
+            if (!array_key_exists('item_number', $item) && array_key_exists($existingId, $existingNumbers)) {
+                $item['item_number'] = $existingNumbers[$existingId];
+            }
+        }
+        unset($item);
+    }
     if (!hasPermission('item_numbers.override', ['SuperAdmin'])) {
         $preserved=[];
         if($excludeOrderId){$stmt=$pdo->prepare('SELECT item_no FROM order_items WHERE order_id=?');$stmt->execute([$excludeOrderId]);foreach($stmt->fetchAll(PDO::FETCH_COLUMN) as $value){$key=ItemNumberReservationService::normalize((string)$value);if($key!=='')$preserved[$key]=true;}}
@@ -568,6 +583,16 @@ function buildOrderSearchSql(PDO $pdo, string $query, array &$params, string $or
         if ($hasItemNo) {
             $itemClauses[] = orderUtf8LikeExpr("COALESCE(oi.item_no, '')") . " LIKE ?";
             $params[] = $like;
+        }
+        if (orderTableHasColumn($pdo, 'order_items', 'item_number')) {
+            $itemClauses[] = orderUtf8LikeExpr("COALESCE(oi.item_number, '')") . " LIKE ?";
+            $params[] = $like;
+        }
+        if (orderSupportsSharedCartons($pdo)) {
+            foreach (['item_no', 'item_number'] as $identifier) {
+                $itemClauses[] = clmsSharedCartonIdentifierSearch('oi.shared_carton_contents', $identifier);
+                $params[] = $like;
+            }
         }
         if ($hasItemCode) {
             $itemClauses[] = orderUtf8LikeExpr("COALESCE(oi.code, '')") . " LIKE ?";
@@ -1207,7 +1232,7 @@ function outputOrderCsv(array $order, array $items, ?string $filename = null): v
     fputcsv($out, [clmsT('Status'), clmsStatusLabel((string) ($order['status'] ?? ''))]);
     fputcsv($out, [clmsT('Currency'), (string) ($order['currency'] ?? '')]);
     fputcsv($out, ['']);
-    fputcsv($out, array_map('clmsT', ['What Brand', 'Good Type', 'Code', 'Photo Count', 'Item No', 'Supplier', 'Description', 'Total CTNS', 'QTY/CTN', 'TOTAL QTY', 'UNIT PRICE', 'TOTAL AMOUNT', 'CBM', 'TOTAL CBM', 'GWKG', 'TOTAL GW', 'Express Number', 'Size']));
+    fputcsv($out, array_map('clmsT', ['What Brand', 'Good Type', 'Code', 'Photo Count', 'I.I.N', 'Supplier', 'Description', 'Total CTNS', 'QTY/CTN', 'TOTAL QTY', 'UNIT PRICE', 'TOTAL AMOUNT', 'CBM', 'TOTAL CBM', 'GWKG', 'TOTAL GW', 'Express Number', 'Size', 'Item Number']));
 
     foreach ($items as $item) {
         $imagePaths = $item['image_paths'] ?? [];
@@ -1254,9 +1279,17 @@ function outputOrderCsv(array $order, array $items, ?string $filename = null): v
             $multiplier > 0 && $gwPer ? round($gwPer * $multiplier, 4) : '',
             (string) ($item['express_number'] ?? ''),
             (string) ($item['size'] ?? ''),
+            (string) ($item['item_number'] ?? ''),
         ]);
     }
 
+    foreach (OrderExcelService::sharedCartonIdentifierRows([['order'=>$order,'items'=>$items]]) as $reference) {
+        $row = array_fill(0, 19, '');
+        $row[4] = $reference['item_no'];
+        $row[6] = clmsT('Contained item') . ': ' . $reference['description'];
+        $row[18] = $reference['item_number'];
+        fputcsv($out, $row); // Identifier-only rows never duplicate totals.
+    }
     $fees = $order['receipt_fees'] ?? ($order['receipt']['fees'] ?? []);
     if (is_array($fees) && $fees) {
         fputcsv($out, ['']);
@@ -1690,7 +1723,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $rip->execute([$receipt['id']]);
                 $row['receipt']['photos'] = $rip->fetchAll(PDO::FETCH_ASSOC);
                 $receiptItemCols = "oi.description_cn, oi.description_en, oi.item_no, oi.shipping_code, oi.cartons, oi.qty_per_carton, oi.quantity, oi.unit_price as declared_unit_price, oi.total_amount as declared_total_amount";
-                foreach (['what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
+                foreach (['item_number', 'what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
                     if (orderTableHasColumn($pdo, 'order_items', $column)) {
                         $receiptItemCols .= ", oi.$column";
                     }
@@ -1788,7 +1821,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $hasCustomDesignRequired = orderTableHasColumn($pdo, 'order_items', 'custom_design_required');
                 $hasCustomDesignNote = orderTableHasColumn($pdo, 'order_items', 'custom_design_note');
                 $metadataColumns = [];
-                foreach (['what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
+                foreach (['item_number', 'what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
                     if (orderTableHasColumn($pdo, 'order_items', $column)) {
                         $metadataColumns[] = $column;
                     }
@@ -2034,7 +2067,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $hasCustomDesignRequired = orderTableHasColumn($pdo, 'order_items', 'custom_design_required');
                     $hasCustomDesignNote = orderTableHasColumn($pdo, 'order_items', 'custom_design_note');
                     $metadataColumns = [];
-                    foreach (['what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
+                    foreach (['item_number', 'what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
                         if (orderTableHasColumn($pdo, 'order_items', $column)) {
                             $metadataColumns[] = $column;
                         }

@@ -1,6 +1,28 @@
 (function () {
     const API = window.API_BASE || "/cargochina/api/v1";
     let draftOrderCustomerAc = null;
+    const internalNumbers = new WeakMap();
+
+    function initializePackingListNumber(owner, selector, initial) {
+        const input = owner.querySelector(selector);
+        if (!input) return;
+        // A loaded/imported row, including a historical blank, is never prefilled.
+        const loaded = Object.keys(initial).length > 0;
+        input.value = loaded ? (initial.item_number ?? "") : currentPackingListDefault();
+        owner.dataset.packingListNumberUntouched = loaded ? "0" : "1";
+        input.addEventListener("input", () => { owner.dataset.packingListNumberUntouched = "0"; });
+    }
+
+    function currentPackingListDefault() {
+        return String(draftOrderCustomerAc?.getSelected()?.default_shipping_code ?? "");
+    }
+
+    function prefillUntouchedPackingListNumbers() {
+        document.querySelectorAll(".draft-item-item-number, .draft-shared-content-item-number").forEach(input => {
+            const owner = input.closest(".draft-shared-carton-row, .draft-order-item-card");
+            if (owner?.dataset.packingListNumberUntouched === "1") input.value = currentPackingListDefault();
+        });
+    }
     let draftOrderDestinationCountryAc = null;
     let legacyMigrationCustomerAc = null;
     let builderModal = null;
@@ -682,6 +704,7 @@
     // Fill only untouched, empty fields. Existing generated, manual, imported,
     // or deliberately cleared values are never rewritten by this pass.
     function renumberDraftItems() {
+        prefillUntouchedPackingListNumbers();
         const prefix = getCustomerShipCode();
         setShippingHint(prefix);
         const targets = [];
@@ -744,6 +767,7 @@
             target.input.dataset.suggested = "1";
             remember(target.key, candidate);
         });
+        targets.forEach(target => { if (target.input) internalNumbers.set(target.input, target.input.value); });
     }
 
     function buildDraftSupplierSectionLabel(section, collapsed = false) {
@@ -2008,6 +2032,7 @@
         return Array.from(card.querySelectorAll("input:not([type=hidden]):not([type=file]), textarea, select")).some((field) => {
             if (field.type === "checkbox") return field.checked;
             if (field.classList.contains("draft-item-item-no") && card.dataset.itemNoSource === "generated") return false;
+            if (field.classList.contains("draft-item-item-number") && card.dataset.packingListNumberUntouched === "1") return false;
             if (field.classList.contains("draft-item-unit") && field.value === "pieces") return false;
             return field.value.trim() !== "";
         });
@@ -2482,8 +2507,10 @@
                   <input type="hidden" class="draft-shared-content-supplier-id">
                 </div>
                 <div class="col-12 col-sm-6 col-xl-2">
-                  <label class="form-label draft-item-label">Item No</label>
-                  <input type="text" maxlength="150" class="form-control form-control-sm draft-shared-content-item-no" placeholder="${escapeHtml(draftT("Auto"))}" autocomplete="off">
+                  <label class="form-label draft-item-label" for="draftContainedIin${contentId}">I.I.N</label>
+                  <input id="draftContainedIin${contentId}" type="text" maxlength="150" class="form-control form-control-sm draft-shared-content-item-no bg-light" placeholder="${escapeHtml(draftT("Auto"))}" readonly aria-readonly="true" tabindex="-1">
+                  <label class="form-label draft-item-label mt-2" for="draftContainedNumber${contentId}">Item Number</label>
+                  <input id="draftContainedNumber${contentId}" type="text" maxlength="150" class="form-control form-control-sm draft-shared-content-item-number" placeholder="Packing-list reference" autocomplete="off">
                 </div>
                 <div class="col-12 col-sm-6 col-xl-2">
                   <label class="form-label draft-item-label">Qty / Carton</label>
@@ -2780,6 +2807,7 @@
             initial.item_no || "";
         row.dataset.itemNoSource = initial.item_no_source || (initial.item_no_manual ? "manual" : "generated");
         row.dataset.manualItemNo = row.dataset.itemNoSource !== "generated" ? "1" : "";
+        initializePackingListNumber(row, ".draft-shared-content-item-number", initial);
         row.querySelector(".draft-shared-content-qty-per-carton").value =
             initial.quantity_per_carton ?? "";
         row.querySelector(".draft-shared-content-unit-price").value =
@@ -2866,14 +2894,6 @@
                 updateDraftItemTotals(card),
             );
         });
-        row.querySelector(".draft-shared-content-item-no")?.addEventListener(
-            "input",
-            () => {
-                row.dataset.itemNoSource = "manual";
-                row.dataset.manualItemNo = "1";
-                delete row.querySelector(".draft-shared-content-item-no")?.dataset.suggested;
-            },
-        );
         row.querySelector(".draft-shared-content-remove")?.addEventListener(
             "click",
             () => {
@@ -2989,10 +3009,15 @@
         if (identityLabel) {
             identityLabel.textContent = enabled
                 ? draftT("Carton Code")
-                : draftT("Item No");
+                : draftT("I.I.N");
         }
         const itemNoInput = card.querySelector(".draft-item-item-no");
         if (itemNoInput) {
+            // The existing shared-carton code is operational input, not I.I.N.
+            itemNoInput.readOnly = !enabled;
+            itemNoInput.setAttribute("aria-readonly", String(!enabled));
+            itemNoInput.classList.toggle("bg-light", !enabled);
+            itemNoInput.tabIndex = enabled ? 0 : -1;
             itemNoInput.placeholder = enabled
                 ? draftT("Optional carton code")
                 : draftT("Auto");
@@ -3104,9 +3129,11 @@
                           <input class="form-check-input draft-item-shared-carton-toggle" type="checkbox" id="draftItemSharedCarton${idx}">
                           <label class="form-check-label small fw-semibold" for="draftItemSharedCarton${idx}">${escapeHtml(draftT("This carton contains multiple items"))}</label>
                         </div>
-                        <label class="form-label form-label-sm draft-item-identity-label">Item No</label>
-                        <input type="text" maxlength="150" class="form-control form-control-sm draft-item-item-no" placeholder="Auto" autocomplete="off">
-                        <div class="form-text">${escapeHtml(draftT("Suggested automatically; you can type, paste, replace, or clear it."))}</div>
+                        <label class="form-label form-label-sm draft-item-identity-label" for="draftItemIin${idx}">I.I.N</label>
+                        <input id="draftItemIin${idx}" type="text" maxlength="150" class="form-control form-control-sm draft-item-item-no bg-light" placeholder="Auto" readonly aria-readonly="true" tabindex="-1">
+                        <div class="form-text">${escapeHtml(draftT("Internal identifier · assigned automatically"))}</div>
+                        <label class="form-label form-label-sm mt-2" for="draftItemNumber${idx}">Item Number</label>
+                        <input id="draftItemNumber${idx}" type="text" maxlength="150" class="form-control form-control-sm draft-item-item-number" placeholder="Packing-list reference" autocomplete="off">
                         <input type="hidden" class="draft-item-shipping-code">
                         <div class="draft-item-identity-hs-wrap">
                           <label class="form-label form-label-sm mt-2">HS Code (Optional)</label>
@@ -3789,6 +3816,7 @@
             : initial.item_no || "";
         card.dataset.itemNoSource = initial.item_no_source || (initial.item_no_manual ? "manual" : "generated");
         card.dataset.manualItemNo = card.dataset.itemNoSource !== "generated" ? "1" : "";
+        initializePackingListNumber(card, ".draft-item-item-number", initial);
         card.dataset.dimensionsScope = (
             initial.dimensions_scope || "carton"
         ).toLowerCase();
@@ -3935,17 +3963,6 @@
                 updateDraftItemTotals(card);
             });
         });
-        card.querySelector(".draft-item-item-no")?.addEventListener(
-            "input",
-            () => {
-                if (card.dataset.sharedCartonEnabled === "1") {
-                    return;
-                }
-                card.dataset.itemNoSource = "manual";
-                card.dataset.manualItemNo = "1";
-                delete card.querySelector(".draft-item-item-no")?.dataset.suggested;
-            },
-        );
         syncDraftSharedCartonMode(card, isSharedCarton);
         if (isSharedCarton) {
             getDraftSharedCartonRows(card).forEach((row) => row.remove());
@@ -3961,7 +3978,7 @@
         renumberDraftItems();
         connectDraftLabels(card);
         card.addEventListener("input", refreshDraftPresentation);
-        if (options.reveal) revealDraftEntry(card, card.querySelector(".draft-item-item-no"));
+        if (options.reveal) revealDraftEntry(card, card.querySelector(".draft-item-item-number"));
     }
 
     function addDraftQuickSupplierPaymentLink(rowData = {}) {
@@ -4307,7 +4324,8 @@
             product_id:
                 row.querySelector(".draft-shared-content-product-id")?.value ||
                 null,
-            item_no: row.querySelector(".draft-shared-content-item-no")?.value || null,
+            item_no: internalNumbers.get(row.querySelector(".draft-shared-content-item-no")) || null,
+            item_number: row.querySelector(".draft-shared-content-item-number")?.value ?? null,
             item_no_manual: row.dataset.manualItemNo ? 1 : 0,
             item_no_source: row.dataset.itemNoSource || "generated",
             shipping_code:
@@ -4626,6 +4644,11 @@
             }
 
             cards.forEach((card) => {
+                card.querySelectorAll(".draft-item-item-number, .draft-shared-content-item-number").forEach(input => {
+                    if (Array.from(input.value).length > 150 || /[\x00-\x1F\x7F]/.test(input.value)) {
+                        addInvalid(input, draftT("Item Number must be 150 characters or fewer and contain no line breaks."));
+                    }
+                });
                 const shared = card.dataset.sharedCartonEnabled === "1";
                 const cartonsInput = card.querySelector(".draft-item-cartons");
                 const piecesInput = card.querySelector(
@@ -4940,7 +4963,8 @@
                         existing_item_id: card.dataset.existingItemId || null,
                         item_no: sharedCartonEnabled
                             ? null
-                            : card.querySelector(".draft-item-item-no")?.value || null,
+                            : internalNumbers.get(card.querySelector(".draft-item-item-no")) || null,
+                        item_number: card.querySelector(".draft-item-item-number")?.value ?? null,
                         item_no_manual: sharedCartonEnabled
                             ? 0
                             : card.dataset.manualItemNo

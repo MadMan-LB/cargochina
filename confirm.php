@@ -311,7 +311,7 @@ $clientTranslations = clmsGetClientTranslationPayload();
         const meta = itemMetaText(it);
         return `
     <tr>
-      <td>${esc(it.item_no || '—')}</td>
+      <td>I.I.N: ${esc(it.item_no || '—')}${it.item_number != null && it.item_number !== '' ? `<div>Item Number: ${esc(it.item_number)}</div>` : ''}</td>
       <td>${esc(descText(it))}${meta ? `<div class="text-muted" style="font-size:.78rem;">${esc(meta)}</div>` : ''}</td>
       <td>${esc(it.shipping_code || '—')}</td>
       <td>${esc(it.cartons || '—')}</td>
@@ -362,7 +362,7 @@ $clientTranslations = clmsGetClientTranslationPayload();
         </h6>
         <div style="overflow-x:auto;">
           <table class="items-table">
-            <thead><tr><th>Item No</th><th>Description</th><th>Shipping Code</th><th>Cartons</th><th>Qty</th><th>Decl. CBM</th><th>Decl. Weight</th></tr></thead>
+            <thead><tr><th>Item Identification</th><th>Description</th><th>Shipping Code</th><th>Cartons</th><th>Qty</th><th>Decl. CBM</th><th>Decl. Weight</th></tr></thead>
             <tbody>${itemsHtml}</tbody>
           </table>
         </div>` : ''}

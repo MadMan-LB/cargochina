@@ -20,7 +20,7 @@ async function loadPushLog() {
           <td>${r.attempt_count ?? 0}</td>
           <td><small class="text-danger">${escapeHtml((r.last_error || "").substring(0, 80))}${(r.last_error || "").length > 80 ? "…" : ""}</small></td>
           <td>${r.updated_at || r.created_at || "-"}</td>
-          <td>${r.status === "failed" ? `<button class="btn btn-sm btn-warning" onclick="retryPush(${r.entity_id})">Retry</button>` : ""} ${r.last_error ? `<button class="btn btn-sm btn-outline-secondary" onclick="showError(this)" data-error="${escapeHtml((r.last_error || "").replace(/"/g, "&quot;"))}">View</button>` : ""}</td>
+          <td>${["failed", "disabled", "dry_run"].includes(r.status) ? `<button class="btn btn-sm btn-warning" onclick="retryPush(${r.entity_id})">Retry</button>` : ""} ${r.last_error ? `<button class="btn btn-sm btn-outline-secondary" onclick="showError(this)" data-error="${escapeHtml((r.last_error || "").replace(/"/g, "&quot;"))}">View</button>` : ""}</td>
         </tr>`,
                 )
                 .join("") ||
@@ -41,10 +41,11 @@ function showError(btn) {
 
 async function retryPush(draftId) {
     try {
-        await api("POST", "/shipment-drafts/" + draftId + "/push", {});
-        showToast("Push retried");
+        const res = await api("POST", "/shipment-drafts/" + draftId + "/push", {});
+        showToast(res.data?.message || "Tracking push was not confirmed", res.data?.success === true ? "success" : "warning");
         loadPushLog();
     } catch (e) {
         showToast(e.message, "danger");
+        loadPushLog();
     }
 }

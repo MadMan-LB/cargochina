@@ -340,7 +340,7 @@ async function loadShipmentDrafts() {
                                 ? "Dry-run"
                                 : "Not pushed";
                     const retryBtn =
-                        sd.status === "finalized" && ps === "failed"
+                        sd.status === "finalized" && ps !== "success" && ps !== "pending"
                             ? `<button type="button" class="btn btn-sm btn-warning ms-1" onclick="retryPush(${sd.id})">Retry Push</button>`
                             : "";
                     const deleteBtn =
@@ -678,10 +678,11 @@ async function retryPush(draftId) {
             "/shipment-drafts/" + draftId + "/push",
             {},
         );
-        showToast(res.data?.message || "Push completed");
+        showToast(res.data?.message || "Tracking push was not confirmed", res.data?.success === true ? "success" : "warning");
         loadShipmentDrafts();
     } catch (e) {
         showToast(e.message, "danger");
+        loadShipmentDrafts();
     }
 }
 
@@ -694,12 +695,16 @@ async function finalizeDraft() {
     const btn = document.getElementById("finalizeConfirmBtn");
     try {
         setLoading(btn, true);
-        await api(
+        const res = await api(
             "POST",
             "/shipment-drafts/" + currentDraftId + "/finalize",
             {},
         );
-        showToast("Finalized and pushed to tracking");
+        const push = res.data?.tracking_result;
+        showToast(push?.success === true
+            ? "Shipment finalized. " + (push.message || "Pushed to tracking")
+            : "Shipment finalized. " + (push?.message || "Not pushed to tracking"),
+            push?.success === true ? "success" : "warning");
         bootstrap.Modal.getInstance(
             document.getElementById("finalizeConfirmModal"),
         ).hide();

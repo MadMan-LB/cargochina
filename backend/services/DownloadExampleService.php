@@ -36,7 +36,7 @@ class DownloadExampleService
 
         $headers = [
             'Photo',
-            'Item No',
+            'I.I.N',
             'English Item Name',
             'Chinese Item Name',
             'SKU / Item Code',
@@ -61,6 +61,7 @@ class DownloadExampleService
             'HS Code',
             'Notes / Description',
             'Custom Design',
+            'Item Number',
         ];
         $lastColumn = Coordinate::stringFromColumnIndex(count($headers));
 
@@ -113,6 +114,7 @@ class DownloadExampleService
         $sheet->getStyle("B" . ($headerRow + 1) . ":H" . ($headerRow + 50))->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
         $sheet->getStyle("L" . ($headerRow + 1) . ":L" . ($headerRow + 50))->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
         $sheet->getStyle("X" . ($headerRow + 1) . ":Z" . ($headerRow + 50))->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
+        $sheet->getStyle($lastColumn . ($headerRow + 1) . ":" . $lastColumn . ($headerRow + 50))->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
         $sheet->freezePane('A' . ($headerRow + 1));
         $sheet->setAutoFilter("A{$headerRow}:{$lastColumn}{$headerRow}");
 

@@ -41,24 +41,34 @@ class TrackingPushService
         if ($log['status'] === 'success') {
             return [
                 'success' => true,
+                'status' => 'success',
                 'message' => 'Already pushed (idempotent skip)',
                 'external_id' => $log['external_id'],
                 'log_id' => $log['id'],
             ];
         }
 
-        if ($dryRun || !$enabled || empty(trim($this->config['tracking_api_base_url'] ?? ''))) {
-            $this->updateLog($log['id'], 'dry_run', null, null, null, 'Dry-run or disabled; payload logged only');
-            $this->appendFileLog($shipmentDraftId, $payload, 'dry_run');
+        // Refresh the logged request on retry; never rewrite a successful push.
+        $this->pdo->prepare("UPDATE tracking_push_log SET request_payload=? WHERE id=?")
+            ->execute([json_encode($payload), $log['id']]);
+        if (!$enabled || $dryRun) {
+            $status = !$enabled ? 'disabled' : 'dry_run';
+            $message = !$enabled ? 'Tracking push disabled; no request sent. Enable tracking push in Configuration.' : 'Dry-run: payload logged, no remote call';
+            $this->updateLog($log['id'], $status, null, null, null, $message);
+            $this->appendFileLog($shipmentDraftId, $payload, $status, 0, $message);
             return [
-                'success' => true,
-                'message' => $dryRun ? 'Dry-run: payload logged, no remote call' : 'Push disabled',
+                'success' => false,
+                'status' => $status,
+                'message' => $message,
                 'log_id' => $log['id'],
             ];
         }
-
-        $attempt = (int) $log['attempt_count'] + 1;
-        $this->updateLogAttempt($log['id'], $attempt);
+        if (empty(trim($this->config['tracking_api_base_url'] ?? ''))) {
+            $message = 'Tracking API endpoint is not configured; no request sent.';
+            $this->updateLog($log['id'], 'failed', null, null, null, $message);
+            $this->appendFileLog($shipmentDraftId, $payload, 'failed', 0, $message);
+            throw new RuntimeException($message);
+        }
 
         $timeout = (int) ($this->config['tracking_api_timeout_sec'] ?? 15);
         $retryCount = (int) ($this->config['tracking_api_retry_count'] ?? 3);
@@ -73,6 +83,7 @@ class TrackingPushService
         $responseBody = null;
 
         for ($r = 0; $r <= $retryCount; $r++) {
+            $this->updateLogAttempt($log['id'], (int) $log['attempt_count'] + $r + 1);
             try {
                 $ch = curl_init($url);
                 curl_setopt_array($ch, [
@@ -100,11 +111,17 @@ class TrackingPushService
 
                 if ($code >= 200 && $code < 300) {
                     $decoded = json_decode($body, true);
+                    // Some APIs return HTTP 200 for an application-level rejection.
+                    if (is_array($decoded) && (($decoded['success'] ?? null) === false || ($decoded['accepted'] ?? null) === false || !empty($decoded['error']))) {
+                        $lastError = 'Tracking API rejected request: ' . substr((string) ($decoded['message'] ?? (is_string($decoded['error'] ?? null) ? $decoded['error'] : 'not accepted')), 0, 200);
+                        break;
+                    }
                     $externalId = $decoded['external_shipment_id'] ?? $decoded['id'] ?? null;
                     $this->updateLog($log['id'], 'success', $code, $responseBody, $externalId, null);
                     $this->appendFileLog($shipmentDraftId, $payload, 'success', $code, $body);
                     return [
                         'success' => true,
+                        'status' => 'success',
                         'message' => 'Pushed to tracking',
                         'external_id' => $externalId,
                         'response_code' => $code,
@@ -113,8 +130,8 @@ class TrackingPushService
                 }
 
                 if ($code >= 400 && $code < 500 && $code !== 429) {
-                    $this->updateLog($log['id'], 'failed', $code, $responseBody, null, 'Client error ' . $code);
-                    throw new RuntimeException('Tracking API error ' . $code . ': ' . substr($responseBody, 0, 200));
+                    $lastError = 'Tracking API error ' . $code . ': ' . substr($responseBody, 0, 200);
+                    break;
                 }
 
                 $lastError = 'HTTP ' . $code;
@@ -134,7 +151,8 @@ class TrackingPushService
         }
 
         $this->updateLog($log['id'], 'failed', $responseCode, $responseBody, null, $lastError ?? 'Max retries exceeded');
-        throw new RuntimeException('Push failed after retries: ' . ($lastError ?? 'unknown'));
+        $this->appendFileLog($shipmentDraftId, $payload, 'failed', $responseCode ?? 0, $lastError ?? 'Max retries exceeded');
+        throw new RuntimeException('Push failed: ' . ($lastError ?? 'unknown'));
     }
 
     private function buildPayload(int $draftId, array $sd, array $orderIds): array
@@ -212,7 +230,7 @@ class TrackingPushService
             ->execute([$attemptCount, $logId]);
     }
 
-    private function appendFileLog(int $draftId, array $payload, string $result, int $code = 0, $extra = ''): void
+    protected function appendFileLog(int $draftId, array $payload, string $result, int $code = 0, $extra = ''): void
     {
         $logDir = dirname(__DIR__, 2) . '/logs';
         if (!is_dir($logDir)) {

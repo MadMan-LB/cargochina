@@ -170,7 +170,7 @@ async function loadExcelImageHealth() {
                     .join(", ");
                 return `<tr>
                     <td>${escapeHtml(String(item.order_item_id || "-"))}</td>
-                    <td>${escapeHtml(item.item_no || "-")}</td>
+                    <td>${escapeHtml(itemIdentifierText(item) || "-")}</td>
                     <td>${escapeHtml(String(item.product_id || "-"))}</td>
                     <td>${diagnosticBadge(item.status === "ready", item.status === "ready" ? "Ready" : "Unavailable")}</td>
                     <td>${escapeHtml(String(item.provided_candidate_count || 0))}</td>
@@ -215,7 +215,7 @@ async function loadExcelImageHealth() {
             </div>
             <div class="mb-2">${environmentMarkup}</div>
             <div class="table-responsive mb-2"><table class="table table-sm align-middle mb-0">
-                <thead><tr><th>Item ID</th><th>Item No</th><th>Product ID</th><th>Status</th><th>Payload</th><th>Canonical</th><th>Source</th><th>Embeddable</th><th>Failures</th><th>Runtime fallback</th></tr></thead>
+                <thead><tr><th>Item ID</th><th>Item Identification</th><th>Product ID</th><th>Status</th><th>Payload</th><th>Canonical</th><th>Source</th><th>Embeddable</th><th>Failures</th><th>Runtime fallback</th></tr></thead>
                 <tbody>${itemRows || '<tr><td colspan="10" class="text-muted">No order items.</td></tr>'}</tbody>
             </table></div>
             <div class="text-muted text-break"><strong>Source fingerprints:</strong> ${escapeHtml(fingerprints || "-")}</div>

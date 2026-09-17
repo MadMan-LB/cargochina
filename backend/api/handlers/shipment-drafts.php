@@ -257,16 +257,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $pdo->prepare("UPDATE shipment_drafts SET status='finalized' WHERE id=?")->execute([$id]);
                 $ph = implode(',', array_fill(0, count($orderIds), '?'));
                 $pdo->prepare("UPDATE orders SET status='FinalizedAndPushedToTracking' WHERE id IN ($ph)")->execute($orderIds);
-                $config = require dirname(__DIR__, 2) . '/config/config.php';
-                $pushEnabled = (int) ($config['tracking_push_enabled'] ?? 0);
                 $trackingResult = null;
-                if ($pushEnabled) {
-                    try {
-                        $svc = new TrackingPushService($pdo);
-                        $trackingResult = $svc->push($id);
-                    } catch (Throwable $e) {
-                        $trackingResult = ['success' => false, 'message' => $e->getMessage(), 'push_failed' => true];
-                    }
+                try {
+                    $svc = new TrackingPushService($pdo);
+                    $trackingResult = $svc->push((int) $id);
+                } catch (Throwable $e) {
+                    $trackingResult = ['success' => false, 'status' => 'failed', 'message' => $e->getMessage(), 'push_failed' => true];
                 }
                 (new NotificationService($pdo))->notifyShipmentFinalized($id, count($orderIds));
                 $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('shipment_draft',?,?,?,?)")
@@ -281,7 +277,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if (!$sd) jsonError('Shipment draft not found', 404);
                 if ($sd['status'] !== 'finalized') jsonError('Draft must be finalized before push/retry', 400);
                 $svc = new TrackingPushService($pdo);
-                $result = $svc->push($id);
+                try {
+                    $result = $svc->push((int) $id);
+                } catch (Throwable $e) {
+                    $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('shipment_draft',?,?,?,?)")
+                        ->execute([$id, 'tracking_push', json_encode(['success' => false, 'message' => $e->getMessage()]), $userId]);
+                    jsonError('Tracking push failed: ' . $e->getMessage(), 502);
+                }
+                $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('shipment_draft',?,?,?,?)")
+                    ->execute([$id, 'tracking_push', json_encode($result), $userId]);
                 jsonResponse(['data' => $result]);
                 break;
             }

@@ -135,10 +135,12 @@ function getOrderStatusLabel(status) {
 
 function getOrderSearchText(order) {
     const items = (order.items || [])
+        .flatMap((item) => [item, ...(item.shared_carton_contents || [])])
         .map((item) => {
             return [
                 item.shipping_code,
                 item.item_no,
+                item.item_number,
                 item.description_cn,
                 item.description_en,
             ]

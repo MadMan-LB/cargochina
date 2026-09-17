@@ -1,6 +1,7 @@
 <?php
 
 require_once dirname(__DIR__, 2) . '/vendor/autoload.php';
+require_once __DIR__ . '/PackingListItemNumber.php';
 
 class ReceivingExcelImportService
 {
@@ -17,7 +18,8 @@ class ReceivingExcelImportService
         'item_code' => ['sku', 'itemcode', 'skuitemcode', 'code', 'productcode', 'productsku'],
         'express_number' => ['expressnumber', 'expressno', 'express', 'trackingnumber', 'couriernumber', 'waybill', 'waybillnumber'],
         'shipping_code' => ['shippingcode', 'shipping', 'shipcode', 'trackingcode', 'customerreference'],
-        'item_no' => ['itemno', 'itemnumber', 'lineno', 'linenumber', 'no'],
+        'item_no' => ['iin', 'internalitemnumber', 'itemno', 'lineno', 'linenumber', 'no'],
+        'item_number' => ['itemnumber', 'packinglistitemnumber', 'packinglistreference'],
         'description' => ['description', 'productnames', 'productname', 'product', 'names', 'notesdescription'],
         'description_en' => ['englishitemname', 'englishname', 'descriptionen', 'englishdescription'],
         'description_cn' => ['chineseitemname', 'chinesename', 'descriptioncn', 'chinesedescription'],
@@ -442,6 +444,7 @@ class ReceivingExcelImportService
                 'expected_ready_date' => $this->normalizeDateValue((string) ($metadata['expected_ready_date'] ?? '')) ?: date('Y-m-d'),
                 'currency' => strtoupper(trim((string) ($metadata['currency'] ?? 'RMB'))) ?: 'RMB',
                 'item_no' => $itemNo,
+                'item_number' => clmsPackingListItemNumber($raw['item_number'] ?? null),
                 'shipping_code' => $this->cleanDirectText($raw['shipping_code'] ?? '', 150),
                 'code' => $itemCode,
                 'express_number' => $this->cleanDirectText($raw['express_number'] ?? '', 150),
@@ -1015,7 +1018,7 @@ class ReceivingExcelImportService
     private function insertDirectIntakeItems(PDO $pdo, int $orderId, array $items, ?int $defaultSupplierId): array
     {
         $metadataColumns = [];
-        foreach (['what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
+        foreach (['item_number', 'what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
             if ($this->tableHasColumn($pdo, 'order_items', $column)) {
                 $metadataColumns[] = $column;
             }
@@ -1064,6 +1067,9 @@ class ReceivingExcelImportService
             ];
             foreach ($metadataColumns as $column) {
                 switch ($column) {
+                    case 'item_number':
+                        $params[] = $item['item_number'] ?? null;
+                        break;
                     case 'what_brand':
                     case 'brand':
                         $params[] = $item['brand'] ?? null;
@@ -1350,6 +1356,7 @@ class ReceivingExcelImportService
             'express_number',
             'shipping_code',
             'item_no',
+            'item_number',
             'description',
             'description_en',
             'description_cn',
@@ -1438,7 +1445,8 @@ class ReceivingExcelImportService
             'item_code' => 'SKU / Item Code',
             'express_number' => 'Express Number',
             'shipping_code' => 'Shipping Code',
-            'item_no' => 'Item No',
+            'item_no' => 'I.I.N',
+            'item_number' => 'Item Number',
             'description_en' => 'English Item Name',
             'description_cn' => 'Chinese Item Name',
             'copy_normal_goods' => 'Good Type',
@@ -1468,7 +1476,8 @@ class ReceivingExcelImportService
         $normalized = ['_row' => $rowNumber];
         foreach ($this->aliases as $field => $_) {
             $column = $headers[$field] ?? null;
-            $normalized[$field] = $column !== null ? trim((string) ($row[$column] ?? '')) : '';
+            $value = $column !== null ? (string) ($row[$column] ?? '') : '';
+            $normalized[$field] = $field === 'item_number' ? $value : trim($value);
         }
         return $normalized;
     }
@@ -1686,7 +1695,7 @@ class ReceivingExcelImportService
                 $extraCols .= ", oi.$column";
             }
         }
-        $stmt = $pdo->prepare("SELECT oi.order_id, oi.id, oi.product_id, oi.item_no, oi.shipping_code, oi.cartons, oi.qty_per_carton, oi.quantity, oi.unit_price, oi.total_amount, oi.declared_cbm, oi.declared_weight, oi.description_cn, oi.description_en$extraCols FROM order_items oi WHERE oi.order_id IN (" . implode(',', array_fill(0, count($ids), '?')) . ")");
+        $stmt = $pdo->prepare("SELECT oi.order_id, oi.id, oi.product_id, oi.item_no, oi.item_number, oi.shipping_code, oi.cartons, oi.qty_per_carton, oi.quantity, oi.unit_price, oi.total_amount, oi.declared_cbm, oi.declared_weight, oi.description_cn, oi.description_en$extraCols FROM order_items oi WHERE oi.order_id IN (" . implode(',', array_fill(0, count($ids), '?')) . ")");
         $stmt->execute($ids);
         $itemsByOrder = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
@@ -1743,9 +1752,10 @@ class ReceivingExcelImportService
         $expressNumber = trim((string) ($raw['express_number'] ?? ''));
         $shippingCode = trim((string) ($raw['shipping_code'] ?? ''));
         $itemNo = trim((string) ($raw['item_no'] ?? ''));
+        $packingListNo = (string) ($raw['item_number'] ?? '');
         $description = $this->rowDescriptionText($raw);
 
-        if ($orderItemIdRaw === '' && $productIdRaw === '' && $itemCode === '' && $expressNumber === '' && $shippingCode === '' && $itemNo === '' && $description === '') {
+        if ($orderItemIdRaw === '' && $productIdRaw === '' && $itemCode === '' && $expressNumber === '' && $shippingCode === '' && $itemNo === '' && $packingListNo === '' && $description === '') {
             if (count($items) === 1) {
                 return $items[0];
             }
@@ -1821,6 +1831,14 @@ class ReceivingExcelImportService
             return null;
         }
 
+        if ($packingListNo !== '' && $itemNo === '') {
+            $matches = array_values(array_filter($items, static fn($item) => (string) ($item['item_number'] ?? '') === $packingListNo));
+            if (count($matches) === 1) return $matches[0];
+            $errors[] = count($matches) > 1
+                ? 'Item Number "' . $packingListNo . '" matches multiple items. Use I.I.N or Order Item ID.'
+                : 'Item Number "' . $packingListNo . '" was not found on this order.';
+            return null;
+        }
         if ($itemNo !== '') {
             $matches = array_values(array_filter($items, static fn($item) => strcasecmp(trim((string) ($item['item_no'] ?? '')), $itemNo) === 0));
             if (count($matches) === 1) {

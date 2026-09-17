@@ -52,6 +52,7 @@ function receiptItemMetaText(item) {
               : copyNormalRaw;
     return [
         item?.what_brand ? `${receiptT("What Brand")}: ${item.what_brand}` : "",
+        itemIdentifierText(item),
         copyNormalLabel
             ? `${receiptT("Good Type")}: ${copyNormalLabel}`
             : "",

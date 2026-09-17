@@ -126,7 +126,7 @@ function printDraftEntryRows(array $sections): string
                   <td><?= htmlspecialchars($item['what_brand'] ?? '—') ?></td>
                   <td><?= htmlspecialchars(printDraftCopyNormalGoodsDisplay($item['copy_normal_goods'] ?? null)) ?></td>
                   <td><?= htmlspecialchars($item['code'] ?? '—') ?></td>
-                  <td><?= htmlspecialchars($item['shared_carton_code'] ?? '—') ?></td>
+                  <td><?= htmlspecialchars($item['shared_carton_code'] ?? '—') ?><?php if (($item['item_number'] ?? '') !== ''): ?><div class="small">Item Number: <?= htmlspecialchars($item['item_number']) ?></div><?php endif; ?></td>
                   <td><strong><?= htmlspecialchars(clmsT('Shared carton / multiple items')) ?></strong></td>
                   <td>—</td>
                   <td><?= htmlspecialchars(format_display_number($item['pieces_per_carton'] ?? null, 4) ?: '—') ?></td>
@@ -159,7 +159,7 @@ function printDraftEntryRows(array $sections): string
                       <td><?= htmlspecialchars($content['what_brand'] ?: '—') ?></td>
                       <td><?= htmlspecialchars(printDraftCopyNormalGoodsDisplay($content['copy_normal_goods'] ?? null)) ?></td>
                       <td><?= htmlspecialchars($content['code'] ?: '—') ?></td>
-                      <td><?= htmlspecialchars((string) ($content['item_no'] ?? '')) ?></td>
+                      <td>I.I.N: <?= htmlspecialchars((string) ($content['item_no'] ?? '')) ?><?php if (($content['item_number'] ?? '') !== ''): ?><div class="small">Item Number: <?= htmlspecialchars($content['item_number']) ?></div><?php endif; ?></td>
                       <td><?= htmlspecialchars($descLabel ?: '—') ?></td>
                       <td><?= htmlspecialchars($content['hs_code'] ?? '—') ?></td>
                       <td><?= htmlspecialchars(format_display_number($content['quantity_per_carton'] ?? null, 4) ?: '—') ?></td>
@@ -197,7 +197,7 @@ function printDraftEntryRows(array $sections): string
                   <td><?= htmlspecialchars($item['what_brand'] ?? '—') ?></td>
                   <td><?= htmlspecialchars(printDraftCopyNormalGoodsDisplay($item['copy_normal_goods'] ?? null)) ?></td>
                   <td><?= htmlspecialchars($item['code'] ?? '—') ?></td>
-                  <td><?= htmlspecialchars($item['item_no'] ?? '—') ?></td>
+                  <td>I.I.N: <?= htmlspecialchars($item['item_no'] ?? '—') ?><?php if (($item['item_number'] ?? '') !== ''): ?><div class="small">Item Number: <?= htmlspecialchars($item['item_number']) ?></div><?php endif; ?></td>
                   <td><?= htmlspecialchars($desc ?: '—') ?></td>
                   <td><?= htmlspecialchars($item['hs_code'] ?? '—') ?></td>
                   <td><?= htmlspecialchars(format_display_number($item['pieces_per_carton'] ?? null, 4) ?: '—') ?></td>
@@ -305,6 +305,7 @@ if ($orderId > 0) {
             : (float) (($row['quantity'] ?? 0) ?: 0);
         $sections[$key]['items'][] = [
             'item_no' => $row['item_no'] ?: null,
+            'item_number' => $row['item_number'] ?? null,
             'what_brand' => $row['what_brand'] ?? '',
             'copy_normal_goods' => $row['copy_normal_goods'] ?? '',
             'code' => $row['code'] ?? '',
@@ -443,7 +444,7 @@ if ($orderId > 0) {
           <th><?= htmlspecialchars(clmsT('What Brand')) ?></th>
           <th><?= htmlspecialchars(clmsT('Good Type')) ?></th>
           <th><?= htmlspecialchars(clmsT('Code')) ?></th>
-          <th><?= htmlspecialchars(clmsT('Item No')) ?></th>
+          <th><?= htmlspecialchars(clmsT('Item Identification')) ?></th>
           <th><?= htmlspecialchars(clmsT('Product / Names')) ?></th>
           <th><?= htmlspecialchars(clmsT('HS Code')) ?></th>
           <th><?= htmlspecialchars(clmsT('Pieces/Carton')) ?></th>

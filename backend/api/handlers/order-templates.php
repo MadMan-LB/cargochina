@@ -61,7 +61,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $insCols = "template_id, sort_order, item_no, shipping_code, product_id, description_cn, description_en, cartons, qty_per_carton, quantity, unit, declared_cbm, declared_weight, item_length, item_width, item_height, unit_price, total_amount, notes";
             $insVals = "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?";
             $metadataColumns = [];
-            foreach (['what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
+            foreach (['item_number', 'what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
                 $colChk = @$pdo->query("SHOW COLUMNS FROM order_template_items LIKE " . $pdo->quote($column));
                 if ($colChk && $colChk->rowCount() > 0) {
                     $metadataColumns[] = $column;
@@ -106,7 +106,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $it['notes'] ?? null,
                 ];
                 foreach ($metadataColumns as $column) {
-                    if (in_array($column, ['length', 'width', 'height'], true)) {
+                    if ($column === 'item_number') {
+                        $params[] = clmsPackingListItemNumber($it['item_number'] ?? null);
+                    } elseif (in_array($column, ['length', 'width', 'height'], true)) {
                         $params[] = isset($it[$column]) ? (float) $it[$column] : (isset($it['item_' . $column]) ? (float) $it['item_' . $column] : null);
                     } elseif ($column === 'brand') {
                         $params[] = $it['brand'] ?? $it['what_brand'] ?? null;

@@ -159,7 +159,7 @@
                 <td>${escapeHtml(r.customer_name || "")}</td>
                 <td>${escapeHtml(r.supplier_name || "—")}</td>
                 <td><span class="badge bg-secondary">${escapeHtml(stockStatusDisplay(r.warehouse_state || r.status || ""))}</span></td>
-                <td>${escapeHtml(r.description_en || r.description_cn || r.product_desc_en || r.product_desc_cn || "—")}</td>
+                <td>${escapeHtml(r.description_en || r.description_cn || r.product_desc_en || r.product_desc_cn || "—")}<div class="small text-muted">${escapeHtml(itemIdentifierText(r))}</div></td>
                 <td>${r.item_actual_quantity || r.quantity || "—"}</td>
                 <td>${r.declared_cbm != null ? formatStockCbm(r.declared_cbm, 2) : "—"}</td>
                 <td>${r.item_actual_cbm != null ? formatStockCbm(r.item_actual_cbm, 2) : r.order_actual_cbm != null ? formatStockCbm(r.order_actual_cbm, 2) : "—"}</td>
@@ -211,7 +211,7 @@
                     <tr>
                         <td>${escapeHtml(item.description_en || item.description_cn || "—")}</td>
                         <td>${escapeHtml(item.shipping_code || "—")}</td>
-                        <td>${escapeHtml(item.item_no || "—")}</td>
+                        <td>${escapeHtml(itemIdentifierText(item) || "—")}</td>
                         <td>${escapeHtml(item.supplier_name || order.supplier_name || "—")}</td>
                         <td>${item.quantity != null ? escapeHtml(String(item.quantity)) : "—"}</td>
                         <td>${item.declared_cbm != null ? formatStockCbm(item.declared_cbm || 0, 3) : "—"}</td>
@@ -243,7 +243,7 @@
                                     <tr>
                                         <th>${escapeHtml(stockT("Item"))}</th>
                                         <th>${escapeHtml(stockT("Shipping"))}</th>
-                                        <th>${escapeHtml(stockT("Item No"))}</th>
+                                        <th>${escapeHtml(stockT("Item Identification"))}</th>
                                         <th>${escapeHtml(stockT("Supplier"))}</th>
                                         <th>${escapeHtml(stockT("Qty"))}</th>
                                         <th>${escapeHtml(stockT("CBM"))}</th>

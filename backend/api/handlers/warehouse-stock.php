@@ -68,7 +68,7 @@ function warehouseStockSearchExpressions(PDO $pdo): array
         'c.name',
         "COALESCE(s.name,'')",
     ];
-    foreach (['code', 'brand', 'materials', 'express_number'] as $searchColumn) {
+    foreach (['item_number', 'code', 'brand', 'materials', 'express_number'] as $searchColumn) {
         if (warehouseStockHasColumn($pdo, 'order_items', $searchColumn)) {
             $expressions[] = "oi.$searchColumn";
         }
@@ -127,7 +127,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         CASE WHEN o.status = 'InTransitToWarehouse' THEN 'InTransit' ELSE 'InWarehouse' END AS warehouse_state,
         o.expected_ready_date,
         c.name as customer_name, s.name as supplier_name,
-        oi.id as item_id, oi.product_id, oi.item_no, oi.shipping_code, oi.quantity, oi.unit, oi.declared_cbm, oi.declared_weight, oi.item_length, oi.item_width, oi.item_height, oi.description_cn, oi.description_en,
+        oi.id as item_id, oi.product_id, oi.item_no, oi.item_number, oi.shipping_code, oi.quantity, oi.unit, oi.declared_cbm, oi.declared_weight, oi.item_length, oi.item_width, oi.item_height, oi.description_cn, oi.description_en,
         p.description_cn as product_desc_cn, p.description_en as product_desc_en,
         wr.actual_cbm as order_actual_cbm, wr.actual_weight as order_actual_weight, wr.actual_cartons as order_actual_cartons,
         ria.item_actual_cbm, ria.item_actual_weight, ria.item_actual_cartons, ria.item_actual_quantity, $actualDimensionOuterSql$imagePathsSelect$classificationSelect
@@ -172,11 +172,17 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     if ($q) {
         $like = clmsSearchLike($q);
         $searchExpressions = warehouseStockSearchExpressions($pdo);
-        $sql .= ' AND (' . implode(' OR ', array_map(
+        $searchClauses = array_map(
             static fn(string $expression): string => clmsUtf8SearchExpr("COALESCE($expression, '')") . ' LIKE ?',
             $searchExpressions
-        )) . ')';
-        $params = array_merge($params, array_fill(0, count($searchExpressions), $like));
+        );
+        if (warehouseStockHasColumn($pdo, 'order_items', 'shared_carton_contents')) {
+            foreach (['item_no', 'item_number'] as $identifier) {
+                $searchClauses[] = clmsSharedCartonIdentifierSearch('oi.shared_carton_contents', $identifier);
+            }
+        }
+        $sql .= ' AND (' . implode(' OR ', $searchClauses) . ')';
+        $params = array_merge($params, array_fill(0, count($searchClauses), $like));
     }
     if ($itemType !== null && warehouseStockHasColumn($pdo, 'item_classifications', 'item_type_code')) {
         $sql .= ' AND ic.item_type_code=?'; $params[] = $itemType;
@@ -222,6 +228,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 ? ($orderReceiptImages[$rowOrderId] ?? [])
                 : []
         );
+        $contents = json_decode((string) ($row['shared_carton_contents'] ?? ''), true) ?: [];
+        $contents = is_array($contents) ? array_values(array_filter($contents, 'is_array')) : [];
+        $row['item_identifiers'] = !empty($row['shared_carton_enabled']) ? array_map(static fn(array $content): array => [
+            'item_no' => $content['item_no'] ?? null,
+            'item_number' => $content['item_number'] ?? null,
+            'description_en' => $content['description_en'] ?? null,
+            'description_cn' => $content['description_cn'] ?? null,
+        ], $contents) : [];
         unset($row['shared_carton_contents']);
     }
     unset($row);
@@ -230,8 +244,20 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if ($format === 'csv') {
             header('Content-Type: text/csv; charset=utf-8');
             header('Content-Disposition: attachment; filename="warehouse_stock_' . date('Y-m-d') . '.csv"');
-            $out=fopen('php://output','w'); fputcsv($out,['Order','Customer','Supplier','Status','Item','Description EN','Description ZH','Item Type','Quantity','Actual Quantity','Actual Cartons','Actual CBM','Actual Weight','Height','Width','Length']);
-            foreach($rows as $row) fputcsv($out,[$row['order_id'],$row['customer_name'],$row['supplier_name'],$row['status'],$row['item_id'],$row['description_en'],$row['description_cn'],$row['item_type_code']??'unclassified',$row['quantity'],$row['item_actual_quantity'],$row['item_actual_cartons'],$row['item_actual_cbm'],$row['item_actual_weight'],$row['item_actual_height'],$row['item_actual_width'],$row['item_actual_length']]);
+            $out=fopen('php://output','w'); fputcsv($out,['Order','Customer','Supplier','Status','Item','Description EN','Description ZH','Item Type','Quantity','Actual Quantity','Actual Cartons','Actual CBM','Actual Weight','Height','Width','Length','I.I.N','Item Number']);
+            foreach($rows as $row) fputcsv($out,[$row['order_id'],$row['customer_name'],$row['supplier_name'],$row['status'],$row['item_id'],$row['description_en'],$row['description_cn'],$row['item_type_code']??'unclassified',$row['quantity'],$row['item_actual_quantity'],$row['item_actual_cartons'],$row['item_actual_cbm'],$row['item_actual_weight'],$row['item_actual_height'],$row['item_actual_width'],$row['item_actual_length'],$row['item_no']??'',$row['item_number']??'']);
+            foreach ($rows as $row) foreach ($row['item_identifiers'] ?? [] as $content) {
+                $reference = array_fill(0, 18, '');
+                $reference[0] = $row['order_id'];
+                $reference[1] = $row['customer_name'];
+                $reference[2] = $row['supplier_name'];
+                $reference[3] = $row['status'];
+                $reference[4] = $row['item_id'];
+                $reference[5] = clmsT('Contained item') . ': ' . ($content['description_en'] ?? $content['description_cn'] ?? '');
+                $reference[16] = $content['item_no'] ?? '';
+                $reference[17] = $content['item_number'] ?? '';
+                fputcsv($out, $reference);
+            }
             fclose($out); exit;
         }
         (new OrderExcelService($pdo))->exportWarehouseStockSummary($rows, 'warehouse_stock_' . date('Ymd_His') . '.xlsx');

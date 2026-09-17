@@ -129,7 +129,7 @@
                             item?.description_en ||
                             item?.description_cn ||
                             "—",
-                        itemNo: item?.item_no || item?.shipping_code || "—",
+                        itemNo: itemIdentifierText(item) || item?.shipping_code || "—",
                         quantity: item?.quantity || item?.cartons || "0",
                         sellPrice:
                             item?.sell_price != null
@@ -169,7 +169,7 @@
                         content?.description_en ||
                         content?.description_cn ||
                         "—",
-                    itemNo: content?.item_no || item?.item_no || "—",
+                    itemNo: itemIdentifierText(content) || itemIdentifierText(item) || "—",
                     quantity: content?.quantity || "0",
                     sellPrice:
                         content?.sell_price != null

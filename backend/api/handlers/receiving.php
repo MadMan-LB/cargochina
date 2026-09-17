@@ -574,13 +574,19 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
         $itemSearchClauses = [];
         $itemSearchParams = [];
-        foreach (['shipping_code', 'item_no', 'description_cn', 'description_en', 'what_brand', 'copy_normal_goods', 'code', 'express_number', 'size'] as $column) {
+        foreach (['shipping_code', 'item_no', 'item_number', 'description_cn', 'description_en', 'what_brand', 'copy_normal_goods', 'code', 'express_number', 'size'] as $column) {
             if (receivingTableHasColumn($pdo, 'order_items', $column)) {
                 $itemSearchClauses[] = receivingUtf8LikeExpr("oi.$column") . " LIKE ?";
                 $itemSearchParams[] = $like;
             }
         }
         if ($itemSearchClauses) {
+            if (receivingTableHasColumn($pdo, 'order_items', 'shared_carton_contents')) {
+                foreach (['item_no', 'item_number'] as $identifier) {
+                    $itemSearchClauses[] = clmsSharedCartonIdentifierSearch('oi.shared_carton_contents', $identifier);
+                    $itemSearchParams[] = $like;
+                }
+            }
             $searchClauses[] = "EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND (" . implode(' OR ', $itemSearchClauses) . "))";
             array_push($searchParams, ...$itemSearchParams);
         }
@@ -664,7 +670,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $rip->execute([$receiptId]);
             $row['photos'] = $rip->fetchAll(PDO::FETCH_ASSOC);
             $row['fees'] = receivingFetchReceiptFees($pdo, $receiptId);
-            $receiptItemCols = "oi.declared_cbm, oi.declared_weight, oi.description_cn, oi.description_en, oi.item_no, oi.shipping_code, oi.cartons, oi.qty_per_carton, oi.quantity, oi.unit_price as declared_unit_price, oi.total_amount as declared_total_amount";
+            $receiptItemCols = "oi.declared_cbm, oi.declared_weight, oi.description_cn, oi.description_en, oi.item_no, oi.item_number, oi.shipping_code, oi.cartons, oi.qty_per_carton, oi.quantity, oi.unit_price as declared_unit_price, oi.total_amount as declared_total_amount";
             foreach (['what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'height', 'width', 'length'] as $column) {
                 $chkMeta = @$pdo->query("SHOW COLUMNS FROM order_items LIKE " . $pdo->quote($column));
                 if ($chkMeta && $chkMeta->rowCount() > 0) {

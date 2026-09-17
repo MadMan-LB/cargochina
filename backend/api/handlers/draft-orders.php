@@ -464,6 +464,8 @@ function draftOrderNormalizeSharedCartonContents(PDO $pdo, array $rawContents, i
             'product_id' => !empty($rawContent['product_id']) ? (int) $rawContent['product_id'] : null,
             'supplier_id' => $supplierId,
             'item_no' => draftOrderValidateItemNumber($rawContent['item_no'] ?? null, $itemNumberSource),
+            'item_number' => clmsPackingListItemNumber($rawContent['item_number'] ?? null),
+            'item_number_present' => array_key_exists('item_number', $rawContent),
             'item_no_source' => $itemNumberSource,
             'item_no_manual' => $itemNumberSource !== 'generated' ? 1 : 0,
             'existing_item_id' => !empty($rawContent['existing_item_id']) ? (int) $rawContent['existing_item_id'] : null,
@@ -980,6 +982,8 @@ function draftOrderNormalizeItem(PDO $pdo, array $rawItem, int $supplierId, ?arr
         'product_id' => $sharedCartonEnabled ? null : (!empty($rawItem['product_id']) ? (int) $rawItem['product_id'] : null),
         'supplier_id' => $supplierId,
         'item_no' => $sharedCartonEnabled ? null : draftOrderValidateItemNumber($rawItem['item_no'] ?? null, $itemNumberSource),
+        'item_number' => clmsPackingListItemNumber($rawItem['item_number'] ?? null),
+        'item_number_present' => array_key_exists('item_number', $rawItem),
         'item_no_source' => $sharedCartonEnabled ? 'generated' : $itemNumberSource,
         'item_no_manual' => $sharedCartonEnabled ? 0 : ($itemNumberSource !== 'generated' ? 1 : 0),
         'existing_item_id' => !empty($rawItem['existing_item_id']) ? (int) $rawItem['existing_item_id'] : null,
@@ -1202,7 +1206,7 @@ function draftOrderPreserveItemNumber(array $item, array $old): array
 function draftOrderPreserveExistingNumbers(PDO $pdo, int $orderId, array $items): array
 {
     $sourceSelect = draftOrderTableHasColumn($pdo, 'order_items', 'item_no_source') ? 'item_no_source' : "'generated' AS item_no_source";
-    $stmt=$pdo->prepare("SELECT id,item_no,$sourceSelect,shared_carton_contents FROM order_items WHERE order_id=?");
+    $stmt=$pdo->prepare("SELECT id,item_no,item_number,$sourceSelect,shared_carton_contents FROM order_items WHERE order_id=?");
     $stmt->execute([$orderId]);
     $existing=[];
     foreach($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $existing[(int)$row['id']]=$row;
@@ -1211,6 +1215,7 @@ function draftOrderPreserveExistingNumbers(PDO $pdo, int $orderId, array $items)
         $existingId=(int)($item['existing_item_id']??0);
         $old=$existing[$existingId]??null;
         if(!$old) continue;
+        if (empty($item['item_number_present'])) $item['item_number'] = $old['item_number'] ?? null;
         $item = draftOrderPreserveItemNumber($item, $old);
 
         $oldContents=json_decode((string)($old['shared_carton_contents']??''),true);
@@ -1219,6 +1224,17 @@ function draftOrderPreserveExistingNumbers(PDO $pdo, int $orderId, array $items)
         foreach($item['shared_carton_contents'] as $index=>&$content){
             $oldContent=$oldContents[$index]??null;
             if(!is_array($oldContent)) continue;
+            if (empty($content['item_number_present'])) {
+                // Internal identifiers disambiguate contained products after reorder.
+                foreach ($oldContents as $candidate) {
+                    if (is_array($candidate) && !empty($content['item_no'])
+                        && ($candidate['item_no'] ?? null) === $content['item_no']) {
+                        $oldContent = $candidate;
+                        break;
+                    }
+                }
+                $content['item_number'] = $oldContent['item_number'] ?? null;
+            }
             $content = draftOrderPreserveItemNumber($content, $oldContent);
         }
         unset($content);
@@ -1314,7 +1330,7 @@ function draftOrderInsertItems(PDO $pdo, int $orderId, ?int $defaultSupplierId, 
     $hasSharedCartonCode = draftOrderTableHasColumn($pdo, 'order_items', 'shared_carton_code');
     $hasSharedCartonContents = draftOrderTableHasColumn($pdo, 'order_items', 'shared_carton_contents');
     $metadataColumns = [];
-    foreach (['what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
+    foreach (['item_number', 'what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
         if (draftOrderTableHasColumn($pdo, 'order_items', $column)) {
             $metadataColumns[] = $column;
         }
@@ -1444,8 +1460,12 @@ function draftOrderInsertItems(PDO $pdo, int $orderId, ?int $defaultSupplierId, 
             $params[] = $item['shared_carton_code'] ?? null;
         }
         if ($hasSharedCartonContents) {
+            $storedContents = array_map(static function (array $content): array {
+                unset($content['item_number_present']); // Request-only omission tracking.
+                return $content;
+            }, $item['shared_carton_contents'] ?? []);
             $params[] = !empty($item['shared_carton_contents'])
-                ? json_encode($item['shared_carton_contents'], JSON_UNESCAPED_UNICODE)
+                ? json_encode($storedContents, JSON_UNESCAPED_UNICODE)
                 : null;
         }
         $insert->execute($params);
@@ -1585,6 +1605,7 @@ function draftOrderBuildSupplierSections(array $items): array
             'existing_item_id' => (int) $item['id'],
             'product_id' => (!empty($item['shared_carton_enabled']) ? null : (!empty($item['product_id']) ? (int) $item['product_id'] : null)),
             'item_no' => !empty($item['shared_carton_enabled']) ? null : ($item['item_no'] ?? null),
+            'item_number' => $item['item_number'] ?? null,
             'item_no_source' => in_array((string) ($item['item_no_source'] ?? ''), ['generated', 'manual', 'imported'], true) ? $item['item_no_source'] : 'generated',
             'item_no_manual' => in_array((string) ($item['item_no_source'] ?? ''), ['manual', 'imported'], true) ? 1 : 0,
             'shipping_code' => $item['shipping_code'] ?: null,
@@ -1689,6 +1710,7 @@ function draftOrderFetchOrderPayload(PDO $pdo, int $orderId): array
         'high_alert_notes' => $order['high_alert_notes'] ?: null,
         'created_at' => $order['created_at'],
         'updated_at' => $order['updated_at'],
+        'lock_version' => (int) ($order['lock_version'] ?? 0),
         'editable' => $order['status'] === 'Draft',
         'supplier_sections' => $sections,
         'operational_costs' => $costs,
@@ -1760,6 +1782,7 @@ function draftOrderBuildExportRows(array $sections): array
                     'supplier_id' => $section['supplier_id'] ?? null,
                     'supplier_name' => $section['supplier_name'] ?? '',
                     'item_no' => $item['shared_carton_code'] ?: $item['shipping_code'] ?: '',
+                    'item_number' => $item['item_number'] ?? null,
                     'what_brand' => $item['what_brand'] ?? '',
                     'brand' => $item['brand'] ?? $item['what_brand'] ?? '',
                     'materials' => $item['materials'] ?? '',
@@ -1812,6 +1835,7 @@ function draftOrderBuildExportRows(array $sections): array
                         // The row type already identifies shared-carton contents. Keep the
                         // stored item number byte-for-byte visible in every export.
                         'item_no' => $content['item_no'] ?? '',
+                        'item_number' => $content['item_number'] ?? null,
                         'what_brand' => $content['what_brand'] ?? '',
                         'brand' => $content['brand'] ?? $content['what_brand'] ?? '',
                         'materials' => $content['materials'] ?? '',
@@ -1870,6 +1894,7 @@ function draftOrderBuildExportRows(array $sections): array
                 'supplier_id' => $section['supplier_id'] ?? null,
                 'supplier_name' => $section['supplier_name'] ?? '',
                 'item_no' => $item['item_no'] ?? '',
+                'item_number' => $item['item_number'] ?? null,
                 'what_brand' => $item['what_brand'] ?? '',
                 'brand' => $item['brand'] ?? $item['what_brand'] ?? '',
                 'materials' => $item['materials'] ?? '',
@@ -1918,18 +1943,22 @@ function draftOrderListQuery(PDO $pdo, array $filters, bool $paginate = true): a
             ? " LEFT JOIN item_classifications icq ON icq.entity_type='order_item' AND icq.entity_id=oi.id"
             : '';
         $classificationSearch = $classificationJoin !== '' ? ' OR icq.item_type_code LIKE ?' : '';
+        $sharedSearch = draftOrderSupportsSharedCartons($pdo)
+            ? ' OR ' . clmsSharedCartonIdentifierSearch('oi.shared_carton_contents', 'item_no')
+                . ' OR ' . clmsSharedCartonIdentifierSearch('oi.shared_carton_contents', 'item_number')
+            : '';
         $where[] = "(CAST(o.id AS CHAR) LIKE ? OR c.name LIKE ? OR EXISTS (
             SELECT 1 FROM order_items oi
             LEFT JOIN suppliers si ON si.id = oi.supplier_id
             $classificationJoin
             WHERE oi.order_id = o.id AND (
-                oi.item_no LIKE ? OR oi.shipping_code LIKE ? OR oi.code LIKE ?
+                oi.item_no LIKE ? OR oi.item_number LIKE ? OR oi.shipping_code LIKE ? OR oi.code LIKE ?
                 OR oi.description_en LIKE ? OR oi.description_cn LIKE ?
                 OR oi.brand LIKE ? OR oi.what_brand LIKE ? OR oi.materials LIKE ?
-                OR oi.copy_normal_goods LIKE ? OR si.name LIKE ?$classificationSearch
+                OR oi.copy_normal_goods LIKE ? OR si.name LIKE ?$classificationSearch$sharedSearch
             )
         ))";
-        $params = array_merge($params, array_fill(0, $classificationJoin !== '' ? 13 : 12, $like));
+        $params = array_merge($params, array_fill(0, ($classificationJoin !== '' ? 14 : 13) + ($sharedSearch !== '' ? 2 : 0), $like));
     }
     $statuses = $filters['status'] ?? [];
     if (!is_array($statuses)) $statuses = preg_split('/\s*,\s*/', (string) $statuses) ?: [];
@@ -2092,7 +2121,7 @@ function draftOrderExportCsv(PDO $pdo, int $orderId): void
 
     foreach ($order['supplier_sections'] as $section) {
         fputcsv($out, [clmsT('Supplier') . ':', $section['supplier_name']]);
-        fputcsv($out, array_map('clmsT', ['Supplier', 'Supplier Name', 'Brand', 'Materials', 'Height', 'Width', 'Length', 'What Brand', 'Good Type', 'Code', 'Item No', 'English Description', 'Chinese Description', 'Notes', 'HS Code', 'Pieces/Carton', 'Cartons', 'Quantity', 'Unit', 'Factory Price', 'Customer Price', 'Total Amount', 'CBM/Unit', 'Total CBM', 'Weight/Unit', 'Total Weight', 'Custom Design', 'Express Number', 'Size']));
+        fputcsv($out, array_map('clmsT', ['Supplier', 'Supplier Name', 'Brand', 'Materials', 'Height', 'Width', 'Length', 'What Brand', 'Good Type', 'Code', 'I.I.N', 'English Description', 'Chinese Description', 'Notes', 'HS Code', 'Pieces/Carton', 'Cartons', 'Quantity', 'Unit', 'Factory Price', 'Customer Price', 'Total Amount', 'CBM/Unit', 'Total CBM', 'Weight/Unit', 'Total Weight', 'Custom Design', 'Express Number', 'Size', 'Item Number']));
         foreach (draftOrderBuildExportRows([$section]) as $item) {
             $customDesignValue = strtolower(trim((string) ($item['custom_design_required'] ?? '')));
             $customDesignLabel = $customDesignValue === ''
@@ -2128,6 +2157,7 @@ function draftOrderExportCsv(PDO $pdo, int $orderId): void
                 $customDesignLabel,
                 $item['express_number'] ?? '',
                 $item['size'] ?? '',
+                $item['item_number'] ?? '',
             ]);
         }
         fputcsv($out, ['', '', '', '', clmsT('Supplier subtotal'), '', '', '', '', '', '', '', '', $section['totals']['amount'], '', $section['totals']['cbm'], '', $section['totals']['weight'], '', '', '']);
@@ -2164,6 +2194,7 @@ function draftOrderBuildExcelEntry(PDO $pdo, int $orderId): array
             'id' => (int) ($row['source_item_id'] ?? 0),
             'product_id' => !empty($row['product_id']) ? (int) $row['product_id'] : null,
             'item_no' => $row['item_no'] ?? '',
+            'item_number' => $row['item_number'] ?? null,
             'shipping_code' => '',
             'what_brand' => $row['what_brand'] ?? '',
             'brand' => $row['brand'] ?? ($row['what_brand'] ?? ''),
@@ -2260,7 +2291,8 @@ function draftOrderImportColumnAliases(): array
         'length' => ['length', 'lenght', 'l'],
         'width' => ['width', 'w'],
         'height' => ['height', 'h'],
-        'item_no' => ['itemno', 'itemnumber', 'no', 'lineno', 'line'],
+        'item_no' => ['iin', 'internalitemnumber', 'itemno', 'no', 'lineno', 'line'],
+        'item_number' => ['itemnumber', 'packinglistitemnumber', 'packinglistreference'],
         'supplier_name' => ['supplier', 'suppliername', 'factoryname', 'factory', 'vendorname'],
         'supplier_code' => ['suppliercode', 'supplierno'],
         'supplier_id' => ['supplierid'],
@@ -3952,6 +3984,7 @@ function draftOrderImportBuildItem(array $row, array $map, ?string &$skipReason 
     return [
         'product_id' => null,
         'item_no' => $itemNo,
+        'item_number' => clmsPackingListItemNumber(draftOrderImportRawField($row, $map, 'item_number')),
         'item_no_manual' => $itemNo !== '' ? 1 : 0,
         'item_no_source' => 'imported',
         'import_row_number' => (int) draftOrderImportRowMeta($row, '__row_number', 0),
@@ -4011,6 +4044,7 @@ function draftOrderImportBuildSharedContent(PDO $pdo, array $row, array $map, ar
         'supplier_name' => $supplier['name'],
         'product_id' => null,
         'item_no' => $item['item_no'],
+        'item_number' => $item['item_number'] ?? null,
         'item_no_manual' => $item['item_no'] !== '' ? 1 : 0,
         'item_no_source' => 'imported',
         'import_row_number' => $item['import_row_number'] ?? 0,

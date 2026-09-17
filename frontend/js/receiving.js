@@ -1924,6 +1924,7 @@ function getReceivingItemMetaText(item) {
               : copyNormalRaw;
     return [
         item?.what_brand ? `${receivingT("What Brand")}: ${item.what_brand}` : "",
+        itemIdentifierText(item),
         copyNormalLabel
             ? `${receivingT("Good Type")}: ${copyNormalLabel}`
             : "",

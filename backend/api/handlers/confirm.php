@@ -39,7 +39,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
         $itemCols = "description_cn, description_en, cartons, quantity, unit,
              declared_cbm, declared_weight, item_no, shipping_code";
-        foreach (['what_brand', 'copy_normal_goods', 'code', 'express_number', 'size'] as $column) {
+        foreach (['item_number', 'what_brand', 'copy_normal_goods', 'code', 'express_number', 'size'] as $column) {
             $chkMeta = @$pdo->query("SHOW COLUMNS FROM order_items LIKE " . $pdo->quote($column));
             if ($chkMeta && $chkMeta->rowCount() > 0) {
                 $itemCols .= ", $column";

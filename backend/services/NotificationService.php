@@ -319,7 +319,7 @@ class NotificationService
         $this->notifyAdmins(
             'shipment_finalized',
             'Shipment draft #' . $shipmentDraftId . ' finalized',
-            $orderCount . ' order(s) pushed to tracking.',
+            $orderCount . ' order(s) finalized. Check Consolidation for the tracking push result.',
             ['shipment_draft_id' => $shipmentDraftId]
         );
     }

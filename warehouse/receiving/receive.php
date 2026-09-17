@@ -109,7 +109,8 @@ require __DIR__ . '/../../includes/area_layout.php';
 
 <button type="button" class="btn btn-primary" id="submitReceiveBtn"><?= htmlspecialchars(clmsT('Record Receipt')) ?></button>
 <?php
-$pageScripts = ['/cargochina/frontend/js/upload-utils.js', '/cargochina/frontend/js/photo_uploader.js'];
+// upload-utils is already loaded by the shared footer; loading twice aborts JS.
+$pageScripts = ['/cargochina/frontend/js/photo_uploader.js'];
 $pageScript = '/cargochina/frontend/js/receiving_receive.js';
 ?>
 <script>

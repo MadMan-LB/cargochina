@@ -194,7 +194,7 @@ function outputContainerOrdersCsv(array $container, array $ordersWithItems): voi
     $out = fopen('php://output', 'w');
     fputcsv($out, [clmsT('Container'), (string) ($container['code'] ?? '')]);
     fputcsv($out, ['']);
-    fputcsv($out, array_map('clmsT', ['What Brand', 'Copy / Normal Goods', 'Code', 'Order ID', 'Customer', 'Supplier', 'Item No', 'Shipping Code', 'Description', 'Cartons', 'Qty/Carton', 'Total Qty', 'Unit Price', 'Total Amount', 'Declared CBM', 'Declared Weight', 'Express Number', 'Size', 'Photo Count']));
+    fputcsv($out, array_map('clmsT', ['What Brand', 'Copy / Normal Goods', 'Code', 'Order ID', 'Customer', 'Supplier', 'I.I.N', 'Shipping Code', 'Description', 'Cartons', 'Qty/Carton', 'Total Qty', 'Unit Price', 'Total Amount', 'Declared CBM', 'Declared Weight', 'Express Number', 'Size', 'Photo Count', 'Item Number']));
     foreach ($ordersWithItems as $data) {
         $order = $data['order'] ?? [];
         foreach (($data['items'] ?? []) as $item) {
@@ -230,8 +230,17 @@ function outputContainerOrdersCsv(array $container, array $ordersWithItems): voi
                 (string) ($item['express_number'] ?? ''),
                 (string) ($item['size'] ?? ''),
                 count($imagePaths),
+                (string) ($item['item_number'] ?? ''),
             ]);
         }
+    }
+    foreach (OrderExcelService::sharedCartonIdentifierRows($ordersWithItems) as $reference) {
+        $row = array_fill(0, 20, '');
+        $row[3] = $reference['order_id'];
+        $row[6] = $reference['item_no'];
+        $row[8] = clmsT('Contained item') . ': ' . $reference['description'];
+        $row[19] = $reference['item_number'];
+        fputcsv($out, $row); // Identifier-only rows leave cargo/financial totals unchanged.
     }
     fclose($out);
     exit;
@@ -324,6 +333,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 );
                 $stmt->execute([$id]);
                 $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                require_once __DIR__ . '/orders.php';
+                $containerItems = fetchOrderItemsForOrders($pdo, array_column($orders, 'id'));
                 $totals = [
                     'order_count' => count($orders),
                     'item_count' => 0,
@@ -334,6 +345,20 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     'amount' => 0.0,
                 ];
                 foreach ($orders as &$ord) {
+                    $ord['item_identifiers'] = [];
+                    foreach ($containerItems[(int) $ord['id']] ?? [] as $item) {
+                        $identifiedItems = !empty($item['shared_carton_enabled'])
+                            ? orderDecodeSharedCartonContents($pdo, $item)
+                            : [$item];
+                        foreach ($identifiedItems as $identified) {
+                            $ord['item_identifiers'][] = [
+                                'item_no' => $identified['item_no'] ?? null,
+                                'item_number' => $identified['item_number'] ?? null,
+                                'description_en' => $identified['description_en'] ?? null,
+                                'description_cn' => $identified['description_cn'] ?? null,
+                            ];
+                        }
+                    }
                     $t = loadContainerOrderTotals($pdo, (int) $ord['id']);
                     $ord += $t;
                     $totals['item_count'] += (int) $t['items'];
@@ -457,8 +482,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         $innerCond .= " OR (cu2.phone $coll LIKE ?)";
                         $innerParams[] = $like;
                     }
-                    $innerCond .= " OR (oi2.shipping_code $coll LIKE ?) OR (oi2.item_no $coll LIKE ?) OR (oi2.description_cn $coll LIKE ?) OR (oi2.description_en $coll LIKE ?)";
-                    $innerParams = array_merge($innerParams, [$like, $like, $like, $like]);
+                    $innerCond .= " OR (oi2.item_number $coll LIKE ?) OR (oi2.shipping_code $coll LIKE ?) OR (oi2.item_no $coll LIKE ?) OR (oi2.description_cn $coll LIKE ?) OR (oi2.description_en $coll LIKE ?)";
+                    $innerParams = array_merge($innerParams, [$like, $like, $like, $like, $like]);
+                    if (containerTableHasColumn($pdo, 'order_items', 'shared_carton_contents')) {
+                        foreach (['item_no', 'item_number'] as $identifier) {
+                            $innerCond .= ' OR (' . clmsSharedCartonIdentifierSearch('oi2.shared_carton_contents', $identifier) . ')';
+                            $innerParams[] = $like;
+                        }
+                    }
                     if (is_numeric($search)) {
                         $innerCond .= " OR o2.id = ?";
                         $innerParams[] = (int) $search;

@@ -217,11 +217,11 @@ $canUseBalancesFromRole = $isSuperAdmin
               </div>
             </div>
             <div class="d-flex gap-2 mb-2">
-              <button type="button" class="btn btn-outline-secondary btn-sm" id="togglePasteCsv" onclick="togglePasteCsv()">Paste CSV</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="togglePasteCsv" onclick="window.togglePasteCsv()">Paste CSV</button>
             </div>
             <div id="pasteCsvArea" class="mb-3 d-none">
               <textarea class="form-control font-monospace" id="pasteCsvData" rows="6" placeholder="what_brand,good_type,code,item_no,description,cartons,qty_per_carton,qty,unit_price,weight,cbm,express_number,size&#10;Brand A,Normal Goods,A-001,SC-1-1,Widget A,10,100,1000,1.50,0.5,0.25,EX123,40 x 30 x 20"></textarea>
-              <small class="text-muted d-block mt-1">Paste rows from Excel/Sheets. Optional header row. Columns: what_brand, good_type, code, item_no, description, cartons, qty_per_carton, qty, unit_price, weight, cbm, express_number, size</small>
+              <small class="text-muted d-block mt-1">Paste rows from Excel/Sheets. Optional header row. Columns: what_brand, good_type, code, item_no, description, cartons, qty_per_carton, qty, unit_price, weight, cbm, express_number, size. With a header, use I.I.N for the internal identifier and Item Number for the packing-list reference.</small>
               <div class="d-flex gap-2 mt-2">
                 <button type="button" class="btn btn-primary btn-sm" onclick="importOrderItemsFromCsv()">Import rows</button>
                 <button type="button" class="btn btn-outline-secondary btn-sm" onclick="saveCsvAsTemplate()">Save as template</button>

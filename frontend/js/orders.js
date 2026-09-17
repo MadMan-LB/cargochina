@@ -2,6 +2,7 @@ let itemIndex = 0;
 let orderCustomerAc, orderSupplierAc, orderSearchAc, orderDestinationCountryAc;
 let orderCustomerCountryShipping = [];
 let orderEffectiveShippingCode = "";
+let orderPackingListDefault = "";
 let orderOffset = 0;
 const orderPageSize = 50;
 let lastOrderFilterQuery = null;
@@ -134,6 +135,7 @@ function renderRecentChips() {
 
 function selectRecentCustomer(id, name, shipCode) {
     orderCustomerAc?.setValue({ id, name, code: shipCode, default_shipping_code: shipCode });
+    orderPackingListDefault = String(shipCode ?? "");
     applyCustomerDefaultShippingCode(shipCode);
     (async () => {
         try {
@@ -222,6 +224,8 @@ function setOrderItemMetadata(card, item = {}) {
         if (el) el.value = value ?? "";
     };
     set(".item-brand", item.brand || item.what_brand);
+    set(".item-item-number", item.item_number);
+    card.dataset.packingListNumberUntouched = "0";
     set(".item-materials", item.materials);
     set(".item-what-brand", item.what_brand);
     set(".item-copy-normal-goods", normalizeOrderGoodType(item.copy_normal_goods));
@@ -260,6 +264,7 @@ function applyCustomerDefaultShippingCode(code) {
 }
 
 function renumberOrderItemNumbers() {
+    document.querySelectorAll('#orderItemsBody .order-item-card[data-packing-list-number-untouched="1"] .item-item-number').forEach(input => { input.value = orderPackingListDefault; });
     const baseShippingCode = (orderEffectiveShippingCode || "").trim();
     const supplierOrder = [];
     const supplierSequenceByKey = new Map();
@@ -557,6 +562,7 @@ function orderItemMetaText(item) {
               : copyNormalRaw;
     return [
         item?.what_brand ? `${orderT("What Brand")}: ${item.what_brand}` : "",
+        item?.item_number ? `${orderT("Item Number")}: ${item.item_number}` : "",
         copyNormalLabel
             ? `${orderT("Good Type")}: ${copyNormalLabel}`
             : "",
@@ -758,12 +764,14 @@ document.addEventListener("DOMContentLoaded", () => {
             searchPath: "/lookup",
             placeholder: orderT("Type customer name or code..."),
             onSelect: async (item) => {
+                orderPackingListDefault = String(item.default_shipping_code ?? "");
                 saveRecent(RECENT_KEY_CUSTOMERS, item);
                 try {
                     const res = await api("GET", "/customers/" + item.id + "/lookup");
                     const cust = res.data || {};
                     orderCustomerCountryShipping = cust.country_shipping || [];
                     const defShip = cust.default_shipping_code || item.default_shipping_code || "";
+                    orderPackingListDefault = String(cust.default_shipping_code ?? item.default_shipping_code ?? "");
                     if (orderCustomerCountryShipping.length === 1) {
                         const c = orderCustomerCountryShipping[0];
                         setOrderDestinationCountry(c.country_id, c.country_name, c.country_code);
@@ -1036,6 +1044,7 @@ function openOrderForm() {
     document.getElementById("orderDestinationCountryId").value = "";
     orderCustomerCountryShipping = [];
     orderEffectiveShippingCode = "";
+    orderPackingListDefault = "";
     showOrderDestinationSelect(false);
     const destInp = document.getElementById("orderDestinationCountry");
     if (destInp) destInp.value = "";
@@ -1090,7 +1099,7 @@ async function loadOrderTemplate(id) {
         if (uniqueSuppliers.length === 1) {
             orderSupplierAc?.setValue(uniqueSuppliers[0]);
         }
-        const key = (it) => `${it.product_id || ""}|${it.supplier_id || ""}|${(it.description_cn || it.description_en || "").trim()}`;
+        const key = (it) => `${it.product_id || ""}|${it.supplier_id || ""}|${(it.description_cn || it.description_en || "").trim()}|${JSON.stringify(it.item_number ?? null)}`;
         let lastCard = null;
         let lastKey = null;
         for (const it of tpl.items) {
@@ -1196,6 +1205,7 @@ function collectItemsForTemplate() {
                     product_id: productId || null,
                     supplier_id: supplierId || null,
                     item_no: itemNo || null,
+                    item_number: tr.querySelector(".item-item-number")?.value ?? null,
                     shipping_code: shippingCode || null,
                     what_brand:
                         tr.querySelector(".item-what-brand")?.value?.trim() ||
@@ -1246,6 +1256,7 @@ async function saveOrderAsTemplate() {
     if (!name?.trim()) return;
     const templateItems = items.map((it) => ({
         item_no: it.item_no,
+        item_number: it.item_number ?? null,
         shipping_code: it.shipping_code,
         product_id: it.product_id,
         supplier_id: it.supplier_id || null,
@@ -1299,7 +1310,8 @@ function togglePasteCsv() {
 
 const ORDER_CSV_ALIASES = {
     description: ["description", "productnames", "productname", "productdescription", "names"],
-    item_no: ["itemno", "itemnumber", "line"],
+    item_no: ["iin", "internalitemnumber", "itemno", "line"],
+    item_number: ["itemnumber", "packinglistitemnumber", "packinglistreference"],
     cartons: ["cartons", "totalctns", "totalcartons", "ctns"],
     qty_per_carton: ["qtypercarton", "piecespercarton", "piecescarton", "qtyctn", "qtyperctn"],
     qty: ["qty", "quantity", "totalqty", "totalquantity"],
@@ -1352,15 +1364,28 @@ function orderCsvLooksLikeHeader(firstRow) {
     );
 }
 
+function orderCsvCells(line) {
+    const cells = []; let cell = "", quoted = false;
+    for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+            if (quoted && line[i + 1] === '"') { cell += '"'; i++; }
+            else quoted = !quoted;
+        } else if (ch === "," && !quoted) { cells.push(cell); cell = ""; }
+        else cell += ch;
+    }
+    cells.push(cell); return cells;
+}
+
 function importOrderItemsFromCsv() {
-    const raw = document.getElementById("pasteCsvData")?.value?.trim();
+    const raw = document.getElementById("pasteCsvData")?.value;
     if (!raw) {
         showToast("Paste CSV data first", "danger");
         return;
     }
     const lines = raw.split(/\r\n|\r|\n/).filter((l) => l.trim());
     if (lines.length === 0) return;
-    const firstRow = lines[0].split(",").map((c) => c.trim().toLowerCase());
+    const firstRow = orderCsvCells(lines[0]).map((c) => c.trim().toLowerCase());
     const isHeader = orderCsvLooksLikeHeader(firstRow);
     const dataRows = isHeader ? lines.slice(1) : lines;
     const posMap = {
@@ -1376,11 +1401,11 @@ function importOrderItemsFromCsv() {
     const colMap = isHeader ? mapOrderCsvColumns(firstRow) : {};
     const idx = (arr, name) => {
         const i = colMap[name] ?? posMap[name] ?? -1;
-        return i >= 0 && arr[i] !== undefined ? String(arr[i]).trim() : "";
+        return i >= 0 && arr[i] !== undefined ? (name === "item_number" ? String(arr[i]) : String(arr[i]).trim()) : "";
     };
     let imported = 0;
     for (const line of dataRows) {
-        const row = line.split(",").map((c) => c.trim());
+        const row = orderCsvCells(line);
         if (row.length < 2) continue;
         const desc = idx(row, "description") || row[0];
         if (!desc) continue;
@@ -1403,6 +1428,8 @@ function importOrderItemsFromCsv() {
             set(".item-express-number", idx(row, "express_number"));
             set(".item-size", idx(row, "size"));
             set(".item-item-no", idx(row, "item_no"));
+            card.querySelector(".item-item-number").value = idx(row, "item_number");
+            card.dataset.packingListNumberUntouched = "0";
             set(".item-cartons", idx(row, "cartons"));
             set(".item-qty-per-ctn", idx(row, "qty_per_carton"));
             set(".item-qty", idx(row, "qty"));
@@ -1424,11 +1451,11 @@ function importOrderItemsFromCsv() {
 }
 
 function parseOrderItemsCsv() {
-    const raw = document.getElementById("pasteCsvData")?.value?.trim();
+    const raw = document.getElementById("pasteCsvData")?.value;
     if (!raw) return null;
     const lines = raw.split(/\r\n|\r|\n/).filter((l) => l.trim());
     if (lines.length === 0) return null;
-    const firstRow = lines[0].split(",").map((c) => c.trim().toLowerCase());
+    const firstRow = orderCsvCells(lines[0]).map((c) => c.trim().toLowerCase());
     const isHeader = orderCsvLooksLikeHeader(firstRow);
     const dataRows = isHeader ? lines.slice(1) : lines;
     const posMap = {
@@ -1444,11 +1471,11 @@ function parseOrderItemsCsv() {
     const colMap = isHeader ? mapOrderCsvColumns(firstRow) : {};
     const idx = (arr, name) => {
         const i = colMap[name] ?? posMap[name] ?? -1;
-        return i >= 0 && arr[i] !== undefined ? String(arr[i]).trim() : "";
+        return i >= 0 && arr[i] !== undefined ? (name === "item_number" ? String(arr[i]) : String(arr[i]).trim()) : "";
     };
     const items = [];
     for (const line of dataRows) {
-        const row = line.split(",").map((c) => c.trim());
+        const row = orderCsvCells(line);
         if (row.length < 2) continue;
         const desc = idx(row, "description") || row[0];
         if (!desc) continue;
@@ -1467,6 +1494,7 @@ function parseOrderItemsCsv() {
             express_number: idx(row, "express_number") || null,
             size: idx(row, "size") || null,
             item_no: idx(row, "item_no") || null,
+            item_number: idx(row, "item_number"),
             cartons,
             qty_per_carton: qtyPerCtn,
             quantity: qty > 0 ? qty : null,
@@ -1555,8 +1583,10 @@ function addOrderItem() {
               <input type="hidden" class="item-supplier-id" data-idx="${idx}" value="${defaultSuppId}">
             </div>
             <div class="col-6 col-md-2">
-              <label class="form-label form-label-sm">Item No</label>
-              <input type="text" class="form-control form-control-sm item-item-no" placeholder="Auto" data-idx="${idx}" readonly aria-readonly="true">
+              <label class="form-label form-label-sm" for="orderItemIin${idx}">I.I.N</label>
+              <input id="orderItemIin${idx}" type="text" class="form-control form-control-sm item-item-no bg-light" placeholder="Auto" data-idx="${idx}" readonly aria-readonly="true">
+              <label class="form-label form-label-sm mt-2" for="orderItemNumber${idx}">Item Number</label>
+              <input id="orderItemNumber${idx}" type="text" maxlength="150" class="form-control form-control-sm item-item-number" placeholder="Packing-list reference" value="${escapeHtml(orderPackingListDefault)}">
               <input type="hidden" class="item-shipping-code" value="${escapeHtml(effectiveShipCode || "")}">
             </div>
             <div class="col-12 col-md-7">
@@ -1684,6 +1714,8 @@ function addOrderItem() {
     container.appendChild(card);
     const photoPanel = card.querySelector(".order-item-photo-panel");
     const photoContainer = card.querySelector(`.item-photos[data-idx="${idx}"]`);
+    card.dataset.packingListNumberUntouched = "1";
+    card.querySelector(".item-item-number").addEventListener("input", () => { card.dataset.packingListNumberUntouched = "0"; });
     card.querySelector(".order-item-add-packaging")?.addEventListener("click", () => {
         addItemPackagingRow(card);
     });
@@ -2224,6 +2256,7 @@ async function copyOrder(id) {
             showOrderDestinationSelect(false);
         }
         let shipCode = custRes?.data?.default_shipping_code || "";
+        orderPackingListDefault = String(custRes?.data?.default_shipping_code ?? "");
         if (destId && orderCustomerCountryShipping?.length > 0) {
             const c = orderCustomerCountryShipping.find((x) => String(x.country_id) === String(destId));
             if (c) shipCode = c.shipping_code || shipCode;
@@ -2234,7 +2267,7 @@ async function copyOrder(id) {
             "Copy of Order #" + id;
         const container = document.getElementById("orderItemsBody");
         resetOrderItems();
-        const copyKey = (it) => `${it.product_id || ""}|${it.supplier_id || ""}|${(it.description_cn || it.description_en || "").trim().substring(0, 50)}`;
+        const copyKey = (it) => `${it.product_id || ""}|${it.supplier_id || ""}|${(it.description_cn || it.description_en || "").trim().substring(0, 50)}|${JSON.stringify(it.item_number ?? null)}`;
         let copyLastCard = null;
         let copyLastKey = null;
         (o.items || []).forEach((it) => {
@@ -2367,6 +2400,7 @@ async function editOrder(id) {
             showOrderDestinationSelect(false);
         }
         let shipCode = custRes?.data?.default_shipping_code || "";
+        orderPackingListDefault = String(custRes?.data?.default_shipping_code ?? "");
         if (destId && orderCustomerCountryShipping?.length > 0) {
             const c = orderCustomerCountryShipping.find((x) => String(x.country_id) === String(destId));
             if (c) shipCode = c.shipping_code || shipCode;
@@ -2377,7 +2411,7 @@ async function editOrder(id) {
             "Edit Order #" + o.id;
         const container = document.getElementById("orderItemsBody");
         resetOrderItems();
-        const itemKey = (it) => `${it.product_id || ""}|${it.supplier_id || ""}|${(it.description_cn || it.description_en || "").trim().substring(0, 50)}`;
+        const itemKey = (it) => `${it.product_id || ""}|${it.supplier_id || ""}|${(it.description_cn || it.description_en || "").trim().substring(0, 50)}|${JSON.stringify(it.item_number ?? null)}`;
         let lastCard = null;
         let lastKey = null;
         (o.items || []).forEach((it) => {
@@ -2512,6 +2546,7 @@ function collectOrderItems() {
                     product_id: productId || null,
                     supplier_id: supplierId || null,
                     item_no: itemNo || null,
+                    item_number: tr.querySelector(".item-item-number")?.value ?? null,
                     item_no_manual: tr.dataset.manualItemNo ? 1 : 0,
                     shipping_code: shippingCode || null,
                     what_brand:
@@ -2782,7 +2817,7 @@ async function showOrderFinance(id) {
           <h6 class="mt-3 mb-2 fw-semibold">Items — Supplier Cost Breakdown</h6>
           <div class="table-responsive">
             <table class="table table-sm table-hover">
-              <thead class="table-light"><tr><th>Description</th><th>Item No</th><th class="text-end">Cartons</th><th class="text-end">Qty</th><th class="text-end">Unit Price</th><th class="text-end">Total (${escapeHtml(currency)})</th></tr></thead>
+              <thead class="table-light"><tr><th>Description</th><th>I.I.N</th><th class="text-end">Cartons</th><th class="text-end">Qty</th><th class="text-end">Unit Price</th><th class="text-end">Total (${escapeHtml(currency)})</th></tr></thead>
               <tbody>${itemRows || '<tr><td colspan="6" class="text-muted text-center">No items</td></tr>'}</tbody>
               <tfoot class="table-light"><tr><td colspan="5" class="text-end fw-semibold">Total Cost</td><td class="text-end fw-bold text-primary">${totalCost > 0 ? fmtOrderAmount(totalCost) : "—"} ${escapeHtml(currency)}</td></tr></tfoot>
             </table>
@@ -3036,7 +3071,7 @@ async function showOrderInfo(id) {
               <thead class="table-light">
                 <tr>
                   <th style="width:56px">Photo</th>
-                  <th>Item No</th>
+                  <th>I.I.N</th>
                   <th>Description</th>
                   <th>Supplier</th>
                   <th class="text-end">Ctns × Qty/Ctn = Total</th>

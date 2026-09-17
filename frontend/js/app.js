@@ -890,6 +890,19 @@ if (typeof window !== "undefined") {
     window.hasUnsavedChanges = hasUnsavedChanges;
     window.cleanupStaleModalState = cleanupStaleModalState;
 }
+function itemIdentifierText(item) {
+    const identifiers = [
+        item?.item_no != null && item.item_no !== "" ? `I.I.N: ${item.item_no}` : "",
+        item?.item_number != null && item.item_number !== "" ? `${typeof t === "function" ? t("Item Number") : "Item Number"}: ${item.item_number}` : "",
+    ].filter(Boolean);
+    let contents = item?.item_identifiers || (item?.shared_carton_enabled ? item.shared_carton_contents : []);
+    if (typeof contents === "string") { try { contents = JSON.parse(contents); } catch { contents = []; } }
+    if (Array.isArray(contents)) contents.forEach(content => {
+        const text = itemIdentifierText(content);
+        if (text) identifiers.push(`${typeof t === "function" ? t("Contained item") : "Contained item"}: ${text}`);
+    });
+    return identifiers.join(" · ");
+}
 
 function cleanupStaleModalState() {
     if (typeof document === "undefined" || typeof window === "undefined") return;
