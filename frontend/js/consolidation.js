@@ -4,6 +4,7 @@ let draftOrders = [];
 let draftCbmForCapacity = 0;
 let draftWeightForCapacity = 0;
 let draftContainerAc = null;
+let draftLoadVersion = 0;
 
 function renderCapacityBars(cbm, weight, container, hintEl) {
     if (!hintEl) return;
@@ -61,6 +62,10 @@ let containerPresets = {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+    el("draftModal")?.addEventListener("hide.bs.modal", () => {
+        // A completed request must not reopen a dialog the employee closed.
+        draftLoadVersion++;
+    });
     try {
         loadContainers();
         loadShipmentDrafts();
@@ -476,7 +481,10 @@ function orderWeight(o) {
     );
 }
 
-async function openDraftModal(id) {
+async function openDraftModal(id, refreshOnly = false) {
+    const modalEl = el("draftModal");
+    if (refreshOnly && (currentDraftId !== id || !modalEl?.classList.contains("show"))) return;
+    const version = ++draftLoadVersion;
     currentDraftId = id;
     document.getElementById("draftModalId").textContent = "#" + id;
     const deleteBtn = document.getElementById("draftDeleteBtn");
@@ -487,13 +495,14 @@ async function openDraftModal(id) {
             api("GET", "/orders?status=Confirmed"),
             api("GET", "/containers"),
         ]);
+        if (version !== draftLoadVersion) return;
         const draftOrderIds = draftRes.data.order_ids || [];
         const allEligibleRaw = [
             ...(ordersRes.data || []),
             ...(res2.data || []),
         ];
         const seen = new Set();
-        eligibleOrders = allEligibleRaw.filter((o) => {
+        const loadedEligibleOrders = allEligibleRaw.filter((o) => {
             if (seen.has(o.id) || draftOrderIds.includes(o.id)) return false;
             if (
                 typeof orderIsShipmentEligible === "function" &&
@@ -504,13 +513,16 @@ async function openDraftModal(id) {
             seen.add(o.id);
             return true;
         });
-        draftOrders = [];
+        const loadedOrders = [];
         for (const oid of draftOrderIds) {
             try {
                 const r = await api("GET", "/orders/" + oid);
-                if (r.data) draftOrders.push(r.data);
+                if (r.data) loadedOrders.push(r.data);
             } catch (_) {}
         }
+        if (version !== draftLoadVersion) return;
+        eligibleOrders = loadedEligibleOrders;
+        draftOrders = loadedOrders;
 
         const addBody = el("draftAddOrderBody");
         const removeBody = el("draftRemoveOrderBody");
@@ -580,9 +592,9 @@ async function openDraftModal(id) {
 
         renderCapacityBars(draftCbm, draftWeight, containerData, hintEl);
 
-        new bootstrap.Modal(document.getElementById("draftModal")).show();
+        if (!refreshOnly) bootstrap.Modal.getOrCreateInstance(modalEl).show();
     } catch (e) {
-        showToast(e.message, "danger");
+        if (version === draftLoadVersion) showToast(e.message, "danger");
     }
 }
 
@@ -600,6 +612,7 @@ function toggleRemoveSelectAll() {
 }
 
 async function addOrdersToDraft() {
+    const draftId = currentDraftId;
     const ids = Array.from(
         document.querySelectorAll(".draft-add-order-cb:checked"),
     ).map((cb) => cb.value);
@@ -610,13 +623,13 @@ async function addOrdersToDraft() {
     try {
         await api(
             "POST",
-            "/shipment-drafts/" + currentDraftId + "/add-orders",
+            "/shipment-drafts/" + draftId + "/add-orders",
             {
                 order_ids: ids,
             },
         );
         showToast("Orders added");
-        openDraftModal(currentDraftId);
+        await openDraftModal(draftId, true);
         loadShipmentDrafts();
         loadReadyTotals();
     } catch (e) {
@@ -625,6 +638,7 @@ async function addOrdersToDraft() {
 }
 
 async function removeOrdersFromDraft() {
+    const draftId = currentDraftId;
     const ids = Array.from(
         document.querySelectorAll(".draft-remove-order-cb:checked"),
     ).map((cb) => cb.value);
@@ -635,13 +649,13 @@ async function removeOrdersFromDraft() {
     try {
         await api(
             "POST",
-            "/shipment-drafts/" + currentDraftId + "/remove-orders",
+            "/shipment-drafts/" + draftId + "/remove-orders",
             {
                 order_ids: ids,
             },
         );
         showToast("Orders removed");
-        openDraftModal(currentDraftId);
+        await openDraftModal(draftId, true);
         loadShipmentDrafts();
         loadReadyTotals();
     } catch (e) {
@@ -650,6 +664,7 @@ async function removeOrdersFromDraft() {
 }
 
 async function assignContainerToDraft() {
+    const draftId = currentDraftId;
     const containerId = document.getElementById("draftContainer").value;
     if (!containerId) {
         showToast("Select a container", "danger");
@@ -658,13 +673,13 @@ async function assignContainerToDraft() {
     try {
         await api(
             "POST",
-            "/shipment-drafts/" + currentDraftId + "/assign-container",
+            "/shipment-drafts/" + draftId + "/assign-container",
             {
                 container_id: parseInt(containerId),
             },
         );
         showToast("Container assigned");
-        openDraftModal(currentDraftId);
+        await openDraftModal(draftId, true);
         loadShipmentDrafts();
     } catch (e) {
         showToast(e.message, "danger");

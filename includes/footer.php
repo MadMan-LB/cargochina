@@ -29,7 +29,10 @@
     </script>
     <?php if (!empty($pageScripts) && is_array($pageScripts)): ?>
       <?php foreach ($pageScripts as $s): ?>
-        <script src="<?= htmlspecialchars($s) ?>"></script>
+        <?php $scriptSrc = $s === '/cargochina/frontend/js/autocomplete.js'
+            ? $s . '?v=' . filemtime(__DIR__ . '/../frontend/js/autocomplete.js')
+            : $s; ?>
+        <script src="<?= htmlspecialchars($scriptSrc) ?>"></script>
       <?php endforeach; ?>
     <?php endif; ?>
     <?php if (!empty($pageScript)): ?>

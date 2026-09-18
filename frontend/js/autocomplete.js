@@ -47,6 +47,7 @@ const Autocomplete = {
         let selectedIndex = -1;
         let items = [];
         let abortController = null;
+        let blurTimer;
 
         const hide = () => {
             if (dropdown) {
@@ -74,6 +75,12 @@ const Autocomplete = {
                 el.dataset.index = String(i);
                 el.addEventListener("mousedown", (e) => {
                     e.preventDefault();
+                });
+                // Keep the option under the pointer until the complete click.
+                // Removing it on mousedown can send mouseup/click to the form below.
+                el.addEventListener("click", (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
                     selectItem(i);
                 });
                 dropdown.appendChild(el);
@@ -165,6 +172,7 @@ const Autocomplete = {
         });
 
         inputEl.addEventListener("focus", async () => {
+            clearTimeout(blurTimer);
             const q = inputEl.value.trim();
             if (q.length >= minChars && items.length > 0) show(items);
             else if (minChars === 0 && q.length === 0 && items.length === 0) {
@@ -174,7 +182,9 @@ const Autocomplete = {
         });
 
         inputEl.addEventListener("blur", () => {
-            setTimeout(hide, 150);
+            blurTimer = setTimeout(() => {
+                if (document.activeElement !== inputEl) hide();
+            }, 150);
         });
 
         inputEl.addEventListener("keydown", (e) => {
