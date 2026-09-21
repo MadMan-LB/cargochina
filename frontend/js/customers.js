@@ -4,6 +4,10 @@ const customerPageSize = 50;
 let customerPaymentLinks = [];
 let customerCountryShipping = [];
 let customerPorValues = [];
+let customerCreateRequestKey=null;
+let customerRevision=null;
+let customerEditRequest=0;
+let customerListRequest=0;
 const fmtCustomerAmount = (value) =>
     typeof window.formatDisplayAmount === "function"
         ? window.formatDisplayAmount(value)
@@ -28,6 +32,9 @@ function canCreateCustomers() {
 function canManageCustomers() {
     return customerPageEl()?.dataset?.canManageCustomers === "1";
 }
+
+function canFinanceCustomers() { return customerPageEl()?.dataset?.canFinanceCustomers === '1'; }
+function customerNameArgument(value) { return "decodeURIComponent('" + encodeURIComponent(String(value??'')).replace(/'/g,'%27') + "')"; }
 
 function canImportCustomers() {
     return customerPageEl()?.dataset?.canImportCustomers === "1";
@@ -92,6 +99,7 @@ function esc(s) {
 }
 
 async function loadCustomers() {
+    const request = ++customerListRequest;
     const tbody = document.querySelector("#customersTable tbody");
     if (!tbody) return;
     try {
@@ -101,6 +109,7 @@ async function loadCustomers() {
         if (q) params.set("q", q);
         const path = "/customers?" + params.toString();
         const res = await api("GET", path);
+        if(request!==customerListRequest)return;
         const rows = res.data || [];
         const meta = res.meta || {};
         const manageActionsEnabled = canManageCustomers();
@@ -118,12 +127,12 @@ async function loadCustomers() {
         <td>${esc(r.payment_terms || "-")}</td>
         <td class="table-actions">
           ${manageActionsEnabled ? `<button type="button" class="btn btn-sm btn-outline-primary" onclick="editCustomer(${r.id})">Edit</button>` : ""}
-          <button type="button" class="btn btn-sm btn-outline-info" onclick="showOrders(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Orders</button>
-          ${manageActionsEnabled ? `<button type="button" class="btn btn-sm btn-outline-success" onclick="openDepositModal(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Deposit</button>` : ""}
-          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="showBalance(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Balance</button>
-          ${portalActionsEnabled ? `<button type="button" class="btn btn-sm btn-outline-info" onclick="generatePortalLink(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')" title="One-time customer status link">Portal Link</button>` : ""}
-          ${messageActionsEnabled ? `<button type="button" class="btn btn-sm btn-outline-secondary" onclick="openMessagesModal(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Messages</button>` : ""}
-          ${manageActionsEnabled ? `<button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteCustomer(${r.id}, '${esc(r.name).replace(/'/g, "\\'")}')">Del</button>` : ""}
+          <button type="button" class="btn btn-sm btn-outline-info" onclick="showOrders(${r.id}, ${customerNameArgument(r.name)})">Orders</button>
+          ${canFinanceCustomers() ? `<button type="button" class="btn btn-sm btn-outline-success" onclick="openDepositModal(${r.id}, ${customerNameArgument(r.name)})">Deposit</button>` : ""}
+          ${canFinanceCustomers() ? `<button type="button" class="btn btn-sm btn-outline-secondary" onclick="showBalance(${r.id}, ${customerNameArgument(r.name)})">Deposits</button>` : ""}
+          ${portalActionsEnabled ? `<button type="button" class="btn btn-sm btn-outline-info" onclick="generatePortalLink(${r.id}, ${customerNameArgument(r.name)})" title="One-time customer status link">Portal Link</button>` : ""}
+          ${messageActionsEnabled ? `<button type="button" class="btn btn-sm btn-outline-secondary" onclick="openMessagesModal(${r.id}, ${customerNameArgument(r.name)})">Messages</button>` : ""}
+          ${manageActionsEnabled ? `<button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteCustomer(${r.id}, ${customerNameArgument(r.name)})">Del</button>` : ""}
         </td>
       </tr>
     `,
@@ -139,6 +148,8 @@ async function loadCustomers() {
             ? t("Showing {from}-{to} of {total}", { from: rows.length ? customerOffset + 1 : 0, to: customerOffset + rows.length, total: meta.total ?? rows.length })
             : `Showing ${rows.length ? customerOffset + 1 : 0}-${customerOffset + rows.length} of ${meta.total ?? rows.length}`;
     } catch (e) {
+        if(request!==customerListRequest)return;
+        tbody.innerHTML='<tr><td colspan="6" class="text-danger">Unable to load customers.</td></tr>';
         showToast(e.message, "danger");
     }
 }
@@ -289,6 +300,7 @@ window.updatePaymentLinkValue = function updatePaymentLinkValue(id, v) {
 };
 
 function openCustomerForm() {
+    customerCreateRequestKey=clmsRequestKey('customer');customerRevision=null;++customerEditRequest;
     if (!canCreateCustomers()) {
         showToast("You do not have permission to add customers", "warning");
         return;
@@ -309,13 +321,16 @@ function openCustomerForm() {
 }
 
 async function editCustomer(id) {
+    const request=++customerEditRequest;
     if (!canManageCustomers()) {
         showToast("You do not have permission to edit customers", "warning");
         return;
     }
     try {
         const res = await api("GET", "/customers/" + id);
+        if(request!==customerEditRequest)return;
         const d = res.data;
+        customerRevision=d.revision;
         document.getElementById("customerId").value = d.id;
         document.getElementById("customerName").value = d.name || "";
         document.getElementById("customerPhone").value = d.phone || "";
@@ -411,11 +426,11 @@ async function saveCustomer() {
     }
     try {
         if (id) {
-            const res = await api("PUT", "/customers/" + id, payload);
+            const res = await api("PUT", "/customers/" + id, {...payload,revision:customerRevision});
             showToast("Customer updated");
             if (res?.warning) showToast(res.warning, "warning");
         } else {
-            const res = await api("POST", "/customers", payload);
+            const res = await api("POST", "/customers", {...payload,idempotency_key:customerCreateRequestKey || (customerCreateRequestKey=clmsRequestKey('customer'))});
             showToast("Customer created");
             if (res?.warning) showToast(res.warning, "warning");
         }
@@ -509,9 +524,11 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 let depOrderAc = null;
+let customerDepositRequestKey = null;
 
 function openDepositModal(customerId, name) {
-    if (!canManageCustomers()) {
+    customerDepositRequestKey = clmsRequestKey('customer-deposit');
+    if (!canFinanceCustomers()) {
         showToast("You do not have permission to record customer deposits", "warning");
         return;
     }
@@ -539,7 +556,7 @@ function openDepositModal(customerId, name) {
 }
 
 async function submitDeposit() {
-    if (!canManageCustomers()) {
+    if (!canFinanceCustomers()) {
         showToast("You do not have permission to record customer deposits", "danger");
         return;
     }
@@ -549,9 +566,10 @@ async function submitDeposit() {
         showToast("Amount must be positive", "danger");
         return;
     }
-    const orderVal = (depOrderAc?.getSelectedId?.() || document.getElementById("depOrderId").value?.trim() || "").replace(/^#/, "");
+    const orderVal = String(depOrderAc?.getSelectedId?.() || document.getElementById("depOrderId").value?.trim() || "").replace(/^#/, "");
     const orderId = orderVal && /^\d+$/.test(String(orderVal)) ? parseInt(orderVal, 10) : null;
     const payload = {
+        idempotency_key: customerDepositRequestKey,
         amount,
         currency: document.getElementById("depCurrency").value,
         payment_method: document.getElementById("depMethod").value || null,
@@ -613,15 +631,23 @@ async function showBalance(customerId, name) {
 }
 
 let ordersCache = { customerId: null, data: [] };
+let customerOrdersRequest = 0;
 
 async function showOrders(customerId, name) {
+    const request=++customerOrdersRequest;
     document.getElementById("ordersCustomerName").textContent = name;
     document.getElementById("ordersFilter").value = "";
     document.getElementById("ordersFilter").oninput = () =>
         renderOrders(ordersCache.data);
     try {
-        const res = await api("GET", "/orders?customer_id=" + customerId);
-        const orders = res.data || [];
+        const orders=[];let offset=0;
+        do {
+            const res=await api('GET',`/orders?customer_id=${customerId}&limit=100&offset=${offset}`);
+            if(request!==customerOrdersRequest)return;
+            const batch=res.data||[];orders.push(...batch);
+            if(!res.meta?.has_more||!batch.length)break;
+            offset+=batch.length;
+        }while(true);
         ordersCache = { customerId, data: orders };
         renderOrders(orders);
         new bootstrap.Modal(document.getElementById("ordersModal")).show();
@@ -646,21 +672,19 @@ function renderOrders(orders) {
     let totalCbm = 0,
         totalWeight = 0;
     filtered.forEach((o) => {
-        (o.items || []).forEach((it) => {
-            totalCbm += parseFloat(it.declared_cbm || 0);
-            totalWeight += parseFloat(it.declared_weight || 0);
-        });
+        totalCbm += o.cargo_totals?.cbm ?? (o.items || []).reduce((sum, it) => sum + Number(it.cargo_cbm ?? it.declared_cbm ?? 0), 0);
+        totalWeight += o.cargo_totals?.weight ?? (o.items || []).reduce((sum, it) => sum + Number(it.cargo_weight ?? it.declared_weight ?? 0), 0);
     });
     tbody.innerHTML =
         filtered.length > 0
             ? filtered
                   .map((o) => {
-                      const oCbm = (o.items || []).reduce(
-                          (s, i) => s + (parseFloat(i.declared_cbm) || 0),
+                      const oCbm = o.cargo_totals?.cbm ?? (o.items || []).reduce(
+                          (s, i) => s + (parseFloat(i.cargo_cbm ?? i.declared_cbm) || 0),
                           0,
                       );
-                      const oWt = (o.items || []).reduce(
-                          (s, i) => s + (parseFloat(i.declared_weight) || 0),
+                      const oWt = o.cargo_totals?.weight ?? (o.items || []).reduce(
+                          (s, i) => s + (parseFloat(i.cargo_weight ?? i.declared_weight) || 0),
                           0,
                       );
                       const statusClass =
@@ -693,7 +717,8 @@ async function deleteCustomer(id, name) {
     }
     if (!confirm('Delete customer "' + name + '"?')) return;
     try {
-        await api("DELETE", "/customers/" + id);
+        const current=await api('GET','/customers/'+id);
+        await api("DELETE", "/customers/" + id,{revision:current.data.revision});
         showToast("Customer deleted");
         loadCustomers();
     } catch (e) {
@@ -707,6 +732,7 @@ window.generatePortalLink = function (customerId, name) {
         return;
     }
     window._portalCustomerId = customerId;
+    window._portalRequestKey = clmsRequestKey('customer-portal');
     document.getElementById("portalCustomerName").textContent = name;
     document.getElementById("portalLinkResult").classList.add("d-none");
     document.getElementById("portalLinkInput").value = "";
@@ -723,6 +749,7 @@ window.doGeneratePortalLink = async function () {
     try {
         setLoading(btn, true);
         const res = await api("POST", "/customer-portal-tokens", {
+            idempotency_key: window._portalRequestKey,
             customer_id: customerId,
             hours,
         });
@@ -805,6 +832,7 @@ window.openMessagesModal = function (customerId, name) {
         return;
     }
     window._messagesCustomerId = customerId;
+    window._messageRequestKey = null;
     document.getElementById("messagesCustomerName").textContent = name;
     document.getElementById("messageBody").value = "";
     loadMessages();
@@ -845,12 +873,15 @@ window.sendMessage = async function () {
     const body = document.getElementById("messageBody").value.trim();
     if (!body) return;
     const btn = document.getElementById("messageSendBtn");
+    window._messageRequestKey ||= clmsRequestKey('customer-message');
     try {
         setLoading(btn, true);
         await api("POST", "/internal-messages", {
+            idempotency_key: window._messageRequestKey,
             customer_id: customerId,
             body,
         });
+        window._messageRequestKey = null;
         document.getElementById("messageBody").value = "";
         loadMessages();
         showToast("Message sent");
@@ -862,6 +893,7 @@ window.sendMessage = async function () {
 };
 
 window.openImportModal = function (entity) {
+    window._customerImportRequestKey=clmsRequestKey('customer-import');
     if (!canImportCustomers()) {
         showToast("You do not have permission to import customers", "warning");
         return;
@@ -898,15 +930,16 @@ window.doImport = async function () {
             resultEl.classList.add("d-none");
             resultEl.textContent = "";
         }
-        const res = await api("POST", "/" + entity + "/import", { csv });
+        const res = await api("POST", "/" + entity + "/import", { csv,idempotency_key:window._customerImportRequestKey || (window._customerImportRequestKey=clmsRequestKey('customer-import')) });
         const d = res.data;
         let msg = `Created: ${d.created}, Skipped: ${d.skipped}`;
         if (d.errors?.length) msg += `; Errors: ${d.errors.join("; ")}`;
+        if (d.warnings?.length) msg += `; Warnings: ${d.warnings.join('; ')}`;
         if (resultEl) {
             resultEl.textContent = msg;
             resultEl.className =
                 "alert alert-" +
-                (d.errors?.length ? "warning" : "success") +
+                (d.errors?.length || d.warnings?.length ? "warning" : "success") +
                 " mt-2";
             resultEl.classList.remove("d-none");
         }

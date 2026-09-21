@@ -13,7 +13,9 @@
         formPayeeAc,
         formCategoryAc;
     let filterDebounce = null;
-    let loading = false;
+    let expenseLoadGeneration=0;
+    let expenseRevision=null, expenseRequest=null, expenseSaving=false, expenseEditGeneration=0;
+    const expenseRevisions=new Map();
 
     async function api(method, path, body) {
         const opts = { method, credentials: "same-origin" };
@@ -60,8 +62,7 @@
     }
 
     window.loadExpenses = async function () {
-        if (loading) return;
-        loading = true;
+        const generation=++expenseLoadGeneration;
         const tbody = document.querySelector("#expensesTable tbody");
         if (tbody)
             tbody.innerHTML =
@@ -78,19 +79,22 @@
         if (s.sid) params.set("supplier_id", s.sid);
 
         try {
-            const d = await api("GET", "/expenses?" + params.toString());
-            renderExpenses(d.data);
+            const endpoint="/expenses?"+params.toString();
+            const d=await api("GET",endpoint);
+            const rows=d.meta?.has_more ? await clmsLoadAllPages(endpoint):d.data;
+            if(generation!==expenseLoadGeneration)return;
+            renderExpenses(rows);
             renderSummary(d.summary);
             saveFiltersToStorage();
         } catch (e) {
+            if(generation!==expenseLoadGeneration)return;
+            expenseRevisions.clear();renderSummary([]);
             if (tbody)
                 tbody.innerHTML =
                     '<tr><td colspan="8" class="text-center text-danger py-4">' +
                     escapeHtml(e.message || "Failed to load") +
                     "</td></tr>";
             alert(e.message || "Failed to load expenses");
-        } finally {
-            loading = false;
         }
     };
 
@@ -126,7 +130,7 @@
         const parts = summary
             .map(
                 (s) =>
-                    `<strong>${s.currency}:</strong> ${parseFloat(s.total).toFixed(2)}`,
+                    `<strong>${escapeHtml(s.currency)}:</strong> ${parseFloat(s.total).toFixed(4)}`,
             )
             .join(" &nbsp; ");
         el.innerHTML =
@@ -136,6 +140,7 @@
     }
 
     function renderExpenses(rows) {
+        expenseRevisions.clear();for(const row of rows||[])expenseRevisions.set(String(row.id),row.revision);
         const tbody = document.querySelector("#expensesTable tbody");
         if (!rows || rows.length === 0) {
             tbody.innerHTML =
@@ -148,7 +153,7 @@
       <tr>
         <td>${r.expense_date || "—"}</td>
         <td><span class="badge bg-secondary">${escapeHtml(r.category_name || r.category_type || "—")}</span></td>
-        <td><strong>${parseFloat(r.amount).toFixed(2)}</strong> ${r.currency}</td>
+        <td><strong>${parseFloat(r.amount).toFixed(4)}</strong> ${escapeHtml(r.currency)}</td>
         <td>${escapeHtml(r.payee || "—")}</td>
         <td>${r.order_id ? '<a href="/cargochina/orders.php?order_id=' + r.order_id + '">#' + r.order_id + "</a>" : "—"}</td>
         <td>${r.container_code || (r.container_id ? "#" + r.container_id : "—")}</td>
@@ -172,6 +177,7 @@
     }
 
     window.openExpenseForm = function (editId) {
+        expenseRevision=null; expenseEditGeneration++;
         document.getElementById("expenseModalTitle").textContent = editId
             ? "Edit Expense"
             : "Add Expense";
@@ -202,9 +208,12 @@
     };
 
     async function loadExpenseForEdit(id) {
+        const generation=expenseEditGeneration;
         try {
             const d = await api("GET", "/expenses/" + id);
             const r = d.data;
+            if(generation!==expenseEditGeneration)return;
+            expenseRevision=r.revision;
             if (formCategoryAc?.setValue) {
                 formCategoryAc.setValue({
                     id: r.category_id,
@@ -260,7 +269,9 @@
     }
 
     window.saveExpense = async function () {
+        if(expenseSaving)return;
         const id = document.getElementById("expenseId").value;
+        if(id&&!expenseRevision)return;
         const categoryVal =
             formCategoryAc?.getSelectedId?.() ||
             document.getElementById("expenseCategory").value.trim();
@@ -284,7 +295,7 @@
             ...(categoryId === 0 && categoryName
                 ? { category_name: categoryName }
                 : {}),
-            amount: parseFloat(document.getElementById("expenseAmount").value),
+            amount: document.getElementById("expenseAmount").value,
             currency: document.getElementById("expenseCurrency").value,
             expense_date: document.getElementById("expenseDate").value,
             payee:
@@ -307,12 +318,17 @@
             );
             return;
         }
+        const signature=JSON.stringify(body);
+        if(id)body.revision=expenseRevision;
+        else {if(expenseRequest?.signature!==signature)expenseRequest={signature,key:crypto.randomUUID()};body.idempotency_key=expenseRequest.key;}
+        expenseSaving=true;
         try {
             if (id) {
                 await api("PUT", "/expenses/" + id, body);
             } else {
                 await api("POST", "/expenses", body);
             }
+            expenseRequest=null;
             bootstrap.Modal.getInstance(
                 document.getElementById("expenseModal"),
             ).hide();
@@ -320,13 +336,13 @@
             loadExpenses();
         } catch (e) {
             alert(e.message || "Failed to save expense");
-        }
+        } finally {expenseSaving=false;}
     };
 
     window.deleteExpense = async function (id) {
         if (!confirm("Delete this expense?")) return;
         try {
-            await api("DELETE", "/expenses/" + id);
+            await api("DELETE", "/expenses/" + id,{revision:expenseRevisions.get(String(id))});
             loadExpenses();
         } catch (e) {
             alert(e.message || "Failed to delete");

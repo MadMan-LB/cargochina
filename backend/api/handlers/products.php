@@ -5,6 +5,10 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
+require_once dirname(__DIR__,2).'/services/AuditService.php';
+require_once dirname(__DIR__,2).'/services/CatalogRevisionService.php';
+require_once dirname(__DIR__,2).'/services/ProductWriteService.php';
+require_once dirname(__DIR__,2).'/services/MasterDataImportService.php';
 require_once dirname(__DIR__, 2) . '/services/ItemClassificationService.php';
 
 function productConfirmedClassification(PDO $pdo,array $input,?string $descriptionEn,?string $descriptionCn,?int $supplierId): array
@@ -77,7 +81,7 @@ function buildProductSearchSql(string $query, array &$params, string $productAli
 
     $clauses = [];
     foreach ($terms as $term) {
-        $like = '%' . $term . '%';
+        $like = clmsSearchLike($term);
         $clauses[] = "(CAST($productAlias.id AS CHAR) LIKE ? OR $productAlias.description_cn LIKE ? OR $productAlias.description_en LIKE ? OR COALESCE($productAlias.packaging, '') LIKE ? OR COALESCE($productAlias.hs_code, '') LIKE ? OR COALESCE($supplierAlias.name, '') LIKE ?)";
         array_push($params, $like, $like, $like, $like, $like, $like);
     }
@@ -86,14 +90,27 @@ function buildProductSearchSql(string $query, array &$params, string $productAli
 }
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('products', $method, $id, $action);
     $pdo = getDb();
-    $hasHighAlertColumn = ensureProductHighAlertColumn($pdo);
+    if ($method === 'GET') { require_once dirname(__DIR__, 2) . '/services/QueryFilterService.php'; QueryFilterService::validate($_GET, 'products'); }
+    requirePermission($method==='GET'?'products.read':($method==='POST'?($id==='import'?'products.import':'products.create'):'products.write'),['ChinaAdmin','ChinaEmployee','SuperAdmin']);
+    if(($method==='POST'&&$id===null)||$method==='PUT'){
+        $input=ProductWriteService::normalize($pdo,$input);
+        MasterDataImportService::lock($pdo,'product');
+    }
+    $createClaim=null;
+    if($method==='POST' && $id===null) {
+        $createClaim=OperationReplayService::claim($pdo,'catalog_products',$input,(int)getAuthUserId());
+        if($createClaim['previous_id']) jsonResponse(['data'=>['id'=>$createClaim['previous_id']],'idempotent_replay'=>true]);
+    }
+    $hasHighAlertColumn = productHasColumn($pdo,'high_alert_note');
 
     switch ($method) {
         case 'GET':
             if ($id === 'hs-codes') {
                 $q = trim($_GET['q'] ?? '');
-                $like = strlen($q) >= 1 ? '%' . preg_replace('/\s+/', '%', $q) . '%' : '%';
+                $like = strlen($q) >= 1 ? clmsSearchLike($q) : '%';
                 $stmt = $pdo->prepare("SELECT DISTINCT hs_code FROM products WHERE hs_code IS NOT NULL AND hs_code != '' AND hs_code LIKE ? ORDER BY hs_code LIMIT 15");
                 $stmt->execute([$like]);
                 $rows = array_map(fn($r) => ['id' => $r['hs_code'], 'hs_code' => $r['hs_code']], $stmt->fetchAll(PDO::FETCH_ASSOC));
@@ -126,7 +143,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if (strlen($q) < 2) {
                     jsonResponse(['data' => []]);
                 }
-                $like = "%$q%";
+                $like = clmsSearchLike($q);
                 $stmt = $pdo->prepare("SELECT id, description_cn, description_en, cbm, weight, hs_code FROM products WHERE description_cn LIKE ? OR description_en LIKE ? OR hs_code LIKE ? LIMIT 20");
                 $stmt->execute([$like, $like, $like]);
                 $candidates = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -172,7 +189,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         $params[] = $normalizedHsCode . '%';
                     } else {
                         $where[] = "COALESCE(p.hs_code, '') LIKE ?";
-                        $params[] = '%' . preg_replace('/\s+/', '%', $hsCode) . '%';
+                        $params[] = clmsSearchLike($hsCode);
                     }
                 }
 
@@ -216,6 +233,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 jsonResponse(['data' => $rows,'meta'=>['limit'=>$limit,'offset'=>$offset,'has_more'=>$hasMore,'total'=>$total]]);
             }
+            $revisionReadOwned = !$pdo->inTransaction();
+            if ($revisionReadOwned) AuditService::begin($pdo);
             $stmt = $pdo->prepare("SELECT p.*, s.name as supplier_name, COALESCE(ic.item_type_code,'unclassified') item_type_code, ic.confidence item_type_confidence, COALESCE(ic.is_confirmed,0) item_type_confirmed FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id LEFT JOIN item_classifications ic ON ic.entity_type='product' AND ic.entity_id=p.id WHERE p.id = ?");
             $stmt->execute([$id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -235,80 +254,27 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             if (!isset($row['pieces_per_carton'])) $row['pieces_per_carton'] = null;
             if (!isset($row['unit_price'])) $row['unit_price'] = null;
+            $row['revision']=CatalogRevisionService::revision($pdo,'products',(int)$id);
+            if ($revisionReadOwned) $pdo->commit();
             jsonResponse(['data' => $row]);
 
         case 'POST':
             if ($id === 'import') {
-                $csv = trim($input['csv'] ?? $input['data'] ?? '');
-                if (!$csv) jsonError('No CSV data provided', 400);
-                $lines = preg_split('/\r\n|\r|\n/', $csv);
-                $header = array_map('trim', array_map('strtolower', str_getcsv(array_shift($lines) ?? '')));
-                $col = fn($n) => array_search($n, $header) !== false ? array_search($n, $header) : (['description_cn' => 0, 'description_en' => 1, 'cbm' => 2, 'weight' => 3, 'hs_code' => 4, 'pieces_per_carton' => 5, 'unit_price' => 6, 'packaging' => 7, 'supplier_code' => 8][$n] ?? -1);
-                $created = 0;
-                $skipped = 0;
-                $errors = [];
-                $hasPpc = (bool) @$pdo->query("SHOW COLUMNS FROM products LIKE 'pieces_per_carton'")->rowCount();
-                $hasUp = (bool) @$pdo->query("SHOW COLUMNS FROM products LIKE 'unit_price'")->rowCount();
-                $hasLwh = (bool) @$pdo->query("SHOW COLUMNS FROM products LIKE 'length_cm'")->rowCount();
-                foreach ($lines as $i => $line) {
-                    $row = str_getcsv($line);
-                    if (count($row) < 3) continue;
-                    $descCn = trim($row[$col('description_cn')] ?? $row[0] ?? '');
-                    $descEn = trim($row[$col('description_en')] ?? $row[1] ?? '');
-                    $cbm = (float) ($row[$col('cbm')] ?? $row[2] ?? 0);
-                    $weight = (float) ($row[$col('weight')] ?? $row[3] ?? 0);
-                    if (!$descCn && !$descEn) {
-                        $skipped++;
-                        continue;
-                    }
-                    if ($cbm <= 0) {
-                        $errors[] = "Row " . ($i + 2) . ": CBM required";
-                        continue;
-                    }
-                    $supplierCode = $col('supplier_code') >= 0 && isset($row[$col('supplier_code')]) ? trim($row[$col('supplier_code')]) : null;
-                    $supplierId = null;
-                    if ($supplierCode) {
-                        $s = $pdo->prepare("SELECT id FROM suppliers WHERE code = ?");
-                        $s->execute([$supplierCode]);
-                        $supplierId = $s->fetchColumn() ?: null;
-                    }
-                    $hsCode = $col('hs_code') >= 0 && isset($row[$col('hs_code')]) ? trim($row[$col('hs_code')]) : null;
-                    $ppc = $hasPpc && $col('pieces_per_carton') >= 0 && isset($row[$col('pieces_per_carton')]) ? (int) $row[$col('pieces_per_carton')] : null;
-                    $up = $hasUp && $col('unit_price') >= 0 && isset($row[$col('unit_price')]) ? (float) $row[$col('unit_price')] : null;
-                    $packaging = $col('packaging') >= 0 && isset($row[$col('packaging')]) ? trim($row[$col('packaging')]) : null;
-                    $chk = $pdo->prepare("SELECT id FROM products WHERE (? != '' AND description_cn = ?) OR (? != '' AND description_en = ?)");
-                    $chk->execute([$descCn, $descCn, $descEn, $descEn]);
-                    if ($chk->fetch()) {
-                        $skipped++;
-                        continue;
-                    }
-                    $cols = ['supplier_id', 'cbm', 'weight', 'description_cn', 'description_en', 'hs_code', 'packaging', 'image_paths'];
-                    $vals = [$supplierId, $cbm, $weight, $descCn ?: null, $descEn ?: null, $hsCode ?: null, $packaging ?: null, null];
-                    if ($hasLwh) {
-                        $cols[] = 'length_cm';
-                        $cols[] = 'width_cm';
-                        $cols[] = 'height_cm';
-                        $vals[] = null;
-                        $vals[] = null;
-                        $vals[] = null;
-                    }
-                    if ($hasPpc) {
-                        $cols[] = 'pieces_per_carton';
-                        $vals[] = $ppc;
-                    }
-                    if ($hasUp) {
-                        $cols[] = 'unit_price';
-                        $vals[] = $up;
-                    }
-                    try {
-                        $ph = implode(',', array_fill(0, count($vals), '?'));
-                        $pdo->prepare("INSERT INTO products (" . implode(',', $cols) . ") VALUES ($ph)")->execute($vals);
-                        $created++;
-                    } catch (PDOException $e) {
-                        $errors[] = "Row " . ($i + 2) . ": " . $e->getMessage();
-                    }
-                }
-                jsonResponse(['data' => ['created' => $created, 'skipped' => $skipped, 'errors' => $errors]]);
+                $allowed=['description_cn','description_en','cbm','weight','hs_code','pieces_per_carton','unit_price','buy_price','sell_price','packaging','supplier_code','length_cm','width_cm','height_cm','dimensions_scope','item_type_code','item_type_confirmed','force_create'];
+                $result=MasterDataImportService::run($pdo,'product',$input,['item_type_code','item_type_confirmed'],$allowed,function(array $row)use($pdo):?int{
+                    $row['supplier_id']=null;
+                    if(!empty($row['supplier_code'])){$s=$pdo->prepare('SELECT id FROM suppliers WHERE code=?');$s->execute([$row['supplier_code']]);$row['supplier_id']=$s->fetchColumn();if(!$row['supplier_id'])jsonError('Unknown product supplier code',422);}
+                    $row=ProductWriteService::normalize($pdo,$row);
+                    $classification=productConfirmedClassification($pdo,$row,$row['description_en']??null,$row['description_cn']??null,$row['supplier_id']);
+                    $s=$pdo->prepare("SELECT id FROM products WHERE supplier_id <=> ? AND COALESCE(description_cn,'')=? AND COALESCE(description_en,'')=? LIMIT 1");$s->execute([$row['supplier_id'],$row['description_cn']??'',$row['description_en']??'']);if($s->fetchColumn())return null;
+                    ProductWriteService::assertDuplicates($pdo,$row);
+                    $fields=['supplier_id','description_cn','description_en','cbm','weight','hs_code','pieces_per_carton','unit_price','buy_price','sell_price','packaging','length_cm','width_cm','height_cm','dimensions_scope'];
+                    $values=[];foreach($fields as $field)$values[]=$row[$field]??($field==='weight'?0:($field==='dimensions_scope'?'piece':null));
+                    $pdo->prepare('INSERT INTO products('.implode(',',$fields).') VALUES ('.implode(',',array_fill(0,count($fields),'?')).')')->execute($values);$newId=(int)$pdo->lastInsertId();
+                    (new ItemClassificationService($pdo))->set('product',$newId,$classification['item_type_code'],$classification['confidence'],true,getAuthUserId(),'manual');
+                    return $newId;
+                });
+                jsonResponse(['data'=>$result]);
             }
             $forceCreate = !empty($input['force_create']);
             $cbm = (float) ($input['cbm'] ?? 0);
@@ -350,22 +316,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             $classification=productConfirmedClassification($pdo,$input,$descriptionEn,$descriptionCn,$supplierId);
             $imagePaths = isset($input['image_paths']) ? json_encode($input['image_paths']) : null;
-            if (!$forceCreate && ($descriptionCn || $descriptionEn || $hsCode)) {
-                $search = trim($descriptionCn ?: $descriptionEn ?: $hsCode ?: '');
-                if (strlen($search) >= 2) {
-                    $like = '%' . $search . '%';
-                    $stmt = $pdo->prepare("SELECT id, description_cn, description_en, hs_code FROM products WHERE description_cn LIKE ? OR description_en LIKE ? OR hs_code LIKE ? LIMIT 10");
-                    $stmt->execute([$like, $like, $like]);
-                    $dupes = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                    foreach ($dupes as $d) {
-                        $compare = $d['description_cn'] ?: $d['description_en'] ?: $d['hs_code'] ?: '';
-                        similar_text($search, $compare, $pct);
-                        if ($pct >= 70) {
-                            jsonError('Possible duplicate product. Use force_create=true to create anyway, or reuse existing product #' . $d['id'], 409, ['suggested_ids' => array_column($dupes, 'id')]);
-                        }
-                    }
-                }
-            }
+            ProductWriteService::assertDuplicates($pdo,$input);
             $hasPpc = false;
             $hasUp = false;
             $hasBuy = false;
@@ -436,6 +387,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         $ins->execute([$newId, $text, $translated ?: null, $i]);
                     }
                 }
+                AuditService::record($pdo,'product',$newId,'create',null,AuditService::snapshot($pdo,'products',$newId),getAuthUserId());
+                OperationReplayService::record($pdo,'catalog_products',$newId,$createClaim,[],(int)getAuthUserId());
                 $pdo->commit();
             } catch(Throwable $e) {
                 if($pdo->inTransaction())$pdo->rollBack();
@@ -556,7 +509,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $vals[] = $highAlertNote ?: null;
             }
             $vals[] = $id;
-            $pdo->beginTransaction();
+            AuditService::begin($pdo);
+            $auditBefore=AuditService::snapshot($pdo,'products',(int)$id,true);
+            CatalogRevisionService::assertCurrent($pdo,'products',(int)$id,$input);
             try {
                 $pdo->prepare("UPDATE products SET " . implode(', ', $sets) . " WHERE id=?")->execute($vals);
                 (new ItemClassificationService($pdo))->set('product',(int)$id,$classification['item_type_code'],$classification['confidence'],true,getAuthUserId(),'manual');
@@ -572,6 +527,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         }
                     }
                 }
+                AuditService::record($pdo,'product',(int)$id,'update',$auditBefore,AuditService::snapshot($pdo,'products',(int)$id),getAuthUserId());
                 $pdo->commit();
             } catch(Throwable $e) {
                 if($pdo->inTransaction())$pdo->rollBack();
@@ -594,12 +550,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if (!$id) {
                 jsonError('ID required', 400);
             }
-            $pdo->beginTransaction();
+            AuditService::begin($pdo);
+            $auditBefore=AuditService::snapshot($pdo,'products',(int)$id,true);
+            CatalogRevisionService::assertCurrent($pdo,'products',(int)$id,$input);
             try {
                 $stmt = $pdo->prepare("DELETE FROM products WHERE id = ?");
                 $pdo->prepare("DELETE FROM item_classifications WHERE entity_type='product' AND entity_id=?")->execute([$id]);
                 $stmt->execute([$id]);
                 if($stmt->rowCount()===0){$pdo->rollBack();jsonError('Product not found',404);}
+                AuditService::record($pdo,'product',(int)$id,'delete',$auditBefore,null,getAuthUserId());
                 $pdo->commit();
             } catch(Throwable $e) { if($pdo->inTransaction())$pdo->rollBack(); throw $e; }
             if ($stmt->rowCount() === 0) {

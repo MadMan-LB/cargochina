@@ -25,7 +25,7 @@ require __DIR__ . '/../../includes/area_layout.php';
   </div>
 </div>
 <?php
-$pageScript = '/cargochina/frontend/js/receiving_receipt.js';
+$pageScript = '/cargochina/frontend/js/receiving_receipt.js?v=' . filemtime(__DIR__ . '/../../frontend/js/receiving_receipt.js');
 ?>
 <script>
   window.RECEIPT_ID = <?= (int)$receiptId ?>;

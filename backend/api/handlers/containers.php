@@ -8,6 +8,13 @@
 require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__, 2) . '/services/OrderCountryService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
+require_once dirname(__DIR__, 2) . '/services/CargoMetricsService.php';
+require_once dirname(__DIR__, 2) . '/services/ContainerCapacityService.php';
+require_once dirname(__DIR__, 2) . '/services/ShipmentAssignmentService.php';
+require_once dirname(__DIR__, 2) . '/services/CargoStateService.php';
+require_once dirname(__DIR__, 2) . '/services/ContainerWriteService.php';
+require_once dirname(__DIR__, 2) . '/services/OrderWriteService.php';
+require_once dirname(__DIR__, 2) . '/services/ShipmentWriteService.php';
 
 function containerTableHasColumn(PDO $pdo, string $table, string $column): bool
 {
@@ -75,6 +82,7 @@ function loadContainerOrderTotals(PDO $pdo, int $orderId): array
 {
     $columns = [
         'id',
+        'order_id',
         'cartons',
         'qty_per_carton',
         'quantity',
@@ -96,6 +104,7 @@ function loadContainerOrderTotals(PDO $pdo, int $orderId): array
     $stmt = $pdo->prepare("SELECT " . implode(', ', $columns) . " FROM order_items WHERE order_id = ?");
     $stmt->execute([$orderId]);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $rows = CargoMetricsService::shippingItems($pdo, $rows);
 
     $totals = [
         'items' => count($rows),
@@ -115,22 +124,29 @@ function loadContainerOrderTotals(PDO $pdo, int $orderId): array
         $totals['total_amount'] += $line['amount'];
     }
 
+    $cargo = CargoMetricsService::totals($pdo, [$orderId])[$orderId] ?? [];
+    $totals['total_cbm'] = $cargo['cbm'] ?? $totals['total_cbm'];
+    $totals['total_weight'] = $cargo['weight'] ?? $totals['total_weight'];
+    $totals['total_ctns'] = $cargo['cartons'] ?? $totals['total_ctns'];
+    $totals['total_qty'] = array_key_exists('quantity',$cargo) ? $cargo['quantity'] : $totals['total_qty'];
     return [
         'items' => (int) $totals['items'],
         'total_ctns' => round($totals['total_ctns'], 4),
-        'total_qty' => round($totals['total_qty'], 4),
-        'total_cbm' => round($totals['total_cbm'], 4),
-        'total_weight' => round($totals['total_weight'], 2),
-        'total_amount' => round($totals['total_amount'], 2),
+        'total_qty' => $totals['total_qty']===null ? null : round($totals['total_qty'], 4),
+        'total_cbm' => round($totals['total_cbm'], 6),
+        'total_weight' => round($totals['total_weight'], 4),
+        'total_amount' => $totals['total_qty']===null ? null : round($totals['total_amount'], 2),
     ];
 }
 
 function fetchContainerUsage(PDO $pdo, int $containerId): array
 {
+    $cargoSql = CargoMetricsService::orderTotalsSql($pdo);
     $stmt = $pdo->prepare(
         "SELECT
-            COALESCE(SUM(oi.declared_cbm), 0) AS used_cbm,
-            COALESCE(SUM(oi.declared_weight), 0) AS used_weight,
+            COALESCE(SUM(cargo.cbm), 0) AS used_cbm,
+            COALESCE(SUM(cargo.weight), 0) AS used_weight,
+            COALESCE(SUM(cargo.measured_cargo_complete=0),0)=0 AS capacity_known,
             COUNT(DISTINCT ord.order_id) AS order_count
          FROM (
             SELECT DISTINCT sdo.order_id
@@ -138,14 +154,15 @@ function fetchContainerUsage(PDO $pdo, int $containerId): array
             JOIN shipment_drafts sd ON sdo.shipment_draft_id = sd.id
             WHERE sd.container_id = ?
          ) ord
-         LEFT JOIN order_items oi ON oi.order_id = ord.order_id"
+         LEFT JOIN ($cargoSql) cargo ON cargo.order_id = ord.order_id"
     );
     $stmt->execute([$containerId]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
     return [
-        'used_cbm' => round((float) ($row['used_cbm'] ?? 0), 4),
-        'used_weight' => round((float) ($row['used_weight'] ?? 0), 2),
+        'used_cbm' => !empty($row['capacity_known']) ? round((float) ($row['used_cbm'] ?? 0), 6) : null,
+        'used_weight' => !empty($row['capacity_known']) ? round((float) ($row['used_weight'] ?? 0), 4) : null,
+        'capacity_known' => !empty($row['capacity_known']),
         'order_count' => (int) ($row['order_count'] ?? 0),
     ];
 }
@@ -153,6 +170,14 @@ function fetchContainerUsage(PDO $pdo, int $containerId): array
 function enrichContainerDestination(PDO $pdo, array $container): array
 {
     static $countryCache = [];
+    $container['revision']=ContainerWriteService::revision($container);
+    $container['assignment_locked']=!ShipmentAssignmentService::containerIsOpen($pdo,$container);
+    $container['allowed_status_transitions']=CargoStateService::nextContainerStates($pdo,$container);
+    if(array_key_exists('used_cbm',$container)) {
+        $known=($container['capacity_known']??true)!==false;
+        $container['remaining_cbm']=$known ? round((float)$container['max_cbm']-(float)$container['used_cbm'],6) : null;
+        $container['remaining_weight']=$known ? round((float)$container['max_weight']-(float)$container['used_weight'],4) : null;
+    }
 
     $countryId = OrderCountryService::resolveContainerDestinationCountryId($pdo, $container);
     $container['destination_country_id'] = $countryId ?: null;
@@ -192,9 +217,12 @@ function outputContainerOrdersCsv(array $container, array $ordersWithItems): voi
     header('Cache-Control: no-cache, no-store, must-revalidate');
 
     $out = fopen('php://output', 'w');
-    fputcsv($out, [clmsT('Container'), (string) ($container['code'] ?? '')]);
-    fputcsv($out, ['']);
-    fputcsv($out, array_map('clmsT', ['What Brand', 'Copy / Normal Goods', 'Code', 'Order ID', 'Customer', 'Supplier', 'I.I.N', 'Shipping Code', 'Description', 'Cartons', 'Qty/Carton', 'Total Qty', 'Unit Price', 'Total Amount', 'Declared CBM', 'Declared Weight', 'Express Number', 'Size', 'Photo Count', 'Item Number']));
+    clmsWriteCsv($out, array_map('clmsSpreadsheetCell',[clmsT('Container'), (string) ($container['code'] ?? '')]));
+    if (isset($container['cargo_totals'])) {
+        clmsWriteCsv($out, [clmsT('Cargo CBM'), $container['cargo_totals']['cbm'], clmsT('Cargo Weight (kg)'), $container['cargo_totals']['weight']]);
+    }
+    clmsWriteCsv($out, ['']);
+    clmsWriteCsv($out, array_map('clmsT', ['What Brand', 'Copy / Normal Goods', 'Code', 'Order ID', 'Customer', 'Supplier', 'I.I.N', 'Shipping Code', 'Description', 'Cartons', 'Qty/Carton', 'Total Qty', 'Unit Price', 'Total Amount', 'Cargo CBM', 'Cargo Weight', 'Express Number', 'Size', 'Photo Count', 'Item Number', 'Currency']));
     foreach ($ordersWithItems as $data) {
         $order = $data['order'] ?? [];
         foreach (($data['items'] ?? []) as $item) {
@@ -204,13 +232,11 @@ function outputContainerOrdersCsv(array $container, array $ordersWithItems): voi
             }
             $cartons = (float) ($item['cartons'] ?? 0);
             $qtyPerCarton = (float) ($item['qty_per_carton'] ?? 0);
-            $totalQty = ($cartons > 0 && $qtyPerCarton > 0)
-                ? $cartons * $qtyPerCarton
-                : (float) ($item['quantity'] ?? 0);
+            $totalQty = (float) ($item['quantity'] ?? 0);
             $unitPrice = isset($item['sell_price']) && $item['sell_price'] !== null && $item['sell_price'] !== ''
                 ? (float) $item['sell_price']
                 : (float) ($item['unit_price'] ?? 0);
-            fputcsv($out, [
+            clmsWriteCsv($out, array_map('clmsSpreadsheetCell',[
                 (string) ($item['what_brand'] ?? ''),
                 containerCopyNormalGoodsDisplay($item['copy_normal_goods'] ?? ''),
                 (string) ($item['code'] ?? ''),
@@ -225,22 +251,23 @@ function outputContainerOrdersCsv(array $container, array $ordersWithItems): voi
                 $totalQty ?: '',
                 $unitPrice ?: '',
                 $totalQty > 0 && $unitPrice ? round($totalQty * $unitPrice, 4) : '',
-                round((float) ($item['declared_cbm'] ?? 0), 6),
-                round((float) ($item['declared_weight'] ?? 0), 4),
+                isset($item['declared_cbm'])?round((float)$item['declared_cbm'],6):null,
+                isset($item['declared_weight'])?round((float)$item['declared_weight'],4):null,
                 (string) ($item['express_number'] ?? ''),
                 (string) ($item['size'] ?? ''),
                 count($imagePaths),
                 (string) ($item['item_number'] ?? ''),
-            ]);
+                (string) ($order['currency'] ?? 'USD'),
+            ]));
         }
     }
     foreach (OrderExcelService::sharedCartonIdentifierRows($ordersWithItems) as $reference) {
-        $row = array_fill(0, 20, '');
+        $row = array_fill(0, 21, '');
         $row[3] = $reference['order_id'];
         $row[6] = $reference['item_no'];
         $row[8] = clmsT('Contained item') . ': ' . $reference['description'];
         $row[19] = $reference['item_number'];
-        fputcsv($out, $row); // Identifier-only rows leave cargo/financial totals unchanged.
+        clmsWriteCsv($out, array_map('clmsSpreadsheetCell',$row)); // Identifier-only rows leave cargo/financial totals unchanged.
     }
     fclose($out);
     exit;
@@ -285,27 +312,39 @@ function fetchContainerExportExpenses(PDO $pdo, int $containerId, array $orderId
 }
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('containers', $method, $id, $action);
     $pdo = getDb();
+    if ($method === 'GET') { require_once dirname(__DIR__, 2) . '/services/QueryFilterService.php'; QueryFilterService::validate($_GET, 'containers'); }
+    if($method==='GET'&&($action==='export'||$id==='export'))clmsBeginExportSnapshot($pdo);
+    requirePermission('containers.'.($method==='GET'?'read':($action==='assign-orders'?'assign':'write')));
 
-    switch ($method) {
+    try { switch ($method) {
 
         // -------------------------------------------------------------------------
         case 'GET':
+            foreach(['q','fill','status_mode','format'] as $field)if(isset($_GET[$field])&&!is_string($_GET[$field]))jsonError("Invalid $field filter",422);
+            foreach(['limit'=>1,'offset'=>0] as $field=>$minimum)if(isset($_GET[$field])&&(filter_var($_GET[$field],FILTER_VALIDATE_INT)===false||(int)$_GET[$field]<$minimum))jsonError("Invalid $field",422);
+            if(isset($_GET['status']))foreach((array)$_GET['status'] as $value)if(!is_string($value))jsonError('Invalid status filter',422);
+            if(isset($_GET['status_mode'])&&!in_array($_GET['status_mode'],['include','exclude'],true))jsonError('Invalid status filter mode',422);
+            if(isset($_GET['format'])&&!in_array($_GET['format'],['csv','xlsx'],true))jsonError('Unsupported export format',422);
             if ($id === 'search') {
                 $q = trim($_GET['q'] ?? '');
                 if (strlen($q) < 1) {
                     jsonResponse(['data' => []]);
                 }
-                $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+                $like = clmsSearchLike($q);
                 $coll = 'COLLATE utf8mb4_unicode_ci';
                 $chkNotes = @$pdo->query("SHOW COLUMNS FROM containers LIKE 'notes'");
                 $notesCond = ($chkNotes && $chkNotes->rowCount() > 0) ? " OR (notes $coll LIKE ?)" : '';
-                $sql = "SELECT id, code, max_cbm, max_weight, status FROM containers WHERE ((code $coll LIKE ?) OR id = ?$notesCond) ORDER BY id DESC LIMIT 20";
+                $sql = "SELECT * FROM containers WHERE ((code $coll LIKE ?) OR id = ?$notesCond) ORDER BY id DESC LIMIT 20";
                 $stmt = $pdo->prepare($sql);
                 $execParams = [$like, is_numeric($q) ? (int) $q : 0];
                 if ($notesCond) $execParams[] = $like;
                 $stmt->execute($execParams);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                foreach ($rows as &$searchRow) $searchRow = enrichContainerDestination($pdo,$searchRow+fetchContainerUsage($pdo,(int)$searchRow['id']));
+                unset($searchRow);
                 jsonResponse(['data' => $rows]);
             }
             if ($id && $action === 'orders') {
@@ -344,6 +383,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     'weight' => 0.0,
                     'amount' => 0.0,
                 ];
+                $amountsByCurrency=[];
                 foreach ($orders as &$ord) {
                     $ord['item_identifiers'] = [];
                     foreach ($containerItems[(int) $ord['id']] ?? [] as $item) {
@@ -361,35 +401,41 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     }
                     $t = loadContainerOrderTotals($pdo, (int) $ord['id']);
                     $ord += $t;
+                    $currency=$ord['currency']?:'USD';
+                    if(!array_key_exists($currency,$amountsByCurrency))$amountsByCurrency[$currency]=0.0;
+                    $amountsByCurrency[$currency]=$amountsByCurrency[$currency]===null||$t['total_amount']===null?null:$amountsByCurrency[$currency]+$t['total_amount'];
                     $totals['item_count'] += (int) $t['items'];
                     $totals['cartons'] += (float) $t['total_ctns'];
-                    $totals['quantity'] += (float) $t['total_qty'];
+                    $totals['quantity'] = $totals['quantity']===null || $t['total_qty']===null ? null : $totals['quantity']+(float)$t['total_qty'];
                     $totals['cbm'] += (float) $t['total_cbm'];
                     $totals['weight'] += (float) $t['total_weight'];
-                    $totals['amount'] += (float) $t['total_amount'];
+                    $totals['amount'] = $totals['amount']===null || $t['total_amount']===null ? null : $totals['amount']+(float)$t['total_amount'];
                 }
                 unset($ord);
                 $usage = fetchContainerUsage($pdo, (int) $id);
                 $container['used_cbm']    = $usage['used_cbm'];
                 $container['used_weight'] = $usage['used_weight'];
-                $container['fill_pct_cbm'] = $container['max_cbm'] > 0
-                    ? round($container['used_cbm'] / $container['max_cbm'] * 100, 1) : 0;
+                $container['capacity_known'] = $usage['capacity_known'];
+                $container['fill_pct_cbm'] = !$usage['capacity_known']?null:($container['max_cbm'] > 0
+                    ? round($container['used_cbm'] / $container['max_cbm'] * 100, 1) : 0);
                 $container = enrichContainerDestination($pdo, $container);
                 $draftsStmt = $pdo->prepare(
-                    "SELECT sd.id, sd.status, sd.container_number, sd.booking_number, sd.tracking_url,
+                    "SELECT sd.id, sd.status, sd.container_id, sd.container_number, sd.booking_number, sd.tracking_url,
                             (SELECT COUNT(*) FROM shipment_draft_orders WHERE shipment_draft_id = sd.id) as order_count
                      FROM shipment_drafts sd WHERE sd.container_id = ? ORDER BY sd.id"
                 );
                 $draftsStmt->execute([$id]);
                 $drafts = $draftsStmt->fetchAll(PDO::FETCH_ASSOC);
+                foreach($drafts as &$draft)$draft['revision']=ShipmentWriteService::revision($draft);unset($draft);
                 jsonResponse(['data' => ['container' => $container, 'orders' => $orders, 'drafts' => $drafts, 'totals' => [
                     'order_count' => (int) $totals['order_count'],
                     'item_count' => (int) $totals['item_count'],
                     'cartons' => round($totals['cartons'], 4),
-                    'quantity' => round($totals['quantity'], 4),
-                    'cbm' => round($totals['cbm'], 4),
-                    'weight' => round($totals['weight'], 2),
-                    'amount' => round($totals['amount'], 2),
+                    'quantity' => $totals['quantity']===null?null:round($totals['quantity'], 4),
+                    'cbm' => $usage['used_cbm'],
+                    'weight' => $usage['used_weight'],
+                    'amount' => count($amountsByCurrency)===1?reset($amountsByCurrency):null,
+                    'amounts_by_currency' => $amountsByCurrency,
                 ]]]);
             }
 
@@ -423,10 +469,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $stmt->execute([$oid]);
                     $order = $stmt->fetch(PDO::FETCH_ASSOC);
                     if (!$order) continue;
-                    $items = normalizeOrderItems($pdo, fetchOrderItems($pdo, (int) $oid));
+                    $items = CargoMetricsService::shippingItems($pdo, normalizeOrderItems($pdo, fetchOrderItems($pdo, (int) $oid)));
                     $ordersWithItems[] = ['order' => $order, 'items' => $items];
                 }
-                $format = strtolower(trim((string) ($_GET['format'] ?? 'xlsx')));
+                $format = clmsExportFormat('xlsx');
+                $cargo = CargoMetricsService::totals($pdo, $orderIds);
+                foreach ($cargo as $summary) if (!$summary['quantity_complete']) jsonError('Historical item quantities require reconciliation before a packing-list export',409);
+                $container['cargo_totals'] = ['cbm' => array_sum(array_column($cargo, 'cbm')), 'weight' => array_sum(array_column($cargo, 'weight'))];
                 $code = preg_replace('/[^a-zA-Z0-9_-]/', '_', $container['code'] ?? 'container');
                 if ($format === 'csv') {
                     outputContainerOrdersCsv($container, $ordersWithItems);
@@ -436,6 +485,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     'container_' . $code . '_orders_' . date('Ymd_His') . '.xlsx',
                     [
                         'container' => $container,
+                        'cargo_totals' => $container['cargo_totals'],
                         'expenses' => $expenses,
                     ]
                 );
@@ -450,15 +500,19 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     : (trim((string) $statusParam) !== '' ? [trim((string) $statusParam)] : []);
                 $statusMode = strtolower(trim((string) ($_GET['status_mode'] ?? 'include')));
                 $statusMode = $statusMode === 'exclude' ? 'exclude' : 'include';
+                if(array_diff($statusFilter,['planning','to_go','on_route','arrived','available']))jsonError('Invalid container status filter',422);
+                $cargoSql = CargoMetricsService::orderTotalsSql($pdo);
                 $sql = "SELECT c.*,
-                    COALESCE(cu.used_cbm, 0) AS used_cbm,
-                    COALESCE(cu.used_weight, 0) AS used_weight,
+                    CASE WHEN cu.capacity_known=0 THEN NULL ELSE COALESCE(cu.used_cbm, 0) END AS used_cbm,
+                    CASE WHEN cu.capacity_known=0 THEN NULL ELSE COALESCE(cu.used_weight, 0) END AS used_weight,
+                    COALESCE(cu.capacity_known,1) AS capacity_known,
                     COALESCE(cu.order_count, 0) AS order_count
                 FROM containers c
                 LEFT JOIN (
                     SELECT ord.container_id,
-                           COALESCE(SUM(oi.declared_cbm), 0) AS used_cbm,
-                           COALESCE(SUM(oi.declared_weight), 0) AS used_weight,
+                           COALESCE(SUM(cargo.cbm), 0) AS used_cbm,
+                           COALESCE(SUM(cargo.weight), 0) AS used_weight,
+                           COALESCE(SUM(cargo.measured_cargo_complete=0),0)=0 AS capacity_known,
                            COUNT(DISTINCT ord.order_id) AS order_count
                     FROM (
                         SELECT DISTINCT sd.container_id, sdo.order_id
@@ -467,13 +521,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         JOIN orders ovis ON sdo.order_id = ovis.id
                         WHERE sd.container_id IS NOT NULL
                     ) ord
-                    LEFT JOIN order_items oi ON oi.order_id = ord.order_id
+                    LEFT JOIN ($cargoSql) cargo ON cargo.order_id = ord.order_id
                     GROUP BY ord.container_id
                 ) cu ON cu.container_id = c.id
                 WHERE 1=1";
                 $params = [];
                 if ($search !== '') {
-                    $like = '%' . $search . '%';
+                    $like = clmsSearchLike($search);
                     $coll = 'COLLATE utf8mb4_unicode_ci';
                     $innerCond = "(cu2.name $coll LIKE ?) OR (cu2.code $coll LIKE ?)";
                     $innerParams = [$like, $like];
@@ -513,10 +567,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $params = array_merge($params, $statusFilter);
                 }
                 $fillFilter=strtolower(trim((string)($_GET['fill']??'')));
-                if($fillFilter==='empty')$sql.=' AND COALESCE(cu.used_cbm,0)=0';
-                elseif($fillFilter==='partial')$sql.=' AND COALESCE(cu.used_cbm,0)>0 AND (COALESCE(cu.used_cbm,0)/NULLIF(c.max_cbm,0))*100<85';
-                elseif($fillFilter==='almost')$sql.=' AND (COALESCE(cu.used_cbm,0)/NULLIF(c.max_cbm,0))*100>=85 AND (COALESCE(cu.used_cbm,0)/NULLIF(c.max_cbm,0))*100<100';
-                elseif($fillFilter==='full')$sql.=' AND (COALESCE(cu.used_cbm,0)/NULLIF(c.max_cbm,0))*100>=100';
+                if(!in_array($fillFilter,['','empty','partial','almost','full','launching_soon'],true))jsonError('Invalid capacity filter',422);
+                if(in_array($fillFilter,['empty','partial','almost','full'],true))$sql.=' AND COALESCE(cu.capacity_known,1)=1';
+                $fillRatio='GREATEST(COALESCE(cu.used_cbm,0)/NULLIF(c.max_cbm,0),COALESCE(cu.used_weight,0)/NULLIF(c.max_weight,0))';
+                if($fillFilter==='empty')$sql.=' AND COALESCE(cu.order_count,0)=0';
+                elseif($fillFilter==='partial')$sql.=" AND COALESCE(cu.order_count,0)>0 AND $fillRatio<0.85";
+                elseif($fillFilter==='almost')$sql.=" AND $fillRatio>=0.85 AND $fillRatio<1";
+                elseif($fillFilter==='full')$sql.=" AND $fillRatio>=1";
                 elseif($fillFilter==='launching_soon')$sql.=' AND c.expected_ship_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(),INTERVAL 7 DAY)';
                 $limit=clmsQueryLimit($_GET['limit']??null,50,200);$offset=clmsQueryOffset($_GET['offset']??null);
                 $countStmt=$params?$pdo->prepare("SELECT COUNT(*) FROM ($sql) containers_filtered"):$pdo->query("SELECT COUNT(*) FROM ($sql) containers_filtered");if($params)$countStmt->execute($params);$total=(int)$countStmt->fetchColumn();
@@ -526,11 +583,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 $hasMore=count($rows)>$limit;if($hasMore)$rows=array_slice($rows,0,$limit);
                 foreach ($rows as &$r) {
-                    $r['used_cbm']    = (float) $r['used_cbm'];
-                    $r['used_weight'] = (float) $r['used_weight'];
+                    $r['capacity_known'] = (bool)$r['capacity_known'];
+                    $r['used_cbm']    = $r['capacity_known'] ? (float) $r['used_cbm'] : null;
+                    $r['used_weight'] = $r['capacity_known'] ? (float) $r['used_weight'] : null;
                     $r['order_count'] = (int)   $r['order_count'];
-                    $r['fill_pct_cbm'] = $r['max_cbm'] > 0
-                        ? round($r['used_cbm'] / $r['max_cbm'] * 100, 1) : 0;
+                    $r['fill_pct_cbm'] = !$r['capacity_known']?null:($r['max_cbm'] > 0
+                        ? round($r['used_cbm'] / $r['max_cbm'] * 100, 1) : 0);
                     $r = enrichContainerDestination($pdo, $r);
                 }
                 unset($r);
@@ -541,16 +599,26 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $stmt->execute([$id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$row) jsonError('Container not found', 404);
+            $row += fetchContainerUsage($pdo,(int)$id);
             jsonResponse(['data' => enrichContainerDestination($pdo, $row)]);
             break;
 
         // -------------------------------------------------------------------------
         case 'PUT':
             if (!$id) jsonError('Container ID required', 400);
-            $stmt = $pdo->prepare("SELECT * FROM containers WHERE id = ?");
+            $startedTransaction = !$pdo->inTransaction();
+            if ($startedTransaction) {
+                $pdo->beginTransaction();
+                register_shutdown_function(static function () use ($pdo) { if ($pdo->inTransaction()) $pdo->rollBack(); });
+            }
+            $stmt = $pdo->prepare("SELECT * FROM containers WHERE id = ? FOR UPDATE");
             $stmt->execute([$id]);
             $existing = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$existing) jsonError('Container not found', 404);
+            if(!is_string($input['revision']??null)||!hash_equals(ContainerWriteService::revision($existing),$input['revision']))jsonError('Container changed or revision is missing; reopen before saving',409);
+            $input=ContainerWriteService::normalize($pdo,$input,$existing);
+            CargoStateService::assertContainerUpdate($pdo, $existing, $input);
+            ContainerWriteService::assertDestination($pdo,$existing,$input);
             $allowed_statuses = ['planning', 'to_go', 'on_route', 'arrived', 'available'];
             $sets = [];
             $params = [];
@@ -565,20 +633,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $params[] = $code;
             }
             if (array_key_exists('max_cbm', $input)) {
-                $maxCbm = (float) $input['max_cbm'];
-                if ($maxCbm <= 0) jsonError('Max CBM must be positive', 400);
-                $usage = fetchContainerUsage($pdo, (int) $id);
-                $usedCbm = (float) $usage['used_cbm'];
-                if ($usedCbm > $maxCbm) jsonError('Max CBM cannot be less than used CBM (' . round($usedCbm, 2) . ')', 400);
+                $maxCbm = ContainerCapacityService::limit($input['max_cbm'],'Max CBM');
                 $sets[] = 'max_cbm = ?';
                 $params[] = $maxCbm;
             }
             if (array_key_exists('max_weight', $input)) {
-                $maxWeight = (float) $input['max_weight'];
-                if ($maxWeight <= 0) jsonError('Max weight must be positive', 400);
-                $usage = $usage ?? fetchContainerUsage($pdo, (int) $id);
-                $usedWeight = (float) $usage['used_weight'];
-                if ($usedWeight > $maxWeight) jsonError('Max weight cannot be less than used weight (' . round($usedWeight, 2) . ' kg)', 400);
+                $maxWeight = ContainerCapacityService::limit($input['max_weight'],'Max weight');
                 $sets[] = 'max_weight = ?';
                 $params[] = $maxWeight;
             }
@@ -633,12 +693,17 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $params[] = trim($input['destination'] ?? '') ?: null;
             }
             if (empty($sets)) jsonError('Nothing to update', 400);
+            if (isset($maxCbm) || isset($maxWeight)) ContainerCapacityService::check($pdo,array_replace($existing,['max_cbm'=>$maxCbm??$existing['max_cbm'],'max_weight'=>$maxWeight??$existing['max_weight']]));
             $params[] = $id;
             $pdo->prepare("UPDATE containers SET " . implode(', ', $sets) . " WHERE id = ?")
                 ->execute($params);
             $stmt = $pdo->prepare("SELECT * FROM containers WHERE id = ?");
             $stmt->execute([$id]);
-            jsonResponse(['data' => $stmt->fetch(PDO::FETCH_ASSOC)]);
+            $updated = $stmt->fetch(PDO::FETCH_ASSOC);
+            $pdo->prepare("INSERT INTO audit_log(entity_type,entity_id,action,old_value,new_value,user_id) VALUES ('container',?,'update',?,?,?)")
+                ->execute([$id,json_encode($existing),json_encode($updated),getAuthUserId()]);
+            if ($startedTransaction) $pdo->commit();
+            jsonResponse(['data' => enrichContainerDestination($pdo,$updated)]);
             break;
 
         // -------------------------------------------------------------------------
@@ -646,21 +711,34 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             // Shortcut: assign orders directly to a container, handling draft creation automatically
             if ($id && $action === 'assign-orders') {
                 requirePermission('containers.assign');
-                $orderIds = array_map('intval', $input['order_ids'] ?? []);
-                $force    = !empty($input['force']); // allow even if over capacity
+                $orderIds = ShipmentAssignmentService::ids($input['order_ids'] ?? null);
                 if (empty($orderIds)) jsonError('order_ids required', 400);
+                $startedTransaction = !$pdo->inTransaction();
+                if ($startedTransaction) {
+                    $pdo->beginTransaction();
+                    register_shutdown_function(static function () use ($pdo) { if ($pdo->inTransaction()) $pdo->rollBack(); });
+                }
 
-                $stmt = $pdo->prepare("SELECT * FROM containers WHERE id = ?");
+                $stmt = $pdo->prepare("SELECT * FROM containers WHERE id = ? FOR UPDATE");
                 $stmt->execute([$id]);
                 $container = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$container) jsonError('Container not found', 404);
+                ShipmentAssignmentService::assertContainerOpen($pdo,$container);
 
                 // Validate order eligibility
                 $eligible = ['ReadyForConsolidation', 'Confirmed'];
+                $newOrderIds=[];$existingDraftIds=[];
                 foreach ($orderIds as $oid) {
-                    $st = $pdo->prepare("SELECT id, status, destination_country_id, confirmation_token FROM orders WHERE id = ?");
+                    $st = $pdo->prepare("SELECT id, status, destination_country_id, confirmation_token FROM orders WHERE id = ? FOR UPDATE");
                     $st->execute([$oid]);
                     $order = $st->fetch(PDO::FETCH_ASSOC);
+                    if(!$order)jsonError("Order #$oid not found",404);
+                    $memberships=ShipmentAssignmentService::memberships($pdo,$oid);
+                    if($memberships){
+                        $membership=$memberships[0];
+                        if((int)$membership['container_id']===(int)$id && $membership['status']!=='finalized' && $order['status']==='AssignedToContainer'){$existingDraftIds[]=(int)$membership['shipment_draft_id'];continue;}
+                        throw new ShipmentAssignmentException("Order #$oid is already reserved; remove or move its existing reservation first");
+                    }
                     $s = $order['status'] ?? null;
                     if (!in_array($s, $eligible, true)) {
                         jsonError("Order #$oid is not eligible (status: $s). Must be ReadyForConsolidation or Confirmed.", 400);
@@ -671,50 +749,31 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     if (!OrderCountryService::orderMatchesContainer($pdo, $order, $container)) {
                         jsonError("Order #$oid destination country does not match container destination.", 400);
                     }
+                    ShipmentAssignmentService::assertReceived($pdo,$oid);
+                    $newOrderIds[]=$oid;
                 }
 
                 // Find or create a non-finalized draft for this container
                 $draftRow = $pdo->prepare("SELECT id FROM shipment_drafts WHERE container_id = ? AND status != 'finalized' ORDER BY id DESC LIMIT 1");
                 $draftRow->execute([$id]);
                 $draftId = $draftRow->fetchColumn();
+                if(!$newOrderIds){
+                    $usage=fetchContainerUsage($pdo,(int)$id);
+                    if($startedTransaction)$pdo->commit();
+                    jsonResponse(['data'=>['draft_id'=>$existingDraftIds[0]??$draftId,'orders_added'=>0,'already_applied'=>true,'over_capacity'=>false]+$usage]);
+                }
+                $orderIds=$newOrderIds;
+
+                $ph = implode(',', array_fill(0, count($orderIds), '?'));
+                $newUsage = ContainerCapacityService::check($pdo,$container,$orderIds);
+                $maxCbm    = (float) $container['max_cbm'];
+                $maxWeight = (float) $container['max_weight'];
+
+                // Insert into draft
                 if (!$draftId) {
                     $pdo->prepare("INSERT INTO shipment_drafts (status, container_id) VALUES ('draft', ?)")->execute([$id]);
                     $draftId = (int) $pdo->lastInsertId();
                 }
-
-                // Compute CURRENT usage of this container
-                $usage = fetchContainerUsage($pdo, (int) $id);
-                $currentCbm    = (float) ($usage['used_cbm'] ?? 0);
-                $currentWeight = (float) ($usage['used_weight'] ?? 0);
-
-                // Compute what the NEW orders would add
-                $ph = implode(',', array_fill(0, count($orderIds), '?'));
-                $newTot = $pdo->prepare("SELECT COALESCE(SUM(declared_cbm),0), COALESCE(SUM(declared_weight),0) FROM order_items WHERE order_id IN ($ph)");
-                $newTot->execute($orderIds);
-                [$addCbm, $addWeight] = $newTot->fetch(PDO::FETCH_NUM);
-                $addCbm    = (float) $addCbm;
-                $addWeight = (float) $addWeight;
-
-                $totalCbm    = $currentCbm    + $addCbm;
-                $totalWeight = $currentWeight + $addWeight;
-                $maxCbm    = (float) $container['max_cbm'];
-                $maxWeight = (float) $container['max_weight'];
-
-                $overCbm    = $totalCbm    > $maxCbm;
-                $overWeight = $totalWeight > $maxWeight;
-
-                if (($overCbm || $overWeight) && !$force) {
-                    $msgs = [];
-                    if ($overCbm)    $msgs[] = "CBM: {$totalCbm} / {$maxCbm}";
-                    if ($overWeight) $msgs[] = "Weight: {$totalWeight} / {$maxWeight} kg";
-                    jsonResponse([
-                        'over_capacity' => true,
-                        'message' => 'Adding these orders would exceed container capacity (' . implode(', ', $msgs) . '). Send with force=true to proceed anyway.',
-                        'details' => compact('totalCbm', 'totalWeight', 'maxCbm', 'maxWeight'),
-                    ], 409);
-                }
-
-                // Insert into draft
                 $ins = $pdo->prepare("INSERT IGNORE INTO shipment_draft_orders (shipment_draft_id, order_id) VALUES (?,?)");
                 foreach ($orderIds as $oid) {
                     $ins->execute([$draftId, $oid]);
@@ -728,13 +787,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if (!empty($orderIds)) {
                     $pdo->prepare("UPDATE orders SET status='AssignedToContainer' WHERE id IN ($ph)")->execute($orderIds);
                 }
+                ShipmentAssignmentService::audit($pdo,'assign_orders',(int)$draftId,[],['container_id'=>(int)$id,'order_ids'=>$orderIds],(int)getAuthUserId());
 
-                $newUsage = fetchContainerUsage($pdo, (int) $id);
+                if ($startedTransaction) $pdo->commit();
                 jsonResponse([
                     'data' => [
                         'draft_id'      => $draftId,
                         'orders_added'  => count($orderIds),
-                        'over_capacity' => $overCbm || $overWeight,
+                        'over_capacity' => false,
                         'used_cbm'      => (float) ($newUsage['used_cbm'] ?? 0),
                         'used_weight'   => (float) ($newUsage['used_weight'] ?? 0),
                         'max_cbm'       => $maxCbm,
@@ -743,31 +803,55 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 ]);
             }
 
-            $code = trim($input['code'] ?? '');
-            $maxCbm = (float) ($input['max_cbm'] ?? 0);
-            $maxWeight = (float) ($input['max_weight'] ?? 0);
+            if($id!==null||$action!==null)jsonError('Unsupported container action',400);
+            $input=ContainerWriteService::normalize($pdo,$input);
+            $code = $input['code'] ?? '';
+            $maxCbm = ContainerCapacityService::limit($input['max_cbm']??null,'Max CBM');
+            $maxWeight = ContainerCapacityService::limit($input['max_weight']??null,'Max weight');
             if (!$code || $maxCbm <= 0 || $maxWeight <= 0) {
                 jsonError('code, max_cbm, max_weight required and positive', 400);
             }
-            $status = in_array($input['status'] ?? '', ['planning', 'to_go', 'on_route', 'arrived', 'available'])
-                ? $input['status'] : 'planning';
-            $expectedShip = isset($input['expected_ship_date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $input['expected_ship_date']) ? $input['expected_ship_date'] : null;
-            $chkShip = @$pdo->query("SHOW COLUMNS FROM containers LIKE 'expected_ship_date'");
+            $status = $input['status'] ?? 'planning';
+            if (!in_array($status, ['planning', 'to_go'], true)) jsonError('New containers must start in planning or to_go', 400);
+            $key=OrderWriteService::requestKey($input['idempotency_key']??null);
             $cols = ['code', 'max_cbm', 'max_weight', 'status'];
             $vals = [$code, $maxCbm, $maxWeight, $status];
-            if ($chkShip && $chkShip->rowCount() > 0) {
-                $cols[] = 'expected_ship_date';
-                $vals[] = $expectedShip;
+            foreach(['expected_ship_date','eta_date','actual_departure_date','actual_arrival_date','vessel_name','destination_country','destination','notes'] as $field){
+                if(containerTableHasColumn($pdo,'containers',$field)){$cols[]=$field;$vals[]=$input[$field]??null;}
+            }
+            $hash=hash('sha256',json_encode($vals,JSON_THROW_ON_ERROR));
+            $lock='container-create:'.substr(hash('sha256',$pdo->query('SELECT DATABASE()')->fetchColumn().':'.$key),0,42);
+            $s=$pdo->prepare('SELECT GET_LOCK(?,5)');$s->execute([$lock]);if(!(int)$s->fetchColumn())jsonError('Container creation is busy; retry',409);
+            register_shutdown_function(static function()use($pdo,$lock){if($pdo->inTransaction())$pdo->rollBack();$pdo->prepare('SELECT RELEASE_LOCK(?)')->execute([$lock]);});
+            $startedTransaction=!$pdo->inTransaction();if($startedTransaction)$pdo->beginTransaction();
+            $a=$pdo->prepare("SELECT entity_id,new_value,user_id FROM audit_log WHERE entity_type='container' AND action='create' AND JSON_UNQUOTE(JSON_EXTRACT(new_value,'$.idempotency_key'))=? ORDER BY id LIMIT 1");$a->execute([$key]);$prior=$a->fetch(PDO::FETCH_ASSOC);
+            if($prior){
+                $audit=json_decode($prior['new_value'],true);
+                if((int)$prior['user_id']!==getAuthUserId()||!hash_equals($audit['request_hash']??'',$hash))jsonError('Container request key belongs to another payload or operator',409);
+                $s=$pdo->prepare('SELECT * FROM containers WHERE id=? FOR UPDATE');$s->execute([$prior['entity_id']]);$saved=$s->fetch(PDO::FETCH_ASSOC);if(!$saved)jsonError('Original container is missing; do not replay this request',409);
+                if($startedTransaction)$pdo->commit();jsonResponse(['data'=>enrichContainerDestination($pdo,$saved),'idempotent_replay'=>true]);
+            }
+            $s=$pdo->prepare('SELECT * FROM containers WHERE code=?');$s->execute([$code]);$saved=$s->fetch(PDO::FETCH_ASSOC);
+            if($saved){
+                jsonError('Container code already exists; open the existing container',409);
             }
             $ph = implode(',', array_fill(0, count($vals), '?'));
             $pdo->prepare("INSERT INTO containers (" . implode(',', $cols) . ") VALUES ($ph)")
                 ->execute($vals);
             $newId = (int) $pdo->lastInsertId();
+            $pdo->prepare("INSERT INTO audit_log(entity_type,entity_id,action,new_value,user_id) VALUES ('container',?,'create',?,?)")->execute([$newId,json_encode(['idempotency_key'=>$key,'request_hash'=>$hash,'fields'=>array_combine($cols,$vals)]),getAuthUserId()]);
             $stmt = $pdo->prepare("SELECT * FROM containers WHERE id = ?");
             $stmt->execute([$newId]);
-            jsonResponse(['data' => $stmt->fetch(PDO::FETCH_ASSOC)], 201);
+            $created=$stmt->fetch(PDO::FETCH_ASSOC);if($startedTransaction)$pdo->commit();jsonResponse(['data' => enrichContainerDestination($pdo,$created)], 201);
             break;
+    } } catch (ContainerCapacityException $e) {
+        jsonResponse(['error'=>true,'over_capacity'=>$e->overCapacity,'message'=>$e->getMessage(),'details'=>$e->details],$e->httpStatus);
+    } catch (ShipmentAssignmentException $e) {
+        jsonError($e->getMessage(),409);
+    } catch (PDOException $e) {
+        if($pdo->inTransaction())$pdo->rollBack();
+        if((int)($e->errorInfo[1]??0)===1062)jsonError('Container identity already exists; reload before retrying',409);
+        throw $e;
     }
-
     jsonError('Method not allowed', 405);
 };

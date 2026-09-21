@@ -35,6 +35,8 @@
     }
 
     function renderTimelineTable(rows, type) {
+        const dateField=type === "orders" ? "expected_ready_date" : "eta_date";
+        rows=[...rows].sort((a,b)=>String(a[dateField]).localeCompare(String(b[dateField])) || Number(a.id)-Number(b.id));
         if (!rows.length) {
             return '<p class="text-muted">No records in this month.</p>';
         }
@@ -48,7 +50,7 @@
                             (row) => `
                       <tr>
                         <td>${escapeLocal(row.expected_ready_date)}</td>
-                        <td><a href="/cargochina/orders.php?id=${row.id}">#${row.id}</a></td>
+                        <td><a href="/cargochina/orders.php?order_id=${row.id}">#${row.id}</a></td>
                         <td>${escapeLocal(row.customer_name)}</td>
                         <td>${escapeLocal(row.supplier_name || "-")}</td>
                         <td><span class="badge ${statusBadgeClass(row.status)}">${escapeLocal(statusLabel(row.status))}</span></td>
@@ -67,7 +69,7 @@
                         (row) => `
                   <tr>
                     <td>${escapeLocal(row.eta_date)}</td>
-                    <td><a href="/cargochina/containers.php?id=${row.id}">${escapeLocal(row.code || `Container #${row.id}`)}</a></td>
+                    <td><a href="/cargochina/containers.php?container_id=${row.id}">${escapeLocal(row.code || `Container #${row.id}`)}</a></td>
                     <td>${escapeLocal(row.status || "-")}</td>
                     <td>${escapeLocal(row.destination || row.destination_country || "-")}</td>
                   </tr>`,
@@ -100,10 +102,10 @@
             const otherMonth = date.getMonth() !== activeMonth.getMonth();
             const items = [
                 ...dayOrders.slice(0, 2).map(
-                    (order) => `<a class="calendar-event-pill order" href="/cargochina/orders.php?id=${order.id}">#${order.id} ${escapeLocal(order.customer_name || "")}</a>`,
+                    (order) => `<a class="calendar-event-pill order" href="/cargochina/orders.php?order_id=${order.id}">#${order.id} ${escapeLocal(order.customer_name || "")}</a>`,
                 ),
                 ...dayContainers.slice(0, 2).map(
-                    (container) => `<a class="calendar-event-pill container" href="/cargochina/containers.php?id=${container.id}">${escapeLocal(container.code || `Container #${container.id}`)}</a>`,
+                    (container) => `<a class="calendar-event-pill container" href="/cargochina/containers.php?container_id=${container.id}">${escapeLocal(container.code || `Container #${container.id}`)}</a>`,
                 ),
             ];
             const hiddenCount =
@@ -121,7 +123,9 @@
         grid.innerHTML = cells.join("");
     }
 
+    let calendarLoadVersion=0;
     async function loadCalendar() {
+        const version=++calendarLoadVersion;
         const bounds = monthBounds(activeMonth);
         const monthInput = document.getElementById("calendarMonth");
         const monthLabel = document.getElementById("calendarMonthLabel");
@@ -135,18 +139,16 @@
 
         try {
             const [ordersRes, containersRes] = await Promise.all([
-                api(
-                    "GET",
-                    `/orders?date_from=${bounds.startIso}&date_to=${bounds.endIso}`,
-                ),
-                api("GET", "/containers"),
+                clmsLoadAllPages(`/orders?date_from=${bounds.startIso}&date_to=${bounds.endIso}`),
+                loadAssignmentContainers(),
             ]);
-            const orders = (ordersRes.data || []).filter(
+            if(version !== calendarLoadVersion)return;
+            const orders = ordersRes.filter(
                 (order) =>
                     order.expected_ready_date >= bounds.startIso &&
                     order.expected_ready_date <= bounds.endIso,
             );
-            const containers = (containersRes.data || []).filter(
+            const containers = containersRes.filter(
                 (container) =>
                     container.eta_date &&
                     container.eta_date >= bounds.startIso &&
@@ -157,6 +159,7 @@
             document.getElementById("ordersTimeline").innerHTML = renderTimelineTable(orders, "orders");
             document.getElementById("containersTimeline").innerHTML = renderTimelineTable(containers, "containers");
         } catch (error) {
+            if(version !== calendarLoadVersion)return;
             const grid = document.getElementById("calendarGrid");
             if (grid) {
                 const message = typeof t === "function" ? t(error.message || "Failed to load calendar") : (error.message || "Failed to load calendar");

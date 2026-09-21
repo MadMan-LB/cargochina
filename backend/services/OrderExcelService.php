@@ -84,7 +84,7 @@ class OrderExcelService
         $sheet = $spreadsheet->createSheet();
         $sheet->setTitle('Shared carton identifiers');
         $headers = ['Order ID','Order Item ID','Carton Code','I.I.N','Item Number','Description'];
-        foreach ($headers as $i => $header) $sheet->setCellValue(Coordinate::stringFromColumnIndex($i+1).'1', $this->tr($header));
+        foreach ($headers as $i => $header) $this->setSafeCell($sheet,Coordinate::stringFromColumnIndex($i+1).'1', $this->tr($header));
         foreach ($rows as $i => $row) foreach (array_values($row) as $j => $value) {
             $sheet->setCellValueExplicit(Coordinate::stringFromColumnIndex($j+1).($i+2), (string) ($value ?? ''), DataType::TYPE_STRING);
         }
@@ -218,10 +218,12 @@ class OrderExcelService
             self::CONTAINER_LAST_COL,
             $this->tr('Container Orders'),
             [
-                [$this->tr('Container') . ':', (string) ($context['container_code'] ?? $context['code'] ?? '')],
+                [$this->tr('Container') . ':', (string) ($context['container_code'] ?? $context['code'] ?? $context['container']['code'] ?? '')],
                 [$this->tr('Orders') . ':', (string) count($ordersWithItems)],
                 [$this->tr('Generated') . ':', date('Y-m-d H:i:s')],
                 [$this->tr('Currency') . ':', (string) ($context['currency'] ?? '')],
+                [$this->tr('Cargo CBM') . ':', (string) ($context['cargo_totals']['cbm'] ?? '')],
+                [$this->tr('Cargo Weight (kg)') . ':', (string) ($context['cargo_totals']['weight'] ?? '')],
             ],
             $this->tr('Salameh Global / CargoChina')
         );
@@ -307,6 +309,7 @@ class OrderExcelService
             'Shipment Charges',
             'Total CBM',
             'Total Weight (kg)',
+            'Currency',
         ];
 
         $bodyRows = array_map(function (array $row): array {
@@ -324,6 +327,8 @@ class OrderExcelService
             }
 
             $supplierDisplay = trim((string) ($row['supplier_name'] ?? ''));
+            $cbm = isset($row['cargo_totals']) ? $row['cargo_totals']['cbm'] : $cbm;
+            $weight = isset($row['cargo_totals']) ? $row['cargo_totals']['weight'] : $weight;
             if ($supplierNames) {
                 $names = array_keys($supplierNames);
                 $supplierDisplay = count($names) === 1 ? $names[0] : $this->tr('Multiple ({names})', ['names' => implode(', ', $names)]);
@@ -338,11 +343,12 @@ class OrderExcelService
                 (string) ($row['expected_ready_date'] ?? ''),
                 $this->statusText((string) ($row['status'] ?? '')),
                 $this->tr((string) ($row['deposit_status'] ?? 'No Deposit')),
-                round((float) ($row['deposit_paid_amount'] ?? 0), 2),
-                round((float) ($row['remaining_balance'] ?? 0), 2),
+                round((float) ($row['deposit_paid_amount'] ?? 0), 4),
+                round((float) ($row['remaining_balance'] ?? 0), 4),
                 $this->formatOperationalCostSummary($row),
-                round($cbm, 4),
-                round($weight, 2),
+                $cbm===null?null:round($cbm, 6),
+                $weight===null?null:round($weight, 4),
+                $row['currency']??'',
             ];
         }, $rows);
 
@@ -419,7 +425,7 @@ class OrderExcelService
                 implode('; ', array_keys($shippingCodes)),
                 $totalCartons,
                 round((float) ($row['declared_cbm'] ?? 0), 6),
-                round((float) ($row['declared_weight'] ?? 0), 2),
+                round((float) ($row['declared_weight'] ?? 0), 4),
                 implode('; ', array_filter($itemsSummary)),
             ];
         }, $rows);
@@ -439,7 +445,7 @@ class OrderExcelService
             'Shipping Code',
             'I.I.N',
             'Item Type',
-            'Quantity',
+            'Ordered Quantity',
             'Actual Quantity',
             'Actual Cartons',
             'Declared CBM',
@@ -449,6 +455,9 @@ class OrderExcelService
             'Actual Width',
             'Actual Length',
             'Item Number',
+            'Remaining Quantity',
+            'Warehouse State',
+            'Reconciliation Required',
         ];
 
         $bodyRows = array_map(function (array $row): array {
@@ -462,16 +471,19 @@ class OrderExcelService
                 (string) ($row['shipping_code'] ?? ''),
                 (string) ($row['item_no'] ?? ''),
                 $this->itemTypeText((string) ($row['item_type_code'] ?? 'unclassified')),
-                $row['quantity'] ?? null,
+                $row['ordered_quantity'] ?? $row['quantity'] ?? null,
                 $row['item_actual_quantity'] ?? null,
-                $row['item_actual_cartons'] ?? $row['order_actual_cartons'] ?? null,
+                $row['item_actual_cartons'] ?? null,
                 $row['declared_cbm'] ?? null,
-                $row['item_actual_cbm'] ?? $row['order_actual_cbm'] ?? null,
-                $row['item_actual_weight'] ?? $row['order_actual_weight'] ?? null,
-                $row['item_actual_height'] ?? $row['height'] ?? $row['item_height'] ?? null,
-                $row['item_actual_width'] ?? $row['width'] ?? $row['item_width'] ?? null,
-                $row['item_actual_length'] ?? $row['length'] ?? $row['item_length'] ?? null,
+                $row['item_actual_cbm'] ?? null,
+                $row['item_actual_weight'] ?? null,
+                $row['item_actual_height'] ?? null,
+                $row['item_actual_width'] ?? null,
+                $row['item_actual_length'] ?? null,
                 (string) ($row['item_number'] ?? ''),
+                $row['remaining_quantity'] ?? null,
+                $row['warehouse_state'] ?? '',
+                !empty($row['reconciliation_required']) ? 'Yes' : 'No',
             ];
         }, $rows);
 
@@ -570,7 +582,7 @@ class OrderExcelService
     private function writeCompanyHeader($sheet, int $startRow, string $lastColumn, string $title = 'Goods Details', array $metadata = [], string $note = ''): int
     {
         $titleRow = $startRow;
-        $sheet->setCellValue('A' . $titleRow, $title);
+        $this->setSafeCell($sheet,'A' . $titleRow, $title);
         $sheet->mergeCells("A{$titleRow}:{$lastColumn}{$titleRow}");
         $sheet->getStyle("A{$titleRow}:{$lastColumn}{$titleRow}")->applyFromArray([
             'font' => ['name' => 'Arial', 'size' => 16, 'bold' => true, 'color' => ['rgb' => self::HEADER_BLUE]],
@@ -580,7 +592,7 @@ class OrderExcelService
         $sheet->getRowDimension($titleRow)->setRowHeight(28);
 
         $brandRow = $startRow + 1;
-        $sheet->setCellValue('A' . $brandRow, $this->tr('Salameh Global / CargoChina'));
+        $this->setSafeCell($sheet,'A' . $brandRow, $this->tr('Salameh Global / CargoChina'));
         $sheet->mergeCells("A{$brandRow}:{$lastColumn}{$brandRow}");
         $sheet->getStyle("A{$brandRow}:{$lastColumn}{$brandRow}")->applyFromArray([
             'font' => ['name' => 'Arial', 'size' => 10, 'bold' => true, 'color' => ['rgb' => self::HEADER_BLUE]],
@@ -592,22 +604,22 @@ class OrderExcelService
             $entry = $metadata[$index] ?? ['', ''];
             $label = (string) ($entry[0] ?? '');
             $value = $entry[1] ?? '';
-            $sheet->setCellValue('A' . $row, $label);
+            $this->setSafeCell($sheet,'A' . $row, $label);
             if (is_string($value)
                 && preg_match('/^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?$/', $value)
                 && preg_match('/date|ready|received|created|updated|generated/i', $label)) {
                 $excelDate = $this->excelDateValue($value);
-                $sheet->setCellValue('B' . $row, $excelDate ?? $value);
+                $this->setSafeCell($sheet,'B' . $row, $excelDate ?? $value);
                 $sheet->getStyle('B' . $row)->getNumberFormat()->setFormatCode(str_contains($value, ':') ? 'yyyy-mm-dd hh:mm:ss' : 'yyyy-mm-dd');
             } else {
-                $sheet->setCellValue('B' . $row, $value);
+                $this->setSafeCell($sheet,'B' . $row, $value);
             }
             $sheet->getStyle('A' . $row)->getFont()->setName('Arial')->setBold(true);
             $sheet->getStyle('A' . $row . ':' . $lastColumn . $row)->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
         }
 
         $noteRow = $startRow + 6;
-        $sheet->setCellValue('A' . $noteRow, $note);
+        $this->setSafeCell($sheet,'A' . $noteRow, $note);
         $sheet->mergeCells("A{$noteRow}:{$lastColumn}{$noteRow}");
         $sheet->getStyle("A{$noteRow}:{$lastColumn}{$noteRow}")->applyFromArray([
             'font' => ['name' => 'Arial', 'size' => 10, 'bold' => true, 'color' => ['rgb' => self::HEADER_BLUE]],
@@ -655,8 +667,8 @@ class OrderExcelService
 
         $chineseRow = $row + 1;
         foreach ($headers as $col => $label) {
-            $sheet->setCellValue($col . $row, $this->trForLocale($label, 'en'));
-            $sheet->setCellValue($col . $chineseRow, $this->trForLocale($label, 'zh-CN'));
+            $this->setSafeCell($sheet,$col . $row, $this->trForLocale($label, 'en'));
+            $this->setSafeCell($sheet,$col . $chineseRow, $this->trForLocale($label, 'zh-CN'));
         }
 
         $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $chineseRow, [
@@ -697,41 +709,41 @@ class OrderExcelService
                 $qtyPerCarton = (float) ($item['qty_per_carton'] ?? 0);
                 $quantity = $this->resolveQuantity($item);
                 $unitPrice = $this->resolveUnitPrice($item);
-                $scope = strtolower(trim((string) ($item['product_dimensions_scope'] ?? $item['dimensions_scope'] ?? 'piece')));
+                $scope = strtolower(trim((string) ($item['dimensions_scope'] ?? $item['product_dimensions_scope'] ?? 'piece')));
                 $multiplier = $scope === 'carton' && $cartons > 0 ? $cartons : $quantity;
                 $cbmPer = $multiplier > 0 ? round((float) ($item['declared_cbm'] ?? 0) / $multiplier, 6) : '';
                 $weightPer = $multiplier > 0 ? round((float) ($item['declared_weight'] ?? 0) / $multiplier, 4) : '';
 
                 $supplierName = (string) ($item['supplier_name'] ?? $group['supplier_name'] ?? '');
                 $supplierDisplay = trim((string) ($item['supplier_code'] ?? $item['supplier_store_id'] ?? ''));
-                $sheet->setCellValue('A' . $row, $supplierDisplay !== '' ? $supplierDisplay : $supplierName);
-                $sheet->setCellValue('B' . $row, $supplierName);
-                $sheet->setCellValue('C' . $row, $this->itemText($item, 'brand') ?: $this->itemText($item, 'what_brand'));
-                $sheet->setCellValue('D' . $row, $this->itemText($item, 'materials'));
-                $sheet->setCellValue('E' . $row, $this->itemText($item, 'what_brand'));
-                $sheet->setCellValue('F' . $row, $this->copyNormalGoodsText($item));
-                $sheet->setCellValue('G' . $row, $this->itemText($item, 'code'));
+                $this->setSafeCell($sheet,'A' . $row, $supplierDisplay !== '' ? $supplierDisplay : $supplierName);
+                $this->setSafeCell($sheet,'B' . $row, $supplierName);
+                $this->setSafeCell($sheet,'C' . $row, $this->itemText($item, 'brand') ?: $this->itemText($item, 'what_brand'));
+                $this->setSafeCell($sheet,'D' . $row, $this->itemText($item, 'materials'));
+                $this->setSafeCell($sheet,'E' . $row, $this->itemText($item, 'what_brand'));
+                $this->setSafeCell($sheet,'F' . $row, $this->copyNormalGoodsText($item));
+                $this->setSafeCell($sheet,'G' . $row, $this->itemText($item, 'code'));
                 $sheet->setCellValueExplicit('I' . $row, (string) ($item['item_no'] ?? $item['shipping_code'] ?? ''), DataType::TYPE_STRING);
                 $sheet->setCellValueExplicit('AC' . $row, (string) ($item['item_number'] ?? ''), DataType::TYPE_STRING);
-                $sheet->setCellValue('J' . $row, trim((string) ($item['description_en'] ?? '')));
-                $sheet->setCellValue('K' . $row, trim((string) ($item['description_cn'] ?? '')));
-                $sheet->setCellValue('L' . $row, $this->dimensionValue($item, 'height', 'item_height'));
-                $sheet->setCellValue('M' . $row, $this->dimensionValue($item, 'width', 'item_width'));
-                $sheet->setCellValue('N' . $row, $this->dimensionValue($item, 'length', 'item_length'));
-                $sheet->setCellValue('O' . $row, $cartons ?: '');
-                $sheet->setCellValue('P' . $row, $qtyPerCarton ?: '');
-                $sheet->setCellValue('Q' . $row, $quantity ?: '');
-                $sheet->setCellValue('R' . $row, $this->itemText($item, 'unit'));
-                $sheet->setCellValue('S' . $row, $unitPrice !== null ? $unitPrice : '');
-                $sheet->setCellValue('T' . $row, ($unitPrice !== null && $quantity > 0) ? round($unitPrice * $quantity, 4) : '');
-                $sheet->setCellValue('U' . $row, $cbmPer);
-                $sheet->setCellValue('V' . $row, round((float) ($item['declared_cbm'] ?? 0), 6));
-                $sheet->setCellValue('W' . $row, $weightPer);
-                $sheet->setCellValue('X' . $row, round((float) ($item['declared_weight'] ?? 0), 4));
-                $sheet->setCellValue('Y' . $row, $this->itemText($item, 'express_number'));
-                $sheet->setCellValue('Z' . $row, $this->resolveItemSize($item));
-                $sheet->setCellValue('AA' . $row, $this->itemText($item, 'hs_code'));
-                $sheet->setCellValue('AB' . $row, $this->itemText($item, 'notes'));
+                $this->setSafeCell($sheet,'J' . $row, trim((string) ($item['description_en'] ?? '')));
+                $this->setSafeCell($sheet,'K' . $row, trim((string) ($item['description_cn'] ?? '')));
+                $this->setSafeCell($sheet,'L' . $row, $this->dimensionValue($item, 'height', 'item_height'));
+                $this->setSafeCell($sheet,'M' . $row, $this->dimensionValue($item, 'width', 'item_width'));
+                $this->setSafeCell($sheet,'N' . $row, $this->dimensionValue($item, 'length', 'item_length'));
+                $this->setSafeCell($sheet,'O' . $row, $cartons ?: '');
+                $this->setSafeCell($sheet,'P' . $row, $qtyPerCarton ?: '');
+                $this->setSafeCell($sheet,'Q' . $row, $quantity ?: '');
+                $this->setSafeCell($sheet,'R' . $row, $this->itemText($item, 'unit'));
+                $this->setSafeCell($sheet,'S' . $row, $unitPrice !== null ? $unitPrice : '');
+                $this->setSafeCell($sheet,'T' . $row, ($unitPrice !== null && $quantity > 0) ? round($unitPrice * $quantity, 4) : '');
+                $this->setSafeCell($sheet,'U' . $row, $cbmPer);
+                $this->setSafeCell($sheet,'V' . $row, round((float) ($item['declared_cbm'] ?? 0), 6));
+                $this->setSafeCell($sheet,'W' . $row, $weightPer);
+                $this->setSafeCell($sheet,'X' . $row, round((float) ($item['declared_weight'] ?? 0), 4));
+                $this->setSafeCell($sheet,'Y' . $row, $this->itemText($item, 'express_number'));
+                $this->setSafeCell($sheet,'Z' . $row, $this->resolveItemSize($item));
+                $this->setSafeCell($sheet,'AA' . $row, $this->itemText($item, 'hs_code'));
+                $this->setSafeCell($sheet,'AB' . $row, $this->itemText($item, 'notes'));
 
                 $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
                     'font' => ['name' => 'Arial', 'size' => 11],
@@ -771,7 +783,7 @@ class OrderExcelService
         }
 
         $row = $startRow + 1;
-        $sheet->setCellValue('A' . $row, $this->tr('Customer-facing receiving fees'));
+        $this->setSafeCell($sheet,'A' . $row, $this->tr('Customer-facing receiving fees'));
         $sheet->mergeCells('A' . $row . ':' . self::STANDARD_LAST_COL . $row);
         $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
             'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true, 'color' => ['rgb' => 'FFFFFF']],
@@ -791,10 +803,10 @@ class OrderExcelService
             $label = trim((string) ($fee['fee_label'] ?? $fee['label'] ?? 'Warehouse fee'));
             $notes = trim((string) ($fee['notes'] ?? ''));
 
-            $sheet->setCellValue('A' . $row, $label !== '' ? $label : $this->tr('Warehouse fee'));
-            $sheet->setCellValue('T' . $row, $amount);
-            $sheet->setCellValue('U' . $row, $currency);
-            $sheet->setCellValue('V' . $row, $notes);
+            $this->setSafeCell($sheet,'A' . $row, $label !== '' ? $label : $this->tr('Warehouse fee'));
+            $this->setSafeCell($sheet,'T' . $row, $amount);
+            $this->setSafeCell($sheet,'U' . $row, $currency);
+            $this->setSafeCell($sheet,'V' . $row, $notes);
             $sheet->mergeCells('A' . $row . ':S' . $row);
             $sheet->mergeCells('V' . $row . ':' . self::STANDARD_LAST_COL . $row);
             $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
@@ -823,8 +835,8 @@ class OrderExcelService
 
         foreach ($summaryRows as $entry) {
             [$label, $amounts, $fill] = $entry;
-            $sheet->setCellValue('A' . $row, $this->tr($label));
-            $sheet->setCellValue('T' . $row, $this->formatCurrencyBreakdown($amounts));
+            $this->setSafeCell($sheet,'A' . $row, $this->tr($label));
+            $this->setSafeCell($sheet,'T' . $row, $this->formatCurrencyBreakdown($amounts));
             $sheet->mergeCells('A' . $row . ':S' . $row);
             $sheet->mergeCells('T' . $row . ':' . self::STANDARD_LAST_COL . $row);
             $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
@@ -853,7 +865,7 @@ class OrderExcelService
         }
 
         $row = $startRow + 1;
-        $sheet->setCellValue('A' . $row, $this->tr('Shipment Charges'));
+        $this->setSafeCell($sheet,'A' . $row, $this->tr('Shipment Charges'));
         $sheet->mergeCells('A' . $row . ':' . self::STANDARD_LAST_COL . $row);
         $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
             'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true, 'color' => ['rgb' => 'FFFFFF']],
@@ -868,10 +880,10 @@ class OrderExcelService
             $description = (string) ($cost['description_en'] ?? $cost['description_zh'] ?? '');
             $provider = (string) ($cost['supplier_name'] ?? $cost['service_provider'] ?? '');
             $detail = trim(implode(' | ', array_filter([$description, $provider, (string) ($cost['responsible_payer'] ?? ''), (string) ($cost['allocation_method'] ?? '')])));
-            $sheet->setCellValue('A' . $row, $type);
-            $sheet->setCellValue('T' . $row, (float) ($cost['base_amount'] ?? 0));
-            $sheet->setCellValue('U' . $row, (string) ($cost['base_currency'] ?? ''));
-            $sheet->setCellValue('V' . $row, $detail);
+            $this->setSafeCell($sheet,'A' . $row, $type);
+            $this->setSafeCell($sheet,'T' . $row, (float) ($cost['base_amount'] ?? 0));
+            $this->setSafeCell($sheet,'U' . $row, (string) ($cost['base_currency'] ?? ''));
+            $this->setSafeCell($sheet,'V' . $row, $detail);
             $sheet->mergeCells('A' . $row . ':S' . $row);
             $sheet->mergeCells('V' . $row . ':' . self::STANDARD_LAST_COL . $row);
             $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
@@ -884,9 +896,9 @@ class OrderExcelService
             $row++;
         }
 
-        $sheet->setCellValue('A' . $row, $this->tr('Shipment Charges Total'));
-        $sheet->setCellValue('T' . $row, (float) ($costs['base_total'] ?? 0));
-        $sheet->setCellValue('U' . $row, (string) ($costs['base_currency'] ?? ''));
+        $this->setSafeCell($sheet,'A' . $row, $this->tr('Shipment Charges Total'));
+        $this->setSafeCell($sheet,'T' . $row, (float) ($costs['base_total'] ?? 0));
+        $this->setSafeCell($sheet,'U' . $row, (string) ($costs['base_currency'] ?? ''));
         $sheet->mergeCells('A' . $row . ':S' . $row);
         $sheet->mergeCells('U' . $row . ':' . self::STANDARD_LAST_COL . $row);
         $this->styleRange($sheet, 'A' . $row . ':' . self::STANDARD_LAST_COL . $row, [
@@ -937,8 +949,8 @@ class OrderExcelService
 
         $chineseRow = $row + 1;
         foreach ($headers as $col => $label) {
-            $sheet->setCellValue($col . $row, $this->trForLocale($label, 'en'));
-            $sheet->setCellValue($col . $chineseRow, $this->trForLocale($label, 'zh-CN'));
+            $this->setSafeCell($sheet,$col . $row, $this->trForLocale($label, 'en'));
+            $this->setSafeCell($sheet,$col . $chineseRow, $this->trForLocale($label, 'zh-CN'));
         }
 
         $this->styleRange($sheet, 'B' . $row . ':' . self::CONTAINER_LAST_COL . $chineseRow, [
@@ -1006,12 +1018,12 @@ class OrderExcelService
             ? $this->tr('Orders: {orders}', ['orders' => '#' . implode(', #', $orderIds)])
             : $this->tr('Orders: -');
 
-        $sheet->setCellValue('A' . $row, '##');
-        $sheet->setCellValue('B' . $row, $section['customer_display'] ?: $this->tr('Customer'));
-        $sheet->setCellValue('K' . $row, trim((string) ($section['customer_phone'] ?? '')) !== ''
+        $this->setSafeCell($sheet,'A' . $row, '##');
+        $this->setSafeCell($sheet,'B' . $row, $section['customer_display'] ?: $this->tr('Customer'));
+        $this->setSafeCell($sheet,'K' . $row, trim((string) ($section['customer_phone'] ?? '')) !== ''
             ? $this->tr('Phone: {phone}', ['phone' => $section['customer_phone']])
             : $this->tr('Phone: -'));
-        $sheet->setCellValue('N' . $row, $orderLabel);
+        $this->setSafeCell($sheet,'N' . $row, $orderLabel);
         $sheet->mergeCells('B' . $row . ':J' . $row);
         $sheet->mergeCells('K' . $row . ':M' . $row);
         $sheet->mergeCells('N' . $row . ':' . self::CONTAINER_LAST_COL . $row);
@@ -1057,36 +1069,36 @@ class OrderExcelService
                 $sellTotal = ($unitPrice !== null && $quantity > 0) ? round($unitPrice * $quantity, 4) : 0.0;
                 $factoryTotal = ($factoryPriceForTotals !== null && $quantity > 0) ? round($factoryPriceForTotals * $quantity, 4) : 0.0;
                 $currency = $this->resolveCurrency($order, $item);
-                $scope = strtolower(trim((string) ($item['product_dimensions_scope'] ?? $item['dimensions_scope'] ?? 'piece')));
+                $scope = strtolower(trim((string) ($item['dimensions_scope'] ?? $item['product_dimensions_scope'] ?? 'piece')));
                 $multiplier = $scope === 'carton' && $cartons > 0 ? $cartons : $quantity;
-                $totalCbm = round((float) ($item['declared_cbm'] ?? 0), 6);
-                $totalWeight = round((float) ($item['declared_weight'] ?? 0), 4);
-                $cbmPer = $multiplier > 0 ? round($totalCbm / $multiplier, 6) : '';
-                $weightPer = $multiplier > 0 ? round($totalWeight / $multiplier, 4) : '';
+                $totalCbm = isset($item['declared_cbm'])?round((float)$item['declared_cbm'],6):null;
+                $totalWeight = isset($item['declared_weight'])?round((float)$item['declared_weight'],4):null;
+                $cbmPer = $multiplier > 0 && $totalCbm!==null ? round($totalCbm / $multiplier, 6) : '';
+                $weightPer = $multiplier > 0 && $totalWeight!==null ? round($totalWeight / $multiplier, 4) : '';
                 $accountNumber = $this->extractSupplierAccountReference($item, $order);
                 $supplierPhone = trim((string) ($item['supplier_phone'] ?? $group['supplier_phone'] ?? $order['supplier_phone'] ?? ''));
 
-                $sheet->setCellValue('B' . $row, $this->itemText($item, 'what_brand'));
-                $sheet->setCellValue('C' . $row, $this->copyNormalGoodsText($item));
-                $sheet->setCellValue('D' . $row, $this->itemText($item, 'code'));
+                $this->setSafeCell($sheet,'B' . $row, $this->itemText($item, 'what_brand'));
+                $this->setSafeCell($sheet,'C' . $row, $this->copyNormalGoodsText($item));
+                $this->setSafeCell($sheet,'D' . $row, $this->itemText($item, 'code'));
                 $sheet->setCellValueExplicit('F' . $row, (string) ($item['item_no'] ?? $item['shipping_code'] ?? ''), DataType::TYPE_STRING);
                 $sheet->setCellValueExplicit('W' . $row, (string) ($item['item_number'] ?? ''), DataType::TYPE_STRING);
-                $sheet->setCellValue('G' . $row, (string) ($item['supplier_name'] ?? $group['supplier_name'] ?? $order['supplier_name'] ?? ''));
-                $sheet->setCellValue('H' . $row, $supplierPhone);
-                $sheet->setCellValue('I' . $row, $accountNumber !== '' ? $accountNumber : $group['supplier_info']);
-                $sheet->setCellValue('J' . $row, $this->descriptionText($item));
-                $sheet->setCellValue('K' . $row, $cartons ?: '');
-                $sheet->setCellValue('L' . $row, $qtyPerCarton ?: '');
-                $sheet->setCellValue('M' . $row, $quantity ?: '');
-                $sheet->setCellValue('N' . $row, $unitPrice !== null ? $unitPrice : '');
-                $sheet->setCellValue('O' . $row, $factoryPrice !== null ? $factoryPrice : '');
-                $sheet->setCellValue('P' . $row, $sellTotal ?: '');
-                $sheet->setCellValue('Q' . $row, $cbmPer);
-                $sheet->setCellValue('R' . $row, $totalCbm ?: '');
-                $sheet->setCellValue('S' . $row, $weightPer);
-                $sheet->setCellValue('T' . $row, $totalWeight ?: '');
-                $sheet->setCellValue('U' . $row, $this->itemText($item, 'express_number'));
-                $sheet->setCellValue('V' . $row, $this->resolveItemSize($item));
+                $this->setSafeCell($sheet,'G' . $row, (string) ($item['supplier_name'] ?? $group['supplier_name'] ?? $order['supplier_name'] ?? ''));
+                $this->setSafeCell($sheet,'H' . $row, $supplierPhone);
+                $this->setSafeCell($sheet,'I' . $row, $accountNumber !== '' ? $accountNumber : $group['supplier_info']);
+                $this->setSafeCell($sheet,'J' . $row, $this->descriptionText($item));
+                $this->setSafeCell($sheet,'K' . $row, $cartons ?: '');
+                $this->setSafeCell($sheet,'L' . $row, $qtyPerCarton ?: '');
+                $this->setSafeCell($sheet,'M' . $row, $quantity ?: '');
+                $this->setSafeCell($sheet,'N' . $row, $unitPrice !== null ? $unitPrice : '');
+                $this->setSafeCell($sheet,'O' . $row, $factoryPrice !== null ? $factoryPrice : '');
+                $this->setSafeCell($sheet,'P' . $row, $sellTotal ?: '');
+                $this->setSafeCell($sheet,'Q' . $row, $cbmPer);
+                $this->setSafeCell($sheet,'R' . $row, $totalCbm ?: '');
+                $this->setSafeCell($sheet,'S' . $row, $weightPer);
+                $this->setSafeCell($sheet,'T' . $row, $totalWeight ?: '');
+                $this->setSafeCell($sheet,'U' . $row, $this->itemText($item, 'express_number'));
+                $this->setSafeCell($sheet,'V' . $row, $this->resolveItemSize($item));
 
                 $this->styleRange($sheet, 'B' . $row . ':' . self::CONTAINER_LAST_COL . $row, [
                     'font' => ['name' => 'Arial', 'size' => 11],
@@ -1117,6 +1129,7 @@ class OrderExcelService
                     'item_no' => (string) ($item['item_no'] ?? $item['shipping_code'] ?? ''),
                 ]);
 
+                foreach(['cbm'=>$totalCbm,'weight'=>$totalWeight,'quantity'=>$item['quantity']??null] as $metric=>$value)if($value===null){$sectionTotals[$metric.'_unknown']=true;$overallTotals[$metric.'_unknown']=true;}
                 $sectionTotals['cartons'] += $cartons;
                 $sectionTotals['quantity'] += $quantity;
                 $sectionTotals['cbm'] += $totalCbm;
@@ -1140,11 +1153,11 @@ class OrderExcelService
 
     private function writeSupplierGroupHeader($sheet, int $row, string $supplierName, string $supplierPhone, string $supplierInfo, string $lastCol): int
     {
-        $sheet->setCellValue('A' . $row, '@@');
-        $sheet->setCellValue('B' . $row, $this->tr('supplier name and info') . ':');
-        $sheet->setCellValue('C' . $row, $supplierName !== '' ? $supplierName : '-');
-        $sheet->setCellValue('D' . $row, $supplierPhone !== '' ? $supplierPhone : '-');
-        $sheet->setCellValue('E' . $row, $supplierInfo !== '' ? $supplierInfo : '-');
+        $this->setSafeCell($sheet,'A' . $row, '@@');
+        $this->setSafeCell($sheet,'B' . $row, $this->tr('supplier name and info') . ':');
+        $this->setSafeCell($sheet,'C' . $row, $supplierName !== '' ? $supplierName : '-');
+        $this->setSafeCell($sheet,'D' . $row, $supplierPhone !== '' ? $supplierPhone : '-');
+        $this->setSafeCell($sheet,'E' . $row, $supplierInfo !== '' ? $supplierInfo : '-');
 
         if ($lastCol > 'E') {
             $sheet->mergeCells('E' . $row . ':' . $lastCol . $row);
@@ -1224,9 +1237,9 @@ class OrderExcelService
                 $description = $this->tr('Container / customer expense');
             }
 
-            $sheet->setCellValue('B' . $row, implode(' - ', $labelParts));
-            $sheet->setCellValue('J' . $row, $description);
-            $sheet->setCellValue('P' . $row, $this->formatCurrencyBreakdown([$currency => $amount]));
+            $this->setSafeCell($sheet,'B' . $row, implode(' - ', $labelParts));
+            $this->setSafeCell($sheet,'J' . $row, $description);
+            $this->setSafeCell($sheet,'P' . $row, $this->formatCurrencyBreakdown([$currency => $amount]));
             $sheet->mergeCells('B' . $row . ':I' . $row);
             $sheet->mergeCells('J' . $row . ':O' . $row);
             $sheet->mergeCells('P' . $row . ':' . self::CONTAINER_LAST_COL . $row);
@@ -1263,8 +1276,8 @@ class OrderExcelService
 
         foreach ($rows as $entry) {
             [$label, $amounts, $fill] = $entry;
-            $sheet->setCellValue('B' . $row, $section['customer_display'] . ' - ' . $this->tr($label));
-            $sheet->setCellValue('P' . $row, $this->formatCurrencyBreakdown($amounts));
+            $this->setSafeCell($sheet,'B' . $row, $section['customer_display'] . ' - ' . $this->tr($label));
+            $this->setSafeCell($sheet,'P' . $row, !empty($sectionTotals['quantity_unknown']) && $label!=='Section expenses total'?'Unknown: reconciliation required':$this->formatCurrencyBreakdown($amounts));
             $sheet->mergeCells('B' . $row . ':O' . $row);
             $sheet->mergeCells('P' . $row . ':' . self::CONTAINER_LAST_COL . $row);
             $this->styleRange($sheet, 'B' . $row . ':' . self::CONTAINER_LAST_COL . $row, [
@@ -1286,7 +1299,7 @@ class OrderExcelService
 
     private function writeOverallExpenseBlock($sheet, array $expenses, int $row, array &$overallTotals): int
     {
-        $sheet->setCellValue('B' . $row, $this->tr('Container-wide expenses'));
+        $this->setSafeCell($sheet,'B' . $row, $this->tr('Container-wide expenses'));
         $sheet->mergeCells('B' . $row . ':' . self::CONTAINER_LAST_COL . $row);
         $this->styleRange($sheet, 'B' . $row . ':' . self::CONTAINER_LAST_COL . $row, [
             'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true],
@@ -1308,9 +1321,9 @@ class OrderExcelService
                 $description = $this->tr('Container expense');
             }
 
-            $sheet->setCellValue('B' . $row, $this->tr('Container expense'));
-            $sheet->setCellValue('J' . $row, $description);
-            $sheet->setCellValue('P' . $row, $this->formatCurrencyBreakdown([$currency => $amount]));
+            $this->setSafeCell($sheet,'B' . $row, $this->tr('Container expense'));
+            $this->setSafeCell($sheet,'J' . $row, $description);
+            $this->setSafeCell($sheet,'P' . $row, $this->formatCurrencyBreakdown([$currency => $amount]));
             $sheet->mergeCells('B' . $row . ':I' . $row);
             $sheet->mergeCells('J' . $row . ':O' . $row);
             $sheet->mergeCells('P' . $row . ':' . self::CONTAINER_LAST_COL . $row);
@@ -1340,8 +1353,8 @@ class OrderExcelService
             ['Overall factory total', $overallTotals['factory']],
             ['Overall expenses total', $overallTotals['expenses']],
             ['Overall total need to pay', $this->mergeCurrencyTotals($overallTotals['factory'], $overallTotals['expenses'])],
-            ['Overall CBM', ['METRIC' => round($overallTotals['cbm'], 6)]],
-            ['Overall weight', ['METRIC' => round($overallTotals['weight'], 4)]],
+            ['Overall CBM', ['METRIC' => !empty($overallTotals['cbm_unknown'])?'Unknown: reconciliation required':round($overallTotals['cbm'], 6)]],
+            ['Overall weight', ['METRIC' => !empty($overallTotals['weight_unknown'])?'Unknown: reconciliation required':round($overallTotals['weight'], 4)]],
         ];
 
         foreach ($rows as $entry) {
@@ -1349,8 +1362,8 @@ class OrderExcelService
             $value = array_key_exists('METRIC', $amounts)
                 ? (string) $amounts['METRIC']
                 : $this->formatCurrencyBreakdown($amounts);
-            $sheet->setCellValue('B' . $row, $this->tr($label));
-            $sheet->setCellValue('P' . $row, $value);
+            $this->setSafeCell($sheet,'B' . $row, $this->tr($label));
+            $this->setSafeCell($sheet,'P' . $row, !array_key_exists('METRIC',$amounts) && !empty($overallTotals['quantity_unknown']) && $label!=='Overall expenses total'?'Unknown: reconciliation required':$value);
             $sheet->mergeCells('B' . $row . ':O' . $row);
             $sheet->mergeCells('P' . $row . ':' . self::CONTAINER_LAST_COL . $row);
             $this->styleRange($sheet, 'B' . $row . ':' . self::CONTAINER_LAST_COL . $row, [
@@ -1474,12 +1487,12 @@ class OrderExcelService
         $paths = $this->normalizeImagePaths([$providedPaths, $canonicalPaths]);
 
         if (!$paths) {
-            $sheet->setCellValue($cell, $this->tr('No photo'));
+            $this->setSafeCell($sheet,$cell, $this->tr('No photo'));
             $this->logWorkbookImageDiagnostic('excel_image_unavailable', $context, 'no_candidates', 0);
             return;
         }
         if ($drawing === null) {
-            $sheet->setCellValue($cell, $this->tr('No photo'));
+            $this->setSafeCell($sheet,$cell, $this->tr('No photo'));
             $this->logWorkbookImageDiagnostic(
                 'excel_image_unavailable',
                 $context,
@@ -1524,9 +1537,9 @@ class OrderExcelService
             $drawing->setOffsetX($offsetX);
             $drawing->setOffsetY($offsetY);
             $drawing->setWorksheet($sheet);
-            $sheet->setCellValue($cell, '');
+            $this->setSafeCell($sheet,$cell, '');
         } catch (Throwable $e) {
-            $sheet->setCellValue($cell, $this->tr('No photo'));
+            $this->setSafeCell($sheet,$cell, $this->tr('No photo'));
             $this->logWorkbookImageDiagnostic('excel_image_unavailable', $context, 'worksheet_attachment_failed', count($paths));
         }
     }
@@ -1916,6 +1929,16 @@ class OrderExcelService
 
     private function validateWorkbookImageFile(string $path): array
     {
+        // API exports must enforce the same private-file scope as original/thumbnail delivery.
+        if (session_status() === PHP_SESSION_ACTIVE && getAuthUserId()) {
+            $root=str_replace('\\','/',realpath($this->backendDir.'/uploads') ?: $this->backendDir.'/uploads').'/';
+            $absolute=str_replace('\\','/',realpath($path) ?: $path);
+            if (str_starts_with(strtolower($absolute),strtolower($root))) {
+                require_once __DIR__.'/UploadAccessService.php';
+                UploadAccessService::authorize($this->pdo ?? getDb(),'uploads/'.substr($absolute,strlen($root)));
+            }
+        }
+
         if (!is_file($path)) {
             return ['path' => '', 'reason' => 'local_file_missing'];
         }
@@ -1933,6 +1956,7 @@ class OrderExcelService
         if (!is_array($info)) {
             return ['path' => '', 'reason' => 'invalid_image_content'];
         }
+        if ((float)($info[0]??0)*(float)($info[1]??0)>25000000) return ['path'=>'','reason'=>'image_dimensions_too_large'];
         $mime = strtolower((string) ($info['mime'] ?? ''));
         $directMimes = ['image/jpeg', 'image/png', 'image/gif'];
         $convertMimes = ['image/webp', 'image/bmp', 'image/x-ms-bmp'];
@@ -1960,6 +1984,9 @@ class OrderExcelService
             $resolvedPort = $port > 0 ? $port : ($scheme === 'https' ? 443 : 80);
             curl_setopt_array($handle, [
                 CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_PROXY => '',
+                CURLOPT_SSL_VERIFYHOST => 2,
+                CURLOPT_SSL_VERIFYPEER => true,
                 CURLOPT_CONNECTTIMEOUT => 3,
                 CURLOPT_TIMEOUT => 6,
                 CURLOPT_USERAGENT => 'CLMS Excel Export/1.0',
@@ -1984,27 +2011,11 @@ class OrderExcelService
                 return ['data' => '', 'reason' => 'remote_fetch_failed'];
             }
         } else {
-            $streamContext = stream_context_create(['http' => [
-                'timeout' => 6,
-                'follow_location' => 0,
-                'ignore_errors' => false,
-                'user_agent' => 'CLMS Excel Export/1.0',
-            ]]);
-            $source = @fopen($url, 'rb', false, $streamContext);
-            if (!$source) {
-                return ['data' => '', 'reason' => 'remote_fetch_failed'];
-            }
-            $data = stream_get_contents($source, $limit + 1);
-            fclose($source);
-            if (!is_string($data) || $data === '') {
-                return ['data' => '', 'reason' => 'remote_fetch_failed'];
-            }
-            if (strlen($data) > $limit) {
-                return ['data' => '', 'reason' => 'remote_image_too_large'];
-            }
+            return ['data' => '', 'reason' => 'secure_remote_transport_unavailable'];
         }
 
-        if (@getimagesizefromstring($data) === false) {
+        $imageInfo = @getimagesizefromstring($data);
+        if ($imageInfo === false || (float)$imageInfo[0]*(float)$imageInfo[1]>25000000) {
             return ['data' => '', 'reason' => 'remote_invalid_image'];
         }
         return ['data' => $data, 'reason' => 'ok'];
@@ -2474,6 +2485,13 @@ class OrderExcelService
         }
     }
 
+    /** These workbooks contain calculated values, never executable formulas. */
+    private function setSafeCell(Worksheet $sheet,string $coordinate,$value): void
+    {
+        if(is_string($value))$sheet->setCellValueExplicit($coordinate,$value,DataType::TYPE_STRING);
+        else $sheet->setCellValue($coordinate,$value);
+    }
+
     private function createWorkbookDrawingOutcome(string $sourcePath, int $targetWidth, int $targetHeight): array
     {
         $preparedPath = $sourcePath;
@@ -2672,8 +2690,8 @@ class OrderExcelService
         $chineseHeaderRow = $headerRow + 1;
         foreach ($englishHeaders as $index => $header) {
             $column = Coordinate::stringFromColumnIndex($index + 1);
-            $sheet->setCellValue($column . $headerRow, $header);
-            $sheet->setCellValue($column . $chineseHeaderRow, $chineseHeaders[$index] ?? $header);
+            $this->setSafeCell($sheet,$column . $headerRow, $header);
+            $this->setSafeCell($sheet,$column . $chineseHeaderRow, $chineseHeaders[$index] ?? $header);
             $sheet->getStyle($column . $headerRow . ':' . $column . $chineseHeaderRow)->applyFromArray([
                 'font' => ['name' => 'Arial', 'size' => 11, 'bold' => true, 'color' => ['rgb' => 'FFFFFF']],
                 'alignment' => [
@@ -2707,12 +2725,14 @@ class OrderExcelService
                     && preg_match('/^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?$/', $value)
                     && preg_match('/date|ready|received|created|updated|generated/i', $header)) {
                     $excelDate = $this->excelDateValue($value);
-                    $sheet->setCellValue($cell, $excelDate ?? $value);
+                    $this->setSafeCell($sheet,$cell, $excelDate ?? $value);
                     $sheet->getStyle($cell)->getNumberFormat()->setFormatCode(str_contains($value, ':') ? 'yyyy-mm-dd hh:mm:ss' : 'yyyy-mm-dd');
                 } elseif (in_array(strtolower(trim($header)), ['item number', 'i.i.n'], true)) {
                     $sheet->setCellValueExplicit($cell, (string) ($value ?? ''), DataType::TYPE_STRING);
+                } elseif (is_string($value)) {
+                    $sheet->setCellValueExplicit($cell, $value, DataType::TYPE_STRING);
                 } else {
-                    $sheet->setCellValue($cell, $value);
+                    $this->setSafeCell($sheet,$cell, $value);
                 }
                 $sheet->getStyle($cell)->applyFromArray([
                     'font' => ['name' => 'Arial', 'size' => 10],
@@ -2730,7 +2750,7 @@ class OrderExcelService
         }
 
         if ($rowNumber === $chineseHeaderRow + 1) {
-            $sheet->setCellValue('A' . $rowNumber, $this->tr('No rows available.'));
+            $this->setSafeCell($sheet,'A' . $rowNumber, $this->tr('No rows available.'));
             $sheet->mergeCells("A{$rowNumber}:{$lastColumn}{$rowNumber}");
             $sheet->getStyle("A{$rowNumber}:{$lastColumn}{$rowNumber}")->getAlignment()
                 ->setHorizontal(Alignment::HORIZONTAL_CENTER)

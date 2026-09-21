@@ -6,8 +6,11 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
+require_once dirname(__DIR__,2).'/services/OperationReplayService.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('customer-portal-tokens', $method, $id, $action);
     $pdo = getDb();
     $userId = getAuthUserId();
     if (!$userId) jsonError('Unauthorized', 401);
@@ -15,19 +18,22 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
     switch ($method) {
         case 'POST':
-            $customerId = (int) ($input['customer_id'] ?? 0);
+            $customerId = (int) OrderWriteService::number($input['customer_id']??null,'Customer',true,0,4294967295);
             if (!$customerId) jsonError('customer_id required', 400);
             clmsRequireCustomerAccess($pdo, $customerId);
-            $hours = (int) ($input['hours'] ?? 24);
-            if ($hours < 1 || $hours > 168) $hours = 24;
+            $hours = (int)OrderWriteService::number($input['hours']??24,'Hours',true,0,168);
+            if($hours<1)jsonError('Hours must be between 1 and 168',422);
+            $claim=OperationReplayService::claim($pdo,'customer_portal_token',$input,$userId);
+            if($claim['previous_id'])jsonError('This link was already issued. Use the displayed link or generate a new one.',409);
+            $pdo->beginTransaction();register_shutdown_function(static function()use($pdo){if($pdo->inTransaction())$pdo->rollBack();});
+            $s=$pdo->prepare('SELECT id FROM customers WHERE id=? FOR UPDATE');$s->execute([$customerId]);if(!$s->fetchColumn())jsonError('Customer not found',404);
             $token = bin2hex(random_bytes(32));
             $hash = hash('sha256', $token);
             $expires = date('Y-m-d H:i:s', strtotime("+{$hours} hours"));
             $pdo->prepare("INSERT INTO customer_portal_tokens (customer_id, token_hash, expires_at, created_by) VALUES (?,?,?,?)")
                 ->execute([$customerId, $hash, $expires, $userId]);
             $portalTokenId = (int) $pdo->lastInsertId();
-            $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('customer_portal_token', ?, 'create', ?, ?)")
-                ->execute([$portalTokenId, json_encode(['customer_id' => $customerId, 'expires_at' => $expires]), $userId]);
+            OperationReplayService::record($pdo,'customer_portal_token',$portalTokenId,$claim,['customer_id'=>$customerId,'expires_at'=>$expires],$userId);$pdo->commit();
             $config = require dirname(__DIR__, 2) . '/config/config.php';
             $base = trim((string) ($config['app_url'] ?? ''));
             if (!$base) {

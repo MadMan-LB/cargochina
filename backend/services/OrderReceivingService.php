@@ -1,7 +1,10 @@
 <?php
+require_once __DIR__ . '/OrderStateService.php';
 
 require_once __DIR__ . '/NotificationService.php';
 require_once __DIR__ . '/ShipmentAccountingService.php';
+require_once __DIR__ . '/ReceivingQuantityService.php';
+require_once dirname(__DIR__) . '/api/helpers.php';
 
 if (!class_exists('OrderReceivingValidationException')) {
     class OrderReceivingValidationException extends RuntimeException
@@ -32,15 +35,22 @@ class OrderReceivingService
 {
     public function receive(PDO $pdo, int $orderId, array $input, int $userId, bool $manageTransaction = true, array $options = []): array
     {
+        if (isset($input['notes']) && !is_string($input['notes'])) throw new OrderReceivingValidationException('Receipt notes must be text', 400);
+        if (isset($input['idempotency_key']) && !is_string($input['idempotency_key'])) throw new OrderReceivingValidationException('Receiving idempotency key must be text',400);
         $operationId = trim((string) ($options['idempotency_key'] ?? $input['idempotency_key'] ?? ''));
-        if ($operationId !== '' && !preg_match('/^[A-Za-z0-9._:-]{8,64}$/', $operationId)) {
-            throw new OrderReceivingValidationException('Invalid receiving idempotency key', 400);
+        if (!preg_match('/^[A-Za-z0-9._:-]{8,64}$/', $operationId)) {
+            throw new OrderReceivingValidationException('A receiving idempotency key (8–64 letters, digits, dots, colons, underscores or hyphens) is required', 400);
         }
+        if (!$this->tableHasColumn($pdo, 'warehouse_receipts', 'receiving_operation_id')) throw new OrderReceivingValidationException('Receiving retry protection is not installed. Run migration 075.', 503);
+        $requestHash = $this->requestHash($input);
         if ($operationId !== '' && $this->tableHasColumn($pdo, 'warehouse_receipts', 'receiving_operation_id')) {
-            $existing = $pdo->prepare('SELECT id FROM warehouse_receipts WHERE receiving_operation_id=? LIMIT 1');
+            $existing = $pdo->prepare('SELECT id, order_id FROM warehouse_receipts WHERE receiving_operation_id=? LIMIT 1');
             $existing->execute([$operationId]);
-            $existingId = (int) $existing->fetchColumn();
+            $existingReceipt = $existing->fetch(PDO::FETCH_ASSOC);
+            $existingId = (int) ($existingReceipt['id'] ?? 0);
             if ($existingId > 0) {
+                if ((int) $existingReceipt['order_id'] !== $orderId) throw new OrderReceivingValidationException('Receiving idempotency key belongs to another order', 409);
+                $this->validateReplay($pdo, $orderId, $existingId, $requestHash);
                 return ['status' => 'already_received', 'receipt_id' => $existingId, 'idempotent_replay' => true];
             }
         }
@@ -56,16 +66,9 @@ class OrderReceivingService
             throw new OrderReceivingValidationException('Order must be Approved or InTransitToWarehouse to receive', 400);
         }
 
-        $actualCartons = (int) ($input['actual_cartons'] ?? 0);
-        $actualCbm = (float) ($input['actual_cbm'] ?? 0);
-        $actualWeight = (float) ($input['actual_weight'] ?? 0);
-        if ($actualCartons < 0 || $actualCbm < 0 || $actualWeight < 0) {
-            throw new OrderReceivingValidationException('Actual cartons, CBM, and weight must be zero or positive', 400);
-        }
-
         $condition = $input['condition'] ?? 'good';
         if (!in_array($condition, ['good', 'damaged', 'partial'], true)) {
-            $condition = 'good';
+            throw new OrderReceivingValidationException('Invalid receipt condition', 400);
         }
 
         $photoPaths = $this->normalizeStoredUploadPathList($input['photo_paths'] ?? []);
@@ -81,7 +84,36 @@ class OrderReceivingService
         $photoEvidencePerItem = (int) ($config['photo_evidence_per_item'] ?? 0);
         $itemLevelEnabled = (int) ($config['item_level_receiving_enabled'] ?? 0);
 
-        $orderItems = $pdo->prepare("SELECT id, declared_cbm, declared_weight FROM order_items WHERE order_id = ?");
+        $startedTransaction = false;
+        if ($manageTransaction && !$pdo->inTransaction()) {
+            $pdo->beginTransaction();
+            $startedTransaction = true;
+        }
+        if (!$manageTransaction && !$pdo->inTransaction()) {
+            throw new RuntimeException('Caller-managed receiving requires an active transaction');
+        }
+        try {
+            // Serialize before reading prior partial receipts or declarations.
+            $lock = $pdo->prepare('SELECT * FROM orders WHERE id=? FOR UPDATE');
+            $lock->execute([$orderId]);
+            $order = $lock->fetch(PDO::FETCH_ASSOC);
+            $lockedStatus = (string) ($order['status'] ?? '');
+            if ($operationId !== '' && $this->tableHasColumn($pdo, 'warehouse_receipts', 'receiving_operation_id')) {
+                $existing = $pdo->prepare('SELECT id, order_id FROM warehouse_receipts WHERE receiving_operation_id=? LIMIT 1 FOR UPDATE');
+                $existing->execute([$operationId]);
+                $existingReceipt = $existing->fetch(PDO::FETCH_ASSOC);
+                $existingId = (int) ($existingReceipt['id'] ?? 0);
+                if ($existingId > 0) {
+                    if ((int) $existingReceipt['order_id'] !== $orderId) throw new OrderReceivingValidationException('Receiving idempotency key belongs to another order', 409);
+                    $this->validateReplay($pdo, $orderId, $existingId, $requestHash);
+                    if ($startedTransaction) $pdo->commit();
+                    return ['status'=>'already_received','receipt_id'=>$existingId,'idempotent_replay'=>true];
+                }
+            }
+            if (!in_array($lockedStatus, $allowed, true)) {
+                throw new OrderReceivingValidationException('Order has already been received or is no longer receivable', 409);
+            }
+        $orderItems = $pdo->prepare("SELECT * FROM order_items WHERE order_id = ? FOR UPDATE");
         $orderItems->execute([$orderId]);
         $orderItemsRows = $orderItems->fetchAll(PDO::FETCH_ASSOC);
         $declaredCbm = array_sum(array_column($orderItemsRows, 'declared_cbm'));
@@ -92,24 +124,48 @@ class OrderReceivingService
                             COALESCE(MAX(receipt_condition='damaged'),0) has_damage
                        FROM warehouse_receipts WHERE order_id=?";
         if ($this->tableHasColumn($pdo, 'warehouse_receipts', 'voided_at')) $priorSql .= ' AND voided_at IS NULL';
-        $priorStmt = $pdo->prepare($priorSql); $priorStmt->execute([$orderId]);
+        $priorStmt = $pdo->prepare($priorSql . ' FOR UPDATE'); $priorStmt->execute([$orderId]);
         $prior = $priorStmt->fetch(PDO::FETCH_ASSOC) ?: ['cbm'=>0,'weight'=>0,'cartons'=>0,'has_damage'=>0];
+        $receivedQuantitySql = ReceivingQuantityService::legacyQuantitySql();
         $priorItemSql = "SELECT wri.order_item_id,
                                 COALESCE(SUM(wri.actual_cbm),0) cbm,
+                                SUM($receivedQuantitySql) quantity,
+                                MAX(($receivedQuantitySql) IS NULL) unknown_quantity,
                                 COALESCE(MAX(wri.variance_detected),0) has_variance,
                                 COALESCE(MAX(wri.receipt_condition='damaged'),0) has_damage
                            FROM warehouse_receipt_items wri
                            JOIN warehouse_receipts wr ON wr.id=wri.receipt_id
+                           JOIN order_items oi ON oi.id=wri.order_item_id
                           WHERE wr.order_id=?";
         if ($this->tableHasColumn($pdo, 'warehouse_receipts', 'voided_at')) $priorItemSql .= ' AND wr.voided_at IS NULL';
-        $priorItemSql .= ' GROUP BY wri.order_item_id';
+        $priorItemSql .= ' GROUP BY wri.order_item_id FOR UPDATE';
         $priorItemStmt = $pdo->prepare($priorItemSql); $priorItemStmt->execute([$orderId]);
         $priorItems = [];
         foreach ($priorItemStmt->fetchAll(PDO::FETCH_ASSOC) as $priorItem) {
             $priorItems[(int) $priorItem['order_item_id']] = $priorItem;
         }
-        $isPartial = $condition === 'partial';
-        $hasDamage = $condition === 'damaged' || (!$isPartial && !empty($prior['has_damage']));
+        if (abs((float)$prior['cbm'] - array_sum(array_column($priorItems,'cbm'))) > 0.000001) {
+            throw new OrderReceivingValidationException('Prior receipt item allocation is incomplete; reconcile receipt history before receiving more', 409);
+        }
+        $unallocated=$pdo->prepare('SELECT wr.id FROM warehouse_receipts wr WHERE wr.order_id=? AND wr.voided_at IS NULL AND NOT EXISTS (SELECT 1 FROM warehouse_receipt_items wri WHERE wri.receipt_id=wr.id) LIMIT 1 FOR UPDATE');
+        $unallocated->execute([$orderId]);
+        if($unallocated->fetchColumn()) throw new OrderReceivingValidationException('Prior receipt has no item quantities; reconcile receipt history before receiving more',409);
+        try {
+            $input = ReceivingQuantityService::normalize($input, $orderItemsRows, $priorItems);
+        } catch (InvalidArgumentException $e) {
+            throw new OrderReceivingValidationException($e->getMessage(), 400);
+        }
+        $itemsInput = $input['items'];
+        $actualCartons = (int) $input['actual_cartons'];
+        $actualCbm = (float) $input['actual_cbm'];
+        $actualWeight = (float) $input['actual_weight'];
+        $isPartial = $input['is_partial'];
+        if ($condition !== 'damaged') $condition = $isPartial ? 'partial' : 'good';
+        foreach ($itemsInput as &$receiptItem) {
+            if (($receiptItem['condition'] ?? 'good') !== 'damaged') $receiptItem['condition'] = $isPartial ? 'partial' : 'good';
+        }
+        unset($receiptItem);
+        $hasDamage = $condition === 'damaged' || (!$isPartial && (!empty($prior['has_damage']) || (bool)array_filter($priorItems, static fn($item)=>!empty($item['has_damage']))));
         $comparisonCbm = (float) $prior['cbm'] + $actualCbm;
         $orderVariancePct = $declaredCbm > 0 ? abs($comparisonCbm - $declaredCbm) / $declaredCbm * 100 : 0;
         $orderVarianceAbs = abs($comparisonCbm - $declaredCbm);
@@ -181,19 +237,19 @@ class OrderReceivingService
                     ? (float) $it['total_amount']
                     : null;
 
-                if (($aQuantity === null || $aQuantity <= 0) && $aCartons !== null && $aPiecesPerCarton !== null && $aCartons > 0 && $aPiecesPerCarton > 0) {
+                if (($aQuantity === null) && $aCartons !== null && $aPiecesPerCarton !== null && $aCartons > 0 && $aPiecesPerCarton > 0) {
                     $aQuantity = round($aCartons * $aPiecesPerCarton, 4);
                 }
-                if (($aTotalAmount === null || $aTotalAmount <= 0) && $aQuantity !== null && $aUnitPrice !== null && $aQuantity > 0 && $aUnitPrice >= 0) {
+                if (($aTotalAmount === null) && $aQuantity !== null && $aUnitPrice !== null && $aQuantity > 0 && $aUnitPrice >= 0) {
                     $aTotalAmount = round($aQuantity * $aUnitPrice, 4);
                 }
-                if (($aCbm === null || $aCbm <= 0) && $aCartons !== null) {
+                if (($aCbm === null) && $aCartons !== null) {
                     $derivedCbm = $this->calculateCbmFromDimensions($aCartons, $aHeight, $aWidth, $aLength);
                     if ($derivedCbm !== null) {
                         $aCbm = $derivedCbm;
                     }
                 }
-                if (($aWeight === null || $aWeight <= 0) && $aCartons !== null && $aWeightPerCarton !== null && $aCartons > 0 && $aWeightPerCarton > 0) {
+                if (($aWeight === null) && $aCartons !== null && $aWeightPerCarton !== null && $aCartons > 0 && $aWeightPerCarton > 0) {
                     $aWeight = round($aCartons * $aWeightPerCarton, 4);
                 }
 
@@ -291,34 +347,6 @@ class OrderReceivingService
             throw new OrderReceivingValidationException('Item-level receiving is required; provide items array', 400);
         }
 
-        $startedTransaction = false;
-        if ($manageTransaction && !$pdo->inTransaction()) {
-            $pdo->beginTransaction();
-            $startedTransaction = true;
-        }
-        if (!$manageTransaction && !$pdo->inTransaction()) {
-            throw new RuntimeException('Caller-managed receiving requires an active transaction');
-        }
-
-        try {
-            $lock = $pdo->prepare('SELECT status FROM orders WHERE id=? FOR UPDATE');
-            $lock->execute([$orderId]);
-            $lockedStatus = (string) $lock->fetchColumn();
-            // A concurrent request may have committed the same operation while
-            // this request waited for the order lock. Recheck inside the lock
-            // so the loser returns the original receipt instead of a conflict.
-            if ($operationId !== '' && $this->tableHasColumn($pdo, 'warehouse_receipts', 'receiving_operation_id')) {
-                $existing = $pdo->prepare('SELECT id FROM warehouse_receipts WHERE receiving_operation_id=? LIMIT 1');
-                $existing->execute([$operationId]);
-                $existingId = (int) $existing->fetchColumn();
-                if ($existingId > 0) {
-                    if ($startedTransaction) $pdo->commit();
-                    return ['status'=>'already_received','receipt_id'=>$existingId,'idempotent_replay'=>true];
-                }
-            }
-            if (!in_array($lockedStatus, $allowed, true)) {
-                throw new OrderReceivingValidationException('Order has already been received or is no longer receivable', 409);
-            }
             $receiptCols = 'order_id, actual_cartons, actual_cbm, actual_weight, receipt_condition, notes, received_by';
             $receiptVals = '?,?,?,?,?,?,?';
             $receiptParams = [$orderId, $actualCartons, $actualCbm, $actualWeight, $condition, $input['notes'] ?? null, $userId];
@@ -412,19 +440,19 @@ class OrderReceivingService
                         ? (float) $it['total_amount']
                         : null;
 
-                    if (($aQuantity === null || $aQuantity <= 0) && $aCartons !== null && $aPiecesPerCarton !== null && $aCartons > 0 && $aPiecesPerCarton > 0) {
+                    if (($aQuantity === null) && $aCartons !== null && $aPiecesPerCarton !== null && $aCartons > 0 && $aPiecesPerCarton > 0) {
                         $aQuantity = round($aCartons * $aPiecesPerCarton, 4);
                     }
-                    if (($aTotalAmount === null || $aTotalAmount <= 0) && $aQuantity !== null && $aUnitPrice !== null && $aQuantity > 0 && $aUnitPrice >= 0) {
+                    if (($aTotalAmount === null) && $aQuantity !== null && $aUnitPrice !== null && $aQuantity > 0 && $aUnitPrice >= 0) {
                         $aTotalAmount = round($aQuantity * $aUnitPrice, 4);
                     }
-                    if (($aCbm === null || $aCbm <= 0) && $aCartons !== null) {
+                    if (($aCbm === null) && $aCartons !== null) {
                         $derivedCbm = $this->calculateCbmFromDimensions($aCartons, $aHeight, $aWidth, $aLength);
                         if ($derivedCbm !== null) {
                             $aCbm = $derivedCbm;
                         }
                     }
-                    if (($aWeight === null || $aWeight <= 0) && $aCartons !== null && $aWeightPerCarton !== null && $aCartons > 0 && $aWeightPerCarton > 0) {
+                    if (($aWeight === null) && $aCartons !== null && $aWeightPerCarton !== null && $aCartons > 0 && $aWeightPerCarton > 0) {
                         $aWeight = round($aCartons * $aWeightPerCarton, 4);
                     }
 
@@ -482,6 +510,7 @@ class OrderReceivingService
             }
 
             $newStatus = $isPartial ? 'InTransitToWarehouse' : ($hasVariance ? 'Confirmed' : 'ReadyForConsolidation');
+            if ($newStatus !== $order['status']) OrderStateService::validateTransition($order['status'], $newStatus);
             $confirmToken = null;
             if ($hasVariance && !$isPartial) {
                 $confirmToken = bin2hex(random_bytes(24));
@@ -495,6 +524,8 @@ class OrderReceivingService
                 'actual_weight' => $actualWeight,
                 'status' => $newStatus,
                 'receipt_id' => $receiptId,
+                'request_hash' => $requestHash,
+                'quantity_totals' => $input['quantity_totals'],
                 'fees_count' => count($receiptFees),
                 'fees_total' => $receiptFeeTotals,
             ];
@@ -520,7 +551,7 @@ class OrderReceivingService
                     'import_id' => $options['import_id'] ?? null,
                 ]);
             }
-            (new NotificationService($pdo))->notifyOrderReceived($orderId, $userId, $hasVariance, $confirmToken);
+            (new NotificationService($pdo))->notifyOrderReceived($orderId, $userId, $hasVariance, $confirmToken, $isPartial);
 
             if ($startedTransaction) {
                 $pdo->commit();
@@ -530,6 +561,7 @@ class OrderReceivingService
                 'status' => $newStatus,
                 'receipt_id' => $receiptId,
                 'variance_detected' => $hasVariance,
+                'quantity_totals' => $input['quantity_totals'],
                 'fees_count' => count($receiptFees),
                 'fees_total' => $receiptFeeTotals,
             ];
@@ -541,19 +573,57 @@ class OrderReceivingService
         }
     }
 
-    private function normalizeStoredUploadPathList(array $paths): array
+    private function normalizeStoredUploadPathList($paths): array
     {
-        if (function_exists('normalizeStoredUploadPathList')) {
-            return normalizeStoredUploadPathList($paths);
+        if (!is_array($paths)) throw new OrderReceivingValidationException('Photo paths must be an array', 400);
+        $normalized = [];
+        foreach ($paths as $path) {
+            if (!is_string($path)) throw new OrderReceivingValidationException('Invalid photo path', 400);
+            try {
+                $meta = clmsResolveStoredUploadPathMeta($path);
+                clmsAuthorizeUploadForCurrentActor($meta['normalized']);
+                $imageInfo=@getimagesize($meta['resolved_path']);
+                if ($imageInfo === false || (float)$imageInfo[0]*(float)$imageInfo[1]>25000000) throw new InvalidArgumentException('Receipt evidence must be an uploaded image within the supported dimensions');
+                $normalized[] = $meta['normalized'];
+            } catch (InvalidArgumentException $e) {
+                throw new OrderReceivingValidationException($e->getMessage(), 400);
+            }
         }
+        return array_values(array_unique($normalized));
+    }
 
-        return array_values(array_unique(array_filter(array_map('strval', $paths))));
+    private function requestHash(array $input): string
+    {
+        unset($input['idempotency_key']);
+        $sort = static function ($value) use (&$sort) {
+            if (!is_array($value)) return $value;
+            if (!array_is_list($value)) ksort($value);
+            return array_map($sort, $value);
+        };
+        try { return hash('sha256', json_encode($sort($input), JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION)); }
+        catch (JsonException $e) { throw new OrderReceivingValidationException('Receipt contains invalid text or non-finite numeric values',400); }
+    }
+
+    private function validateReplay(PDO $pdo, int $orderId, int $receiptId, string $hash): void
+    {
+        $stmt = $pdo->prepare('SELECT voided_at FROM warehouse_receipts WHERE id=?');
+        $stmt->execute([$receiptId]);
+        if ($stmt->fetchColumn() !== null) throw new OrderReceivingValidationException('This receiving operation was voided; use a new operation key', 409);
+        $stmt = $pdo->prepare("SELECT new_value FROM audit_log WHERE entity_type='order' AND entity_id=? AND action='receive' ORDER BY id DESC");
+        $stmt->execute([$orderId]);
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $json) {
+            $audit = json_decode($json, true);
+            if ((int) ($audit['receipt_id'] ?? 0) !== $receiptId) continue;
+            if (isset($audit['request_hash']) && hash_equals($audit['request_hash'], $hash)) return;
+            break;
+        }
+        throw new OrderReceivingValidationException('Receiving key payload differs or cannot be verified; inspect the existing receipt', 409);
     }
 
     private function normalizeReceiptFees($rawFees, string $defaultCurrency): array
     {
         if (!is_array($rawFees)) {
-            return [];
+            throw new OrderReceivingValidationException('Receipt fees must be an array',400);
         }
 
         $defaultCurrency = $this->normalizeCurrency($defaultCurrency);
@@ -562,8 +632,9 @@ class OrderReceivingService
 
         foreach ($rawFees as $idx => $rawFee) {
             if (!is_array($rawFee)) {
-                continue;
+                throw new OrderReceivingValidationException('Invalid receipt fee',400);
             }
+            foreach (['label','fee_label','description','type','notes','currency'] as $field) if (isset($rawFee[$field]) && !is_string($rawFee[$field])) throw new OrderReceivingValidationException('Receipt fee '.$field.' must be text',400);
 
             $amountRaw = $rawFee['amount'] ?? null;
             $amountText = is_string($amountRaw)
@@ -581,14 +652,14 @@ class OrderReceivingService
             if (($amountText === null || $amountText === '') && $label === '' && $notes === '') {
                 continue;
             }
-            if (!is_numeric($amountText)) {
+            if (!is_numeric($amountText) || !is_finite((float)$amountText)) {
                 $errors["fees.$idx.amount"] = 'Fee amount must be numeric';
                 continue;
             }
 
             $amount = round((float) $amountText, 4);
-            if ($amount < 0) {
-                $errors["fees.$idx.amount"] = 'Fee amount must be zero or positive';
+            if ($amount < 0 || $amount > 99999999.9999) {
+                $errors["fees.$idx.amount"] = 'Fee amount must be between zero and 99999999.9999';
                 continue;
             }
             if ($amount <= 0) {
@@ -600,6 +671,10 @@ class OrderReceivingService
             }
 
             $currency = $this->normalizeCurrency((string) ($rawFee['currency'] ?? $defaultCurrency));
+            if ($currency !== $defaultCurrency) {
+                $errors["fees.$idx.currency"] = 'Receiving fee currency must match the order currency';
+                continue;
+            }
             $fees[] = [
                 'label' => mb_substr($label, 0, 160),
                 'amount' => $amount,
@@ -703,10 +778,10 @@ class OrderReceivingService
             $unitPrice = isset($rawSplit['unit_price']) && $rawSplit['unit_price'] !== '' ? (float) $rawSplit['unit_price'] : null;
             $totalAmount = isset($rawSplit['total_amount']) && $rawSplit['total_amount'] !== '' ? (float) $rawSplit['total_amount'] : null;
 
-            if (($quantity === null || $quantity <= 0) && $cartons !== null && $pieces !== null && $cartons > 0 && $pieces > 0) {
+            if (($quantity === null) && $cartons !== null && $pieces !== null && $cartons > 0 && $pieces > 0) {
                 $quantity = round($cartons * $pieces, 4);
             }
-            if (($totalAmount === null || $totalAmount <= 0) && $quantity !== null && $unitPrice !== null && $quantity > 0 && $unitPrice >= 0) {
+            if (($totalAmount === null) && $quantity !== null && $unitPrice !== null && $quantity > 0 && $unitPrice >= 0) {
                 $totalAmount = round($quantity * $unitPrice, 4);
             }
 
@@ -741,12 +816,12 @@ class OrderReceivingService
         }
 
         foreach ($splits as &$split) {
-            if (($split['quantity'] === null || $split['quantity'] <= 0)
+            if (($split['quantity'] === null)
                 && $split['cartons'] !== null && $split['pieces_per_carton'] !== null
                 && $split['cartons'] > 0 && $split['pieces_per_carton'] > 0) {
                 $split['quantity'] = round($split['cartons'] * $split['pieces_per_carton'], 4);
             }
-            if (($split['total_amount'] === null || $split['total_amount'] <= 0)
+            if (($split['total_amount'] === null)
                 && $split['quantity'] !== null && $split['unit_price'] !== null
                 && $split['quantity'] > 0 && $split['unit_price'] >= 0) {
                 $split['total_amount'] = round($split['quantity'] * $split['unit_price'], 4);

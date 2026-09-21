@@ -5,10 +5,16 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
+require_once dirname(__DIR__,2).'/services/AuditService.php';
+require_once dirname(__DIR__,2).'/services/SettingsWriteService.php';
 require_once dirname(__DIR__, 2) . '/services/TrainingDataResetService.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('config', $method, $id, $action);
     $pdo = getDb();
+    if($method!=='GET')requireRecentAuthentication();
+    if($id==='training-reset'&&!in_array(strtolower((string)(getenv('APP_ENV') ?: 'production')),['local','development','testing'],true))jsonError('Training reset is disabled in production.',403);
     if ($method !== 'GET' || ($id !== 'receiving' && $id !== 'upload' && $id !== 'container-presets' && $id !== 'eta-offsets')) {
         requireRole(['SuperAdmin']);
     }
@@ -73,7 +79,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 return;
             }
             if ($id === 'receiving') {
-                setCacheHeaders(30);
                 $fileConfig = require dirname(__DIR__, 2) . '/config/config.php';
                 $stmt = @$pdo->query("SELECT key_name, key_value FROM system_config WHERE key_name = 'ITEM_LEVEL_RECEIVING_ENABLED'");
                 $val = 0;
@@ -82,14 +87,20 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 } else {
                     $val = (int) ($fileConfig['item_level_receiving_enabled'] ?? 0);
                 }
-                jsonResponse(['data' => ['item_level_receiving_enabled' => $val]]);
+                jsonResponse(['data' => [
+                    'item_level_receiving_enabled' => $val,
+                    'variance_threshold_percent' => (float) ($fileConfig['variance_threshold_percent'] ?? 10),
+                    'variance_threshold_abs_cbm' => (float) ($fileConfig['variance_threshold_abs_cbm'] ?? 0.1),
+                ]]);
                 return;
             }
             $fileConfig = require dirname(__DIR__, 2) . '/config/config.php';
+            $rawSettings=[];
             $stmt = @$pdo->query("SELECT key_name, key_value FROM system_config");
             if ($stmt) {
                 while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
                     $k = $r['key_name'];
+                    $rawSettings[$k]=$r['key_value'];
                     if ($k === 'VARIANCE_THRESHOLD_PERCENT') $fileConfig['variance_threshold_percent'] = (float) $r['key_value'];
                     elseif ($k === 'VARIANCE_THRESHOLD_ABS_CBM') $fileConfig['variance_threshold_abs_cbm'] = (float) $r['key_value'];
                     elseif ($k === 'CONFIRMATION_REQUIRED') $fileConfig['confirmation_required'] = $r['key_value'];
@@ -154,7 +165,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             } else {
                 $fileConfig['whatsapp_twilio_auth_token_set'] = false;
             }
-            jsonResponse(['data' => $fileConfig]);
+            jsonResponse(['data' => $fileConfig, 'revision'=>SettingsWriteService::revision($rawSettings)]);
             break;
 
         case 'POST':
@@ -182,7 +193,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
         case 'PUT':
             $updates = $input['config'] ?? $input;
-            if (empty($updates)) jsonError('No config to update', 400);
+            if (!is_array($updates)||empty($updates)) jsonError('No config to update', 400);
+            foreach($updates as $key=>$value)if(!is_scalar($value)&&!($key==='UPLOAD_ALLOWED_TYPES'&&is_array($value)))jsonError('Invalid configuration value',422);
             $allowed = ['VARIANCE_THRESHOLD_PERCENT', 'VARIANCE_THRESHOLD_ABS_CBM', 'CONFIRMATION_REQUIRED', 'CUSTOMER_PHOTO_VISIBILITY', 'MIN_PHOTOS_PER_ITEM', 'NOTIFICATION_CHANNELS', 'TRACKING_API_BASE_URL', 'TRACKING_API_TOKEN', 'TRACKING_API_TIMEOUT_SEC', 'TRACKING_API_RETRY_COUNT', 'TRACKING_API_RETRY_BACKOFF_MS', 'TRACKING_PUSH_ENABLED', 'TRACKING_PUSH_DRY_RUN', 'TRACKING_API_PATH', 'EMAIL_FROM_ADDRESS', 'EMAIL_FROM_NAME', 'WHATSAPP_API_URL', 'WHATSAPP_API_TOKEN', 'WHATSAPP_PROVIDER', 'WHATSAPP_TWILIO_ACCOUNT_SID', 'WHATSAPP_TWILIO_AUTH_TOKEN', 'WHATSAPP_TWILIO_FROM', 'WHATSAPP_TWILIO_TO', 'ITEM_LEVEL_RECEIVING_ENABLED', 'PHOTO_EVIDENCE_PER_ITEM', 'NOTIFICATION_MAX_ATTEMPTS', 'NOTIFICATION_RETRY_SECONDS', 'UPLOAD_MAX_MB', 'UPLOAD_ALLOWED_TYPES', 'STALE_ORDER_THRESHOLD_DAYS', 'STALE_ORDER_NOTIFY_ADMIN', 'APP_URL'];
             $maskedKeys = ['TRACKING_API_TOKEN', 'WHATSAPP_API_TOKEN', 'WHATSAPP_TWILIO_AUTH_TOKEN'];
             $errors = [];
@@ -219,12 +231,17 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             if (isset($updates['UPLOAD_ALLOWED_TYPES'])) {
                 $t = is_array($updates['UPLOAD_ALLOWED_TYPES']) ? $updates['UPLOAD_ALLOWED_TYPES'] : array_map('trim', explode(',', (string) $updates['UPLOAD_ALLOWED_TYPES']));
-                $allowed = clmsUploadAllowedExtensions();
-                if (!empty(array_diff(array_map('strtolower', $t), $allowed))) $errors['UPLOAD_ALLOWED_TYPES'] = 'Only ' . implode(',', $allowed) . ' allowed';
+                $extensions = clmsUploadAllowedExtensions();
+                foreach($t as $extension)if(!is_string($extension))jsonError('Invalid upload extensions',422);
+                if (!empty(array_diff(array_map('strtolower', $t), $extensions))) $errors['UPLOAD_ALLOWED_TYPES'] = 'Only ' . implode(',', $extensions) . ' allowed';
+                $updates['UPLOAD_ALLOWED_TYPES']=implode(',',array_map('strtolower',$t));
             }
             if (!empty($errors)) {
                 jsonError('Validation failed', 400, $errors);
             }
+            AuditService::begin($pdo);
+            $before=[];foreach($pdo->query('SELECT key_name,key_value FROM system_config FOR UPDATE')->fetchAll(PDO::FETCH_ASSOC) as $entry)$before[$entry['key_name']]=$entry['key_value'];
+            SettingsWriteService::assertCurrent($before,$input);
             $stmt = $pdo->prepare("INSERT INTO system_config (key_name, key_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE key_value = VALUES(key_value)");
             $changed = [];
             foreach ($updates as $k => $v) {
@@ -235,15 +252,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
             }
             if (!empty($changed)) {
-                $uid = getAuthUserId() ?? 0;
-                $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('system_config', 0, 'update', ?, ?)")
-                    ->execute([json_encode($changed), $uid]);
+                $old=[];foreach($changed as $key=>$value)$old[$key]=$before[$key]??null;
+                AuditService::record($pdo,'system_config',0,'update',$old,$changed,getAuthUserId());
             }
             $stmt = $pdo->query("SELECT key_name, key_value FROM system_config");
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
             $config = [];
-            foreach ($rows as $r) $config[$r['key_name']] = $r['key_value'];
-            jsonResponse(['data' => $config]);
+            foreach ($rows as $r) $config[$r['key_name']] = in_array($r['key_name'],$maskedKeys,true)?'********':$r['key_value'];
+            $revision=SettingsWriteService::revision(array_column($rows,'key_value','key_name'));
+            $pdo->commit();
+            jsonResponse(['data' => $config,'revision'=>$revision]);
             break;
     }
 

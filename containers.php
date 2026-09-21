@@ -24,7 +24,7 @@ require 'includes/layout.php';
   <div class="metric-card">
     <div class="eyebrow">High Utilization</div>
     <div class="value" id="containersHighLoadCount">0</div>
-    <div class="detail">At or above 85% CBM fill</div>
+    <div class="detail">At or above 85% CBM or weight capacity</div>
   </div>
   <div class="metric-card">
     <div class="eyebrow">Assigned Orders</div>

@@ -42,12 +42,14 @@ require 'includes/layout.php';
 <script>
   (function() {
     const API = window.API_BASE || "/cargochina/api/v1";
+    let revision="", saving=false;
     async function load() {
       const r = await fetch(API + "/business-settings", {
         credentials: "same-origin"
       });
       const d = await r.json();
       if (!r.ok || d.error) return;
+      revision=d.revision;
       const data = d.data || {};
       document.getElementById("CONTAINER_20HQ_CBM").value = data.CONTAINER_20HQ_CBM || "28";
       document.getElementById("CONTAINER_40HQ_CBM").value = data.CONTAINER_40HQ_CBM || "68";
@@ -57,6 +59,8 @@ require 'includes/layout.php';
       document.getElementById("ETA_OFFSETS_JSON").value = typeof data.ETA_OFFSETS_JSON === "string" ? data.ETA_OFFSETS_JSON : JSON.stringify(data.ETA_OFFSETS_JSON || {}, null, 2);
     }
     window.saveBusinessSettings = async function() {
+      if(saving) return;
+      saving=true;
       const config = {
         CONTAINER_20HQ_CBM: document.getElementById("CONTAINER_20HQ_CBM").value,
         CONTAINER_40HQ_CBM: document.getElementById("CONTAINER_40HQ_CBM").value,
@@ -73,16 +77,17 @@ require 'includes/layout.php';
           },
           credentials: "same-origin",
           body: JSON.stringify({
-            config
+            config, revision
           })
         });
         const d = await r.json();
         if (!r.ok || d.error) throw new Error(d.message || "Failed");
+        revision=d.revision;
         if (window.showToast) showToast("Saved");
         else alert("Saved");
       } catch (e) {
         alert(e.message || "Failed to save");
-      }
+      } finally {saving=false;}
     };
     document.addEventListener("DOMContentLoaded", load);
   })();

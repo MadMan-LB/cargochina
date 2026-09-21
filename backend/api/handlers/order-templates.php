@@ -8,14 +8,18 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
+require_once dirname(__DIR__,2).'/services/OperationReplayService.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('order-templates', $method, $id, $action);
     $userId = getAuthUserId();
     if (!$userId) {
         jsonError('Unauthorized', 401);
     }
 
     $pdo = getDb();
+    requirePermission($method==='GET'?'orders.read':'orders.write');
 
     if ($method === 'GET' && $id === null) {
         $stmt = $pdo->query("SELECT id, name, created_at FROM order_templates ORDER BY name");
@@ -37,10 +41,17 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $si = $pdo->prepare($sql);
         $si->execute([$id]);
         $tpl['items'] = $si->fetchAll(PDO::FETCH_ASSOC);
+        $tpl['requires_measurement_review'] = count(array_filter($tpl['items'], static fn(array $item): bool => !in_array($item['dimensions_scope'] ?? null, ['piece', 'carton'], true))) > 0;
         jsonResponse(['data' => $tpl]);
     }
 
     if ($method === 'POST' && $id === null) {
+        if(!is_string($input['name']??null)||mb_strlen(trim($input['name']))>255)jsonError('Template name must be text within 255 characters',422);
+        $input['items']=OrderWriteService::standardItems($pdo,$input['items']??null,null);
+        foreach($input['items'] as &$item){if(!in_array($item['dimensions_scope']??'piece',['piece','carton'],true))jsonError('Invalid template dimensions scope',422);$item['item_no']=null;$item['shipping_code']=null;unset($item['id'],$item['existing_item_id']);}
+        unset($item);
+        $claim=OperationReplayService::claim($pdo,'order_template',$input,$userId);
+        if($claim['previous_id'])jsonResponse(['data'=>['id'=>$claim['previous_id'],'name'=>$input['name']],'idempotent_replay'=>true]);
         $name = trim($input['name'] ?? '');
         $items = $input['items'] ?? [];
         if ($name === '') {
@@ -51,6 +62,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         }
 
         $pdo->beginTransaction();
+        register_shutdown_function(static function()use($pdo){if($pdo->inTransaction())$pdo->rollBack();});
         try {
             $ins = $pdo->prepare("INSERT INTO order_templates (name, created_by) VALUES (?, ?)");
             $ins->execute([$name, $userId]);
@@ -61,7 +73,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $insCols = "template_id, sort_order, item_no, shipping_code, product_id, description_cn, description_en, cartons, qty_per_carton, quantity, unit, declared_cbm, declared_weight, item_length, item_width, item_height, unit_price, total_amount, notes";
             $insVals = "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?";
             $metadataColumns = [];
-            foreach (['item_number', 'what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
+            foreach (['dimensions_scope','sell_price','item_number', 'what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
                 $colChk = @$pdo->query("SHOW COLUMNS FROM order_template_items LIKE " . $pdo->quote($column));
                 if ($colChk && $colChk->rowCount() > 0) {
                     $metadataColumns[] = $column;
@@ -73,6 +85,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $insCols .= ", supplier_id";
                 $insVals .= ",?";
             }
+            if(!in_array('dimensions_scope',$metadataColumns,true)||!in_array('sell_price',$metadataColumns,true))jsonError('Template measurement migration 082 is required',503);
             $insItem = $pdo->prepare("INSERT INTO order_template_items ($insCols) VALUES ($insVals)");
 
             foreach ($items as $idx => $it) {
@@ -89,7 +102,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $idx,
                     $it['item_no'] ?? null,
                     $it['shipping_code'] ?? null,
-                    $it['product_id'] ? (int) $it['product_id'] : null,
+                    !empty($it['product_id']) ? (int) $it['product_id'] : null,
                     $desc,
                     $it['description_en'] ?? null,
                     $cartons,
@@ -106,7 +119,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $it['notes'] ?? null,
                 ];
                 foreach ($metadataColumns as $column) {
-                    if ($column === 'item_number') {
+                    if ($column === 'dimensions_scope') {
+                        $params[]=$it['dimensions_scope']??'piece';
+                    } elseif ($column === 'item_number') {
                         $params[] = clmsPackingListItemNumber($it['item_number'] ?? null);
                     } elseif (in_array($column, ['length', 'width', 'height'], true)) {
                         $params[] = isset($it[$column]) ? (float) $it[$column] : (isset($it['item_' . $column]) ? (float) $it['item_' . $column] : null);
@@ -123,6 +138,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 $insItem->execute($params);
             }
+            OperationReplayService::record($pdo,'order_template',$templateId,$claim,['name'=>$name,'item_count'=>count($items)],$userId);
             $pdo->commit();
             jsonResponse(['data' => ['id' => $templateId, 'name' => $name]], 201);
         } catch (Throwable $e) {

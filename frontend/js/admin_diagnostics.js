@@ -249,11 +249,11 @@ async function loadDeliveryLog() {
           <td>#${r.notification_id}</td>
           <td>${escapeHtml(r.channel)}</td>
           <td>${escapeHtml(r.event_type || "-")}</td>
-          <td><span class="badge ${r.status === "sent" ? "bg-success" : "bg-danger"}">${escapeHtml(r.status)}</span></td>
+          <td><span class="badge ${r.status === "sent" ? "bg-success" : r.status === "failed" ? "bg-danger" : "bg-secondary"}">${escapeHtml(r.status)}</span></td>
           <td>${r.attempts}</td>
           <td class="small text-break" style="max-width:200px">${escapeHtml((r.last_error || "").substring(0, 80))}${(r.last_error || "").length > 80 ? "…" : ""}</td>
           <td>${escapeHtml(r.created_at || "")}</td>
-          <td>${r.status === "failed" && ["email", "whatsapp"].includes(r.channel) ? `<button type="button" class="btn btn-sm btn-outline-primary" onclick="retryDelivery(${r.id})">Retry</button>` : "-"}</td>
+          <td>${["failed", "pending"].includes(r.status) && ["email", "whatsapp"].includes(r.channel) ? `<button type="button" class="btn btn-sm btn-outline-primary" onclick="retryDelivery(${r.id})">Retry</button>` : "-"}</td>
         </tr>`,
             )
             .join("");

@@ -8,6 +8,8 @@ require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__, 2) . '/services/NotificationTargetService.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('notifications', $method, $id, $action);
     $pdo = getDb();
     $userId = (int) (getAuthUserId() ?? 0);
     if ($userId <= 0) jsonError('Unauthorized', 401);
@@ -74,7 +76,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 jsonResponse(['data'=>['url'=>$target['url'],'read'=>true,'target_type'=>$target['target_type'],'target_id'=>$target['target_id']]]);
             }
             if ($id && $action === 'read') {
-                $stmt = $pdo->prepare("UPDATE notifications SET read_at = NOW() WHERE id = ? AND user_id = ?");
+                $stmt = $pdo->prepare("UPDATE notifications SET read_at = COALESCE(read_at,NOW()) WHERE id = ? AND user_id = ?");
                 $stmt->execute([$id, $userId]);
                 jsonResponse(['data' => ['read' => true]]);
             }

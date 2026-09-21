@@ -7,6 +7,7 @@
 
 require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
+require_once dirname(__DIR__, 2) . '/services/CargoMetricsService.php';
 
 function warehouseStockHasColumn(PDO $pdo, string $table, string $column): bool
 {
@@ -29,7 +30,7 @@ function warehouseStockStatusGroups(): array
 {
     return [
         'InTransit' => ['InTransitToWarehouse'],
-        'InWarehouse' => ['ReceivedAtWarehouse', 'AwaitingCustomerConfirmation', 'Confirmed', 'ReadyForConsolidation'],
+        'InWarehouse' => CargoMetricsService::WAREHOUSE_STATUSES,
     ];
 }
 
@@ -45,6 +46,11 @@ function warehouseStockNormalizeStateFilters($value): array
         'awaitingcustomerconfirmation' => 'InWarehouse',
         'confirmed' => 'InWarehouse',
         'readyforconsolidation' => 'InWarehouse',
+        'consolidated' => 'InWarehouse',
+        'consolidatedintoshipmentdraft' => 'InWarehouse',
+        'assignedtocontainer' => 'InWarehouse',
+        'customerdeclined' => 'InWarehouse',
+        'customerdeclinedafterautoconfirm' => 'InWarehouse',
     ];
     $states = [];
     foreach ($values as $state) {
@@ -59,6 +65,7 @@ function warehouseStockNormalizeStateFilters($value): array
 function warehouseStockSearchExpressions(PDO $pdo): array
 {
     $expressions = [
+        'o.id',
         'oi.description_cn',
         'oi.description_en',
         'p.description_cn',
@@ -77,7 +84,11 @@ function warehouseStockSearchExpressions(PDO $pdo): array
 }
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('warehouse-stock', $method, $id, $action);
     $pdo = getDb();
+    if ($method === 'GET') { require_once dirname(__DIR__, 2) . '/services/QueryFilterService.php'; QueryFilterService::validate($_GET, 'warehouse-stock'); }
+    if($method==='GET'&&($action==='export'||$id==='export'))clmsBeginExportSnapshot($pdo);
     if (!getAuthUserId()) jsonError('Unauthorized', 401);
     requirePageAccess('warehouse_stock');
     if ($method !== 'GET') requireRole(['WarehouseStaff', 'ChinaAdmin', 'LebanonAdmin', 'ContainersStaff', 'SuperAdmin']);
@@ -87,26 +98,28 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $customerId = $_GET['customer_id'] ?? null;
     $supplierId = $_GET['supplier_id'] ?? null;
     $containerId = $_GET['container_id'] ?? null;
+    foreach (['customer_id'=>$customerId,'supplier_id'=>$supplierId,'container_id'=>$containerId] as $field=>$value) {
+        if ($value!==null && $value!=='' && (!is_scalar($value) || !ctype_digit((string)$value) || (int)$value<1)) jsonError("Invalid $field",400);
+    }
+    if (isset($_GET['q']) && !is_string($_GET['q'])) jsonError('Invalid search',400);
+    foreach ((array)($_GET['status'] ?? []) as $state) {
+        if (!is_string($state) || !warehouseStockNormalizeStateFilters($state)) jsonError('Invalid warehouse state',400);
+    }
     $statuses = warehouseStockNormalizeStateFilters($_GET['status'] ?? null);
     $q = trim($_GET['q'] ?? '');
     $itemType = clmsNormalizeItemTypeFilter($_GET['item_type'] ?? null);
 
-    $receiptHasVoidedAt = warehouseStockHasColumn($pdo, 'warehouse_receipts', 'voided_at');
-    $activeReceiptWhere = $receiptHasVoidedAt ? ' WHERE w.voided_at IS NULL' : '';
-    $activeReceiptItemWhere = $receiptHasVoidedAt ? ' WHERE rw.voided_at IS NULL' : '';
+    $receiptTotalsSql = CargoMetricsService::receiptTotalsSql($pdo);
+    $orderTotalsSql = "SELECT o.id order_id, r.cbm, r.weight, r.cartons,
+        COALESCE(r.receipt_count,0) receipt_count, COALESCE(r.unallocated_receipts,0) unallocated_receipts
+        FROM orders o LEFT JOIN ($receiptTotalsSql) r ON r.order_id=o.id";
+    $itemTotalsSql = CargoMetricsService::itemTotalsSql($pdo);
     $classificationSelect = warehouseStockHasColumn($pdo, 'item_classifications', 'item_type_code') ? ', ic.item_type_code, ic.confidence AS item_type_confidence, ic.is_confirmed AS item_type_confirmed' : '';
     $classificationJoin = warehouseStockHasColumn($pdo, 'item_classifications', 'item_type_code') ? " LEFT JOIN item_classifications ic ON ic.entity_type='order_item' AND ic.entity_id=oi.id" : '';
-    $actualDimensionSelect = '';
     $actualDimensionOuter = [];
     foreach (['actual_height','actual_width','actual_length'] as $dimensionColumn) {
-        $hasDimension = warehouseStockHasColumn($pdo, 'warehouse_receipt_items', $dimensionColumn);
-        if ($hasDimension) {
-            $actualDimensionSelect .= ", MAX(wri.$dimensionColumn) AS $dimensionColumn";
-        }
         $outputAlias = 'item_' . $dimensionColumn;
-        $actualDimensionOuter[] = $hasDimension
-            ? "ria.$dimensionColumn AS $outputAlias"
-            : "NULL AS $outputAlias";
+        $actualDimensionOuter[] = "CASE WHEN wr.unallocated_receipts=0 THEN ria.$dimensionColumn ELSE NULL END AS $outputAlias";
     }
     $actualDimensionOuterSql = implode(', ', $actualDimensionOuter);
 
@@ -123,27 +136,33 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $warehouseStatusGroups = warehouseStockStatusGroups();
     $allStockStatuses = array_merge($warehouseStatusGroups['InTransit'], $warehouseStatusGroups['InWarehouse']);
     $baseStatusPlaceholders = implode(',', array_fill(0, count($allStockStatuses), '?'));
+    $unknownAllocationSql = "(wr.unallocated_receipts>0 OR (wr.receipt_count=0 AND o.status<>'InTransitToWarehouse'))";
+    $stateSql = "CASE WHEN COALESCE(ria.receipt_count,0)>0 OR $unknownAllocationSql THEN 'InWarehouse' ELSE 'InTransit' END";
+    $orderedSql = "CASE WHEN oi.quantity>0 THEN oi.quantity ELSE COALESCE(oi.order_cartons,oi.cartons,0)*COALESCE(oi.order_qty_per_carton,oi.qty_per_carton,0) END";
+    $receivedQuantitySql = "CASE WHEN $unknownAllocationSql OR COALESCE(ria.unknown_quantity,0)>0 THEN NULL ELSE COALESCE(ria.quantity,0) END";
     $sql = "SELECT o.id as order_id, o.customer_id, o.supplier_id, o.status,
-        CASE WHEN o.status = 'InTransitToWarehouse' THEN 'InTransit' ELSE 'InWarehouse' END AS warehouse_state,
+        $stateSql AS warehouse_state,
+        ($orderedSql) AS ordered_quantity, GREATEST(0,($orderedSql)-($receivedQuantitySql)) remaining_quantity,
+        ($unknownAllocationSql OR COALESCE(ria.unknown_quantity,0)>0 OR COALESCE(ria.quantity,0)>($orderedSql)) reconciliation_required,
+        COALESCE(ria.receipt_count,0) item_receipt_count,
         o.expected_ready_date,
         c.name as customer_name, s.name as supplier_name,
-        oi.id as item_id, oi.product_id, oi.item_no, oi.item_number, oi.shipping_code, oi.quantity, oi.unit, oi.declared_cbm, oi.declared_weight, oi.item_length, oi.item_width, oi.item_height, oi.description_cn, oi.description_en,
+        oi.id as item_id, oi.product_id, oi.item_no, oi.item_number, oi.shipping_code, oi.quantity, oi.unit, oi.cartons, oi.qty_per_carton, oi.declared_cbm, oi.declared_weight, oi.item_length, oi.item_width, oi.item_height, oi.description_cn, oi.description_en,
         p.description_cn as product_desc_cn, p.description_en as product_desc_en,
-        wr.actual_cbm as order_actual_cbm, wr.actual_weight as order_actual_weight, wr.actual_cartons as order_actual_cartons,
-        ria.item_actual_cbm, ria.item_actual_weight, ria.item_actual_cartons, ria.item_actual_quantity, $actualDimensionOuterSql$imagePathsSelect$classificationSelect
+        CASE WHEN wr.receipt_count>0 THEN wr.cbm ELSE 0 END as order_actual_cbm,
+        CASE WHEN wr.receipt_count>0 THEN wr.weight ELSE 0 END as order_actual_weight,
+        CASE WHEN wr.receipt_count>0 THEN wr.cartons ELSE 0 END as order_actual_cartons,
+        CASE WHEN NOT $unknownAllocationSql THEN COALESCE(ria.cbm,0) ELSE NULL END item_actual_cbm,
+        CASE WHEN NOT $unknownAllocationSql THEN COALESCE(ria.weight,0) ELSE NULL END item_actual_weight,
+        CASE WHEN NOT $unknownAllocationSql THEN COALESCE(ria.cartons,0) ELSE NULL END item_actual_cartons,
+        ($receivedQuantitySql) item_actual_quantity, $actualDimensionOuterSql$imagePathsSelect$classificationSelect
         FROM orders o
         JOIN customers c ON o.customer_id = c.id
         LEFT JOIN suppliers s ON o.supplier_id = s.id
         JOIN order_items oi ON oi.order_id = o.id
         LEFT JOIN products p ON oi.product_id = p.id$classificationJoin
-        LEFT JOIN (
-            SELECT w.order_id, SUM(w.actual_cbm) actual_cbm, SUM(w.actual_weight) actual_weight, SUM(w.actual_cartons) actual_cartons
-            FROM warehouse_receipts w$activeReceiptWhere GROUP BY w.order_id
-        ) wr ON wr.order_id = o.id
-        LEFT JOIN (
-            SELECT wri.order_item_id, SUM(wri.actual_cbm) item_actual_cbm, SUM(wri.actual_weight) item_actual_weight, SUM(wri.actual_cartons) item_actual_cartons, SUM(wri.actual_quantity) item_actual_quantity$actualDimensionSelect
-            FROM warehouse_receipt_items wri JOIN warehouse_receipts rw ON rw.id=wri.receipt_id$activeReceiptItemWhere GROUP BY wri.order_item_id
-        ) ria ON ria.order_item_id=oi.id
+        LEFT JOIN ($orderTotalsSql) wr ON wr.order_id = o.id
+        LEFT JOIN ($itemTotalsSql) ria ON ria.order_item_id=oi.id
         WHERE o.status IN ($baseStatusPlaceholders)";
     $params = $allStockStatuses;
     if ($customerId) {
@@ -159,15 +178,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $params[] = $containerId;
     }
     if ($statuses && count($statuses) < count($warehouseStatusGroups)) {
-        $storedStatuses = [];
-        foreach ($statuses as $state) {
-            $storedStatuses = array_merge($storedStatuses, $warehouseStatusGroups[$state] ?? []);
-        }
-        if ($storedStatuses) {
-            $placeholders = implode(',', array_fill(0, count($storedStatuses), '?'));
-            $sql .= " AND o.status IN ($placeholders)";
-            $params = array_merge($params, $storedStatuses);
-        }
+        $sql .= " AND ($stateSql)=?";
+        $params[] = $statuses[0];
+    }
+    if (isset($_GET['order_ids'])) {
+        $ids = explode(',', (string) $_GET['order_ids']);
+        if (!$ids || count($ids)>200 || array_filter($ids, static fn($v)=>!ctype_digit($v) || (int)$v<1)) jsonError('Invalid order selection',400);
+        $sql .= ' AND o.id IN (' . implode(',',array_fill(0,count($ids),'?')) . ')';
+        $params = array_merge($params,$ids);
     }
     if ($q) {
         $like = clmsSearchLike($q);
@@ -215,6 +233,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         }
     }
     foreach ($rows as $index => &$row) {
+        $row['unit'] = ReceivingQuantityService::quantityUnit($row);
         $rowOrderId = (int) ($row['order_id'] ?? 0);
         $sharedCartonImages = !empty($row['shared_carton_enabled'])
             ? clmsSharedCartonImagePaths($pdo, $row['shared_carton_contents'] ?? null)
@@ -240,14 +259,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     }
     unset($row);
     if ($id === 'export') {
-        $format = strtolower(trim((string) ($_GET['format'] ?? 'xlsx')));
+        $format = clmsExportFormat('xlsx');
         if ($format === 'csv') {
             header('Content-Type: text/csv; charset=utf-8');
             header('Content-Disposition: attachment; filename="warehouse_stock_' . date('Y-m-d') . '.csv"');
-            $out=fopen('php://output','w'); fputcsv($out,['Order','Customer','Supplier','Status','Item','Description EN','Description ZH','Item Type','Quantity','Actual Quantity','Actual Cartons','Actual CBM','Actual Weight','Height','Width','Length','I.I.N','Item Number']);
-            foreach($rows as $row) fputcsv($out,[$row['order_id'],$row['customer_name'],$row['supplier_name'],$row['status'],$row['item_id'],$row['description_en'],$row['description_cn'],$row['item_type_code']??'unclassified',$row['quantity'],$row['item_actual_quantity'],$row['item_actual_cartons'],$row['item_actual_cbm'],$row['item_actual_weight'],$row['item_actual_height'],$row['item_actual_width'],$row['item_actual_length'],$row['item_no']??'',$row['item_number']??'']);
+            $out=fopen('php://output','w'); clmsWriteCsv($out,['Order','Customer','Supplier','Status','Item','Description EN','Description ZH','Item Type','Ordered Quantity','Actual Quantity','Actual Cartons','Actual CBM','Actual Weight','Height','Width','Length','I.I.N','Item Number','Remaining Quantity','Warehouse State','Reconciliation Required']);
+            $safe=static fn($value)=>is_string($value) && preg_match('/^[\s\x00-\x1f]*[=+@-]/u',$value) ? "'".$value : $value;
+            foreach($rows as $row) clmsWriteCsv($out,array_map($safe,[$row['order_id'],$row['customer_name'],$row['supplier_name'],$row['status'],$row['item_id'],$row['description_en'],$row['description_cn'],$row['item_type_code']??'unclassified',$row['ordered_quantity'],$row['item_actual_quantity'],$row['item_actual_cartons'],$row['item_actual_cbm'],$row['item_actual_weight'],$row['item_actual_height'],$row['item_actual_width'],$row['item_actual_length'],$row['item_no']??'',$row['item_number']??'',$row['remaining_quantity'],$row['warehouse_state'],!empty($row['reconciliation_required'])?'Yes':'No']));
             foreach ($rows as $row) foreach ($row['item_identifiers'] ?? [] as $content) {
-                $reference = array_fill(0, 18, '');
+                $reference = array_fill(0, 21, '');
                 $reference[0] = $row['order_id'];
                 $reference[1] = $row['customer_name'];
                 $reference[2] = $row['supplier_name'];
@@ -256,7 +276,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $reference[5] = clmsT('Contained item') . ': ' . ($content['description_en'] ?? $content['description_cn'] ?? '');
                 $reference[16] = $content['item_no'] ?? '';
                 $reference[17] = $content['item_number'] ?? '';
-                fputcsv($out, $reference);
+                clmsWriteCsv($out, array_map($safe,$reference));
             }
             fclose($out); exit;
         }

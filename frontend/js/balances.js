@@ -6,6 +6,7 @@
     let balanceCustomerAc = null;
     let balanceSupplierAc = null;
     let activeDataset = "customers";
+    let balanceLoadVersion = 0;
     let balanceTxnAccounts = [];
     let balanceAccountSuggestionIndex = -1;
     let customerBalanceOffset=0;
@@ -738,14 +739,14 @@
         );
     }
 
-    async function loadOverview() {
+    async function loadOverview(version) {
         const params = buildParams(false);
         params.set("limit",String(balancePageLimit));params.set("customer_offset",String(customerBalanceOffset));params.set("supplier_offset",String(supplierBalanceOffset));
         const response = await api("/balances" + (params.toString() ? "?" + params.toString() : ""));
-        renderOverview(response.data || {});
+        if(version === balanceLoadVersion) renderOverview(response.data || {});
     }
 
-    async function loadTransactions() {
+    async function loadTransactions(version) {
         const params = buildParams(true);
         const exactTransactionId = new URLSearchParams(window.location.search).get("transaction_id");
         if (exactTransactionId && /^\d+$/.test(exactTransactionId)) params.set("transaction_id", exactTransactionId);
@@ -753,16 +754,19 @@
         const response = await api(
             "/balances/transactions" + (params.toString() ? "?" + params.toString() : ""),
         );
-        renderTransactions(response.data || [],response.meta || null);
+        if(version === balanceLoadVersion) renderTransactions(response.data || [],response.meta || null);
     }
 
     window.loadBalancePageData = async function (resetOffsets = true) {
+        const version = ++balanceLoadVersion;
         if(resetOffsets){customerBalanceOffset=0;supplierBalanceOffset=0;balanceTxOffset=0;}
         updateFilterSummary();
         renderLoading();
         try {
-            await Promise.all([loadOverview(), loadTransactions()]);
+            await Promise.all([loadOverview(version), loadTransactions(version)]);
         } catch (error) {
+            if(version !== balanceLoadVersion) return;
+            ++balanceLoadVersion;
             showToast(error.message || balancesT("Failed to load balances"), "danger");
             renderOverview({ customers: [], suppliers: [], summary: {} });
             renderTransactions([]);
@@ -942,7 +946,9 @@
         setText("balanceLinkedOrderLabel", orderReference || (orderId ? "#" + orderId : ""));
     }
 
+    let balanceTransactionRequestKey = null;
     window.openBalanceTransactionModal = function (partyType = "customer", partyId = null, partyName = "") {
+        balanceTransactionRequestKey = clmsRequestKey('balance-transaction');
         const normalized = partyType === "supplier" ? "supplier" : "customer";
         clearBalanceTxnValidation();
         setLinkedOrder("", "");
@@ -990,6 +996,7 @@
         const { partyType, partyId, amount } = valid;
         const accountValue = el("balanceTxnAccountDetail").value.trim();
         const payload = {
+            idempotency_key: balanceTransactionRequestKey,
             party_type: partyType,
             party_id: Number(partyId),
             transaction_type: el("balanceTxnType").value,

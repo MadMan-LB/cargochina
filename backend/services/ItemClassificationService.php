@@ -50,10 +50,20 @@ class ItemClassificationService
         return ['item_type_code' => 'unclassified', 'confidence' => 0.2500, 'requires_confirmation' => true, 'reason' => 'insufficient_evidence'];
     }
 
-    public function set(string $entityType, int $entityId, string $code, ?float $confidence, bool $confirmed, ?int $userId, string $source): void
+    public function set(string $entityType,int $entityId,string $code,?float $confidence,bool $confirmed,?int $userId,string $source): void
     {
-        if (!preg_match('/^[a-z_]+$/', $entityType) || $entityId <= 0) throw new InvalidArgumentException('Invalid classification entity');
-        $code = $this->normalize($code);
+        $owns=!$this->pdo->inTransaction();if($owns)$this->pdo->beginTransaction();
+        try{$this->setLocked($entityType,$entityId,$code,$confidence,$confirmed,$userId,$source);if($owns)$this->pdo->commit();}
+        catch(Throwable $e){if($owns&&$this->pdo->inTransaction())$this->pdo->rollBack();throw $e;}
+    }
+    private function setLocked(string $entityType, int $entityId, string $code, ?float $confidence, bool $confirmed, ?int $userId, string $source): void
+    {
+        if (!in_array($entityType,['product','order_item'],true) || $entityId <= 0) throw new InvalidArgumentException('Invalid classification entity');
+        if ($confidence !== null && (!is_finite($confidence) || $confidence<0 || $confidence>1)) throw new InvalidArgumentException('Invalid classification confidence');
+        $normalized = $this->normalize($code);
+        if ($normalized==='unclassified' && strtolower(trim($code))!=='unclassified') throw new InvalidArgumentException('Invalid item type');
+        $code = $normalized;
+        $table=$entityType==='product'?'products':'order_items';$lock=$this->pdo->prepare("SELECT id FROM $table WHERE id=? FOR UPDATE");$lock->execute([$entityId]);if(!$lock->fetchColumn())throw new InvalidArgumentException('Classification entity not found');
         $oldStmt = $this->pdo->prepare('SELECT item_type_code, is_confirmed FROM item_classifications WHERE entity_type=? AND entity_id=?');
         $oldStmt->execute([$entityType, $entityId]);
         $old = $oldStmt->fetch(PDO::FETCH_ASSOC) ?: null;

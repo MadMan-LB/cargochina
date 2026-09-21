@@ -58,6 +58,7 @@ require __DIR__ . '/../../includes/area_layout.php';
           </table>
         </div>
         <div id="queueEmpty" class="text-center py-5 text-muted d-none">No orders pending receiving.</div>
+        <div class="d-flex justify-content-between align-items-center p-3"><button id="queuePrevious" class="btn btn-outline-secondary btn-sm" disabled onclick="receivingChangePage('queue',-1)">Previous</button><span id="queuePageSummary"></span><button id="queueNext" class="btn btn-outline-secondary btn-sm" disabled onclick="receivingChangePage('queue',1)">Next</button></div>
       </div>
     </div>
   </div>
@@ -94,10 +95,12 @@ require __DIR__ . '/../../includes/area_layout.php';
           </table>
         </div>
         <div id="historyEmpty" class="text-center py-5 text-muted d-none">No receipts found.</div>
+        <div class="d-flex justify-content-between align-items-center p-3"><button id="historyPrevious" class="btn btn-outline-secondary btn-sm" disabled onclick="receivingChangePage('history',-1)">Previous</button><span id="historyPageSummary"></span><button id="historyNext" class="btn btn-outline-secondary btn-sm" disabled onclick="receivingChangePage('history',1)">Next</button></div>
       </div>
     </div>
   </div>
 </div>
+<script>window.RECEIVING_CAN_RECORD = <?= clmsUserCan('orders.receive', ['WarehouseStaff', 'SuperAdmin'], null, $userId, $userRoles) ? 'true' : 'false' ?>;</script>
 <?php $pageScripts = ['/cargochina/frontend/js/autocomplete.js'];
-$pageScript = '/cargochina/frontend/js/receiving_index.js';
+$pageScript = '/cargochina/frontend/js/receiving_index.js?v=' . filemtime(__DIR__ . '/../../frontend/js/receiving_index.js');
 require __DIR__ . '/../../includes/area_footer.php'; ?>

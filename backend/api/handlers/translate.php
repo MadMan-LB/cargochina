@@ -8,6 +8,8 @@ require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__, 2) . '/services/TranslationService.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('translate', $method, $id, $action);
     if ($method !== 'POST') {
         jsonError('Method not allowed', 405);
     }

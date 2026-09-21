@@ -9,6 +9,9 @@ require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__, 3) . '/includes/sidebar_permissions.php';
 require_once dirname(__DIR__, 2) . '/services/DecimalMath.php';
 require_once dirname(__DIR__, 2) . '/services/FinancialReconciliationService.php';
+require_once dirname(__DIR__,2).'/services/CustomerDepositService.php';
+require_once dirname(__DIR__,2).'/services/SupplierPaymentService.php';
+require_once dirname(__DIR__,2).'/services/OperationReplayService.php';
 
 function balancesCurrentUserCanAccess(): bool
 {
@@ -276,7 +279,7 @@ function balancesFetchParties(PDO $pdo, string $partyType, string $q, int $limit
     $params = [];
     $sql = 'SELECT ' . implode(', ', $cols) . " FROM $table $alias WHERE 1=1";
     $sql .= balancesPartySearchClause($pdo, $alias, $table, $searchCols, $q, $params);
-    $sql .= " ORDER BY $alias.name";
+    $sql .= " ORDER BY $alias.name, $alias.id";
     if ($limit > 0) {
         $sql .= ' LIMIT ' . max(1, min(50, $limit));
     }
@@ -915,7 +918,7 @@ function balancesListTransactions(PDO $pdo, array $filters, bool $paginate = tru
     }
     $q = trim((string) ($filters['q'] ?? ''));
     if ($q !== '') {
-        $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+        $like = clmsSearchLike($q);
         $sql .= " AND (
             CONVERT(COALESCE(tx.party_name, '') USING utf8mb4) COLLATE utf8mb4_unicode_ci LIKE ?
             OR CONVERT(COALESCE(tx.party_code, '') USING utf8mb4) COLLATE utf8mb4_unicode_ci LIKE ?
@@ -931,7 +934,7 @@ function balancesListTransactions(PDO $pdo, array $filters, bool $paginate = tru
     $limit=clmsQueryLimit($filters['limit']??null,100,500);$offset=clmsQueryOffset($filters['offset']??null);
     $total=0;
     if($paginate){$countStmt=$pdo->prepare("SELECT COUNT(*) FROM ($sql) balance_transactions_filtered");$countStmt->execute($params);$total=(int)$countStmt->fetchColumn();}
-    $sql .= ' ORDER BY tx.transaction_date DESC, tx.created_at DESC, tx.id DESC';
+    $sql .= ' ORDER BY tx.transaction_date DESC, tx.created_at DESC, tx.id DESC, tx.source_table ASC';
     if($paginate)$sql.=' LIMIT '.($limit+1).' OFFSET '.$offset;
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
@@ -947,6 +950,7 @@ function balancesListTransactions(PDO $pdo, array $filters, bool $paginate = tru
 
 function balancesValidateParty(PDO $pdo, string $partyType, int $partyId): array
 {
+    if($partyType==='customer')clmsRequireCustomerAccess($pdo,$partyId);
     $table = $partyType === 'customer' ? 'customers' : 'suppliers';
     $stmt = $pdo->prepare("SELECT id, name, code FROM $table WHERE id = ?");
     $stmt->execute([$partyId]);
@@ -1005,11 +1009,15 @@ function balancesValidateOrderLink(PDO $pdo, ?int $orderId, string $partyType, i
     if (!balancesCurrentUserCanUseOrderLinks()) {
         jsonError('You do not have permission', 403);
     }
-    $stmt = $pdo->prepare("SELECT id, customer_id, supplier_id, currency FROM orders WHERE id = ?");
+    $stmt = $pdo->prepare("SELECT id, customer_id, supplier_id, currency FROM orders WHERE id = ?".($pdo->inTransaction()?' FOR UPDATE':''));
     $stmt->execute([$orderId]);
     $order = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$order) {
         jsonError('Invalid order', 404, ['order_id' => 'Invalid order']);
+    }
+    if($partyType==='supplier'){
+        $shared=clmsSharedCartonSupplierPredicate('oi.shared_carton_contents');
+        $s=$pdo->prepare("SELECT 1 FROM orders o WHERE o.id=? AND (o.supplier_id=? OR EXISTS(SELECT 1 FROM order_items oi LEFT JOIN products p ON p.id=oi.product_id WHERE oi.order_id=o.id AND (COALESCE(oi.supplier_id,p.supplier_id)=? OR $shared)))");$s->execute([$orderId,$partyId,$partyId,$partyId,(string)$partyId]);if(!$s->fetchColumn())jsonError('Selected party does not match the linked order',422);return $order;
     }
     $expectedPartyId = $partyType === 'customer' ? (int) $order['customer_id'] : (int) ($order['supplier_id'] ?? 0);
     if ($expectedPartyId <= 0 || $expectedPartyId !== $partyId) {
@@ -1020,86 +1028,18 @@ function balancesValidateOrderLink(PDO $pdo, ?int $orderId, string $partyType, i
 
 function balancesInsertCustomerDeposit(PDO $pdo, int $customerId, string $amount, string $currency, ?string $paymentMethod, ?string $referenceNumber, ?string $notes, int $userId, ?int $orderId = null): int
 {
-    $hasOrderId = balancesTableHasColumn($pdo, 'customer_deposits', 'order_id');
-    if ($hasOrderId) {
-        $pdo->prepare("INSERT INTO customer_deposits (customer_id, order_id, amount, currency, payment_method, reference_no, notes, created_by) VALUES (?,?,?,?,?,?,?,?)")
-            ->execute([$customerId, $orderId, $amount, $currency, $paymentMethod, $referenceNumber, $notes, $userId]);
-    } else {
-        $pdo->prepare("INSERT INTO customer_deposits (customer_id, amount, currency, payment_method, reference_no, notes, created_by) VALUES (?,?,?,?,?,?,?)")
-            ->execute([$customerId, $amount, $currency, $paymentMethod, $referenceNumber, $notes, $userId]);
-    }
-    return (int) $pdo->lastInsertId();
+    return CustomerDepositService::insert($pdo,$customerId,['amount'=>$amount,'currency'=>$currency,'payment_method'=>$paymentMethod,'reference_no'=>$referenceNumber,'notes'=>$notes,'order_id'=>$orderId],$userId);
 }
 
 function balancesInsertSupplierPayment(PDO $pdo, int $supplierId, string $amount, string $currency, ?string $paymentMethod, ?string $paymentAccountLabel, ?string $paymentAccountValue, ?string $paymentAccountQrPath, ?string $notes, int $userId, ?int $orderId = null): int
 {
-    $columns = ['supplier_id', 'order_id', 'amount', 'currency', 'payment_type', 'notes'];
-    $values = ['?', '?', '?', '?', '?', '?'];
-    $params = [$supplierId, $orderId, $amount, $currency, 'partial', $notes];
-
-    if (balancesTableHasColumn($pdo, 'supplier_payments', 'invoice_amount')) {
-        $columns[] = 'invoice_amount';
-        $values[] = '?';
-        $params[] = 0;
-    }
-    if (balancesTableHasColumn($pdo, 'supplier_payments', 'discount_amount')) {
-        $columns[] = 'discount_amount';
-        $values[] = '?';
-        $params[] = 0;
-    }
-    if (balancesTableHasColumn($pdo, 'supplier_payments', 'marked_full_payment')) {
-        $columns[] = 'marked_full_payment';
-        $values[] = '?';
-        $params[] = 0;
-    }
-    if (balancesTableHasColumn($pdo, 'supplier_payments', 'marked_by')) {
-        $columns[] = 'marked_by';
-        $values[] = '?';
-        $params[] = null;
-    }
-    if (balancesTableHasColumn($pdo, 'supplier_payments', 'payment_channel')) {
-        $columns[] = 'payment_channel';
-        $values[] = '?';
-        $params[] = in_array($paymentMethod, ['WeChat', 'Alipay', 'Bank Transfer'], true) ? $paymentMethod : null;
-    }
-    if (balancesTableHasColumn($pdo, 'supplier_payments', 'payment_account_label')) {
-        $columns[] = 'payment_account_label';
-        $values[] = '?';
-        $params[] = $paymentAccountLabel;
-    }
-    if (balancesTableHasColumn($pdo, 'supplier_payments', 'payment_account_value')) {
-        $columns[] = 'payment_account_value';
-        $values[] = '?';
-        $params[] = $paymentAccountValue;
-    }
-    if (balancesTableHasColumn($pdo, 'supplier_payments', 'payment_account_qr_path')) {
-        $columns[] = 'payment_account_qr_path';
-        $values[] = '?';
-        $params[] = $paymentAccountQrPath;
-    }
-    if (balancesTableHasColumn($pdo, 'supplier_payments', 'settlement_delta')) {
-        $columns[] = 'settlement_delta';
-        $values[] = '?';
-        $params[] = 0;
-    }
-    if (balancesTableHasColumn($pdo, 'supplier_payments', 'settlement_mode')) {
-        $columns[] = 'settlement_mode';
-        $values[] = '?';
-        $params[] = null;
-    }
-    if (balancesTableHasColumn($pdo, 'supplier_payments', 'settlement_note')) {
-        $columns[] = 'settlement_note';
-        $values[] = '?';
-        $params[] = null;
-    }
-
-    $pdo->prepare("INSERT INTO supplier_payments (" . implode(', ', $columns) . ") VALUES (" . implode(', ', $values) . ")")
-        ->execute($params);
-    return (int) $pdo->lastInsertId();
+    return SupplierPaymentService::insert($pdo,$supplierId,['amount'=>$amount,'currency'=>$currency,'payment_channel'=>in_array($paymentMethod,['WeChat','Alipay','Bank Transfer'],true)?$paymentMethod:null,'payment_account_label'=>$paymentAccountLabel,'payment_account_value'=>$paymentAccountValue,'payment_account_qr_path'=>$paymentAccountQrPath,'notes'=>$notes,'order_id'=>$orderId,'invoice_amount'=>0],$userId);
 }
 
 function balancesCreateTransaction(PDO $pdo, array $input): array
 {
+    foreach(['party_type','transaction_type','direction','currency','transaction_date','payment_method','reference_number','notes','order_reference','payment_account_label','payment_account_value','payment_account_qr_path'] as $field)if(isset($input[$field])&&!is_string($input[$field]))jsonError("$field must be text",422);
+    OrderWriteService::number($input['party_id']??null,'Party',true,0,4294967295);OrderWriteService::number($input['order_id']??null,'Order',true,0,4294967295);
     if (!balancesTableExists($pdo, 'balance_transactions')) {
         jsonError('Balance transaction table is missing. Run migrations first.', 500);
     }
@@ -1119,7 +1059,12 @@ function balancesCreateTransaction(PDO $pdo, array $input): array
     balancesValidateParty($pdo, $partyType, $partyId);
 
     $transactionType = balancesNormalizeTransactionType($input['transaction_type'] ?? null);
+    if(isset($input['transaction_type'])&&!in_array($input['transaction_type'],['payment_received','payment_sent','deposit','invoice','adjustment','refund','other'],true))jsonError('Invalid transaction type',422);
+    if(!in_array($input['currency']??'RMB',['USD','RMB'],true))jsonError('Currency must be USD or RMB',422);
     $direction = balancesNormalizeDirection($partyType, $transactionType, $input['direction'] ?? null);
+    if(isset($input['direction'])&&!in_array($input['direction'],['increase_balance','reduce_balance'],true))jsonError('Invalid balance direction',422);
+    if(in_array($transactionType,['payment_received','payment_sent','deposit'],true)&&$direction!=='reduce_balance')jsonError('Payments must reduce the balance',422);
+    if(($partyType==='customer'&&$transactionType==='payment_sent')||($partyType==='supplier'&&$transactionType==='payment_received'))jsonError('Payment type does not match the selected party',422);
     try {
         $amount = DecimalMath::round($input['amount'] ?? '0');
     } catch (InvalidArgumentException $e) {
@@ -1131,9 +1076,6 @@ function balancesCreateTransaction(PDO $pdo, array $input): array
     $currency = balancesNormalizeCurrency($input['currency'] ?? 'RMB');
     $transactionDate = balancesNormalizeDate($input['transaction_date'] ?? null);
     $paymentMethod = trim((string) ($input['payment_method'] ?? '')) ?: null;
-    if ($transactionType === 'deposit' && $paymentMethod === null) {
-        $errors['payment_method'] = 'Payment method is required';
-    }
     if ($paymentMethod !== null && mb_strlen($paymentMethod) > 50) {
         $paymentMethod = mb_substr($paymentMethod, 0, 50);
     }
@@ -1172,12 +1114,19 @@ function balancesCreateTransaction(PDO $pdo, array $input): array
     }
     $notes = trim((string) ($input['notes'] ?? '')) ?: null;
     $userId = getAuthUserId() ?? 0;
+    $depositData=CustomerDepositService::normalize(['amount'=>$input['amount']??null,'currency'=>$currency,'payment_method'=>$input['payment_method']??null,'reference_no'=>$input['reference_number']??null,'notes'=>$input['notes']??null,'order_id'=>$input['order_id']??null]);
+    $claim=OperationReplayService::claim($pdo,'balance_transaction',$input,$userId);
+    if($claim['previous_id']){$rows=balancesListTransactions($pdo,['transaction_id'=>$claim['previous_id']],false);if(!$rows)jsonError('Original transaction no longer exists',409);return $rows[0];}
 
     $sourceTable = null;
     $sourceId = null;
 
     $pdo->beginTransaction();
+    register_shutdown_function(static function()use($pdo){if($pdo->inTransaction())$pdo->rollBack();});
     try {
+        balancesValidateOrderLink($pdo,$orderId,$partyType,$partyId);
+        if($partyType==='customer')CustomerDepositService::lockPartyAndOrder($pdo,$partyId,$orderId);
+        else SupplierPaymentService::lockPartyAndOrder($pdo,$partyId,$orderId);
         $accountWasSaved = balancesAppendPaymentAccountIfMissing(
             $pdo,
             $partyType,
@@ -1240,6 +1189,7 @@ function balancesCreateTransaction(PDO $pdo, array $input): array
         $stmt = $pdo->prepare("INSERT INTO balance_transactions (" . implode(', ', $columns) . ") VALUES (" . implode(', ', $values) . ")");
         $stmt->execute($params);
         $newId = (int) $pdo->lastInsertId();
+        OperationReplayService::record($pdo,'balance_transaction',$newId,$claim,['party_type'=>$partyType,'party_id'=>$partyId,'amount'=>$amount,'currency'=>$currency,'source_table'=>$sourceTable,'source_id'=>$sourceId],$userId);
         $pdo->commit();
         logClms('balance_transaction', [
             'transaction_id' => $newId,
@@ -1280,7 +1230,10 @@ function balancesExportXlsx(PDO $pdo, string $filename, string $title, array $he
 }
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('balances', $method, $id, $action);
     $pdo = getDb();
+    if ($method === 'GET') { require_once dirname(__DIR__, 2) . '/services/QueryFilterService.php'; QueryFilterService::validate($_GET, 'balances'); }
     requireAuth();
     if (!balancesCurrentUserCanAccess()) {
         jsonError('You do not have permission', 403);
@@ -1328,7 +1281,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         }
 
         if ($id === 'export') {
-            $dataset = strtolower(trim((string) ($_GET['dataset'] ?? 'transactions')));
+            clmsBeginExportSnapshot($pdo);
+            if(isset($_GET['format'])&&$_GET['format']!=='xlsx')jsonError('Balances export supports XLSX',422);
+            $dataset = $_GET['dataset'] ?? 'transactions';
+            if(!is_string($dataset)||!in_array($dataset,['customers','suppliers','documents','transactions'],true))jsonError('Unsupported balance export dataset',422);
             if (in_array($dataset, ['customers', 'suppliers'], true)) {
                 $overview = balancesBuildOverview($pdo, $_GET, false);
                 $rows = [];
@@ -1337,9 +1293,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         $row['name'],
                         $row['phone'],
                         $row['currency'],
-                        format_display_amount($row['current_balance'], 2),
-                        format_display_amount($row['total_paid'], 2),
-                        format_display_amount($row['total_due'], 2),
+                        (float)$row['current_balance'],
+                        (float)$row['total_paid'],
+                        (float)$row['total_due'],
                         $row['last_payment_date'] ?: '',
                         clmsT($row['status_label']),
                     ];
@@ -1362,7 +1318,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         $row['transaction_date'],
                         clmsT($row['party_type'] === 'customer' ? 'Customer' : 'Supplier'),
                         $row['party_name'],
-                        format_display_amount($row['amount'], 2),
+                        (float)$row['amount'],
                         $row['currency'],
                         $row['payment_method'],
                         $row['order_reference'],
@@ -1386,7 +1342,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     clmsT($row['party_type'] === 'customer' ? 'Customer' : 'Supplier'),
                     $row['party_name'],
                     clmsT(str_replace('_', ' ', ucwords($row['transaction_type'], '_'))),
-                    format_display_amount($row['amount'], 2),
+                    (float)$row['amount'],
                     $row['currency'],
                     $row['payment_method'],
                     $row['payment_account_value'],

@@ -2,7 +2,8 @@
 // Run against an isolated test database with the local HTTP fixture listening.
 require_once dirname(__DIR__) . '/backend/config/database.php';
 require_once dirname(__DIR__) . '/backend/services/TrackingPushService.php';
-if (strpos($_ENV['DB_NAME'] ?? '', 'test') === false) throw new RuntimeException('Isolated test DB required');
+if (($_ENV['DB_NAME']??'')!=='clms_hardening_20260919') throw new RuntimeException('Isolated test DB required');
+define('CLMS_TRACKING_FIXTURES_ONLY',true);require __DIR__.'/tracking_domain_test.php';
 class OutcomeTrackingService extends TrackingPushService {
     public array $fileResults = [];
     protected function appendFileLog(int $draftId, array $payload, string $result, int $code = 0, $extra = ''): void {
@@ -10,7 +11,7 @@ class OutcomeTrackingService extends TrackingPushService {
     }
 }
 $pdo = getDb();
-$pdo->beginTransaction();
+
 $checks = 0;
 function checkOutcome($ok, string $name): void {
     global $checks;
@@ -19,8 +20,7 @@ function checkOutcome($ok, string $name): void {
     echo "PASS: $name\n";
 }
 function newDraft(PDO $pdo): int {
-    $pdo->exec("INSERT INTO shipment_drafts (status) VALUES ('finalized')");
-    return (int) $pdo->lastInsertId();
+    $f=trackingFixture($pdo);return $f['drafts'][0];
 }
 function testService(PDO $pdo, array $override = []): OutcomeTrackingService {
     $svc = new OutcomeTrackingService($pdo);
@@ -77,7 +77,7 @@ try {
     checkOutcome($success->getPushStatus($id)['status'] === 'success', 'Previously disabled push can be retried');
     $unchanged = $pdo->query("SELECT id,status,container_id FROM shipment_drafts WHERE status='finalized' AND id NOT IN ($id,$dryId,$missingId,$failureId,$rejectId,$authId) ORDER BY id")->fetchAll();
     checkOutcome($existing === $unchanged, 'Existing finalized shipment data unchanged');
-    echo "$checks checks passed; all test database changes rolled back.\n";
+    echo "$checks checks passed; only disposable database fixtures changed.\n";
 } finally {
-    $pdo->rollBack();
+    if($pdo->inTransaction())$pdo->rollBack();
 }

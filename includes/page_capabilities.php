@@ -12,7 +12,10 @@ function clmsPageCapabilityMap(): array
     $draftEditors = ['orders', 'procurement_drafts'];
     $shippingEditors = ['consolidation', 'containers', 'assign_container'];
     return [
+        'dashboard.read' => ['dashboard','pipeline'],
         'orders.read' => $orderReaders,
+        'uploads.read' => $partyReaders,
+        'uploads.write' => ['orders','procurement_drafts','receiving','consolidation','containers','customers','suppliers','products','expenses','financials','balances'],
         'orders.write' => $draftEditors,
         'orders.approve' => ['orders'],
         'orders.receive' => ['receiving'],
@@ -33,6 +36,7 @@ function clmsPageCapabilityMap(): array
         'suppliers.finance' => ['suppliers', 'balances', 'financials'],
         'products.read' => array_merge($partyReaders, ['products']),
         'products.create' => array_merge(['products'], $draftEditors),
+        'products.import' => ['products'],
         'products.write' => ['products'],
         'countries.read' => array_merge($partyReaders, ['hs_code_tax']),
         'containers.read' => ['containers', 'assign_container', 'consolidation', 'pipeline', 'calendar', 'expenses', 'financials', 'balances', 'orders', 'dashboard'],

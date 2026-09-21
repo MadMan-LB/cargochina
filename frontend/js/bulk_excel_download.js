@@ -73,9 +73,6 @@
                         .map((node) => String(node.dataset.downloadId || ""))
                         .filter(Boolean),
                 );
-                state.selected = new Set(
-                    Array.from(state.selected).filter((id) => state.visible.has(id)),
-                );
                 nodes.forEach((node) => {
                     node.onchange = () => {
                         const id = String(node.dataset.downloadId || "");
@@ -106,11 +103,13 @@
                 const originalLabel = buttonNode?.textContent || "";
                 if (buttonNode) buttonNode.textContent = translate("Preparing download...");
                 try {
-                    const response = await fetch(options.endpoint, {
-                        method: "POST",
+                    const method = options.method || "POST";
+                    const endpoint = typeof options.endpoint === "function" ? options.endpoint(Array.from(state.selected)) : options.endpoint;
+                    const response = await fetch(endpoint, {
+                        method,
                         credentials: "same-origin",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ ids: Array.from(state.selected) }),
+                        body: method === "GET" ? undefined : JSON.stringify({ ids: Array.from(state.selected) }),
                     });
                     if (!response.ok) {
                         let message = translate("Download failed");
@@ -126,6 +125,7 @@
                             ? "selected_order.xlsx"
                             : "selected_orders.xlsx",
                     );
+                    if(!(response.headers.get('Content-Type')||'').includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'))throw new Error(translate('The server did not return an Excel workbook. Reload and try again.'));
                     downloadBlob(await response.blob(), filename);
                     if (typeof window.showToast === "function") {
                         window.showToast(translate("Download ready"), "success");

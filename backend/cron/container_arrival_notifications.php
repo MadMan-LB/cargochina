@@ -41,35 +41,24 @@ if ($chkBs && $chkBs->rowCount() > 0) {
         $daysStr = trim($r['key_value']);
     }
 }
-$daysList = array_map('intval', array_filter(array_map('trim', explode(',', $daysStr))));
+require_once dirname(__DIR__).'/services/SettingsWriteService.php';
+try {$daysList=SettingsWriteService::arrivalDays($daysStr);}
+catch(InvalidArgumentException $e){error_log('Invalid ARRIVAL_NOTIFY_DAYS configuration; arrival notifications skipped');exit(1);}
 if (empty($daysList)) {
     if (php_sapi_name() === 'cli') echo "No notify days configured\n";
     exit(0);
 }
 
-$stmt = $pdo->query("SELECT id, code, eta_date FROM containers WHERE eta_date IS NOT NULL AND eta_date > CURDATE() AND status NOT IN ('arrived','available')");
+$today=date('Y-m-d');
+$stmt = $pdo->prepare("SELECT id FROM containers WHERE eta_date IS NOT NULL AND eta_date >= ? AND status NOT IN ('arrived','available') ORDER BY id");
+$stmt->execute([$today]);
 $containers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 $notified = 0;
 
+require_once dirname(__DIR__).'/services/ContainerArrivalNotificationService.php';
+$notifications=new NotificationService($pdo);
 foreach ($containers as $c) {
-    $containerId = (int) $c['id'];
-    $code = $c['code'] ?? '#' . $containerId;
-    $etaDate = $c['eta_date'];
-
-    foreach ($daysList as $daysBefore) {
-        if ($daysBefore < 1) continue;
-        $targetDate = date('Y-m-d', strtotime($etaDate . " -{$daysBefore} days"));
-        if ($targetDate !== date('Y-m-d')) continue;
-
-        $exists = $pdo->prepare("SELECT 1 FROM container_arrival_notifications WHERE container_id = ? AND days_before = ? LIMIT 1");
-        $exists->execute([$containerId, $daysBefore]);
-        if ($exists->fetch()) continue;
-
-        (new NotificationService($pdo))->notifyContainerArrival($containerId, $code, $etaDate, $daysBefore);
-        $pdo->prepare("INSERT INTO container_arrival_notifications (container_id, days_before) VALUES (?, ?)")
-            ->execute([$containerId, $daysBefore]);
-        $notified++;
-    }
+    if(ContainerArrivalNotificationService::notifyDue($pdo,$notifications,(int)$c['id'],$daysList,$today))$notified++;
 }
 
 if (php_sapi_name() === 'cli' && $notified > 0) {

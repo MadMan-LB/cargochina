@@ -86,6 +86,8 @@ class TrainingDataResetService
 
     public function reset(array $requestedGroups, int $currentUserId): array
     {
+        $environment=strtolower(trim((string)(getenv('APP_ENV') ?: 'production')));
+        if(!in_array($environment,['local','development','testing'],true))throw new InvalidArgumentException('Training reset is disabled in production.');
         $groups = array_values(array_unique(array_filter(array_map(
             static fn($group): string => is_string($group) ? trim($group) : '',
             $requestedGroups

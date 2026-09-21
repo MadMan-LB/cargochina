@@ -1,4 +1,5 @@
 <?php
+require_once dirname(__DIR__, 2) . '/services/CargoMetricsService.php';
 
 /**
  * Orders API - CRUD, submit, approve, attachments
@@ -6,6 +7,8 @@
 
 require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__, 2) . '/services/OrderStateService.php';
+require_once dirname(__DIR__, 2) . '/services/OrderWriteService.php';
+require_once dirname(__DIR__, 2) . '/services/ShipmentAssignmentService.php';
 require_once dirname(__DIR__, 2) . '/services/NotificationService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderCountryService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderItemNumberingService.php';
@@ -370,17 +373,7 @@ function orderNormalizeCopyNormalGoods($value): ?string
 
 function normalizeOptionalExpectedReadyDate($value): ?string
 {
-    $raw = trim((string) ($value ?? ''));
-    if ($raw === '') {
-        return null;
-    }
-
-    $ts = strtotime($raw);
-    if ($ts === false) {
-        jsonError('Invalid expected_ready_date', 400);
-    }
-
-    return date('Y-m-d', $ts);
+    return OrderWriteService::date($value);
 }
 
 function resolveOrderExpectedReadyDate(array $input, array $order = []): ?string
@@ -423,7 +416,7 @@ function supplierExists(PDO $pdo, int $supplierId): bool
 
 function normalizeExistingSupplierId(PDO $pdo, $supplierId, string $field = 'supplier_id'): ?int
 {
-    $normalized = (int) ($supplierId ?? 0);
+    $normalized = (int) (OrderWriteService::number($supplierId,$field,true,0,4294967295) ?? 0);
     if ($normalized <= 0) {
         return null;
     }
@@ -452,6 +445,7 @@ function validateOrderItemSupplierIds(PDO $pdo, array $items): void
 
 function normalizeOrderItemsForPersistence(PDO $pdo, int $customerId, ?int $destinationCountryId, ?int $defaultSupplierId, array $items, ?string $currentStatus = 'Draft', ?int $excludeOrderId = null): array
 {
+    $items=OrderWriteService::standardItems($pdo,$items,$defaultSupplierId);
     // Older clients may omit this additive field on update. Preserve it by item ID,
     // never by the packing-list value (duplicates are deliberately valid).
     if ($excludeOrderId && orderTableHasColumn($pdo, 'order_items', 'item_number')) {
@@ -476,14 +470,9 @@ function normalizeOrderItemsForPersistence(PDO $pdo, int $customerId, ?int $dest
     return OrderItemNumberingService::prepareItemsForPersistence($items, $currentStatus, $shippingCode, $defaultSupplierId, $history);
 }
 
-function orderCreationIdempotencyKey($value): ?string
+function orderCreationIdempotencyKey($value): string
 {
-    $key = trim((string) $value);
-    if ($key === '') return null;
-    if (!preg_match('/^[A-Za-z0-9._:-]{8,64}$/', $key)) {
-        jsonError('Invalid order idempotency key', 400);
-    }
-    return $key;
+    return OrderWriteService::requestKey($value);
 }
 
 function orderHandleLifecycleTransition(string $action, string $currentStatus, string $targetStatus): void
@@ -546,7 +535,7 @@ function buildOrderSearchSql(PDO $pdo, string $query, array &$params, string $or
 
     $clauses = [];
     foreach ($terms as $term) {
-        $like = '%' . $term . '%';
+        $like = clmsSearchLike($term);
         $termClauses = [
             orderUtf8LikeExpr("CAST($orderAlias.id AS CHAR)") . " LIKE ?",
             orderUtf8LikeExpr("$customerAlias.name") . " LIKE ?",
@@ -665,7 +654,7 @@ function buildOrderSearchSql(PDO $pdo, string $query, array &$params, string $or
     return implode(' AND ', $clauses);
 }
 
-function fetchOrderItemsForOrders(PDO $pdo, array $orderIds): array
+function fetchOrderItemsForOrders(PDO $pdo, array $orderIds, bool $includeReceiptDetails = true): array
 {
     $ids = array_values(array_unique(array_filter(array_map('intval', $orderIds), static fn(int $id): bool => $id > 0)));
     if (empty($ids)) {
@@ -733,11 +722,12 @@ function fetchOrderItemsForOrders(PDO $pdo, array $orderIds): array
     $stmt = $pdo->prepare($sql);
     $stmt->execute($ids);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    $receiptImages = clmsReceiptItemImagePaths(
+    $receiptImages = $includeReceiptDetails ? clmsReceiptItemImagePaths(
         $pdo,
         array_map(static fn(array $row): int => (int) ($row['id'] ?? 0), $rows)
-    );
-    $orderReceiptImages = clmsOrderReceiptImagePaths($pdo, $ids);
+    ) : [];
+    $orderReceiptImages = $includeReceiptDetails ? clmsOrderReceiptImagePaths($pdo, $ids) : [];
+    if ($includeReceiptDetails) $rows = CargoMetricsService::attachItems($pdo, $rows);
     $grouped = [];
     foreach ($rows as $row) {
         $row['receipt_image_paths'] = $receiptImages[(int) ($row['id'] ?? 0)] ?? [];
@@ -832,7 +822,7 @@ function orderRowMatchesSupplierFilter(array $row, int $supplierId): bool
 function fetchOrdersListRowsForRequest(PDO $pdo, bool $paginate = false, ?array &$meta = null): array
 {
     $statusParam = $_GET['status'] ?? null;
-    $statuses = is_array($statusParam) ? array_filter($statusParam) : ($statusParam ? [$statusParam] : []);
+    $statuses = is_array($statusParam) ? array_filter($statusParam) : ($statusParam ? explode(',', $statusParam) : []);
     $statusMode = strtolower(trim((string) ($_GET['status_mode'] ?? 'include')));
     $statusMode = $statusMode === 'exclude' ? 'exclude' : 'include';
     $customerFeedback = trim((string) ($_GET['customer_feedback'] ?? ''));
@@ -863,6 +853,7 @@ function fetchOrdersListRowsForRequest(PDO $pdo, bool $paginate = false, ?array 
         FROM orders o
         JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id$destJoin WHERE 1=1";
     $params = [];
+    if (($_GET['shipment_eligible']??'')==='1') $sql.=' AND ('.ShipmentAssignmentService::eligibleSql($pdo).')';
     if (!empty($statuses)) {
         $placeholders = implode(',', array_fill(0, count($statuses), '?'));
         $sql .= $statusMode === 'exclude'
@@ -877,9 +868,11 @@ function fetchOrdersListRowsForRequest(PDO $pdo, bool $paginate = false, ?array 
     if ($supplierId) {
         $chkItemSupp = @$pdo->query("SHOW COLUMNS FROM order_items LIKE 'supplier_id'");
         if ($chkItemSupp && $chkItemSupp->rowCount() > 0) {
-            $sql .= " AND (o.supplier_id = ? OR EXISTS (SELECT 1 FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = o.id AND COALESCE(oi.supplier_id, p.supplier_id) = ?))";
+            $sharedPredicate = orderSupportsSharedCartons($pdo) ? ' OR ' . clmsSharedCartonSupplierPredicate('oi.shared_carton_contents') : '';
+            $sql .= " AND (o.supplier_id = ? OR EXISTS (SELECT 1 FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = o.id AND (COALESCE(oi.supplier_id, p.supplier_id) = ?$sharedPredicate)))";
             $params[] = $supplierId;
             $params[] = $supplierId;
+            if ($sharedPredicate !== '') array_push($params, (string)(int)$supplierId, (string)(int)$supplierId);
         } else {
             $sql .= " AND o.supplier_id = ?";
             $params[] = $supplierId;
@@ -907,14 +900,14 @@ function fetchOrdersListRowsForRequest(PDO $pdo, bool $paginate = false, ?array 
     }
     if ($shippingCode !== '') {
         $sql .= " AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND " . orderUtf8LikeExpr('oi.shipping_code') . " LIKE ?)";
-        $params[] = '%' . $shippingCode . '%';
+        $params[] = clmsSearchLike($shippingCode);
     }
     if ($q !== '') {
         $sql .= " AND " . buildOrderSearchSql($pdo, $q, $params, 'o', 'c', 's');
     }
     if ($customerFeedback !== '') {
         if ($customerFeedback === 'pending') {
-            $sql .= " AND COALESCE(o.confirmation_token, '') <> ''";
+            $sql .= " AND COALESCE(o.confirmation_token, '') <> '' AND o.status IN ('Confirmed','AwaitingCustomerConfirmation')";
         } elseif ($customerFeedback === 'declined_after_auto_confirm') {
             $sql .= " AND o.status = 'CustomerDeclinedAfterAutoConfirm'";
         }
@@ -937,7 +930,7 @@ function fetchOrdersListRowsForRequest(PDO $pdo, bool $paginate = false, ?array 
         $stmt->execute($params);
     }
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    $itemsByOrderId = fetchOrderItemsForOrders($pdo, array_column($rows, 'id'));
+    $itemsByOrderId = fetchOrderItemsForOrders($pdo, array_column($rows, 'id'), !$paginate || ($_GET['view'] ?? '') !== 'list');
     foreach ($rows as &$row) {
         $row['items'] = normalizeOrderItems($pdo, $itemsByOrderId[(int) ($row['id'] ?? 0)] ?? []);
         $supplierNames = orderCollectSupplierNamesFromItems($row['items'], (string) ($row['supplier_name'] ?? ''));
@@ -967,18 +960,18 @@ function fetchOrdersListRowsForRequest(PDO $pdo, bool $paginate = false, ?array 
     orderAttachDepositSummaries($pdo, $rows);
     orderAttachOperationalCostSummaries($pdo, $rows);
 
+    // Staff tables use these summaries; detail/edit/export requests retain full items.
+    if ($paginate && ($_GET['view'] ?? '') === 'list') {
+        foreach ($rows as &$row) unset($row['items']);
+        unset($row);
+    }
+
     return $rows;
 }
 
 function orderBuildExcelEntry(PDO $pdo, int $orderId): ?array
 {
     if ($orderId <= 0) return null;
-
-    try {
-        (new OrderItemDescriptionService($pdo))->completeMissingForOrder($orderId);
-    } catch (Throwable $e) {
-        logClms('order_export_translation_failed', ['order_id' => $orderId, 'error' => $e->getMessage()]);
-    }
 
     $supplierColumns = 's.name as supplier_name, s.phone as supplier_phone, s.factory_location as supplier_factory';
     if (orderTableHasColumn($pdo, 'suppliers', 'address')) $supplierColumns .= ', s.address as supplier_address';
@@ -1035,6 +1028,7 @@ function orderAttachOperationalCostSummaries(PDO $pdo, array &$rows): void
     }
 
     $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
+
     $stmt = $pdo->prepare(
         "SELECT order_id, base_currency, SUM(base_amount) AS base_total, COUNT(*) AS line_count
          FROM draft_order_costs
@@ -1093,6 +1087,9 @@ function orderAttachDepositSummaries(PDO $pdo, array &$rows): void
     if (!$rows) {
         return;
     }
+    $rows = CargoMetricsService::attachOrders($pdo, $rows);
+    foreach($rows as &$row)$row['shipment_eligible']=ShipmentAssignmentService::eligible($row);
+    unset($row);
 
     $orderIds = array_values(array_unique(array_map(static fn(array $row): int => (int) ($row['id'] ?? 0), $rows)));
     $orderIds = array_values(array_filter($orderIds, static fn(int $id): bool => $id > 0));
@@ -1102,6 +1099,16 @@ function orderAttachDepositSummaries(PDO $pdo, array &$rows): void
 
     $paidByOrder = array_fill_keys($orderIds, '0.0000');
     $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
+
+    $receiptHistory = $pdo->prepare("SELECT DISTINCT order_id FROM warehouse_receipts WHERE order_id IN ($placeholders)");
+    $receiptHistory->execute($orderIds);
+    $immutableOrders = array_fill_keys($receiptHistory->fetchAll(PDO::FETCH_COLUMN), true);
+    foreach ($rows as &$row) {
+        $row['procurement_editable'] = in_array($row['status'],($row['order_type']??'')==='draft_procurement'?['Draft']:['Draft','Submitted'],true) && !isset($immutableOrders[$row['id']])
+            && empty($row['cargo_totals']['reservation_count'])
+            && !in_array($row['status'], ['ConsolidatedIntoShipmentDraft', 'AssignedToContainer', 'FinalizedAndPushedToTracking'], true);
+    }
+    unset($row);
 
     if (orderTableExists($pdo, 'balance_transactions') && orderTableHasColumn($pdo, 'balance_transactions', 'order_id')) {
         $sql = "SELECT order_id, SUM(amount) as paid_amount
@@ -1180,7 +1187,7 @@ function outputOrdersListCsv(array $rows, ?string $filename = null): void
     header('Cache-Control: no-cache, no-store, must-revalidate');
 
     $out = fopen('php://output', 'w');
-    fputcsv($out, array_map('clmsT', ['ID', 'Order Type', 'Customer', 'Supplier', 'Expected Ready', 'Status', 'Deposit Status', 'Paid Amount', 'Remaining Balance', 'Shipment Charges', 'Total CBM', 'Total Weight']));
+    clmsWriteCsv($out, array_map('clmsT', ['ID', 'Order Type', 'Customer', 'Supplier', 'Expected Ready', 'Status', 'Deposit Status', 'Paid Amount', 'Remaining Balance', 'Shipment Charges', 'Total CBM', 'Total Weight', 'Currency']));
     foreach ($rows as $row) {
         $cbm = 0.0;
         $weight = 0.0;
@@ -1194,12 +1201,14 @@ function outputOrdersListCsv(array $rows, ?string $filename = null): void
                 }
             }
         }
+        $cbm = isset($row['cargo_totals']) ? $row['cargo_totals']['cbm'] : $cbm;
+        $weight = isset($row['cargo_totals']) ? $row['cargo_totals']['weight'] : $weight;
         $supplierDisplay = trim((string) ($row['supplier_name_display'] ?? ($row['supplier_name'] ?? '')));
         if ($supplierNames && $supplierDisplay === '') {
             $names = array_keys($supplierNames);
             $supplierDisplay = count($names) === 1 ? $names[0] : clmsT('Multiple ({names})', ['names' => implode(', ', $names)]);
         }
-        fputcsv($out, [
+        clmsWriteCsv($out, [
             (int) ($row['id'] ?? 0),
             (string) ($row['order_type'] ?? 'standard'),
             OrderExcelService::formatCustomerDisplay($row, $row['items'] ?? []),
@@ -1207,11 +1216,12 @@ function outputOrdersListCsv(array $rows, ?string $filename = null): void
             (string) ($row['expected_ready_date'] ?? ''),
             clmsStatusLabel((string) ($row['status'] ?? '')),
             clmsT((string) ($row['deposit_status'] ?? 'No Deposit')),
-            format_display_amount($row['deposit_paid_amount'] ?? 0, 2),
-            format_display_amount($row['remaining_balance'] ?? 0, 2),
+            format_display_amount($row['deposit_paid_amount'] ?? 0, 4),
+            format_display_amount($row['remaining_balance'] ?? 0, 4),
             orderFormatOperationalCostSummary($row),
-            round($cbm, 4),
-            round($weight, 2),
+            $cbm===null?null:round($cbm, 6),
+            $weight===null?null:round($weight, 4),
+            $row['currency']??'',
         ]);
     }
     fclose($out);
@@ -1225,14 +1235,14 @@ function outputOrderCsv(array $order, array $items, ?string $filename = null): v
     header('Cache-Control: no-cache, no-store, must-revalidate');
 
     $out = fopen('php://output', 'w');
-    fputcsv($out, [clmsT('Order'), '#' . (int) ($order['id'] ?? 0)]);
-    fputcsv($out, [clmsT('Customer'), OrderExcelService::formatCustomerDisplay($order, $items)]);
-    fputcsv($out, [clmsT('Supplier'), (string) ($order['supplier_name'] ?? '')]);
-    fputcsv($out, [clmsT('Expected Ready'), (string) ($order['expected_ready_date'] ?? '')]);
-    fputcsv($out, [clmsT('Status'), clmsStatusLabel((string) ($order['status'] ?? ''))]);
-    fputcsv($out, [clmsT('Currency'), (string) ($order['currency'] ?? '')]);
-    fputcsv($out, ['']);
-    fputcsv($out, array_map('clmsT', ['What Brand', 'Good Type', 'Code', 'Photo Count', 'I.I.N', 'Supplier', 'Description', 'Total CTNS', 'QTY/CTN', 'TOTAL QTY', 'UNIT PRICE', 'TOTAL AMOUNT', 'CBM', 'TOTAL CBM', 'GWKG', 'TOTAL GW', 'Express Number', 'Size', 'Item Number']));
+    clmsWriteCsv($out, [clmsT('Order'), '#' . (int) ($order['id'] ?? 0)]);
+    clmsWriteCsv($out, [clmsT('Customer'), OrderExcelService::formatCustomerDisplay($order, $items)]);
+    clmsWriteCsv($out, [clmsT('Supplier'), (string) ($order['supplier_name'] ?? '')]);
+    clmsWriteCsv($out, [clmsT('Expected Ready'), (string) ($order['expected_ready_date'] ?? '')]);
+    clmsWriteCsv($out, [clmsT('Status'), clmsStatusLabel((string) ($order['status'] ?? ''))]);
+    clmsWriteCsv($out, [clmsT('Currency'), (string) ($order['currency'] ?? '')]);
+    clmsWriteCsv($out, ['']);
+    clmsWriteCsv($out, array_map('clmsT', ['What Brand', 'Good Type', 'Code', 'Photo Count', 'I.I.N', 'Supplier', 'Description', 'Total CTNS', 'QTY/CTN', 'TOTAL QTY', 'UNIT PRICE', 'TOTAL AMOUNT', 'CBM', 'TOTAL CBM', 'GWKG', 'TOTAL GW', 'Express Number', 'Size', 'Item Number']));
 
     foreach ($items as $item) {
         $imagePaths = $item['image_paths'] ?? [];
@@ -1249,7 +1259,7 @@ function outputOrderCsv(array $order, array $items, ?string $filename = null): v
         $unitPrice = isset($item['sell_price']) && $item['sell_price'] !== null && $item['sell_price'] !== ''
             ? (float) $item['sell_price']
             : (float) ($item['unit_price'] ?? 0);
-        $scope = strtolower(trim((string) ($item['product_dimensions_scope'] ?? $item['dimensions_scope'] ?? 'piece')));
+        $scope = strtolower(trim((string) ($item['dimensions_scope'] ?? $item['product_dimensions_scope'] ?? 'piece')));
         $totalQty = ($cartons > 0 && $qtyPerCtn > 0) ? $cartons * $qtyPerCtn : (float) ($item['quantity'] ?? 0);
         $denom = ($scope === 'carton' && $cartons > 0) ? $cartons : ($totalQty > 0 ? $totalQty : 0);
         $cbmPer = ($item['declared_cbm'] ?? null) && $denom > 0
@@ -1260,7 +1270,7 @@ function outputOrderCsv(array $order, array $items, ?string $filename = null): v
             : 0;
         $multiplier = $scope === 'carton' ? $cartons : $totalQty;
 
-        fputcsv($out, [
+        clmsWriteCsv($out, [
             (string) ($item['what_brand'] ?? ''),
             orderCopyNormalGoodsDisplay($item['copy_normal_goods'] ?? ''),
             (string) ($item['code'] ?? ''),
@@ -1274,9 +1284,9 @@ function outputOrderCsv(array $order, array $items, ?string $filename = null): v
             $unitPrice ?: '',
             $totalQty > 0 && $unitPrice ? round($totalQty * $unitPrice, 4) : '',
             $cbmPer ?: '',
-            $multiplier > 0 && $cbmPer ? round($cbmPer * $multiplier, 6) : '',
+            $item['declared_cbm'] ?? '',
             $gwPer ?: '',
-            $multiplier > 0 && $gwPer ? round($gwPer * $multiplier, 4) : '',
+            $item['declared_weight'] ?? '',
             (string) ($item['express_number'] ?? ''),
             (string) ($item['size'] ?? ''),
             (string) ($item['item_number'] ?? ''),
@@ -1288,18 +1298,18 @@ function outputOrderCsv(array $order, array $items, ?string $filename = null): v
         $row[4] = $reference['item_no'];
         $row[6] = clmsT('Contained item') . ': ' . $reference['description'];
         $row[18] = $reference['item_number'];
-        fputcsv($out, $row); // Identifier-only rows never duplicate totals.
+        clmsWriteCsv($out, $row); // Identifier-only rows never duplicate totals.
     }
     $fees = $order['receipt_fees'] ?? ($order['receipt']['fees'] ?? []);
     if (is_array($fees) && $fees) {
-        fputcsv($out, ['']);
-        fputcsv($out, [clmsT('Customer-facing receiving fees')]);
-        fputcsv($out, array_map('clmsT', ['Fee', 'Amount', 'Currency', 'Notes']));
+        clmsWriteCsv($out, ['']);
+        clmsWriteCsv($out, [clmsT('Customer-facing receiving fees')]);
+        clmsWriteCsv($out, array_map('clmsT', ['Fee', 'Amount', 'Currency', 'Notes']));
         foreach ($fees as $fee) {
             if (!is_array($fee)) {
                 continue;
             }
-            fputcsv($out, [
+            clmsWriteCsv($out, [
                 (string) ($fee['fee_label'] ?? $fee['label'] ?? clmsT('Warehouse fee')),
                 isset($fee['amount']) ? format_display_amount($fee['amount'], 4) : '',
                 (string) ($fee['currency'] ?? ($order['currency'] ?? '')),
@@ -1309,11 +1319,11 @@ function outputOrderCsv(array $order, array $items, ?string $filename = null): v
     }
     $costs = $order['operational_costs'] ?? [];
     if (!empty($costs['lines']) && is_array($costs['lines'])) {
-        fputcsv($out, ['']);
-        fputcsv($out, [clmsT('Shipment Charges')]);
-        fputcsv($out, array_map('clmsT', ['Type', 'Description', 'Amount', 'Currency', 'Exchange Rate', 'Base Amount', 'Base Currency', 'Supplier / Provider', 'Responsible Payer', 'Allocation', 'Notes', 'Accounting Treatment']));
+        clmsWriteCsv($out, ['']);
+        clmsWriteCsv($out, [clmsT('Shipment Charges')]);
+        clmsWriteCsv($out, array_map('clmsT', ['Type', 'Description', 'Amount', 'Currency', 'Exchange Rate', 'Base Amount', 'Base Currency', 'Supplier / Provider', 'Responsible Payer', 'Allocation', 'Notes', 'Accounting Treatment']));
         foreach ($costs['lines'] as $cost) {
-            fputcsv($out, [
+            clmsWriteCsv($out, [
                 (string) ($cost['cost_type_label_en'] ?? $cost['cost_type_code'] ?? ''),
                 (string) ($cost['description_en'] ?? $cost['description_zh'] ?? ''),
                 (string) ($cost['amount'] ?? ''),
@@ -1328,7 +1338,7 @@ function outputOrderCsv(array $order, array $items, ?string $filename = null): v
                 clmsT(ucfirst((string)($cost['posting_status'] ?? 'pending'))),
             ]);
         }
-        fputcsv($out, [clmsT('Shipment Charges Total'), '', '', '', '', (string) ($costs['base_total'] ?? '0.0000'), (string) ($costs['base_currency'] ?? ''), '', '', '', '', clmsT('Shipment-level; no item allocation')]);
+        clmsWriteCsv($out, [clmsT('Shipment Charges Total'), '', '', '', '', (string) ($costs['base_total'] ?? '0.0000'), (string) ($costs['base_currency'] ?? ''), '', '', '', '', clmsT('Shipment-level; no item allocation')]);
     }
     fclose($out);
     exit;
@@ -1483,17 +1493,17 @@ function syncProductFromOrderItem(PDO $pdo, array $it): void
         return false;
     };
 
-    $qty = (float) ($it['quantity'] ?? 0);
-    if ($qty <= 0) $qty = 1;
+    $qty = OrderWriteService::productMeasurementMultiplier($product, $it);
+    $sameBasis = ($product['dimensions_scope'] ?? 'piece') === ($it['dimensions_scope'] ?? 'piece');
     $cbmTotal = (float) ($it['declared_cbm'] ?? 0);
     $weightTotal = (float) ($it['declared_weight'] ?? 0);
     $sets = [];
     $vals = [];
-    if (isset($it['description_cn']) && $assignIfEmpty($product['description_cn'] ?? null)) {
+    if (isset($it['description_cn']) && mb_strlen($it['description_cn']) <= 500 && $assignIfEmpty($product['description_cn'] ?? null)) {
         $sets[] = 'description_cn=?';
         $vals[] = $it['description_cn'] ?: null;
     }
-    if (isset($it['description_en']) && $assignIfEmpty($product['description_en'] ?? null)) {
+    if (isset($it['description_en']) && mb_strlen($it['description_en']) <= 500 && $assignIfEmpty($product['description_en'] ?? null)) {
         $sets[] = 'description_en=?';
         $vals[] = $it['description_en'] ?: null;
     }
@@ -1501,23 +1511,23 @@ function syncProductFromOrderItem(PDO $pdo, array $it): void
         $sets[] = 'unit_price=?';
         $vals[] = $it['unit_price'] !== null && $it['unit_price'] !== '' ? (float) $it['unit_price'] : null;
     }
-    if ($weightTotal > 0 && $assignIfEmpty($product['weight'] ?? null)) {
+    if ($qty > 0 && $weightTotal > 0 && $assignIfEmpty($product['weight'] ?? null)) {
         $sets[] = 'weight=?';
         $vals[] = $weightTotal / $qty;
     }
-    if ($cbmTotal > 0 && $assignIfEmpty($product['cbm'] ?? null)) {
+    if ($qty > 0 && $cbmTotal > 0 && $assignIfEmpty($product['cbm'] ?? null)) {
         $sets[] = 'cbm=?';
         $vals[] = $cbmTotal / $qty;
     }
-    if (isset($it['item_length']) && $it['item_length'] !== null && $it['item_length'] !== '' && $assignIfEmpty($product['length_cm'] ?? null)) {
+    if ($sameBasis && isset($it['item_length']) && $it['item_length'] !== null && $it['item_length'] !== '' && $assignIfEmpty($product['length_cm'] ?? null)) {
         $sets[] = 'length_cm=?';
         $vals[] = (float) $it['item_length'];
     }
-    if (isset($it['item_width']) && $it['item_width'] !== null && $it['item_width'] !== '' && $assignIfEmpty($product['width_cm'] ?? null)) {
+    if ($sameBasis && isset($it['item_width']) && $it['item_width'] !== null && $it['item_width'] !== '' && $assignIfEmpty($product['width_cm'] ?? null)) {
         $sets[] = 'width_cm=?';
         $vals[] = (float) $it['item_width'];
     }
-    if (isset($it['item_height']) && $it['item_height'] !== null && $it['item_height'] !== '' && $assignIfEmpty($product['height_cm'] ?? null)) {
+    if ($sameBasis && isset($it['item_height']) && $it['item_height'] !== null && $it['item_height'] !== '' && $assignIfEmpty($product['height_cm'] ?? null)) {
         $sets[] = 'height_cm=?';
         $vals[] = (float) $it['item_height'];
     }
@@ -1558,8 +1568,14 @@ function syncProductFromOrderItem(PDO $pdo, array $it): void
 }
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('orders', $method, $id, $action);
     $pdo = getDb();
-    $userId = getAuthUserId() ?? 1; // Dev fallback
+    if ($method === 'GET') { require_once dirname(__DIR__, 2) . '/services/QueryFilterService.php'; QueryFilterService::validate($_GET, 'orders'); }
+    $userId = requireAuth();
+    if($method==='GET'||($method==='POST'&&$id==='bulk-export'))requirePermission('orders.read');
+    if(($method==='GET'&&($action==='export'||$id==='export'))||($method==='POST'&&$id==='bulk-export'))clmsBeginExportSnapshot($pdo);
+    if(array_key_exists('items',$input) && !is_array($input['items']))jsonError('items must be an array',422);
 
     switch ($method) {
         case 'GET':
@@ -1672,7 +1688,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             if ($id === 'export' && $action === 'list') {
                 $rows = fetchOrdersListRowsForRequest($pdo);
-                $format = strtolower(trim((string) ($_GET['format'] ?? 'xlsx')));
+                $format = clmsExportFormat('xlsx');
                 if ($format === 'csv') {
                     outputOrdersListCsv($rows);
                 }
@@ -1687,7 +1703,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if (!$entry) jsonError('Order not found', 404);
                 $order = $entry['order'];
                 $items = $entry['items'];
-                $format = strtolower(trim((string) ($_GET['format'] ?? 'xlsx')));
+                $format = clmsExportFormat('xlsx');
                 if ($format === 'csv') {
                     outputOrderCsv($order, $items, 'order_' . (int) $id . '.csv');
                 }
@@ -1723,7 +1739,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $rip->execute([$receipt['id']]);
                 $row['receipt']['photos'] = $rip->fetchAll(PDO::FETCH_ASSOC);
                 $receiptItemCols = "oi.description_cn, oi.description_en, oi.item_no, oi.shipping_code, oi.cartons, oi.qty_per_carton, oi.quantity, oi.unit_price as declared_unit_price, oi.total_amount as declared_total_amount";
-                foreach (['item_number', 'what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
+                foreach (['dimensions_scope', 'item_number', 'what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
                     if (orderTableHasColumn($pdo, 'order_items', $column)) {
                         $receiptItemCols .= ", oi.$column";
                     }
@@ -1797,22 +1813,27 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $dupWarn = enforceDuplicateShippingCodePolicy($pdo, $customerId, (int) $id, $items);
             $pdo->beginTransaction();
             try {
-                $lockedOrderStmt = $pdo->prepare("SELECT lock_version FROM orders WHERE id=? FOR UPDATE");
-                $lockedOrderStmt->execute([(int) $id]);
-                $lockedVersion = $lockedOrderStmt->fetchColumn();
-                if ($lockedVersion === false) throw new RuntimeException('Order not found');
-                if (array_key_exists('lock_version', $input) && (int) $input['lock_version'] !== (int) $lockedVersion) {
-                    throw new RuntimeException('This order was changed by another request. Reload it before saving.');
+                $customerLocks=array_values(array_unique([(int)$order['customer_id'],$customerId]));sort($customerLocks,SORT_NUMERIC);
+                foreach($customerLocks as $customerLockId){$customerLock=$pdo->prepare('SELECT id FROM customers WHERE id=? FOR UPDATE');$customerLock->execute([$customerLockId]);if(!$customerLock->fetchColumn())jsonError('Customer not found',422);}
+                $lockedOrder=OrderWriteService::lockMutableProcurement($pdo,(int)$id);
+                $lockedVersion=$lockedOrder['lock_version'];
+                if (($order['order_type']??'')==='draft_procurement') throw new ShipmentAssignmentException('Use the draft builder to preserve this order format');
+                if (!array_key_exists('lock_version', $input) || filter_var($input['lock_version'],FILTER_VALIDATE_INT)===false || (int) $input['lock_version'] !== (int) $lockedVersion) {
+                    throw new ShipmentAssignmentException('Order version is missing or changed. Reload it before saving.');
                 }
-                $updSets = "customer_id=?, supplier_id=?, expected_ready_date=?, high_alert_notes=?, lock_version=lock_version+1";
-                $updParams = [$customerId, $supplierId, $expectedDate, $highAlertNotes];
+                $currency=$input['currency']??$order['currency'];
+                if(!in_array($currency,['USD','RMB'],true))jsonError('Currency must be USD or RMB',422);
+                OrderWriteService::assertFinancialIdentity($pdo,$order,$customerId,$currency);
+                $items=normalizeOrderItemsForPersistence($pdo,$customerId,$destinationCountryId,$supplierId?:null,$input['items']??[],$lockedOrder['status'],(int)$id);
+                $updSets = "customer_id=?, supplier_id=?, expected_ready_date=?, high_alert_notes=?, currency=?, lock_version=lock_version+1";
+                $updParams = [$customerId, $supplierId, $expectedDate, $highAlertNotes, $currency];
                 if (orderTableHasColumn($pdo, 'orders', 'destination_country_id')) {
                     $updSets .= ", destination_country_id=?";
                     $updParams[] = $destinationCountryId;
                 }
                 $updParams[] = $id;
                 $pdo->prepare("UPDATE orders SET $updSets WHERE id=?")->execute($updParams);
-                $pdo->prepare("DELETE FROM order_items WHERE order_id = ?")->execute([$id]);
+                OrderWriteService::prepareReplacement($pdo,(int)$id,$items);
                 $hasItemSupplier = $pdo->query("SHOW COLUMNS FROM order_items LIKE 'supplier_id'")->rowCount() > 0;
                 $hasSellPrice = $pdo->query("SHOW COLUMNS FROM order_items LIKE 'sell_price'")->rowCount() > 0;
                 $hasOrderCartons = $pdo->query("SHOW COLUMNS FROM order_items LIKE 'order_cartons'")->rowCount() > 0;
@@ -1821,7 +1842,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $hasCustomDesignRequired = orderTableHasColumn($pdo, 'order_items', 'custom_design_required');
                 $hasCustomDesignNote = orderTableHasColumn($pdo, 'order_items', 'custom_design_note');
                 $metadataColumns = [];
-                foreach (['item_number', 'what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
+                foreach (['dimensions_scope', 'item_number', 'what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
                     if (orderTableHasColumn($pdo, 'order_items', $column)) {
                         $metadataColumns[] = $column;
                     }
@@ -1921,7 +1942,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     if ($hasCustomDesignNote) {
                         $params[] = $it['custom_design_note'] ?? null;
                     }
-                    $insItem->execute($params);
+                    $existingItemId=(int)($it['existing_item_id']??$it['id']??0);
+                    if($existingItemId){
+                        $updateColumns=array_map('trim',explode(',',$insCols));
+                        $pdo->prepare('UPDATE order_items SET '.implode(',',array_map(static fn($column)=>"$column=?",$updateColumns)).' WHERE id=? AND order_id=?')->execute(array_merge($params,[$existingItemId,$id]));
+                    }else $insItem->execute($params);
                     syncProductFromOrderItem($pdo, $it);
                 }
                 (new ItemNumberReservationService($pdo))->reservePersistedOrder((int)$id,(int)$userId);
@@ -1939,7 +1964,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $row['items'] = normalizeOrderItems($pdo, fetchOrderItems($pdo, (int) $id));
                 jsonResponse(array_filter(['data' => $row, 'warning' => $dupWarn]));
             } catch (Exception $e) {
-                $pdo->rollBack();
+                if($pdo->inTransaction())$pdo->rollBack();
+                if($e instanceof ShipmentAssignmentException)jsonError($e->getMessage(),409);
                 throw $e;
             }
             break;
@@ -1947,6 +1973,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         case 'POST':
             if ($id === 'bulk-export') {
                 $rawIds = is_array($input['ids'] ?? null) ? $input['ids'] : [];
+                foreach($rawIds as $rawId)if(!(is_int($rawId)||is_string($rawId))||!preg_match('/^[1-9][0-9]*$/D',(string)$rawId))jsonError('Export IDs must be positive integers',422);
                 $ids = array_values(array_unique(array_filter(array_map(
                     static fn($value): int => filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) ?: 0,
                     $rawIds
@@ -1979,6 +2006,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         ->execute([json_encode($auditPayload, JSON_UNESCAPED_UNICODE), getAuthUserId()]);
                 }
                 logClms('orders_bulk_export', $auditPayload + ['user_id' => getAuthUserId()]);
+                $pdo->commit();
                 (new OrderBulkExcelService($pdo))->output($entries, 'selected_orders');
             }
             if ($id === null) {
@@ -1991,9 +2019,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     jsonError('Missing required: customer_id', 400);
                 }
                 if ($creationKey !== null) {
-                    $existing = $pdo->prepare("SELECT id FROM orders WHERE creation_idempotency_key=? AND COALESCE(order_type,'standard')<>'draft_procurement'");
-                    $existing->execute([$creationKey]);
-                    $existingId = (int) $existing->fetchColumn();
+                    $existingId = OrderWriteService::replay($pdo,$creationKey,$input,'standard',(int)$userId);
                     if ($existingId > 0) {
                         $stmt = $pdo->prepare("SELECT o.*,c.name customer_name,s.name supplier_name FROM orders o JOIN customers c ON c.id=o.customer_id LEFT JOIN suppliers s ON s.id=o.supplier_id WHERE o.id=?");
                         $stmt->execute([$existingId]);
@@ -2031,11 +2057,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 try {
                     $customerLock = $pdo->prepare("SELECT id FROM customers WHERE id=? FOR UPDATE");
                     $customerLock->execute([$customerId]);
-                    if (!$customerLock->fetchColumn()) throw new RuntimeException('Customer not found');
+                    if (!$customerLock->fetchColumn()) jsonError('Customer not found',422);
                     if ($creationKey !== null) {
-                        $existing = $pdo->prepare("SELECT id FROM orders WHERE creation_idempotency_key=? FOR UPDATE");
-                        $existing->execute([$creationKey]);
-                        $existingId = (int) $existing->fetchColumn();
+                        $existingId = OrderWriteService::replay($pdo,$creationKey,$input,'standard',(int)$userId);
                         if ($existingId > 0) {
                             $pdo->commit();
                             $stmt = $pdo->prepare("SELECT o.*,c.name customer_name,s.name supplier_name FROM orders o JOIN customers c ON c.id=o.customer_id LEFT JOIN suppliers s ON s.id=o.supplier_id WHERE o.id=?");
@@ -2067,7 +2091,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $hasCustomDesignRequired = orderTableHasColumn($pdo, 'order_items', 'custom_design_required');
                     $hasCustomDesignNote = orderTableHasColumn($pdo, 'order_items', 'custom_design_note');
                     $metadataColumns = [];
-                    foreach (['item_number', 'what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
+                    foreach (['dimensions_scope', 'item_number', 'what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
                         if (orderTableHasColumn($pdo, 'order_items', $column)) {
                             $metadataColumns[] = $column;
                         }
@@ -2169,7 +2193,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     }
                     (new ItemNumberReservationService($pdo))->reservePersistedOrder($orderId,(int)$userId);
                     $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order',?,?,?,?)")
-                        ->execute([$orderId, 'create', json_encode(['status' => 'Draft']), $userId]);
+                        ->execute([$orderId, 'create', json_encode(['status' => 'Draft','request_hash'=>OrderWriteService::requestHash($input)]), $userId]);
                     (new NotificationService($pdo))->notifyOrderCreated($orderId, $userId);
                     $pdo->commit();
                     notifyCrossSupplierPriceDifferences($pdo, $orderId, detectCrossSupplierPriceDifferences($pdo, $orderId, $currency, $supplierId ?: null, $items));
@@ -2183,7 +2207,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $row['items'] = normalizeOrderItems($pdo, fetchOrderItems($pdo, $orderId));
                     jsonResponse(array_filter(['data' => $row, 'warning' => $dupWarn]), 201);
                 } catch (Exception $e) {
-                    $pdo->rollBack();
+                    if($pdo->inTransaction())$pdo->rollBack();
+                    if($e instanceof PDOException && (string)$e->getCode()==='23000' && $creationKey!==null){
+                        if(OrderWriteService::replay($pdo,$creationKey,$input,'standard',(int)$userId))jsonError('Order was created concurrently; reopen the saved order',409);
+                    }
                     throw $e;
                 }
             }
@@ -2214,7 +2241,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 } elseif (!$token) {
                     requireAuth();
                 }
-                OrderReceiptWorkflowService::acceptAutoConfirmedOrder($pdo, (int) $id, $userId, 'confirm');
+                OrderReceiptWorkflowService::acceptAutoConfirmedOrder($pdo, (int) $id, $userId, 'confirm', $token ?: null);
                 jsonResponse(['data' => ['status' => 'ReadyForConsolidation']]);
             }
             if ($id && $action === 'reset-after-decline') {
@@ -2227,6 +2254,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $order = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$order) jsonError('Order not found', 404);
                 if ($action === 'submit') {
+                    $startedSubmitTransaction = !$pdo->inTransaction();
+                    if ($startedSubmitTransaction) {
+                        $pdo->beginTransaction();
+                        register_shutdown_function(static function () use ($pdo) { if ($pdo->inTransaction()) $pdo->rollBack(); });
+                    }
+                    $lockedSubmit = $pdo->prepare('SELECT * FROM orders WHERE id=? FOR UPDATE');
+                    $lockedSubmit->execute([$id]);
+                    $order = $lockedSubmit->fetch(PDO::FETCH_ASSOC);
+                    if (!$order) jsonError('Order not found', 404);
                     orderHandleLifecycleTransition('submit', (string) ($order['status'] ?? ''), 'Submitted');
                     $si = $pdo->prepare("SELECT COUNT(*) FROM order_items WHERE order_id = ?");
                     $si->execute([$id]);
@@ -2267,9 +2303,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                             $submitWarning = 'Photos are optional for Draft Orders at this stage. Some items are missing photos.';
                         }
                     }
-                    $pdo->prepare("UPDATE orders SET status='Submitted' WHERE id=?")->execute([$id]);
+                    $pdo->prepare("UPDATE orders SET status='Submitted',lock_version=lock_version+1 WHERE id=?")->execute([$id]);
                     $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, user_id) VALUES ('order',?,'submit',?)")->execute([$id, $userId]);
                     (new NotificationService($pdo))->notifyOrderSubmitted((int) $id);
+                    if ($startedSubmitTransaction) $pdo->commit();
                     $response = ['data' => ['status' => 'Submitted']];
                     if ($descriptionService !== null) {
                         try {

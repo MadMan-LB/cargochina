@@ -8,12 +8,17 @@
 require_once __DIR__ . '/../helpers.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('audit-log', $method, $id, $action);
     if ($method !== 'GET') {
         jsonError('Method not allowed', 405);
     }
     requireRole(['SuperAdmin', 'ChinaAdmin']);
 
     $pdo = getDb();
+    require_once dirname(__DIR__,2).'/services/QueryFilterService.php';
+    require_once dirname(__DIR__,2).'/services/AuditService.php';
+    QueryFilterService::validate($_GET,'audit-log');
 
     if ($id === 'users') {
         $stmt = $pdo->query("SELECT id, email, full_name FROM users WHERE is_active = 1 ORDER BY full_name, email");
@@ -26,8 +31,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     $actionFilter = trim($_GET['action'] ?? '');
     $dateFrom = trim($_GET['date_from'] ?? '');
     $dateTo = trim($_GET['date_to'] ?? '');
-    $limit = min(100, max(1, (int) ($_GET['limit'] ?? 50)));
-    $offset = max(0, (int) ($_GET['offset'] ?? 0));
+    $limit = clmsQueryLimit($_GET['limit']??50,50,100);
+    $offset = clmsQueryOffset($_GET['offset']??0);
 
     $sql = "SELECT a.id, a.entity_type, a.entity_id, a.action, a.old_value, a.new_value, a.user_id, a.created_at, u.full_name as user_name
         FROM audit_log a
@@ -60,7 +65,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $params[] = $dateTo;
     }
 
-    $sql .= " ORDER BY a.created_at DESC LIMIT " . ($limit + 1) . " OFFSET " . $offset;
+    $sql .= " ORDER BY a.created_at DESC, a.id DESC LIMIT " . ($limit + 1) . " OFFSET " . $offset;
     $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
     if ($params) {
         $stmt->execute($params);
@@ -71,5 +76,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         array_pop($rows);
     }
 
+    foreach($rows as &$row)foreach(['old_value','new_value'] as $field){if($row[$field]!==null){$decoded=json_decode($row[$field],true);$row[$field]=is_array($decoded)?json_encode(AuditService::redact($decoded),JSON_UNESCAPED_UNICODE):'[unstructured historical value]';}}unset($row);
     jsonResponse(['data' => $rows, 'has_more' => $hasMore]);
 };

@@ -20,10 +20,15 @@ if (strlen($password) < 14
 }
 
 $pdo=getDb();
-$stmt=$pdo->prepare('UPDATE users SET password_hash=? WHERE email=? AND is_active=1');
-$stmt->execute([password_hash($password,PASSWORD_DEFAULT),$email]);
-if ($stmt->rowCount() !== 1) {
-    fwrite(STDERR,"Active administrator account not found or password unchanged.\n");
-    exit(3);
-}
+require_once dirname(__DIR__).'/backend/services/CredentialEscrowService.php';
+AuditService::begin($pdo);
+try {
+ $s=$pdo->prepare('SELECT id FROM users WHERE email=? AND is_active=1 FOR UPDATE');$s->execute([$email]);$id=(int)$s->fetchColumn();
+ if(!$id)throw new RuntimeException('Active account not found');
+ $hash=password_hash($password,PASSWORD_DEFAULT);
+ CredentialEscrowService::store($pdo,$id,$password,$hash);
+ $pdo->prepare('UPDATE users SET password_hash=?,session_version=session_version+1 WHERE id=?')->execute([$hash,$id]);
+ AuditService::record($pdo,'user',$id,'offline_credential_rotation',null,['sessions_revoked'=>true,'operator'=>'protected CLI'],null);$pdo->commit();
+}catch(Throwable $e){if($pdo->inTransaction())$pdo->rollBack();fwrite(STDERR,"Credential rotation failed safely; verify protected configuration.\n");exit(3);}
+unset($password,$hash);
 fwrite(STDOUT,"Administrator password rotated for $email.\n");

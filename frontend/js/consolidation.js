@@ -1,20 +1,40 @@
 let currentDraftId = null;
+let currentDraftRevision = null;
+function trackingFinalizationPresentation(mode) {
+    if(mode==='disabled')return {label:'Finalize (tracking disabled)',hint:'Tracking is disabled. Finalization is local; no external request will be sent.'};
+    if(mode==='dry_run')return {label:'Finalize (tracking dry-run)',hint:'Tracking is in dry-run mode. No external request will be sent.'};
+    return {label:mode==='live'?'Finalize & Push to Tracking':'Finalize',hint:'Finalize when orders are added and a container is assigned. Tracking delivery is recorded separately.'};
+}
 let eligibleOrders = [];
 let draftOrders = [];
 let draftCbmForCapacity = 0;
 let draftWeightForCapacity = 0;
+let draftCapacityKnown = true;
 let draftContainerAc = null;
 let draftLoadVersion = 0;
+let draftAssignedContainerId = null;
 
 function renderCapacityBars(cbm, weight, container, hintEl) {
     if (!hintEl) return;
+    if(!draftCapacityKnown){hintEl.innerHTML='<span class="text-warning">Historical cargo measurements require reconciliation.</span>';return;}
     if (!container) {
         hintEl.innerHTML =
             `<span class="text-muted small">${typeof t === "function" ? t("Assign a container to see capacity") : "Assign a container to see capacity"}</span>`;
         return;
     }
+    if (container.capacity_known === false) {
+        hintEl.innerHTML = '<span class="text-warning">Historical cargo measurements require reconciliation.</span>';
+        return;
+    }
     const maxCbm = parseFloat(container.max_cbm) || 1;
     const maxWt = parseFloat(container.max_weight) || 1;
+    if (container.id && String(container.id) === String(draftAssignedContainerId)) {
+        cbm = Number(container.used_cbm || 0);
+        weight = Number(container.used_weight || 0);
+    } else {
+        cbm += Number(container.used_cbm || 0);
+        weight += Number(container.used_weight || 0);
+    }
     const cbmPct = Math.min(100, (cbm / maxCbm) * 100);
     const wtPct = Math.min(100, (weight / maxWt) * 100);
     const cbmColor =
@@ -37,7 +57,7 @@ function renderCapacityBars(cbm, weight, container, hintEl) {
         <div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;">
           <div style="height:100%;width:${wtPct}%;background:${wtColor};border-radius:4px;transition:width .4s;"></div>
         </div>
-        ${cbmPct >= 100 || wtPct >= 100 ? `<div class="text-danger small fw-semibold mt-1">${typeof t === "function" ? t("Capacity exceeded") : "Capacity exceeded"}</div>` : cbmPct >= 85 || wtPct >= 85 ? `<div class="text-warning small fw-semibold mt-1">${typeof t === "function" ? t("Almost full") : "Almost full"}</div>` : `<div class="text-success small fw-semibold mt-1">${typeof t === "function" ? t("Within capacity") : "Within capacity"}</div>`}
+        ${cbm > maxCbm + 0.00000001 || weight > maxWt + 0.00000001 ? `<div class="text-danger small fw-semibold mt-1">${typeof t === "function" ? t("Capacity exceeded") : "Capacity exceeded"}</div>` : cbmPct >= 100 || wtPct >= 100 ? `<div class="text-success small fw-semibold mt-1">${typeof t === "function" ? t("Full — within capacity") : "Full — within capacity"}</div>` : cbmPct >= 85 || wtPct >= 85 ? `<div class="text-warning small fw-semibold mt-1">${typeof t === "function" ? t("Almost full") : "Almost full"}</div>` : `<div class="text-success small fw-semibold mt-1">${typeof t === "function" ? t("Within capacity") : "Within capacity"}</div>`}
       </div>`;
 }
 
@@ -189,7 +209,8 @@ function renderDraftDocuments(docs) {
 async function saveDraftCarrierRefs() {
     if (!currentDraftId) return;
     try {
-        await api("PUT", "/shipment-drafts/" + currentDraftId, {
+        const result = await api("PUT", "/shipment-drafts/" + currentDraftId, {
+            revision: currentDraftRevision,
             container_number:
                 document.getElementById("draftContainerNumber").value.trim() ||
                 null,
@@ -201,6 +222,7 @@ async function saveDraftCarrierRefs() {
                 null,
         });
         showToast("Carrier refs saved");
+        currentDraftRevision = result.data.revision;
     } catch (e) {
         showToast(e.message, "danger");
     }
@@ -254,22 +276,12 @@ function el(id) {
 
 async function loadReadyTotals() {
     try {
-        const [r1, r2] = await Promise.all([
-            api("GET", "/orders?status=ReadyForConsolidation"),
-            api("GET", "/orders?status=Confirmed"),
-        ]);
-        const orders = [...(r1.data || []), ...(r2.data || [])].filter((order) =>
-            typeof orderIsShipmentEligible === "function"
-                ? orderIsShipmentEligible(order)
-                : true,
-        );
+        const orders = await loadShipmentEligibleOrders();
         let totalCbm = 0,
             totalWeight = 0;
         orders.forEach((o) => {
-            (o.items || []).forEach((it) => {
-                totalCbm += parseFloat(it.declared_cbm || 0);
-                totalWeight += parseFloat(it.declared_weight || 0);
-            });
+            totalCbm += orderCbm(o);
+            totalWeight += orderWeight(o);
         });
         const rc = el("readyOrdersCount"),
             rcbm = el("readyTotalCbm"),
@@ -291,8 +303,7 @@ async function loadContainers() {
     const tbody = el("containersBody");
     if (!tbody) return;
     try {
-        const res = await api("GET", "/containers");
-        const rows = res.data || [];
+        const rows = await loadAssignmentContainers();
         const emptyHint = canCreateContainers()
             ? '<small>Click "+ Add Container" to create one</small>'
             : "<small>No containers are available yet</small>";
@@ -318,11 +329,20 @@ async function loadContainers() {
     }
 }
 
-async function loadShipmentDrafts() {
+let shipmentListOffset=0;
+let shipmentListVersion=0;
+function changeShipmentPage(direction){shipmentListOffset=Math.max(0,shipmentListOffset+direction*50);loadShipmentDrafts(false);}
+async function loadShipmentDrafts(reset=true) {
+    if(reset)shipmentListOffset=0;
+    const version=++shipmentListVersion;
     const list = el("shipmentDraftsList");
     if (!list) return;
     try {
-        const res = await api("GET", "/shipment-drafts");
+        const q=el('shipmentFilter')?.value?.trim()||'';
+        const res = await api("GET", `/shipment-drafts?limit=50&offset=${shipmentListOffset}&q=${encodeURIComponent(q)}`);
+        if(version!==shipmentListVersion)return;
+        const previous=el('shipmentPrevious'),next=el('shipmentNext'),label=el('shipmentPage');
+        if(previous)previous.disabled=shipmentListOffset===0;if(next)next.disabled=!res.meta?.has_more;if(label)label.textContent=`Page ${Math.floor(shipmentListOffset/50)+1} · ${res.meta?.total??0} drafts`;
         const rows = Array.isArray(res.data) ? res.data : [];
         let html =
             rows
@@ -345,7 +365,7 @@ async function loadShipmentDrafts() {
                                 ? "Dry-run"
                                 : "Not pushed";
                     const retryBtn =
-                        sd.status === "finalized" && ps !== "success" && ps !== "pending"
+                        sd.status === "finalized" && ps !== "success"
                             ? `<button type="button" class="btn btn-sm btn-warning ms-1" onclick="retryPush(${sd.id})">Retry Push</button>`
                             : "";
                     const deleteBtn =
@@ -373,6 +393,8 @@ async function loadShipmentDrafts() {
             '<p class="text-center py-4 text-muted mb-0"><span class="d-block mb-1">No shipment drafts</span><small>Click "+ New Draft" to create one</small></p>';
         list.innerHTML = html;
     } catch (e) {
+        if(version!==shipmentListVersion)return;
+        const next=el('shipmentNext');if(next)next.disabled=true;
         showToast(e.message || "Failed to load drafts", "danger");
         list.innerHTML =
             '<p class="text-center py-4 text-muted mb-0">Failed to load. <a href="javascript:void(0)" onclick="loadShipmentDrafts()">Retry</a></p>';
@@ -385,16 +407,23 @@ function applyContainerPreset(code, maxCbm, maxWeight) {
     document.getElementById("containerMaxWeight").value = maxWeight;
 }
 
+let consolidationContainerEditRevision = null;
+let consolidationContainerEditRequest = 0;
 async function openContainerEditModal(containerId) {
     if (!canCreateContainers()) return;
+    const request = ++consolidationContainerEditRequest;
     try {
         const r = await api("GET", "/containers/" + containerId);
+        if(request!==consolidationContainerEditRequest)return;
         const c = r.data;
+        consolidationContainerEditRevision = c.revision;
         el("containerEditId").value = c.id;
         el("containerEditCode").textContent = esc(c.code);
         el("containerEditEtaDate").value = c.eta_date || "";
         el("containerEditDestCountry").value = c.destination_country || "";
         el("containerEditDestination").value = c.destination || "";
+        el('containerEditDestCountry').disabled = !!c.assignment_locked;
+        el('containerEditDestination').disabled = !!c.assignment_locked;
         el("containerEditNotes").value = c.notes || "";
         new bootstrap.Modal(el("containerEditModal")).show();
     } catch (e) {
@@ -406,13 +435,17 @@ async function saveContainerEdit() {
     const id = el("containerEditId").value;
     if (!id) return;
     try {
-        await api("PUT", "/containers/" + id, {
+        const payload = {
+            revision: consolidationContainerEditRevision,
             eta_date: el("containerEditEtaDate").value || null,
             destination_country:
                 el("containerEditDestCountry").value.trim() || null,
             destination: el("containerEditDestination").value.trim() || null,
             notes: el("containerEditNotes").value.trim() || null,
-        });
+        };
+        if (el('containerEditDestCountry').disabled) delete payload.destination_country;
+        if (el('containerEditDestination').disabled) delete payload.destination;
+        await api("PUT", "/containers/" + id, payload);
         showToast("Container updated");
         bootstrap.Modal.getInstance(el("containerEditModal")).hide();
         loadContainers();
@@ -427,6 +460,7 @@ function suggestEtaFromOffsets() {
     el("containerEditEtaDate").value = d.toISOString().slice(0, 10);
 }
 
+let containerCreateRequestKey = null;
 async function saveContainer() {
     if (!canCreateContainers()) {
         showToast("Only SuperAdmin can create containers", "danger");
@@ -443,11 +477,13 @@ async function saveContainer() {
     }
     try {
         await api("POST", "/containers", {
+            idempotency_key: containerCreateRequestKey || (containerCreateRequestKey = `container:${globalThis.crypto?.randomUUID?.() || Date.now().toString(36)+Math.random().toString(36).slice(2)}`),
             code,
             max_cbm: maxCbm,
             max_weight: maxWeight,
         });
         showToast("Container created");
+        containerCreateRequestKey = null;
         bootstrap.Modal.getInstance(
             document.getElementById("containerModal"),
         ).hide();
@@ -458,9 +494,11 @@ async function saveContainer() {
     }
 }
 
+let shipmentCreateRequestKey = null;
 async function createShipmentDraft() {
     try {
-        await api("POST", "/shipment-drafts", {});
+        await api("POST", "/shipment-drafts", {idempotency_key: shipmentCreateRequestKey || (shipmentCreateRequestKey = `shipment:${globalThis.crypto?.randomUUID?.() || Date.now().toString(36)+Math.random().toString(36).slice(2)}`)});
+        shipmentCreateRequestKey = null;
         showToast("Shipment draft created");
         loadShipmentDrafts();
     } catch (e) {
@@ -469,14 +507,16 @@ async function createShipmentDraft() {
 }
 
 function orderCbm(o) {
+    if (o.cargo_totals) return Number(o.cargo_totals.cbm || 0);
     return (o.items || []).reduce(
-        (s, i) => s + (parseFloat(i.declared_cbm) || 0),
+        (s, i) => s + (parseFloat(i.cargo_cbm ?? i.declared_cbm) || 0),
         0,
     );
 }
 function orderWeight(o) {
+    if (o.cargo_totals) return Number(o.cargo_totals.weight || 0);
     return (o.items || []).reduce(
-        (s, i) => s + (parseFloat(i.declared_weight) || 0),
+        (s, i) => s + (parseFloat(i.cargo_weight ?? i.declared_weight) || 0),
         0,
     );
 }
@@ -489,18 +529,13 @@ async function openDraftModal(id, refreshOnly = false) {
     document.getElementById("draftModalId").textContent = "#" + id;
     const deleteBtn = document.getElementById("draftDeleteBtn");
     try {
-        const [draftRes, ordersRes, res2, containersRes] = await Promise.all([
+        const [draftRes, allEligibleRaw, containersRes] = await Promise.all([
             api("GET", "/shipment-drafts/" + id),
-            api("GET", "/orders?status=ReadyForConsolidation"),
-            api("GET", "/orders?status=Confirmed"),
-            api("GET", "/containers"),
+            loadShipmentEligibleOrders(),
+            loadAssignmentContainers(),
         ]);
         if (version !== draftLoadVersion) return;
         const draftOrderIds = draftRes.data.order_ids || [];
-        const allEligibleRaw = [
-            ...(ordersRes.data || []),
-            ...(res2.data || []),
-        ];
         const seen = new Set();
         const loadedEligibleOrders = allEligibleRaw.filter((o) => {
             if (seen.has(o.id) || draftOrderIds.includes(o.id)) return false;
@@ -539,7 +574,7 @@ async function openDraftModal(id, refreshOnly = false) {
         if (saveRefsBtn) {
             saveRefsBtn.classList.toggle("btn-primary", draftRes.data.status === "finalized");
             saveRefsBtn.classList.toggle("btn-outline-primary", draftRes.data.status !== "finalized");
-            saveRefsBtn.textContent = draftRes.data.status === "finalized" ? "Save changes" : "Save refs";
+            saveRefsBtn.textContent = "Save refs";
         }
 
         addBody.innerHTML =
@@ -565,13 +600,19 @@ async function openDraftModal(id, refreshOnly = false) {
         if (addAll) addAll.checked = false;
         if (removeAll) removeAll.checked = false;
 
-        const containers = containersRes.data || [];
+        const containers = containersRes;
+        draftCapacityKnown = draftRes.data.capacity_known !== false;
         draftCbmForCapacity = draftRes.data.total_cbm ?? 0;
         draftWeightForCapacity = draftRes.data.total_weight ?? 0;
         if (containerHidden) containerHidden.value = "";
         if (containerSearchInput) containerSearchInput.value = "";
         const containerId = draftRes.data.container_id;
+        draftAssignedContainerId = containerId;
         const containerData = containers?.find((c) => c.id == containerId);
+        const membershipLocked=draftRes.data.status==='finalized' || !!containerData?.assignment_locked;
+        modalEl.querySelectorAll('.draft-add-order-cb,.draft-remove-order-cb,#draftAddSelectAll,#draftRemoveSelectAll,[onclick="addOrdersToDraft()"],[onclick="removeOrdersFromDraft()"],[onclick="assignContainerToDraft()"]')
+            .forEach(control=>control.disabled=membershipLocked);
+        if(deleteBtn)deleteBtn.disabled=membershipLocked;
         if (containerData && draftContainerAc) {
             draftContainerAc.setValue(containerData);
             containerHidden.value = containerData.id;
@@ -582,13 +623,20 @@ async function openDraftModal(id, refreshOnly = false) {
         const tcbm = el("draftTotalCbm");
         const twt = el("draftTotalWeight");
         const hintEl = el("draftCapacityHint");
-        if (tcbm) tcbm.textContent = draftCbm.toFixed(2);
-        if (twt) twt.textContent = draftWeight.toFixed(0);
+        if (tcbm) tcbm.textContent = draftCapacityKnown?draftCbm.toFixed(2):'—';
+        if (twt) twt.textContent = draftCapacityKnown?draftWeight.toFixed(0):'—';
 
         el("draftContainerNumber").value = draftRes.data.container_number || "";
         el("draftBookingNumber").value = draftRes.data.booking_number || "";
         el("draftTrackingUrl").value = draftRes.data.tracking_url || "";
+        currentDraftRevision = draftRes.data.revision;
+        const trackingMode=trackingFinalizationPresentation(draftRes.data.tracking_mode);
+        const trackingHint=el('draftTrackingMode'),finalizeButton=el('draftFinalizeButton');
+        if(trackingHint)trackingHint.textContent=trackingMode.hint;
+        if(finalizeButton)finalizeButton.textContent=trackingMode.label;
         renderDraftDocuments(draftRes.data.documents || []);
+        modalEl.querySelectorAll('#draftContainerNumber,#draftBookingNumber,#draftTrackingUrl,#draftDocInput,#draftDocType,[onclick="saveDraftCarrierRefs()"],[onclick*="draftDocInput"],[onclick^="removeDraftDoc"]')
+            .forEach(control => control.disabled = membershipLocked);
 
         renderCapacityBars(draftCbm, draftWeight, containerData, hintEl);
 

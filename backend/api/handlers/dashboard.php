@@ -27,11 +27,16 @@ function dashboardWarehouseReceiptHasColumn(PDO $pdo, string $column): bool
 }
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('dashboard', $method, $id, $action);
+    requireAuth();
+    requirePermission('dashboard.read');
     if ($method !== 'GET' || $id !== 'stats') {
         jsonError('Not found', 404);
     }
 
     $pdo = getDb();
+    clmsBeginExportSnapshot($pdo);
     setCacheHeaders(15);
     $userRoles = getUserRoles();
     $userId = getAuthUserId() ?? 0;
@@ -74,6 +79,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         "SELECT COUNT(*)
          FROM orders o
          WHERE COALESCE(o.confirmation_token, '') <> ''
+           AND o.status IN ('Confirmed','AwaitingCustomerConfirmation')
         "
     );
     $stats['customer_feedback_pending'] = (int) $stmt->fetchColumn();
@@ -127,12 +133,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         ? ' AND wr.voided_at IS NULL'
         : '';
     $staleConfirm = $pdo->prepare(
-        "SELECT COUNT(*)
+        "SELECT COUNT(*) FROM (SELECT o.id
          FROM orders o
          JOIN warehouse_receipts wr ON wr.order_id = o.id
          WHERE COALESCE(o.confirmation_token, '') <> ''
+           AND o.status IN ('Confirmed','AwaitingCustomerConfirmation')
            $staleReceiptWhere
-           AND wr.received_at < DATE_SUB(NOW(), INTERVAL ? DAY)"
+           GROUP BY o.id HAVING MAX(wr.received_at) < DATE_SUB(NOW(), INTERVAL ? DAY)) stale_orders"
     );
     $staleConfirm->execute([$threshold]);
     $stats['stale_customer_feedback'] = (int) $staleConfirm->fetchColumn();

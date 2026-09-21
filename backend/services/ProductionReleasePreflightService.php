@@ -35,12 +35,15 @@ final class ProductionReleasePreflightService
         $checks[] = $this->migrationCheck();
         $checks[] = $this->schemaCheck();
         $checks[] = $this->receivingIdempotencyCheck();
+        $checks[] = $this->cargoIntegrityCheck();
         $checks[] = $this->seedPasswordCheck();
         $checks[] = $this->itemNumberCheck();
         $checks[] = $this->classificationCheck();
         $checks[] = $this->translationCheck($context);
         $checks[] = $this->accountingDecisionCheck();
         $checks[] = $this->backupCheck($context);
+        $checks[] = $this->check('off_host_recovery',self::ENVIRONMENT,'OFF-HOST BACKUP EVIDENCE REQUIRED: encrypted upload, independent download, isolated restore, record verification and four-hour recovery objectives require deployment evidence.',[]);
+        $checks[] = $this->check('owner_security_activation',self::ENVIRONMENT,'Verify named owner custody, restricted DB/OS identities, protected escrow keys, second factor, HTTPS and immutable reveal audit before activation.',[]);
 
         $counts = [self::VERIFIED => 0, self::ENVIRONMENT => 0, self::BLOCKED => 0];
         foreach ($checks as $check) {
@@ -80,6 +83,11 @@ final class ProductionReleasePreflightService
             '075_receiving_idempotency.sql',
             '076_auth_login_throttling.sql',
             '077_approved_shipment_accounting_and_item_reservations.sql',
+            '082_order_template_metrics.sql',
+            '083_upload_asset_ownership.sql',
+            '084_release_policy_controls.sql',
+            '085_owner_controls.sql',
+            '086_credential_recovery_requirement.sql',
         ];
         if (!$this->tableExists('_migrations')) {
             return $this->check('release_migrations', self::BLOCKED, 'Migration tracking table is missing.', ['required' => $required, 'missing' => $required]);
@@ -105,6 +113,8 @@ final class ProductionReleasePreflightService
             'draft_order_cost_types', 'draft_order_costs', 'draft_order_cost_history',
             'shipment_financial_entries', 'item_number_reservations', 'item_number_references',
             'auth_login_attempts',
+            'upload_assets',
+            'historical_reconciliation_records','retention_holds','credential_escrow','owner_incidents','owner_incident_events',
         ];
         $missing = array_values(array_filter($tables, fn(string $table): bool => !$this->tableExists($table)));
         return $this->check(
@@ -136,6 +146,19 @@ final class ProductionReleasePreflightService
             $verified ? 'Receiving operation key and uniqueness protection are present.' : 'Receiving idempotency schema or data is unsafe.',
             ['column_present' => $column, 'unique_index_present' => $index, 'duplicate_key_groups' => $duplicateGroups]
         );
+    }
+
+    private function cargoIntegrityCheck(): array
+    {
+        foreach(['warehouse_receipts'=>['voided_at'],'warehouse_receipt_items'=>['actual_quantity'],'order_items'=>['dimensions_scope','order_cartons','order_qty_per_carton']] as $table=>$columns)foreach($columns as $column)if(!$this->columnExists($table,$column))return $this->check('cargo_integrity',self::BLOCKED,'Cargo reconciliation schema is incomplete.',['missing'=>$table.'.'.$column]);
+        require_once __DIR__.'/ReceivingQuantityService.php';
+        $quantity=ReceivingQuantityService::legacyQuantitySql();
+        $unallocated=(int)$this->pdo->query('SELECT COUNT(*) FROM warehouse_receipts wr WHERE wr.voided_at IS NULL AND NOT EXISTS(SELECT 1 FROM warehouse_receipt_items wri WHERE wri.receipt_id=wr.id)')->fetchColumn();
+        $excess=(int)$this->pdo->query("SELECT COUNT(*) FROM (SELECT oi.id FROM order_items oi JOIN warehouse_receipt_items wri ON wri.order_item_id=oi.id JOIN warehouse_receipts wr ON wr.id=wri.receipt_id AND wr.voided_at IS NULL GROUP BY oi.id,oi.quantity,oi.order_cartons,oi.cartons,oi.order_qty_per_carton,oi.qty_per_carton HAVING SUM($quantity)>CASE WHEN oi.quantity>0 THEN oi.quantity ELSE COALESCE(oi.order_cartons,oi.cartons,0)*COALESCE(oi.order_qty_per_carton,oi.qty_per_carton,0) END) over_received")->fetchColumn();
+        $duplicates=(int)$this->pdo->query('SELECT COUNT(*) FROM (SELECT order_id FROM shipment_draft_orders GROUP BY order_id HAVING COUNT(*)>1) duplicate_memberships')->fetchColumn();
+        $missingBasis=(int)$this->pdo->query("SELECT COUNT(*) FROM order_items WHERE dimensions_scope IS NULL AND product_id IS NOT NULL")->fetchColumn();
+        $evidence=['unallocated_active_receipts'=>$unallocated,'over_received_items'=>$excess,'duplicate_assignments'=>$duplicates,'legacy_items_without_measurement_basis'=>$missingBasis];
+        return $this->check('cargo_integrity',array_sum($evidence)>0?self::BLOCKED:self::VERIFIED,array_sum($evidence)>0?'Historical cargo requires verified reconciliation.':'Cargo allocation, assignment uniqueness and measurement snapshots are consistent.',$evidence);
     }
 
     private function seedPasswordCheck(): array
@@ -220,10 +243,10 @@ final class ProductionReleasePreflightService
             : 0;
         return $this->check(
             'translation_provider',
-            $providerConfigured ? self::ENVIRONMENT : self::ENVIRONMENT,
+            $providerConfigured ? self::ENVIRONMENT : self::VERIFIED,
             $providerConfigured
                 ? 'Provider configuration exists but live network, quota, and output quality still require verification.'
-                : 'Translation provider is disabled or unconfigured.',
+                : 'Approved manual translation release mode: provider disabled; terminology review remains a separate gate.',
             ['provider' => $provider ?: 'disabled', 'pending_or_failed_jobs' => $pending, 'credentials_reported' => false]
         );
     }

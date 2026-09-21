@@ -236,10 +236,12 @@ function buildConfirmationsPath() {
     return path;
 }
 
+let confirmationListVersion=0;
 async function loadConfirmations() {
+    const version=++confirmationListVersion;
     try {
-        const res = await api("GET", buildConfirmationsPath());
-        const rows = res.data || [];
+        const rows = await clmsLoadAllPages(buildConfirmationsPath());
+        if(version !== confirmationListVersion)return;
         const tbody = document.querySelector("#confirmationsTable tbody");
         const suppDisplay = (r) => {
             const items = r.items || [];
@@ -288,6 +290,7 @@ async function loadConfirmations() {
         const selectAll = document.getElementById("selectAllConfirm");
         if (selectAll) selectAll.checked = false;
     } catch (e) {
+        if(version !== confirmationListVersion)return;
         updateConfirmOverview([]);
         updateBulkConfirmBtn();
         showToast(e.message || "Failed to load", "danger");

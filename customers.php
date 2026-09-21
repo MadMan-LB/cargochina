@@ -10,13 +10,14 @@ $customerCreateRoles = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'Warehous
 $canCreateCustomers = clmsUserCan('customers.create', $customerCreateRoles, null, $userId, $roles);
 $canManageCustomers = clmsUserCan('customers.write', ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'], null, $userId, $roles);
 $canImportCustomers = clmsUserCan('customers.import', ['ChinaAdmin', 'SuperAdmin'], null, $userId, $roles);
+$canFinanceCustomers = clmsUserCan('customers.finance', [], null, $userId, $roles);
 $canMessageCustomers = clmsUserCan('internal-messages', ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'SuperAdmin', 'WarehouseStaff'], null, $userId, $roles);
 $canUseCustomerAttachments = clmsUserCan('design-attachments', ['ChinaAdmin', 'ChinaEmployee', 'WarehouseStaff', 'SuperAdmin'], null, $userId, $roles);
 $canGeneratePortalLinks = clmsUserCan('customer-portal-tokens', ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'], null, $userId, $roles);
 require 'includes/layout.php';
 ?>
 <h1 class="mb-4">Customers</h1>
-<div class="card" id="customersPage" data-can-create-customers="<?= $canCreateCustomers ? '1' : '0' ?>" data-can-manage-customers="<?= $canManageCustomers ? '1' : '0' ?>" data-can-import-customers="<?= $canImportCustomers ? '1' : '0' ?>" data-can-message-customers="<?= $canMessageCustomers ? '1' : '0' ?>" data-can-customer-attachments="<?= $canUseCustomerAttachments ? '1' : '0' ?>" data-can-generate-portal="<?= $canGeneratePortalLinks ? '1' : '0' ?>">
+<div class="card" id="customersPage" data-can-create-customers="<?= $canCreateCustomers ? '1' : '0' ?>" data-can-manage-customers="<?= $canManageCustomers ? '1' : '0' ?>" data-can-finance-customers="<?= $canFinanceCustomers ? '1' : '0' ?>" data-can-import-customers="<?= $canImportCustomers ? '1' : '0' ?>" data-can-message-customers="<?= $canMessageCustomers ? '1' : '0' ?>" data-can-customer-attachments="<?= $canUseCustomerAttachments ? '1' : '0' ?>" data-can-generate-portal="<?= $canGeneratePortalLinks ? '1' : '0' ?>">
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2 py-3">
     <span class="fw-semibold">Customer List</span>
     <div class="d-flex gap-2 align-items-center flex-wrap">
@@ -177,7 +178,7 @@ require 'includes/layout.php';
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">Balance — <span id="balCustomerName"></span></h5>
+        <h5 class="modal-title">Recorded deposits — <span id="balCustomerName"></span></h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
@@ -211,7 +212,7 @@ require 'includes/layout.php';
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <p class="text-muted small">Paste CSV or choose file. Columns: <code>name</code>, <code>default_shipping_code</code> (or <code>code</code>), <code>phone</code>, <code>email</code>, <code>address</code>, <code>payment_terms</code>. Duplicate shipping codes are skipped.</p>
+        <p class="text-muted small">Paste UTF-8 CSV or choose a file. Columns: <code>name</code>, <code>default_shipping_code</code> (or <code>code</code>), <code>phone</code>, <code>email</code>, <code>address</code>, <code>payment_terms</code>. Existing customer codes are skipped. Shipping-code conflicts follow the configured duplicate policy. Invalid rows reject the whole batch.</p>
         <input type="file" class="form-control form-control-sm mb-2" id="importCsvFile" accept=".csv,.txt" title="Choose CSV file">
         <textarea class="form-control font-monospace" id="importCsvData" rows="10" placeholder="code,name,phone,address,payment_terms&#10;CUST001,Acme Co,+86-21-12345678,123 Shanghai,Net 30"></textarea>
         <div id="importResult" class="alert d-none mt-2"></div>

@@ -5,6 +5,17 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
+require_once dirname(__DIR__,2).'/services/CustomerWriteService.php';
+require_once dirname(__DIR__,2).'/services/OperationReplayService.php';
+require_once dirname(__DIR__,2).'/services/CustomerDepositService.php';
+require_once dirname(__DIR__,2).'/services/CsvTableService.php';
+
+function customerApiRow(PDO $pdo,array $row): array
+{
+    foreach(['contacts','addresses','payment_links'] as $field)$row[$field]=is_array($row[$field]??null)?$row[$field]:(json_decode($row[$field]??'[]',true)?:[]);
+    $row['country_shipping']=loadCountryShipping($pdo,(int)$row['id']);$row['por']=loadCustomerPorValues($pdo,(int)$row['id']);
+    $row['revision']=CustomerWriteService::revision($row,$row['country_shipping'],$row['por']);return $row;
+}
 
 function customerTableHas(PDO $pdo, string $table, string $column): bool
 {
@@ -233,7 +244,8 @@ function generateCustomerCode(PDO $pdo, string $name, ?string $defaultShippingCo
         }
     }
     if (!empty($candidates)) {
-        return $candidates[0];
+        $base=mb_substr($candidates[0],0,50);$code=$base;$suffix=1;
+        while(true){$s=$pdo->prepare('SELECT id FROM customers WHERE code=?');$s->execute([$code]);if(!$s->fetchColumn())return $code;$suffix++;$tail='-'.$suffix;$code=mb_substr($base,0,50-strlen($tail)).$tail;}
     }
     $slug = preg_replace('/[^a-zA-Z0-9]+/', '_', substr(trim($name), 0, 30));
     $slug = $slug ?: 'cust';
@@ -250,7 +262,16 @@ function generateCustomerCode(PDO $pdo, string $name, ?string $defaultShippingCo
 }
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('customers', $method, $id, $action);
     $pdo = getDb();
+    if ($method === 'GET') { require_once dirname(__DIR__, 2) . '/services/QueryFilterService.php'; QueryFilterService::validate($_GET, 'customers'); }
+    if($method==='GET'){
+        requirePermission(($id==='lookup'||$action==='lookup')?'customers.lookup':'customers.read',customerLookupRoles());
+        if(in_array($action,['deposits','balance'],true))requirePermission('customers.finance');
+        foreach(['q','shipping_code'] as $field)if(isset($_GET[$field])&&!is_string($_GET[$field]))jsonError("Invalid $field",422);
+        foreach(['limit'=>1,'offset'=>0] as $field=>$minimum)if(isset($_GET[$field])&&(filter_var($_GET[$field],FILTER_VALIDATE_INT)===false||(int)$_GET[$field]<$minimum))jsonError("Invalid $field",422);
+    }elseif(in_array($method,['PUT','DELETE'],true))requirePermission('customers.write');
 
     switch ($method) {
         case 'GET':
@@ -377,6 +398,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $r['payment_links'] = isset($r['payment_links']) && $r['payment_links'] ? json_decode($r['payment_links'], true) : [];
                     $r['country_shipping'] = loadCountryShipping($pdo, (int) $r['id']);
                     $r['por'] = loadCustomerPorValues($pdo, (int) $r['id']);
+                    $r['revision']=CustomerWriteService::revision($r,$r['country_shipping'],$r['por']);
                 }
                 jsonResponse(['data' => $rows, 'meta' => ['limit' => $limit, 'offset' => $offset, 'has_more' => $hasMore, 'total' => $total]]);
             }
@@ -399,16 +421,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $row['payment_links'] = isset($row['payment_links']) && $row['payment_links'] ? json_decode($row['payment_links'], true) : [];
             $row['country_shipping'] = loadCountryShipping($pdo, (int) $id);
             $row['por'] = loadCustomerPorValues($pdo, (int) $id);
+            $row['revision']=CustomerWriteService::revision($row,$row['country_shipping'],$row['por']);
             if ($action === 'next-item-no') {
                 $shippingCode = trim($_GET['shipping_code'] ?? '');
                 if ($shippingCode === '') {
                     jsonError('shipping_code required', 400);
                 }
-                $stmt = $pdo->prepare("SELECT COUNT(*) as cnt FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.customer_id = ? AND COALESCE(TRIM(oi.shipping_code), '') = ?");
-                $stmt->execute([$id, $shippingCode]);
-                $row = $stmt->fetch(PDO::FETCH_ASSOC);
-                $count = (int) ($row['cnt'] ?? 0);
-                jsonResponse(['data' => ['next' => $count + 1]]);
+                require_once dirname(__DIR__,2).'/services/OrderItemNumberingService.php';
+                $supplierId=OrderWriteService::number($_GET['supplier_id']??null,'Supplier',true,0,4294967295);
+                $items=OrderItemNumberingService::assignItemNumbers([['shipping_code'=>$shippingCode,'supplier_id'=>$supplierId]],$shippingCode,$supplierId,OrderItemNumberingService::fetchNumberingHistory($pdo,(int)$id));
+                jsonResponse(['data'=>['next'=>$items[0]['item_no'],'preview_only'=>true]]);
             }
             if ($action === 'deposits') {
                 $stmt2 = $pdo->prepare("SELECT * FROM customer_deposits WHERE customer_id = ? ORDER BY created_at DESC");
@@ -429,11 +451,17 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         case 'POST':
             if ($id === 'import') {
                 requirePermission('customers.import', ['ChinaAdmin', 'SuperAdmin']);
+                if(!is_string($input['csv']??$input['data']??null))jsonError('CSV data must be text',422);
                 $csv = trim($input['csv'] ?? $input['data'] ?? '');
                 if (!$csv) jsonError('No CSV data provided', 400);
-                $lines = preg_split('/\r\n|\r|\n/', $csv);
-                $header = array_map('trim', str_getcsv(array_shift($lines) ?? ''));
+                if(strlen($csv)>2097152)jsonError('Customer CSV exceeds 2 MB',422);
+                $claim=OperationReplayService::claim($pdo,'customer_import',$input,(int)getAuthUserId());
+                if($claim['previous_data']!==null)jsonResponse(['data'=>$claim['previous_data']['result'],'idempotent_replay'=>true]);
+                CustomerWriteService::lockNamespace($pdo);$pdo->beginTransaction();register_shutdown_function(static function()use($pdo){if($pdo->inTransaction())$pdo->rollBack();});
+                try{$lines=CsvTableService::parse($csv);}catch(InvalidArgumentException $e){jsonError($e->getMessage(),422);}
+                $header=array_map('trim',array_shift($lines)??[]);
                 $hLower = array_map('strtolower', $header);
+                if(!in_array('name',$hLower,true)||count(array_unique($hLower))!==count($hLower))jsonError('CSV requires a name column and unique headers',422);
                 $codeIdx = array_search('code', $hLower) !== false ? array_search('code', $hLower) : null;
                 $shipIdx = array_search('default_shipping_code', $hLower) !== false ? array_search('default_shipping_code', $hLower) : null;
                 $nameIdx = array_search('name', $hLower) !== false ? array_search('name', $hLower) : 1;
@@ -444,6 +472,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $created = 0;
                 $skipped = 0;
                 $errors = [];
+                $warnings=[];$createdIds=[];
                 $hasPhone = (bool) @$pdo->query("SHOW COLUMNS FROM customers LIKE 'phone'")->rowCount();
                 $hasAddress = (bool) @$pdo->query("SHOW COLUMNS FROM customers LIKE 'address'")->rowCount();
                 $hasPaymentLinks = (bool) @$pdo->query("SHOW COLUMNS FROM customers LIKE 'payment_links'")->rowCount();
@@ -452,14 +481,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $hasCreatedBy = customerTableHas($pdo, 'customers', 'created_by');
                 $importUserId = getAuthUserId() ?? 1;
                 foreach ($lines as $i => $line) {
-                    $row = str_getcsv($line);
-                    if (count($row) < 2) continue;
+                    $row = $line;
+                    if(count($row)!==count($header))jsonError('CSV row '.($i+2).' does not match its headers',422);
                     $code = $codeIdx !== null ? trim($row[$codeIdx] ?? '') : '';
                     $defaultShippingCode = $shipIdx !== null ? trim($row[$shipIdx] ?? '') : '';
                     $name = trim($row[$nameIdx] ?? $row[1] ?? '');
                     if (!$name) {
-                        $skipped++;
-                        continue;
+                        jsonError('CSV row '.($i+2).' requires a customer name',422);
                     }
                     $code = $code ?: ($defaultShippingCode ?: null);
                     if (!$code) {
@@ -470,6 +498,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $email = $hasEmail && $emailIdx !== null && isset($row[$emailIdx]) ? trim($row[$emailIdx]) : null;
                     $address = $addressIdx !== null && isset($row[$addressIdx]) ? trim($row[$addressIdx]) : null;
                     $paymentTerms = $termsIdx !== null && isset($row[$termsIdx]) ? trim($row[$termsIdx]) : null;
+                    CustomerWriteService::normalize($pdo,['code'=>$code,'name'=>$name,'default_shipping_code'=>$defaultShippingCode,'phone'=>$phone,'email'=>$email,'address'=>$address,'payment_terms'=>$paymentTerms]);
+                    $existingCode=$pdo->prepare('SELECT id FROM customers WHERE code=?');$existingCode->execute([$code]);if($existingCode->fetchColumn()){$skipped++;continue;}
+                    if($defaultShippingCode!==''&&($duplicate=findDuplicateCustomerShippingCode($pdo,$defaultShippingCode))){$message=customerDuplicateShippingCodeMessage($pdo,$defaultShippingCode,$duplicate);if(getBusinessSetting($pdo,'SHIPPING_CODE_DUPLICATE_ACTION','warn')==='block')jsonError($message,409);$warnings[]=$message;}
                     try {
                         $cols = ['code', 'name', 'contacts', 'addresses', 'payment_terms'];
                         $vals = [$code, $name, null, null, $paymentTerms];
@@ -499,40 +530,38 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                         }
                         $ph = implode(',', array_fill(0, count($vals), '?'));
                         $pdo->prepare("INSERT INTO customers (" . implode(',', $cols) . ") VALUES ($ph)")->execute($vals);
+                        $createdId=(int)$pdo->lastInsertId();$createdIds[]=$createdId;
+                        $pdo->prepare("INSERT INTO audit_log(entity_type,entity_id,action,new_value,user_id) VALUES ('customer',?,'import_create',?,?)")->execute([$createdId,json_encode(['code'=>$code,'name'=>$name,'row'=>$i+2]),$importUserId]);
                         $created++;
                     } catch (PDOException $e) {
-                        if ($e->getCode() == 23000) $skipped++;
-                        else $errors[] = "Row " . ($i + 2) . ": " . $e->getMessage();
+                        $pdo->rollBack();throw $e;
                     }
                 }
-                jsonResponse(['data' => ['created' => $created, 'skipped' => $skipped, 'errors' => $errors]]);
+                $result=['created'=>$created,'skipped'=>$skipped,'errors'=>[],'warnings'=>$warnings];OperationReplayService::record($pdo,'customer_import',0,$claim,['result'=>$result,'customer_ids'=>$createdIds],$importUserId);$pdo->commit();
+                jsonResponse(['data'=>$result]);
             }
             if ($id && $action === 'deposits') {
+                requirePermission('customers.finance');
                 clmsRequireCustomerAccess($pdo, (int) $id);
-                $amount = clmsFinancialDecimal($input['amount'] ?? null, 'Amount');
-                $currency = trim($input['currency'] ?? 'RMB');
-                if (!in_array($currency, ['USD', 'RMB'], true)) jsonError('Currency must be USD or RMB', 400);
-                $paymentMethod = $input['payment_method'] ?? null;
-                $referenceNo = $input['reference_no'] ?? null;
-                $notes = $input['notes'] ?? null;
-                $orderId = !empty($input['order_id']) ? (int) $input['order_id'] : null;
                 $userId = getAuthUserId() ?? 1;
-                $chkOrder = @$pdo->query("SHOW COLUMNS FROM customer_deposits LIKE 'order_id'");
-                $hasOrderId = $chkOrder && $chkOrder->rowCount() > 0;
-                if ($hasOrderId) {
-                    $pdo->prepare("INSERT INTO customer_deposits (customer_id, order_id, amount, currency, payment_method, reference_no, notes, created_by) VALUES (?,?,?,?,?,?,?,?)")
-                        ->execute([$id, $orderId, $amount, $currency, $paymentMethod, $referenceNo, $notes, $userId]);
-                } else {
-                    $pdo->prepare("INSERT INTO customer_deposits (customer_id, amount, currency, payment_method, reference_no, notes, created_by) VALUES (?,?,?,?,?,?,?)")
-                        ->execute([$id, $amount, $currency, $paymentMethod, $referenceNo, $notes, $userId]);
+                $data=CustomerDepositService::normalize($input);
+                $claim=OperationReplayService::claim($pdo,'customer_deposit',array_merge($input,['customer_id'=>(int)$id]),$userId);
+                $newId=$claim['previous_id'];
+                if(!$newId){
+                    $pdo->beginTransaction();register_shutdown_function(static function()use($pdo){if($pdo->inTransaction())$pdo->rollBack();});
+                    try{$newId=CustomerDepositService::insert($pdo,(int)$id,$data,$userId);OperationReplayService::record($pdo,'customer_deposit',$newId,$claim,$data+['customer_id'=>(int)$id],$userId);$pdo->commit();}
+                    catch(Throwable $e){if($pdo->inTransaction())$pdo->rollBack();throw $e;}
                 }
-                $newId = (int) $pdo->lastInsertId();
-                logClms('customer_deposit', ['customer_id' => (int)$id, 'deposit_id' => $newId, 'amount' => $amount, 'currency' => $currency]);
                 $stmt = $pdo->prepare("SELECT * FROM customer_deposits WHERE id = ?");
                 $stmt->execute([$newId]);
                 jsonResponse(['data' => $stmt->fetch(PDO::FETCH_ASSOC)], 201);
             }
             requirePermission('customers.create', customerCreateRoles());
+            if($id!==null)jsonError('Invalid customer action',400);
+            $input=CustomerWriteService::normalize($pdo,$input);
+            $claim=OperationReplayService::claim($pdo,'customer',$input,(int)getAuthUserId());
+            if($claim['previous_id']){$s=$pdo->prepare('SELECT * FROM customers WHERE id=?');$s->execute([$claim['previous_id']]);$saved=$s->fetch(PDO::FETCH_ASSOC);if(!$saved)jsonError('Original customer was removed; use a new request',409);jsonResponse(['data'=>customerApiRow($pdo,$saved),'idempotent_replay'=>true]);}
+            CustomerWriteService::lockNamespace($pdo);
             $name = trim($input['name'] ?? '');
             if (!$name) {
                 jsonError('Missing required fields', 400, ['name' => 'Required']);
@@ -644,16 +673,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 persistCustomerPorValues($pdo, $newId, $porValues);
                 $usedSpecialAccess = !hasAnyRole(['SuperAdmin'])
                     && clmsUserHasPermissionOverride('customers.create', $actingUserId, $pdo);
-                $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('customer', ?, 'create', ?, ?)")
-                    ->execute([
-                        $newId,
-                        json_encode([
-                            'name' => $name,
-                            'code' => $code,
-                            'special_access' => $usedSpecialAccess,
-                        ], JSON_UNESCAPED_UNICODE),
-                        $actingUserId,
-                    ]);
+                OperationReplayService::record($pdo,'customer',$newId,$claim,['name'=>$name,'code'=>$code,'special_access'=>$usedSpecialAccess],$actingUserId);
                 logClms('customer_created', [
                     'customer_id' => $newId,
                     'user_id' => $actingUserId,
@@ -668,6 +688,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $row['payment_links'] = isset($row['payment_links']) && $row['payment_links'] ? json_decode($row['payment_links'], true) : [];
                 $row['country_shipping'] = loadCountryShipping($pdo, $newId);
                 $row['por'] = loadCustomerPorValues($pdo, $newId);
+                $row['revision']=CustomerWriteService::revision($row,$row['country_shipping'],$row['por']);
                 jsonResponse(array_filter(['data' => $row, 'warning' => $duplicateWarning]), 201);
             } catch (PDOException $e) {
                 if ($pdo->inTransaction()) {
@@ -689,12 +710,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 jsonError('ID required', 400);
             }
             clmsRequireCustomerAccess($pdo, (int) $id);
-            $stmt = $pdo->prepare("SELECT id, code FROM customers WHERE id = ?");
+            CustomerWriteService::lockNamespace($pdo);$pdo->beginTransaction();register_shutdown_function(static function()use($pdo){if($pdo->inTransaction())$pdo->rollBack();});
+            $stmt = $pdo->prepare("SELECT * FROM customers WHERE id = ? FOR UPDATE");
             $stmt->execute([$id]);
             $existing = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$existing) {
                 jsonError('Customer not found', 404);
             }
+            $existing=customerApiRow($pdo,$existing);
+            if(!is_string($input['revision']??null)||!hash_equals($existing['revision'],$input['revision']))jsonError('Customer changed or revision is missing; reopen before saving',409);
+            $input=CustomerWriteService::normalize($pdo,array_replace($existing,$input));
             $code = trim($input['code'] ?? '');
             if ($code === '') {
                 $code = $existing['code'];
@@ -793,7 +818,6 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             $vals[] = $id;
             try {
-                $pdo->beginTransaction();
                 $pdo->prepare("UPDATE customers SET " . implode(', ', $sets) . " WHERE id=?")->execute($vals);
                 if (is_array($countryShipping)) {
                     persistCountryShipping($pdo, (int) $id, $countryShipping);
@@ -804,12 +828,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt = $pdo->prepare("SELECT * FROM customers WHERE id = ?");
                 $stmt->execute([$id]);
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                $pdo->prepare("INSERT INTO audit_log(entity_type,entity_id,action,old_value,new_value,user_id) VALUES ('customer',?,'update',?,?,?)")->execute([$id,json_encode($existing),json_encode($input),getAuthUserId()]);
                 $pdo->commit();
                 $row['contacts'] = $row['contacts'] ? json_decode($row['contacts'], true) : [];
                 $row['addresses'] = $row['addresses'] ? json_decode($row['addresses'], true) : [];
                 $row['payment_links'] = isset($row['payment_links']) && $row['payment_links'] ? json_decode($row['payment_links'], true) : [];
                 $row['country_shipping'] = loadCountryShipping($pdo, (int) $id);
                 $row['por'] = loadCustomerPorValues($pdo, (int) $id);
+                $row['revision']=CustomerWriteService::revision($row,$row['country_shipping'],$row['por']);
                 jsonResponse(array_filter(['data' => $row, 'warning' => $duplicateWarning]));
             } catch (Throwable $e) {
                 if ($pdo->inTransaction()) {
@@ -823,11 +849,18 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 jsonError('ID required', 400);
             }
             clmsRequireCustomerAccess($pdo, (int) $id);
+            CustomerWriteService::lockNamespace($pdo);$pdo->beginTransaction();register_shutdown_function(static function()use($pdo){if($pdo->inTransaction())$pdo->rollBack();});
+            $s=$pdo->prepare('SELECT * FROM customers WHERE id=? FOR UPDATE');$s->execute([$id]);$old=$s->fetch(PDO::FETCH_ASSOC);if(!$old)jsonError('Customer not found',404);$old=customerApiRow($pdo,$old);
+            if(!is_string($input['revision']??null)||!hash_equals($old['revision'],$input['revision']))jsonError('Customer changed or revision is missing; reopen before deleting',409);
+            foreach(['orders','customer_deposits','expenses','customer_portal_tokens','internal_messages','item_number_reservations','shipment_financial_entries'] as $table){$s=$pdo->prepare("SELECT id FROM $table WHERE customer_id=? LIMIT 1 FOR UPDATE");$s->execute([$id]);if($s->fetchColumn())jsonError('Customer has operational or financial records and cannot be deleted',409);}
+            $s=$pdo->prepare("SELECT id FROM design_attachments WHERE entity_type='customer' AND entity_id=? LIMIT 1 FOR UPDATE");$s->execute([$id]);if($s->fetchColumn())jsonError('Remove customer attachments before deleting the customer',409);
+            $s=$pdo->prepare("SELECT id FROM balance_transactions WHERE party_type='customer' AND party_id=? LIMIT 1 FOR UPDATE");$s->execute([$id]);if($s->fetchColumn())jsonError('Customer has a financial history and cannot be deleted',409);
             $stmt = $pdo->prepare("DELETE FROM customers WHERE id = ?");
             $stmt->execute([$id]);
             if ($stmt->rowCount() === 0) {
                 jsonError('Customer not found', 404);
             }
+            $pdo->prepare("INSERT INTO audit_log(entity_type,entity_id,action,old_value,user_id) VALUES ('customer',?,'delete',?,?)")->execute([$id,json_encode($old),getAuthUserId()]);$pdo->commit();
             jsonResponse(['message' => 'Deleted']);
 
         default:

@@ -2,12 +2,15 @@
 
 require_once __DIR__ . '/NotificationService.php';
 require_once __DIR__ . '/ShipmentAccountingService.php';
+require_once __DIR__ . '/CargoMetricsService.php';
+require_once __DIR__ . '/OrderStateService.php';
+require_once __DIR__ . '/ShipmentAssignmentService.php';
 
 final class OrderReceiptWorkflowService
 {
     private static array $columnCache = [];
 
-    public static function acceptAutoConfirmedOrder(PDO $pdo, int $orderId, ?int $userId = null, string $auditAction = 'confirm_by_token'): void
+    public static function acceptAutoConfirmedOrder(PDO $pdo, int $orderId, ?int $userId = null, string $auditAction = 'confirm_by_token', ?string $expectedToken = null): void
     {
         $started = self::beginTransaction($pdo);
         try {
@@ -15,15 +18,18 @@ final class OrderReceiptWorkflowService
         if (!$order) {
             jsonError('Order not found', 404);
         }
-        if (trim((string) ($order['confirmation_token'] ?? '')) === '') {
+        if (trim((string) ($order['confirmation_token'] ?? '')) === '' || !in_array($order['status'], ['Confirmed','AwaitingCustomerConfirmation'], true)) {
             jsonError('This order no longer has a pending customer response.', 400);
         }
 
-        $receipt = self::fetchLatestReceipt($pdo, $orderId);
-        $accepted = $receipt ? [
-            'actual_cbm' => $receipt['actual_cbm'],
-            'actual_weight' => $receipt['actual_weight'],
-            'actual_cartons' => $receipt['actual_cartons'],
+        if ($expectedToken !== null && !hash_equals((string)$order['confirmation_token'], $expectedToken)) jsonError('Customer review link changed; reopen the current link', 403);
+        OrderStateService::validateTransition($order['status'], 'ReadyForConsolidation');
+        ShipmentAssignmentService::assertReceived($pdo, $orderId);
+        $cargo = CargoMetricsService::totals($pdo, [$orderId])[$orderId] ?? [];
+        $accepted = !empty($cargo['receipt_count']) ? [
+            'actual_cbm' => $cargo['cbm'],
+            'actual_weight' => $cargo['weight'],
+            'actual_cartons' => $cargo['cartons'],
         ] : [];
 
         $pdo->prepare("UPDATE orders SET status='ReadyForConsolidation', confirmation_token=NULL WHERE id=?")
@@ -38,7 +44,7 @@ final class OrderReceiptWorkflowService
         }
     }
 
-    public static function declineAutoConfirmedOrder(PDO $pdo, int $orderId, string $reason, ?int $userId = null, string $auditAction = 'decline_by_token'): void
+    public static function declineAutoConfirmedOrder(PDO $pdo, int $orderId, string $reason, ?int $userId = null, string $auditAction = 'decline_by_token', ?string $expectedToken = null): void
     {
         $started = self::beginTransaction($pdo);
         try {
@@ -46,13 +52,15 @@ final class OrderReceiptWorkflowService
         if (!$order) {
             jsonError('Order not found', 404);
         }
-        if (trim((string) ($order['confirmation_token'] ?? '')) === '') {
+        if (trim((string) ($order['confirmation_token'] ?? '')) === '' || !in_array($order['status'], ['Confirmed','AwaitingCustomerConfirmation'], true)) {
             jsonError('This order no longer has a pending customer response.', 400);
         }
         if (($order['status'] ?? '') === 'FinalizedAndPushedToTracking') {
             jsonError('This order has already been finalized to tracking and can no longer be declined from the customer portal.', 400);
         }
 
+        if ($expectedToken !== null && !hash_equals((string)$order['confirmation_token'], $expectedToken)) jsonError('Customer review link changed; reopen the current link', 403);
+        OrderStateService::validateTransition($order['status'], 'CustomerDeclinedAfterAutoConfirm');
         self::detachOrderFromShipmentDrafts($pdo, $orderId);
         (new ShipmentAccountingService($pdo))->reverseOrder($orderId, $userId, $reason ?: 'Customer declined');
         $pdo->prepare("UPDATE orders SET status='CustomerDeclinedAfterAutoConfirm', confirmation_token=NULL WHERE id=?")
@@ -80,7 +88,10 @@ final class OrderReceiptWorkflowService
             jsonError('Only declined auto-confirmed orders can be reset to Submitted.', 400);
         }
 
+        OrderStateService::validateTransition($order['status'], 'Submitted');
+
         self::detachOrderFromShipmentDrafts($pdo, $orderId);
+        (new ShipmentAccountingService($pdo))->reverseOrder($orderId, $userId, $reason ?: 'Reset after customer decline');
         self::voidActiveReceipts($pdo, $orderId, $userId, $reason ?: 'Reset after customer decline');
         $pdo->prepare("UPDATE orders SET status='Submitted', confirmation_token=NULL WHERE id=?")->execute([$orderId]);
         (new ShipmentAccountingService($pdo))->restoreOrderCostsAsProvisional($orderId, $userId);
@@ -123,6 +134,9 @@ final class OrderReceiptWorkflowService
 
     private static function detachOrderFromShipmentDrafts(PDO $pdo, int $orderId): void
     {
+        $locked = $pdo->prepare("SELECT sd.id FROM shipment_drafts sd JOIN shipment_draft_orders sdo ON sdo.shipment_draft_id=sd.id WHERE sdo.order_id=? AND (sd.status='finalized' OR sd.container_id IS NOT NULL) LIMIT 1 FOR UPDATE");
+        $locked->execute([$orderId]);
+        if ($locked->fetchColumn()) throw new RuntimeException('Assigned or finalized cargo cannot be reversed through receiving');
         $draftStmt = $pdo->prepare("SELECT shipment_draft_id FROM shipment_draft_orders WHERE order_id = ?");
         $draftStmt->execute([$orderId]);
         $draftIds = array_map('intval', array_column($draftStmt->fetchAll(PDO::FETCH_ASSOC), 'shipment_draft_id'));

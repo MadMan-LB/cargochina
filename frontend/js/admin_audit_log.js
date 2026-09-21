@@ -3,6 +3,7 @@
  */
 let offset = 0;
 const limit = 50;
+let auditGeneration=0, auditLoadingMore=false;
 
 async function loadAuditUsers() {
     try {
@@ -25,7 +26,9 @@ async function loadAuditUsers() {
 }
 
 async function loadAuditLog(reset = true) {
-    if (reset) offset = 0;
+    if(!reset&&auditLoadingMore)return;
+    if(reset){offset=0;auditGeneration++;auditLoadingMore=false;}else auditLoadingMore=true;
+    const generation=auditGeneration;
     const params = new URLSearchParams();
     params.set("limit", limit);
     params.set("offset", offset);
@@ -44,6 +47,7 @@ async function loadAuditLog(reset = true) {
 
     try {
         const res = await api("GET", "/audit-log?" + params.toString());
+        if(generation!==auditGeneration)return;
         const rows = res.data || [];
         const tbody = document.getElementById("auditBody");
         const emptyEl = document.getElementById("auditEmpty");
@@ -57,10 +61,10 @@ async function loadAuditLog(reset = true) {
             const tr = document.createElement("tr");
             const entityLink =
                 r.entity_type === "order"
-                    ? `<a href="/cargochina/orders.php" onclick="event.stopPropagation()">#${r.entity_id}</a>`
+                    ? `<a href="/cargochina/orders.php?order_id=${Number(r.entity_id)}" onclick="event.stopPropagation()">#${r.entity_id}</a>`
                     : r.entity_type === "shipment_draft"
                       ? `<a href="/cargochina/consolidation.php" onclick="event.stopPropagation()">Draft #${r.entity_id}</a>`
-                      : `${r.entity_type} #${r.entity_id}`;
+                      : `${escapeHtml(r.entity_type)} #${Number(r.entity_id)}`;
             let details = "";
             if (r.new_value) {
                 try {
@@ -93,8 +97,9 @@ async function loadAuditLog(reset = true) {
         loadMoreBtn.style.display = res.has_more ? "inline-block" : "none";
         offset += rows.length;
     } catch (e) {
+        if(generation!==auditGeneration)return;
         showToast(e.message, "danger");
-    }
+    } finally {if(generation===auditGeneration)auditLoadingMore=false;}
 }
 
 function loadMore() {

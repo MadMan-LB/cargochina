@@ -4,6 +4,8 @@ require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__, 2) . '/services/DraftOrderCostService.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('draft-order-costs', $method, $id, $action);
     $pdo = getDb();
     $service = new DraftOrderCostService($pdo);
     requirePermission('draft-order-costs.read', ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'SuperAdmin']);

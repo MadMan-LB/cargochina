@@ -50,7 +50,9 @@ require 'includes/layout.php';
                         Draft</button>
                 </div>
                 <div class="card-body py-3">
+                    <label class="form-label" for="shipmentFilter">Find shipment</label><input id="shipmentFilter" class="form-control form-control-sm mb-2" placeholder="Draft ID, container or booking reference" onchange="loadShipmentDrafts()">
                     <div id="shipmentDraftsList" class="consolidation-drafts-list"></div>
+                    <div class="d-flex gap-2 align-items-center"><button class="btn btn-sm btn-outline-secondary" id="shipmentPrevious" onclick="changeShipmentPage(-1)">Previous</button><span id="shipmentPage"></span><button class="btn btn-sm btn-outline-secondary" id="shipmentNext" onclick="changeShipmentPage(1)">Next</button></div>
                 </div>
             </div>
         </div>
@@ -238,12 +240,11 @@ require 'includes/layout.php';
                     </div>
                     <hr>
                     <div id="draftFinalizeSection" class="d-flex justify-content-between align-items-center">
-                        <span class="text-muted small">Finalize when orders are added and container assigned.</span>
-                        <button type="button" class="btn btn-success" onclick="openFinalizeConfirm()">Finalize & Push to
-                            Tracking</button>
+                        <span id="draftTrackingMode" class="text-muted small">Checking tracking configuration...</span>
+                        <button id="draftFinalizeButton" type="button" class="btn btn-success" onclick="openFinalizeConfirm()">Finalize</button>
                     </div>
                     <div id="draftFinalizedMessage" class="d-flex justify-content-between align-items-center d-none">
-                        <span class="text-muted small">Draft finalized. Use &quot;Save refs&quot; above to update carrier information.</span>
+                        <span class="text-muted small">Draft finalized. Cargo, carrier references and documents are locked. Tracking delivery is shown separately in the shipment list.</span>
                     </div>
                 </div>
             </div>
@@ -258,7 +259,7 @@ require 'includes/layout.php';
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="mb-0">Finalize this shipment draft and push to tracking? This cannot be undone.</p>
+                    <p class="mb-0">Finalize and lock this shipment draft? Tracking delivery follows the integration mode shown on the draft. This cannot be undone.</p>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>

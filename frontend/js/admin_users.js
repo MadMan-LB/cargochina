@@ -1,3 +1,4 @@
+let userEditRevision="", permissionRevisions={}, visibilityRevisions={}, sidebarRevision="";
 let allRoles = [];
 let allDepartments = [];
 let allUsers = [];
@@ -139,7 +140,7 @@ async function createUser() {
             email,
             full_name: fullName,
             password,
-            roles,
+            roles, revision:userEditRevision,
             department_ids: departmentIds,
         });
         showToast("User created");
@@ -203,6 +204,7 @@ async function editUser(id) {
     try {
         const res = await api("GET", "/users/" + id);
         const u = res.data;
+        userEditRevision=u.revision;
         document.getElementById("editUserId").value = u.id;
         document.getElementById("editActive").checked = !!u.is_active;
 
@@ -269,12 +271,11 @@ async function resetPassword() {
         });
         const data = res.data || {};
         document.getElementById("resetPassword").value = "";
-        document.getElementById("displayNewPassword").textContent =
-            data.new_password || "";
+        document.getElementById("displayNewPassword").textContent = "";
         document
             .getElementById("resetPasswordResult")
-            .classList.remove("d-none");
-        showToast("Password reset. Copy and share with the user.");
+            .classList.add("d-none");
+        showToast("Password updated. Existing sessions require sign-in again.");
     } catch (e) {
         showToast(e.message, "danger");
     } finally {
@@ -293,6 +294,7 @@ function copyNewPassword() {
 }
 
 async function saveUser() {
+    if(document.getElementById("saveUserBtn")?.disabled) return;
     const id = document.getElementById("editUserId").value;
     const roles = allRoles
         .filter((r) => {
@@ -310,7 +312,7 @@ async function saveUser() {
     try {
         setLoading(btn, true);
         await api("PUT", "/users/" + id, {
-            roles,
+            roles, revision:userEditRevision,
             department_ids: departmentIds,
             is_active: isActive,
         });
@@ -506,6 +508,7 @@ async function loadPermissionOverrideConfig() {
         permissionOverrideRegistry = data.registry || {};
         permissionOverrideUsers = data.users || [];
         permissionOverrideMap = data.overrides || {};
+        permissionRevisions=data.revisions || {};
         const select = document.getElementById("permissionOverrideUserSelect");
         if (select) {
             select.innerHTML =
@@ -599,7 +602,9 @@ function renderPermissionOverrideGrid() {
 }
 
 async function savePermissionOverrides() {
-    if (!selectedPermissionOverrideUserId) {
+    const targetUserId=selectedPermissionOverrideUserId;
+    if(document.getElementById("permissionOverrideSaveBtn")?.disabled) return;
+    if (!targetUserId) {
         showToast("Select a user first", "warning");
         return;
     }
@@ -611,10 +616,11 @@ async function savePermissionOverrides() {
         setLoading(btn, true);
         const res = await api(
             "PUT",
-            "/users/" + selectedPermissionOverrideUserId + "/permission-overrides",
-            { permissions },
+            "/users/" + targetUserId + "/permission-overrides",
+            { permissions, revision:permissionRevisions[targetUserId] },
         );
-        permissionOverrideMap[selectedPermissionOverrideUserId] =
+        permissionRevisions[targetUserId]=res.data?.revision;
+        permissionOverrideMap[targetUserId] =
             res.data?.overrides || [];
         renderPermissionOverrideGrid();
         showToast("Permission overrides saved");
@@ -633,6 +639,7 @@ async function loadCustomerVisibilityConfig() {
         const data = res.data || {};
         customerVisibilityUsers = data.users || [];
         customerVisibilitySettings = data.settings || {};
+        visibilityRevisions=data.revisions || {};
         customerVisibilityFullRoles = data.full_visibility_roles || [];
         const select = document.getElementById("customerVisibilityUserSelect");
         if (select) {
@@ -827,7 +834,9 @@ function renderCustomerVisibilityCreatorState() {
 }
 
 async function saveCustomerVisibility() {
-    if (!selectedCustomerVisibilityUserId) {
+    const targetUserId=selectedCustomerVisibilityUserId;
+    if(document.getElementById("customerVisibilitySaveBtn")?.disabled) return;
+    if (!targetUserId) {
         showToast("Select a user first", "warning");
         return;
     }
@@ -842,13 +851,14 @@ async function saveCustomerVisibility() {
         setLoading(btn, true);
         const res = await api(
             "PUT",
-            "/users/" + selectedCustomerVisibilityUserId + "/customer-visibility",
+            "/users/" + targetUserId + "/customer-visibility",
             {
                 mode,
-                allowed_creator_user_ids: allowedCreatorUserIds,
+                allowed_creator_user_ids: allowedCreatorUserIds, revision:visibilityRevisions[targetUserId],
             },
         );
-        customerVisibilitySettings[selectedCustomerVisibilityUserId] =
+        visibilityRevisions[targetUserId]=res.data?.revision;
+        customerVisibilitySettings[targetUserId] =
             res.data?.setting || {};
         renderCustomerVisibilityEditor();
         renderCustomerVisibilitySummary();
@@ -872,6 +882,7 @@ async function loadSidebarAccessConfig() {
         sidebarAccessAssignable = data.assignable || {};
         sidebarAccessDefaults = data.defaults || {};
         sidebarAccessSettings = data.settings || {};
+        sidebarRevision=data.revision;
         sidebarAccessRoles = data.roles || [];
         sidebarAccessCollapseState = loadSidebarCollapseState();
         sidebarAccessSectionCollapseState = loadSidebarSectionCollapseState();
@@ -1152,11 +1163,13 @@ function collectSidebarAccessSettings() {
 }
 
 async function saveSidebarAccessSettings() {
+    if(document.getElementById("sidebarAccessSaveBtn")?.disabled) return;
     const btn = document.getElementById("sidebarAccessSaveBtn");
     try {
         setLoading(btn, true);
         const settings = collectSidebarAccessSettings();
-        const res = await api("PUT", "/users/sidebar-access", { settings });
+        const res = await api("PUT", "/users/sidebar-access", { settings, revision:sidebarRevision });
+        sidebarRevision=res.data?.revision;
         sidebarAccessSettings = (res.data && res.data.settings) || settings;
         renderSidebarAccessGrid();
         showToast("Sidebar settings saved");

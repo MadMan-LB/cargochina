@@ -13,6 +13,10 @@ let declaredCbm = 0,
 let pendingUploads = 0;
 let receiveCurrentOrderCurrency = "USD";
 let receivingOperationId = null;
+let receivingVarianceThresholdPercent = 10;
+let receivingVarianceThresholdAbsCbm = 0.1;
+let priorReceivedCbm = 0;
+let priorReceiptDamage = false;
 
 function nextReceivingOperationId() {
     if (!receivingOperationId) receivingOperationId = globalThis.crypto?.randomUUID?.() || `receive-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -246,6 +250,9 @@ function recalcReceiveItemRow(row, source = "auto") {
     const weightPerCartonInput = row.querySelector(".item-weight-per-carton");
     const weightInput = row.querySelector(".item-actual-weight");
 
+    if (source === "cartons" && cartons === 0) {
+        for (const input of [qtyInput, amountInput, cbmInput, weightInput]) if (input) input.value = "0";
+    }
     if (qtyInput && source !== "quantity" && cartons > 0 && pieces > 0) {
         qtyInput.value = formatReceiveInputNumber(cartons * pieces, 4);
     }
@@ -323,9 +330,10 @@ function updateReceiveOrderLevelTotals() {
     const cartonsInput = document.getElementById("actualCartons");
     const cbmInput = document.getElementById("actualCbm");
     const weightInput = document.getElementById("actualWeight");
-    if (cartonsInput && totals.cartons > 0) cartonsInput.value = formatReceiveInputNumber(totals.cartons, 0);
-    if (cbmInput && totals.cbm > 0) cbmInput.value = formatReceiveInputNumber(totals.cbm, 6);
-    if (weightInput && totals.weight > 0) weightInput.value = formatReceiveInputNumber(totals.weight, 4);
+    if (cartonsInput) cartonsInput.value = totals.cartons === 0 ? "0" : formatReceiveInputNumber(totals.cartons, 0);
+    if (cbmInput) cbmInput.value = totals.cbm === 0 ? "0" : formatReceiveInputNumber(totals.cbm, 6);
+    if (weightInput) weightInput.value = totals.weight === 0 ? "0" : formatReceiveInputNumber(totals.weight, 4);
+    updateVarianceAlert();
 }
 
 function bindReceiveItemCalculation(row) {
@@ -378,7 +386,7 @@ function bindReceiveItemCalculation(row) {
             recalcReceiveItemRow(row, "dimensions");
         });
     });
-    row.querySelector(".item-condition")?.addEventListener("change", markDirty);
+    row.querySelector(".item-condition")?.addEventListener("change", () => { markDirty(); updateVarianceAlert(); });
     recalcReceiveItemRow(row);
 }
 
@@ -446,6 +454,10 @@ function collectReceivePackagingSplits(orderItemId) {
 async function loadOrder() {
     const res = await api("GET", "/orders/" + ORDER_ID);
     const o = res.data;
+    if (o?.cargo_totals?.quantity_complete === false) {
+        document.getElementById('submitReceiveBtn').disabled = true;
+        throw new Error('Historical item quantities require reconciliation before receiving.');
+    }
     receiveCurrentOrderCurrency = o.currency || "USD";
     resetReceiptFees();
     declaredCbm = (o.items || []).reduce(
@@ -485,12 +497,16 @@ async function loadOrder() {
       <p class="mb-0"><strong>${escapeHtml(receiveT("Items:"))}</strong> ${(o.items || []).length} — ${escapeHtml(receiveT("Declared:"))} ${declaredCbm.toFixed(2)} CBM / ${declaredWeight.toFixed(0)} kg</p>
     `;
     receiveOrderItems = o.items || [];
+    priorReceivedCbm = o.cargo_totals?.receipt_count ? Number(o.cargo_totals.cbm || 0) : 0;
+    priorReceiptDamage = !!Number(o.cargo_totals?.has_damage || 0);
     const configRes = await fetch(RECEIVE_API_BASE + "/config/receiving", {
         credentials: "same-origin",
     })
         .then((r) => r.json())
         .catch(() => ({}));
     const itemLevelSection = document.getElementById("itemLevelSection");
+    receivingVarianceThresholdPercent = Number(configRes.data?.variance_threshold_percent ?? 10);
+    receivingVarianceThresholdAbsCbm = Number(configRes.data?.variance_threshold_abs_cbm ?? 0.1);
     if (itemLevelSection) {
         itemLevelSection.style.display = "block";
         itemLevelSection.dataset.itemLevelRequired = String(
@@ -505,11 +521,11 @@ async function loadOrder() {
                     const metaText = getReceiveItemMetaText(it);
                     return `
           <tr data-order-item-id="${it.id}">
-            <td>${escapeHtml((it.description_cn || it.description_en || "Item " + (i + 1)).substring(0, 40))}${metaText ? `<div class="small text-muted">${escapeHtml(metaText)}</div>` : ""}<div class="small text-muted item-split-total mt-1"></div><button type="button" class="btn btn-sm btn-outline-primary mt-1 item-add-split-line" data-order-item-id="${it.id}">+ ${escapeHtml(receiveT("Split"))}</button></td>
+            <td>${escapeHtml((it.description_cn || it.description_en || "Item " + (i + 1)).substring(0, 40))}${metaText ? `<div class="small text-muted">${escapeHtml(metaText)}</div>` : ""}<div class="small text-muted receiving-quantity-summary">Ordered: ${Number(it.ordered_quantity ?? it.quantity ?? 0)} &middot; Received: ${Number(it.received_quantity ?? 0)} &middot; Remaining: ${Number(it.remaining_quantity ?? it.quantity ?? 0)}</div><div class="small text-muted item-split-total mt-1"></div><button type="button" class="btn btn-sm btn-outline-primary mt-1 item-add-split-line" data-order-item-id="${it.id}">+ ${escapeHtml(receiveT("Split"))}</button></td>
             <td>${formatReceiveDisplayNumber(it.declared_cbm || 0, 6)} CBM / ${formatReceiveDisplayNumber(it.declared_weight || 0, 4)} kg<br><span class="small text-muted">${formatReceiveDisplayNumber(it.cartons || 0, 4)} ${escapeHtml(receiveT("cartons"))} × ${formatReceiveDisplayNumber(it.qty_per_carton || 0, 4)} = ${formatReceiveDisplayNumber(it.quantity || 0, 4)}</span></td>
-            <td><input type="number" class="form-control form-control-sm item-actual-cartons" min="0" step="1" value="${escapeHtml(formatReceiveInputNumber(it.cartons || 0, 0))}" placeholder="${escapeHtml(String(it.cartons || 0))}"></td>
+            <td><input type="number" class="form-control form-control-sm item-actual-cartons" min="0" step="1" value="${escapeHtml(formatReceiveInputNumber(it.remaining_cartons ?? it.cartons ?? 0, 0))}" placeholder="${escapeHtml(String(it.cartons || 0))}"></td>
             <td><input type="number" class="form-control form-control-sm item-actual-pieces-per-carton" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.qty_per_carton || 0, 4))}"></td>
-            <td><input type="number" class="form-control form-control-sm item-actual-quantity" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.quantity || 0, 4))}"></td>
+            <td><input type="number" class="form-control form-control-sm item-actual-quantity" min="0" step="0.0001" max="${Number(it.remaining_quantity ?? it.quantity ?? 0)}" value="${escapeHtml(formatReceiveInputNumber(it.remaining_quantity ?? it.quantity ?? 0, 4))}"></td>
             <td><input type="number" class="form-control form-control-sm item-unit-price" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.unit_price || 0, 4))}"></td>
             <td><input type="number" class="form-control form-control-sm item-total-amount" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.total_amount || 0, 4))}"></td>
             <td><input type="number" step="0.000001" class="form-control form-control-sm item-actual-cbm" min="0" placeholder="${escapeHtml(formatReceiveDisplayNumber(it.declared_cbm || 0, 6))}"></td>
@@ -588,13 +604,19 @@ function updateVarianceAlert() {
         document.getElementById("actualCbm")?.value || 0,
     );
     const condition = document.getElementById("condition")?.value || "good";
+    const itemConditions = [...document.querySelectorAll("#itemLevelBody .item-condition")].map((input) => input.value);
+    const isPartial = receiveOrderItems.length ? receiveOrderItems.some((item) => {
+        const current = getReceiveItemRows(item.id).reduce((sum, row) => sum + (Number(row.querySelector(".item-actual-quantity")?.value) || 0), 0);
+        return Number(item.remaining_quantity ?? item.quantity ?? 0) > current + 0.0001;
+    }) : condition === "partial" || itemConditions.includes("partial");
+    const comparisonCbm = priorReceivedCbm + actualCbm;
     const variancePct =
         declaredCbm > 0
-            ? (Math.abs(actualCbm - declaredCbm) / declaredCbm) * 100
+            ? (Math.abs(comparisonCbm - declaredCbm) / declaredCbm) * 100
             : 0;
-    const varianceAbs = Math.abs(actualCbm - declaredCbm);
-    const hasVariance =
-        variancePct >= 10 || varianceAbs >= 0.1 || condition !== "good";
+    const varianceAbs = Math.abs(comparisonCbm - declaredCbm);
+    const hasVariance = condition === "damaged" || itemConditions.includes("damaged") || (!isPartial &&
+        (priorReceiptDamage || variancePct >= receivingVarianceThresholdPercent || varianceAbs >= receivingVarianceThresholdAbsCbm));
     document
         .getElementById("variancePhotoAlert")
         .classList.toggle(
@@ -606,7 +628,10 @@ function updateVarianceAlert() {
     if (hasVariance) {
         vr.style.display = "block";
         vrb.innerHTML =
-            `<span class="badge bg-warning">${escapeHtml(receiveT("Customer follow-up"))}</span> ${escapeHtml(receiveT("CBM/weight variance or damage detected. The order will still enter stock and a customer review link will be sent."))}`;
+            `<span class="badge bg-warning">${escapeHtml(receiveT("Customer follow-up"))}</span> ${escapeHtml(receiveT("CBM variance or damage detected. The order will still enter stock and a customer review link will be ready."))}`;
+    } else if (isPartial) {
+        vr.style.display = "block";
+        vrb.textContent = receiveT("Partial delivery: the order remains in transit until receiving is complete.");
     } else {
         vr.style.display = "block";
         vrb.innerHTML =
@@ -691,17 +716,7 @@ document.getElementById("submitReceiveBtn").onclick = async () => {
         showToast(feeResult.error, "danger");
         return;
     }
-    const variancePct =
-        declaredCbm > 0
-            ? (Math.abs(actualCbm - declaredCbm) / declaredCbm) * 100
-            : 0;
-    const varianceAbs = Math.abs(actualCbm - declaredCbm);
-    const hasVariance =
-        variancePct >= 10 || varianceAbs >= 0.1 || condition !== "good";
-    if (hasVariance && receivePhotoPaths.length === 0) {
-        showToast(receiveT("Evidence photos required when variance or damage"), "danger");
-        return;
-    }
+    // Evidence is validated by the service against cumulative and item actuals.
     const items = [];
     const tbody = document.getElementById("itemLevelBody");
     let itemValidationError = "";
@@ -782,7 +797,7 @@ document.getElementById("submitReceiveBtn").onclick = async () => {
                     total_amount: splitTotals.amount || aTotalAmount || null,
                     packaging_splits: packagingSplits,
                     actual_cbm: aCbm || null,
-                    actual_weight: aWeight || null,
+                    actual_weight: row.querySelector(".item-actual-weight")?.value === "" ? null : aWeight,
                     weight_per_carton: aWeightPerCarton || null,
                     actual_height: aHeight || null,
                     actual_width: aWidth || null,
@@ -819,8 +834,12 @@ document.getElementById("submitReceiveBtn").onclick = async () => {
         );
         receivingOperationId = null;
         showToast(
-            res.data.variance_detected
-                ? receiveT("Received — auto-confirmed, customer follow-up sent")
+            res.data.idempotent_replay
+                ? receiveT("Receipt already recorded — no duplicate cargo added")
+                : res.data.status === "InTransitToWarehouse"
+                ? receiveT("Partial delivery received — order remains in transit")
+                : res.data.variance_detected
+                ? receiveT("Received — customer review link ready")
                 : receiveT("Received successfully"),
         );
         window.location.href =

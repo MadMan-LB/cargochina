@@ -7,16 +7,18 @@
  */
 
 $root = dirname(__DIR__);
+require_once $root.'/backend/config/database.php';
+if(getDb()->query('SELECT DATABASE()')->fetchColumn()!=='clms_hardening_20260919')throw new RuntimeException('Disposable database required');
 $passed = 0;
 $failed = 0;
 
 function runUploadInSubprocess(string $root, array $files): string
 {
     $rootEsc = addslashes(str_replace('\\', '/', $root));
-    $code = "<?php\n\$_FILES = " . var_export($files, true) . ";\n\$_SERVER['REQUEST_METHOD'] = 'POST';\nrequire '$rootEsc/backend/api/helpers.php';\n\$h = require '$rootEsc/backend/api/handlers/upload.php';\n\$h('POST', null, null, []);\n";
+    $code = "<?php\nsession_start(); \$_SESSION=['user_id'=>1,'user_roles'=>['SuperAdmin']];\n\$_FILES = " . var_export($files, true) . ";\n\$_SERVER['REQUEST_METHOD'] = 'POST';\nrequire '$rootEsc/backend/api/helpers.php';\n\$h = require '$rootEsc/backend/api/handlers/upload.php';\n\$h('POST', null, null, []);\n";
     $tmp = tempnam(sys_get_temp_dir(), 'upload_test_');
     file_put_contents($tmp . '.php', $code);
-    $out = shell_exec('php ' . escapeshellarg($tmp . '.php') . ' 2>&1');
+    $out = shell_exec(escapeshellarg(PHP_BINARY).' ' . escapeshellarg($tmp . '.php') . ' 2>&1');
     @unlink($tmp . '.php');
     @unlink($tmp);
     return $out ?? '';

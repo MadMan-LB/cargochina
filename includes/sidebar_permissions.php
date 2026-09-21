@@ -381,10 +381,10 @@ function clmsGetDefaultPageIdsForRole(string $roleCode): array
     return $ids;
 }
 
-function clmsLoadRoleSidebarPageSettings(?PDO $pdo = null): array
+function clmsLoadRoleSidebarPageSettings(?PDO $pdo = null, bool $refresh = false): array
 {
     static $cache = null;
-    if ($cache !== null) {
+    if ($cache !== null && !$refresh) {
         return $cache;
     }
 

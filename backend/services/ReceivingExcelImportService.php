@@ -2,6 +2,9 @@
 
 require_once dirname(__DIR__, 2) . '/vendor/autoload.php';
 require_once __DIR__ . '/PackingListItemNumber.php';
+require_once __DIR__ . '/CargoMetricsService.php';
+require_once __DIR__ . '/CsvTableService.php';
+require_once __DIR__ . '/WorkbookImportGuard.php';
 
 class ReceivingExcelImportService
 {
@@ -166,6 +169,8 @@ class ReceivingExcelImportService
         $seenItems = [];
         $orderCache = $this->loadOrdersForRows($pdo, $rawRows);
         $itemCache = $this->loadOrderItemsForRows($pdo, array_keys($orderCache));
+        foreach ($itemCache as &$cachedItems) $cachedItems = CargoMetricsService::attachItems($pdo, $cachedItems);
+        unset($cachedItems);
         $productExistsCache = $this->loadProductExistsForRows($pdo, $rawRows);
         $config = require dirname(__DIR__) . '/config/config.php';
         $thresholdPct = (float) ($config['variance_threshold_percent'] ?? 10);
@@ -182,7 +187,7 @@ class ReceivingExcelImportService
             if ($orderId === null) {
                 $rowErrors[] = 'Could not match this procurement-template row to a receiving order. Add Order ID or Order Item ID, or make sure Customer/Supplier/Item fields uniquely match one approved/in-transit order.';
             }
-            $actualCartons = $this->parseNumber($raw['actual_cartons'] ?? null, 'Actual Cartons', true, $rowErrors);
+            $actualCartons = $this->parseInteger($raw['actual_cartons'] ?? null, 'Actual Cartons', true, $rowErrors);
             $actualPieces = $this->parseNumber($raw['actual_pieces_per_carton'] ?? null, 'Pieces / Carton', false, $rowErrors);
             $actualQuantity = $this->parseNumber($raw['actual_quantity'] ?? null, 'Quantity', false, $rowErrors);
             $unitPrice = $this->parseNumber($raw['unit_price'] ?? null, 'Unit Price', false, $rowErrors);
@@ -200,8 +205,8 @@ class ReceivingExcelImportService
                 $rowErrors[] = 'Condition must be good, damaged, or partial.';
                 $condition = 'good';
             }
-            if ($condition !== 'good') {
-                $rowErrors[] = 'Damaged or partial direct receiving rows require photo evidence; receive this packet manually.';
+            if ($condition === 'damaged') {
+                $rowErrors[] = 'Damaged receiving rows require photo evidence; receive this packet manually.';
             }
 
             if ($actualCartons !== null && $actualCartons <= 0) {
@@ -244,14 +249,7 @@ class ReceivingExcelImportService
                     } else {
                         $seenItems[$duplicateKey] = $rowNumber;
                     }
-                    $declaredItemCbm = (float) ($resolvedItem['declared_cbm'] ?? 0);
-                    $variancePct = $declaredItemCbm > 0 && $actualCbm !== null
-                        ? abs($actualCbm - $declaredItemCbm) / $declaredItemCbm * 100
-                        : 0;
-                    $varianceAbs = $actualCbm !== null ? abs($actualCbm - $declaredItemCbm) : 0;
-                    if ($condition !== 'good' || $variancePct >= $thresholdPct || $varianceAbs >= $thresholdAbs) {
-                        $rowErrors[] = 'Evidence photos are required for damage or variance; receive this item manually.';
-                    }
+
                 }
             }
 
@@ -292,8 +290,25 @@ class ReceivingExcelImportService
 
         $grouped = $this->buildPayloadsFromRows($rows);
         foreach ($grouped as $orderId => $payload) {
-            if (($payload['actual_cbm'] ?? 0) <= 0) {
-                $this->markOrderRowsInvalid($rows, (int) $orderId, 'Order total actual CBM must be greater than zero.');
+            $items = $itemCache[$orderId] ?? [];
+            $prior = [];
+            foreach ($items as $item) $prior[$item['id']] = ['quantity'=>$item['received_quantity'] ?? 0];
+            try {
+                $normalized = ReceivingQuantityService::normalize($payload, $items, $prior);
+                if (!$normalized['is_partial']) {
+                    $declared = array_sum(array_column($items,'declared_cbm'));
+                    $cumulative = array_sum(array_column($items,'received_cbm')) + $normalized['actual_cbm'];
+                    $variance = abs($cumulative-$declared) >= $thresholdAbs || ($declared>0 && abs($cumulative-$declared)/$declared*100 >= $thresholdPct);
+                    $byId = array_column($items,null,'id');
+                    foreach ($normalized['items'] as $receivedItem) {
+                        $item = $byId[$receivedItem['order_item_id']];
+                        $delta = abs($item['received_cbm'] + $receivedItem['actual_cbm'] - $item['declared_cbm']);
+                        $variance = $variance || !empty($item['received_has_damage']) || $delta >= $thresholdAbs || ($item['declared_cbm']>0 && $delta/$item['declared_cbm']*100 >= $thresholdPct);
+                    }
+                    if ($variance) throw new InvalidArgumentException('Evidence photos are required for damage or variance; receive this order manually.');
+                }
+            } catch (InvalidArgumentException $e) {
+                $this->markOrderRowsInvalid($rows, (int)$orderId, $e->getMessage());
             }
         }
 
@@ -338,7 +353,7 @@ class ReceivingExcelImportService
                 $rowWarnings[] = 'Supplier "' . $supplierLabel . '" will be created during import.';
             }
 
-            $actualCartons = $this->parseNumber($raw['actual_cartons'] ?? null, 'Cartons', true, $rowErrors);
+            $actualCartons = $this->parseInteger($raw['actual_cartons'] ?? null, 'Cartons', true, $rowErrors);
             $actualPieces = $this->parseNumber($raw['actual_pieces_per_carton'] ?? null, 'Pieces / Carton', false, $rowErrors);
             $actualQuantity = $this->parseNumber($raw['actual_quantity'] ?? null, 'Quantity', false, $rowErrors);
             $factoryPrice = $this->parseNumber(($raw['factory_price'] ?? '') !== '' ? $raw['factory_price'] : ($raw['unit_price'] ?? null), 'Factory Price', false, $rowErrors);
@@ -358,6 +373,9 @@ class ReceivingExcelImportService
                 $condition = 'good';
             }
             $goodType = $this->normalizeGoodType($raw['copy_normal_goods'] ?? '');
+            if ($condition !== 'good') {
+                $rowErrors[] = 'Damaged or partial direct intake must be received manually; provide expected order quantities and photo evidence where required.';
+            }
 
             if ($actualQuantity === null && $actualCartons !== null && $actualPieces !== null && $actualCartons > 0 && $actualPieces > 0) {
                 $actualQuantity = round($actualCartons * $actualPieces, 4);
@@ -408,8 +426,8 @@ class ReceivingExcelImportService
             if ($actualCbm !== null && $actualCbm <= 0) {
                 $rowErrors[] = 'Total CBM must be greater than zero.';
             }
-            if ($actualWeight !== null && $actualWeight <= 0) {
-                $rowErrors[] = 'Total Weight must be greater than zero.';
+            if ($actualWeight !== null && $actualWeight < 0) {
+                $rowErrors[] = 'Total Weight must be zero or positive.';
             }
             if ($actualQuantity !== null && $actualQuantity <= 0) {
                 $rowErrors[] = 'Quantity must be greater than zero.';
@@ -462,6 +480,7 @@ class ReceivingExcelImportService
                 'unit_price' => $factoryPrice,
                 'sell_price' => $customerPrice,
                 'total_amount' => $totalAmount,
+                'dimensions_scope' => 'carton',
                 'declared_cbm' => $actualCbm,
                 'declared_weight' => $actualWeight,
                 'description_en' => $descriptionEn,
@@ -469,6 +488,10 @@ class ReceivingExcelImportService
                 'notes' => $this->cleanDirectText($raw['notes'] ?? '', 1000),
                 'condition' => $condition,
             ];
+
+            try {
+                ReceivingQuantityService::normalize(['items'=>[['order_item_id'=>1,'actual_cartons'=>$actualCartons,'actual_quantity'=>$actualQuantity,'actual_pieces_per_carton'=>$actualPieces,'actual_cbm'=>$actualCbm,'actual_weight'=>$actualWeight]]], [['id'=>1,'quantity'=>$actualQuantity,'cartons'=>$actualCartons,'qty_per_carton'=>$actualPieces,'unit'=>'pieces']], []);
+            } catch (InvalidArgumentException $e) { $rowErrors[]=$e->getMessage(); }
 
             $rows[] = [
                 'row' => $rowNumber,
@@ -630,6 +653,7 @@ class ReceivingExcelImportService
             $results[$orderId] = $receivingService->receive($pdo, $orderId, $receiptPayload, $userId, false, [
                 'source' => 'direct_receiving_excel_import',
                 'import_id' => $importId,
+                'idempotency_key' => 'receiving-import-' . $importId . '-order-' . $orderId,
             ]);
             $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('order', ?, 'direct_receive_import_create', ?, ?)")
                 ->execute([$orderId, json_encode([
@@ -766,10 +790,10 @@ class ReceivingExcelImportService
 
     private function resolveOrCreateDirectIntakeCustomer(PDO $pdo, int $userId, int $importId): int
     {
+        require_once __DIR__.'/CustomerWriteService.php';
+        CustomerWriteService::normalize($pdo,['code'=>self::DIRECT_INTAKE_CUSTOMER_CODE,'name'=>self::DIRECT_INTAKE_CUSTOMER_NAME,'default_shipping_code'=>'DIRECT-WH']);
         $clauses = ['code = ?'];
         $params = [self::DIRECT_INTAKE_CUSTOMER_CODE];
-        $clauses[] = 'name = ?';
-        $params[] = self::DIRECT_INTAKE_CUSTOMER_NAME;
 
         $stmt = $pdo->prepare("SELECT id FROM customers WHERE " . implode(' OR ', $clauses) . " ORDER BY id ASC LIMIT 1");
         $stmt->execute($params);
@@ -792,16 +816,15 @@ class ReceivingExcelImportService
             $insertParams[] = $userId;
         }
 
-        $pdo->prepare("INSERT INTO customers (" . implode(', ', $columns) . ") VALUES (" . implode(', ', $values) . ")")
-            ->execute($insertParams);
+        $insert=$pdo->prepare("INSERT INTO customers (" . implode(', ', $columns) . ") VALUES (" . implode(', ', $values) . ") ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)");
+        $insert->execute($insertParams);
         $customerId = (int) $pdo->lastInsertId();
-        $this->logDirectIntakeCustomer($pdo, $customerId, $userId, $importId);
+        if($insert->rowCount()===1)$this->logDirectIntakeCustomer($pdo, $customerId, $userId, $importId);
         return $customerId;
     }
 
     private function logDirectIntakeCustomer(PDO $pdo, int $customerId, int $userId, int $importId): void
     {
-        try {
             $pdo->prepare("INSERT INTO audit_log (entity_type, entity_id, action, new_value, user_id) VALUES ('customer', ?, 'direct_receive_import_fallback_create', ?, ?)")
                 ->execute([$customerId, json_encode([
                     'import_id' => $importId,
@@ -809,9 +832,6 @@ class ReceivingExcelImportService
                     'name' => self::DIRECT_INTAKE_CUSTOMER_NAME,
                     'source' => 'receiving_excel_direct_intake',
                 ], JSON_UNESCAPED_UNICODE), $userId]);
-        } catch (Throwable $e) {
-            // Audit logging should never block receiving intake.
-        }
     }
 
     private function resolveDirectSupplierPreview(PDO $pdo, array $raw, array &$cache): ?array
@@ -1017,8 +1037,10 @@ class ReceivingExcelImportService
 
     private function insertDirectIntakeItems(PDO $pdo, int $orderId, array $items, ?int $defaultSupplierId): array
     {
+        require_once __DIR__.'/OrderWriteService.php';
+        OrderWriteService::requireMeasurementSchema($pdo);
         $metadataColumns = [];
-        foreach (['item_number', 'what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
+        foreach (['dimensions_scope', 'item_number', 'what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'length', 'width', 'height'] as $column) {
             if ($this->tableHasColumn($pdo, 'order_items', $column)) {
                 $metadataColumns[] = $column;
             }
@@ -1067,6 +1089,9 @@ class ReceivingExcelImportService
             ];
             foreach ($metadataColumns as $column) {
                 switch ($column) {
+                    case 'dimensions_scope':
+                        $params[] = $cartons > 0 ? 'carton' : 'piece';
+                        break;
                     case 'item_number':
                         $params[] = $item['item_number'] ?? null;
                         break;
@@ -1203,6 +1228,7 @@ class ReceivingExcelImportService
         if ($path === '' || !is_file($path)) {
             throw new InvalidArgumentException('Uploaded file is not readable.');
         }
+        WorkbookImportGuard::inspect($path,$ext,$maxSize);
         return $path;
     }
 
@@ -1218,6 +1244,7 @@ class ReceivingExcelImportService
         }
 
         $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($path);
+        foreach($reader->listWorksheetInfo($path) as $info)if($info['totalRows']>self::MAX_ROWS+self::READ_LIMIT_EXTRA_ROWS||$info['totalColumns']>100)throw new InvalidArgumentException('Receiving workbook exceeds the supported row or column count');
         if (method_exists($reader, 'setReadDataOnly')) {
             $reader->setReadDataOnly(true);
         }
@@ -1242,7 +1269,9 @@ class ReceivingExcelImportService
 
         $spreadsheet = $reader->load($path);
         try {
-            $rows = $spreadsheet->getActiveSheet()->toArray(null, true, true, true);
+            $sheet=$spreadsheet->getActiveSheet();
+            foreach($sheet->getCellCollection()->getCoordinates() as $coordinate){$cell=$sheet->getCell($coordinate);if($cell->getDataType()==='f'){$value=$cell->getOldCalculatedValue();if($value===null)throw new InvalidArgumentException('A workbook formula has no saved result. Recalculate and save it first.');$cell->setValue($value);}}
+            $rows = $sheet->toArray(null, false, true, true);
         } finally {
             $spreadsheet->disconnectWorksheets();
         }
@@ -1252,25 +1281,11 @@ class ReceivingExcelImportService
     private function readCsvRows(string $path): array
     {
         $sample = (string) @file_get_contents($path, false, null, 0, 8192);
-        $delimiter = ',';
-        $counts = [
-            ',' => substr_count($sample, ','),
-            ';' => substr_count($sample, ';'),
-            "\t" => substr_count($sample, "\t"),
-        ];
-        arsort($counts);
-        $candidate = (string) array_key_first($counts);
-        if (($counts[$candidate] ?? 0) > 0) {
-            $delimiter = $candidate;
-        }
-
-        $handle = fopen($path, 'rb');
-        if (!$handle) {
-            throw new InvalidArgumentException('Uploaded CSV file is not readable.');
-        }
+        $delimiter=CsvTableService::delimiter($sample);
+        $csvRows=CsvTableService::parse((string)file_get_contents($path),self::MAX_ROWS+self::READ_LIMIT_EXTRA_ROWS,8388608,$delimiter,true);
         $rows = [];
         $rowNumber = 0;
-        while (($values = fgetcsv($handle, 0, $delimiter)) !== false) {
+        foreach ($csvRows as $values) {
             $rowNumber++;
             if ($rowNumber > self::MAX_ROWS + self::READ_LIMIT_EXTRA_ROWS) {
                 break;
@@ -1282,7 +1297,6 @@ class ReceivingExcelImportService
             }
             $rows[$rowNumber] = $row;
         }
-        fclose($handle);
         return $rows;
     }
 
@@ -1334,6 +1348,7 @@ class ReceivingExcelImportService
             }
             foreach ($this->aliases as $field => $aliases) {
                 if ($normalized === $field || in_array($normalized, $aliases, true)) {
+                    if(isset($mapped[$field]))throw new InvalidArgumentException("Duplicate receiving column: ".$field);
                     $mapped[$field] = $column;
                     break;
                 }
@@ -1610,7 +1625,7 @@ class ReceivingExcelImportService
     private function parseInteger($value, string $label, bool $required, array &$errors): ?int
     {
         $number = $this->parseNumber($value, $label, $required, $errors);
-        if ($number === null) {
+        if ($number === null || !is_finite($number)) {
             return null;
         }
         if (floor($number) != $number) {
@@ -1630,7 +1645,7 @@ class ReceivingExcelImportService
             return null;
         }
         $number = $this->numberFromString($raw);
-        if ($number === null) {
+        if ($number === null || !is_finite($number)) {
             $errors[] = $label . ' has an invalid number format.';
             return null;
         }
@@ -1695,12 +1710,11 @@ class ReceivingExcelImportService
                 $extraCols .= ", oi.$column";
             }
         }
-        $stmt = $pdo->prepare("SELECT oi.order_id, oi.id, oi.product_id, oi.item_no, oi.item_number, oi.shipping_code, oi.cartons, oi.qty_per_carton, oi.quantity, oi.unit_price, oi.total_amount, oi.declared_cbm, oi.declared_weight, oi.description_cn, oi.description_en$extraCols FROM order_items oi WHERE oi.order_id IN (" . implode(',', array_fill(0, count($ids), '?')) . ")");
+        $stmt = $pdo->prepare("SELECT oi.* FROM order_items oi WHERE oi.order_id IN (" . implode(',', array_fill(0, count($ids), '?')) . ")");
         $stmt->execute($ids);
         $itemsByOrder = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
             $orderId = (int) ($item['order_id'] ?? 0);
-            unset($item['order_id']);
             $itemsByOrder[$orderId][] = $item;
         }
         return $itemsByOrder;

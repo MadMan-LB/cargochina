@@ -1,4 +1,5 @@
 <?php
+require_once dirname(__DIR__).'/services/LogRetentionService.php';
 require_once dirname(__DIR__) . '/services/PackingListItemNumber.php';
 
 require_once dirname(__DIR__) . '/services/DecimalMath.php';
@@ -66,11 +67,16 @@ function clmsFinalizeApiTiming(int $status): void
         $userId !== null ? (string) $userId : '-',
         $requestId ?: '-'
     );
-    @error_log($line, 3, $logDir . '/performance.log');
+    @error_log($line, 3, LogRetentionService::path('performance'));
 }
 
 function jsonResponse(array $data, int $status = 200): void
 {
+    $retry=$_SERVER['HTTP_X_CLMS_RETRY_OF']??'';
+    if($status<400&&is_string($retry)&&preg_match('/^[a-f0-9]{16,32}$/',$retry)&&!empty($_SESSION['user_id'])){
+        $uid=(int)$_SESSION['user_id'];$parts=explode('/',trim($_GET['path']??'','/'));$workflow=$parts[0]??'';$action=($_SERVER['REQUEST_METHOD']??'GET').'/'.($parts[2]??'');$entity=ctype_digit((string)($parts[1]??''))?(int)$parts[1]:null;$entities=$GLOBALS['clms_incident_entities']??[];if($entity===null&&$entities)$entity=reset($entities);
+        register_shutdown_function(static function()use($retry,$uid,$workflow,$action,$entity){try{$p=clmsNewDbConnection();$p->prepare("UPDATE owner_incident_events e JOIN owner_incidents i ON i.id=e.incident_id SET e.retry_result='same_action_succeeded' WHERE e.request_id=? AND e.user_id=? AND i.workflow=? AND i.action_name=? AND e.entity_id <=> ?")->execute([$retry,$uid,$workflow,$action,$entity]);}catch(Throwable $e){error_log('CLMS retry observation unavailable');}});
+    }
     http_response_code($status);
     clmsFinalizeApiTiming($status);
     echo json_encode($data, JSON_UNESCAPED_UNICODE);
@@ -87,7 +93,14 @@ function jsonError(string $message, int $status = 400, array $errors = [], ?stri
 {
     $requestId = $requestId ?? bin2hex(random_bytes(8));
     $GLOBALS['__clms_api_request_id'] = $requestId;
+    if ($status >= 500) {
+        error_log('API error ['.$requestId.'] status='.$status);
+        $message = 'An error occurred. Please try again or contact support. (ref: '.$requestId.')';
+        $errors = [];
+    }
     $localizedMessage = function_exists('clmsT') ? clmsT($message) : $message;
+    require_once dirname(__DIR__).'/services/OwnerIncidentService.php';
+    OwnerIncidentService::capture($status,$requestId,$message);
     $body = ['error' => true, 'message' => $localizedMessage, 'request_id' => $requestId];
     if (!empty($errors)) {
         $body['errors'] = array_map(
@@ -106,9 +119,36 @@ function clmsNormalizeSearchQuery($value, int $maxLength = 200): string
 }
 
 /** Build a contains pattern where spaces may match intervening words. */
+function clmsSpreadsheetCell($value)
+{
+    return is_string($value)&&preg_match('/^[\s\x00-\x1f]*[=+@-]/u',$value)?"'".$value:$value;
+}
+
+/** Export every untrusted CSV cell as data, including headers and metadata. */
+function clmsWriteCsv($stream,array $row): int|false
+{
+    return fputcsv($stream,array_map('clmsSpreadsheetCell',$row),',','"','');
+}
+
+function clmsExportFormat(string $default='xlsx'): string
+{
+    $format=$_GET['format']??$default;
+    if(!is_string($format)||!in_array(strtolower(trim($format)),['csv','xlsx'],true))jsonError('Unsupported export format',422);
+    return strtolower(trim($format));
+}
+
+/** One consistent database view for a multi-query report, with automatic cleanup on errors. */
+function clmsBeginExportSnapshot(PDO $pdo): void
+{
+    if($pdo->inTransaction())return;
+    $pdo->exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');$pdo->beginTransaction();
+    register_shutdown_function(static function()use($pdo){if($pdo->inTransaction())$pdo->rollBack();});
+}
+
 function clmsSearchLike(string $query): string
 {
     $query = clmsNormalizeSearchQuery($query);
+    $query = strtr($query, ['\\'=>'\\\\', '%'=>'\\%', '_'=>'\\_']);
     return '%' . preg_replace('/\s+/u', '%', $query) . '%';
 }
 
@@ -126,18 +166,28 @@ function clmsQueryLimit($value, int $default = 50, int $maximum = 200): int
     if ($value === null || $value === '') {
         return max(1, min($maximum, $default));
     }
+    if (filter_var($value,FILTER_VALIDATE_INT) === false || (int)$value < 1) jsonError('Invalid limit',422);
     return max(1, min($maximum, (int) $value));
+}
+
+/** Two parameters: numeric supplier ID as JSON, then its legacy string representation. */
+function clmsSharedCartonSupplierPredicate(string $column): string
+{
+    $ids = "COALESCE(JSON_EXTRACT(CASE WHEN JSON_VALID($column) THEN $column ELSE '[]' END, '$[*].supplier_id'), '[]')";
+    return "(JSON_CONTAINS($ids, ?) OR JSON_CONTAINS($ids, JSON_QUOTE(?)))";
 }
 
 function clmsQueryOffset($value, int $maximum = 10000000): int
 {
+    if ($value !== null && $value !== '' && (filter_var($value,FILTER_VALIDATE_INT) === false || (int)$value < 0)) jsonError('Invalid offset',422);
     return max(0, min($maximum, (int) ($value ?? 0)));
 }
 
 function clmsQuerySort($value, array $allowed, string $default): string
 {
     $candidate = (string) ($value ?? '');
-    return in_array($candidate, $allowed, true) ? $candidate : $default;
+    if ($candidate !== '' && !in_array($candidate,$allowed,true)) jsonError('Invalid sort field',422);
+    return $candidate !== '' ? $candidate : $default;
 }
 
 function clmsQueryDirection($value, string $default = 'ASC'): string
@@ -150,7 +200,8 @@ function clmsNormalizeItemTypeFilter($value): ?string
 {
     $code = strtolower(trim((string) $value));
     $allowed = ['normal', 'replica', 'cosmetics', 'branded', 'food', 'dangerous', 'other', 'unclassified'];
-    return in_array($code, $allowed, true) ? $code : null;
+    if ($code !== '' && !in_array($code,$allowed,true)) jsonError('Invalid item type filter',422);
+    return $code !== '' ? $code : null;
 }
 
 function format_display_number($value, int $maxDecimals, int $minDecimals = 0): string
@@ -305,7 +356,9 @@ function ensureSession(): void
 function getAuthUserId(): ?int
 {
     ensureSession();
-    return $_SESSION['user_id'] ?? null;
+    clmsRefreshSessionRolesFromDb();
+    if (!empty($GLOBALS['clms_auth_verification_failed'])) return null;
+    return isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
 }
 
 function getUserRoles(): array
@@ -313,6 +366,13 @@ function getUserRoles(): array
     ensureSession();
     clmsRefreshSessionRolesFromDb();
     return $_SESSION['user_roles'] ?? [];
+}
+
+function requireRecentAuthentication(): void
+{
+    getAuthUserId();
+    require_once dirname(__DIR__).'/services/SessionPolicyService.php';
+    if(!SessionPolicyService::recent($_SESSION))jsonError('Recent sign-in required for this administrative change. Sign in again in another tab, then retry; your changes have not been applied.',403);
 }
 
 function hasRole(string $role): bool
@@ -469,6 +529,7 @@ function normalizeStoredUploadPath(string $filePath, bool $mustExist = true): st
             exit;
         }
 
+        clmsAuthorizeUploadForCurrentActor($meta['normalized']);
         return $meta['normalized'];
     } catch (InvalidArgumentException $e) {
         jsonError($e->getMessage(), 400);
@@ -476,6 +537,14 @@ function normalizeStoredUploadPath(string $filePath, bool $mustExist = true): st
     } catch (RuntimeException $e) {
         jsonError($e->getMessage(), 500);
         exit;
+    }
+}
+
+function clmsAuthorizeUploadForCurrentActor(string $path): void
+{
+    if (session_status() === PHP_SESSION_ACTIVE && getAuthUserId()) {
+        require_once dirname(__DIR__) . '/services/UploadAccessService.php';
+        UploadAccessService::authorize(getDb(),$path);
     }
 }
 
@@ -689,8 +758,9 @@ function logClms(string $event, array $context = []): void
     if (!is_dir($logDir)) {
         @mkdir($logDir, 0755, true);
     }
-    $line = date('Y-m-d H:i:s') . ' ' . json_encode(array_merge(['event' => $event], $context), JSON_UNESCAPED_UNICODE) . "\n";
-    @error_log($line, 3, $logDir . '/clms.log');
+    require_once dirname(__DIR__).'/services/AuditService.php';
+    $line = date('Y-m-d H:i:s') . ' ' . json_encode(AuditService::redact(array_merge(['event' => $event], $context)), JSON_UNESCAPED_UNICODE) . "\n";
+    @error_log($line, 3, LogRetentionService::path('clms'));
 }
 function clmsFinancialDecimal($value, string $label = 'Amount', bool $allowZero = false, int $scale = 4): string
 {

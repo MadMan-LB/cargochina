@@ -8,6 +8,9 @@
 require_once __DIR__ . '/../helpers.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('upload', $method, $id, $action);
+    requireAuth();requirePermission('uploads.write');
     header('Content-Type: application/json; charset=utf-8');
     $requestId = bin2hex(random_bytes(8));
 
@@ -20,6 +23,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     }
 
     try {
+        require_once dirname(__DIR__,2).'/services/UploadAccessService.php';
+        UploadAccessService::requireSchema(getDb());
         $file = $_FILES['file'];
         $config = require dirname(__DIR__, 2) . '/config/config.php';
         $maxSize = (int) ($config['upload_max_size'] ?? 8388608);
@@ -81,11 +86,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
         }
 
+        if(clmsIsUploadImageExtension($ext)) {
+            $info=@getimagesize($file['tmp_name']);
+            if(!$info || (float)$info[0]*(float)$info[1]>25000000) jsonError('Image is invalid or exceeds 25 million pixels',422);
+        }
         $uploadDir = dirname(__DIR__, 2) . '/uploads/';
         if (!is_dir($uploadDir)) {
             mkdir($uploadDir, 0755, true);
         }
-        $filename = date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
+        $filename = date('Ymd_His') . '_' . bin2hex(random_bytes(16)) . '.' . $ext;
         $path = $uploadDir . $filename;
 
         if (!move_uploaded_file($file['tmp_name'], $path)) {
@@ -93,6 +102,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         }
 
         $relPath = 'uploads/' . $filename;
+        try { UploadAccessService::register(getDb(),$relPath,requireAuth()); }
+        catch(Throwable $e) { @unlink($path); throw $e; }
         $url = '/cargochina/backend/' . $relPath;
         $payload = [
             'path' => $relPath,

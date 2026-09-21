@@ -33,6 +33,13 @@ function warehouseEndpointRequest(array $query): array
 }
 
 $pdo = getDb();
+warehouseEndpointAssert($pdo->query('SELECT DATABASE()')->fetchColumn()==='clms_hardening_20260919','Disposable warehouse fixtures required');
+$label='Woven baskets '.bin2hex(random_bytes(6));
+$pdo->prepare('INSERT INTO products(description_en,cbm,weight) VALUES (?,.1,2)')->execute([$label]);$fixtureProduct=(int)$pdo->lastInsertId();
+$buyer=(int)$pdo->query('SELECT id FROM customers ORDER BY id LIMIT 1')->fetchColumn();
+$pdo->prepare("INSERT INTO orders(customer_id,status,created_by) VALUES (?,'InTransitToWarehouse',1)")->execute([$buyer]);$fixtureOrder=(int)$pdo->lastInsertId();
+$pdo->prepare("INSERT INTO order_items(order_id,product_id,quantity,cartons,qty_per_carton,unit) VALUES (?,?,4,1,4,'pieces')")->execute([$fixtureOrder,$fixtureProduct]);
+register_shutdown_function(static function()use($pdo,$fixtureOrder,$fixtureProduct){$pdo->prepare('DELETE FROM order_items WHERE order_id=?')->execute([$fixtureOrder]);$pdo->prepare('DELETE FROM orders WHERE id=?')->execute([$fixtureOrder]);$pdo->prepare('DELETE FROM products WHERE id=?')->execute([$fixtureProduct]);});
 $candidate = $pdo->query(
     "SELECT oi.id AS item_id, COALESCE(NULLIF(TRIM(p.description_en), ''), NULLIF(TRIM(p.description_cn), '')) AS description
      FROM orders o

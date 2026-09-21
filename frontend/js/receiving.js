@@ -3,6 +3,7 @@ let receiveOrderItems = [];
 let receiveItemPhotos = {};
 let receiveItemRenderLimit = 80;
 let receiveCurrentOrderId = null;
+let receiveOrderLoadVersion = 0;
 let receiveCurrentOrderCurrency = "USD";
 let receivingOperationId = null;
 let warehouseQueueData = [];
@@ -16,6 +17,9 @@ let receivingImportProgressState = null;
 let receivingQueueOffset = 0;
 let receivingDownloadSelection = null;
 let receivingQueueTotal = 0;
+let receivingQueueRequestVersion = 0;
+let receivingVarianceThresholdPercent = 10;
+let receivingVarianceThresholdAbsCbm = 0.1;
 const receivingQueueLimit = 50;
 let calMonth = new Date().getMonth();
 let calYear = new Date().getFullYear();
@@ -25,7 +29,7 @@ const RECEIVING_CARD_ITEM_BADGE_LIMIT = 8;
 const RECEIVING_IMPORT_STEPS = [
     { key: "uploading", label: "Uploading", target: 35 },
     { key: "reading", label: "Reading Excel", target: 58 },
-    { key: "rows", label: "Importing rows", target: 76 },
+    { key: "rows", label: "Validating rows", target: 76 },
     { key: "preview", label: "Preparing preview", target: 88 },
     { key: "saving", label: "Saving receipts", target: 96 },
     { key: "done", label: "Done", target: 100 },
@@ -484,6 +488,8 @@ function setupReceiveOrderSearch() {
             return items ? `${base} | ${items}` : base.replace(/\s*—\s*$/g, "");
         },
         onSelect: (item) => {
+            delete searchEl.dataset.receivedCbm;
+            delete searchEl.dataset.receivedDamage;
             idEl.value = String(item.id);
             searchEl.dataset.declaredCbm = String(item.declared_cbm || 0);
             searchEl.dataset.declaredWeight = String(item.declared_weight || 0);
@@ -497,6 +503,9 @@ function setupReceiveOrderSearch() {
             idEl.value = "";
             delete searchEl.dataset.declaredCbm;
             delete searchEl.dataset.declaredWeight;
+            delete searchEl.dataset.receivedCbm;
+            delete searchEl.dataset.receivedDamage;
+            receiveOrderLoadVersion++;
             form.classList.add("d-none");
             receiveOrderItems = [];
             receiveItemPhotos = {};
@@ -516,6 +525,9 @@ function setupReceiveDimensionInputs() {
 async function loadReceivingConfig() {
     try {
         const res = await api("GET", "/config/receiving");
+        receivingVarianceThresholdPercent = Number(res.data?.variance_threshold_percent ?? 10);
+        receivingVarianceThresholdAbsCbm = Number(res.data?.variance_threshold_abs_cbm ?? 0.1);
+        updateVariancePhotoAlert();
         const section = document.getElementById("itemLevelSection");
         if (section) {
             section.classList.remove("d-none");
@@ -529,6 +541,9 @@ async function loadReceivingConfig() {
 }
 
 async function handleReceivePhotos(files) {
+    const targetOrderId = document.getElementById("receiveOrderId")?.value;
+    const targetVersion = receiveOrderLoadVersion;
+    if (!targetOrderId) return;
     const filesArr = Array.from(files || []).filter((f) =>
         f.type.startsWith("image/"),
     );
@@ -543,6 +558,7 @@ async function handleReceivePhotos(files) {
                 if (btn) btn.textContent = receivingT("Uploading {current}/{total}…", { current: i, total });
             },
         );
+        if (targetVersion !== receiveOrderLoadVersion || document.getElementById("receiveOrderId")?.value !== targetOrderId) return;
         paths.forEach((p) => {
             if (p && !receivePhotoPaths.includes(p)) receivePhotoPaths.push(p);
         });
@@ -592,13 +608,21 @@ function updateVariancePhotoAlert() {
         document.getElementById("actualCbm")?.value || 0,
     );
     const condition = document.getElementById("condition")?.value || "good";
+    const itemConditions = [...document.querySelectorAll("#itemLevelBody .item-condition")].map((input) => input.value);
+    const isPartial = receiveOrderItems.length ? receiveOrderItems.some((item) => {
+        const current = getReceiveItemRows(item.id).reduce((sum, row) => sum + (Number(row.querySelector(".item-actual-quantity")?.value) || 0), 0);
+        return Number(item.remaining_quantity ?? item.quantity ?? 0) > current + 0.0001;
+    }) : condition === "partial" || itemConditions.includes("partial");
+    const comparisonCbm = actualCbm + Number(searchEl?.dataset.receivedCbm || 0);
     const variancePct =
         declaredCbm > 0
-            ? (Math.abs(actualCbm - declaredCbm) / declaredCbm) * 100
+            ? (Math.abs(comparisonCbm - declaredCbm) / declaredCbm) * 100
             : 0;
-    const varianceAbs = Math.abs(actualCbm - declaredCbm);
-    const hasVariance =
-        variancePct >= 10 || varianceAbs >= 0.1 || condition !== "good";
+    const varianceAbs = Math.abs(comparisonCbm - declaredCbm);
+    const hasVariance = condition === "damaged" || itemConditions.includes("damaged") ||
+        (!isPartial &&
+            (searchEl?.dataset.receivedDamage === "1" || variancePct >= receivingVarianceThresholdPercent ||
+                varianceAbs >= receivingVarianceThresholdAbsCbm));
     const needsPhoto = hasVariance && receivePhotoPaths.length === 0;
     alertEl.classList.toggle("d-none", !needsPhoto);
 }
@@ -759,6 +783,7 @@ function applyLocalReceivingFilters() {
 }
 
 async function applyFilters(resetOffset = true) {
+    const requestVersion = ++receivingQueueRequestVersion;
     if(resetOffset)receivingQueueOffset=0;
     const listEl = document.getElementById("warehouseList");
     const applyBtn = document.getElementById("applyFiltersBtn");
@@ -767,15 +792,29 @@ async function applyFilters(resetOffset = true) {
         if (applyBtn) applyBtn.disabled = true;
         const params=new URLSearchParams(getFilterParams());params.set("limit",String(receivingQueueLimit));params.set("offset",String(receivingQueueOffset));const qs=params.toString();
         const res = await api("GET", "/receiving/queue?" + qs);
+        if (requestVersion !== receivingQueueRequestVersion) return;
         warehouseQueueSourceData = res.data || [];
         receivingQueueTotal = Number(res.meta?.total || 0);
+        if (receivingQueueOffset > 0 && warehouseQueueSourceData.length === 0) {
+            receivingQueueOffset = receivingQueueTotal > 0
+                ? Math.floor((receivingQueueTotal - 1) / receivingQueueLimit) * receivingQueueLimit
+                : 0;
+            return await applyFilters(false);
+        }
         const prev=document.getElementById("receivingPrevBtn"),next=document.getElementById("receivingNextBtn");if(prev)prev.disabled=receivingQueueOffset<=0;if(next)next.disabled=!res.meta?.has_more;const summary=document.getElementById("receivingPageSummary");if(summary)summary.textContent=warehouseQueueSourceData.length?`${receivingQueueOffset+1}–${receivingQueueOffset+warehouseQueueSourceData.length} ${receivingT("of")} ${receivingQueueTotal}`:`0 ${receivingT("results")}`;
         applyLocalReceivingFilters();
         syncReceivingUrl();
     } catch (e) {
+        if (requestVersion !== receivingQueueRequestVersion) return;
         warehouseQueueSourceData = [];
         warehouseQueueData = [];
         receivingQueueTotal = 0;
+        const summary = document.getElementById("receivingPageSummary");
+        if (summary) summary.textContent = `0 ${receivingT("results")}`;
+        for (const id of ["receivingPrevBtn", "receivingNextBtn"]) {
+            const button = document.getElementById(id);
+            if (button) button.disabled = true;
+        }
         renderWarehouseList();
         renderCalendar();
         renderSchedule();
@@ -785,8 +824,10 @@ async function applyFilters(resetOffset = true) {
             ?.classList.remove("d-none");
         showToast(e.message, "danger");
     } finally {
-        if (listEl) listEl.classList.remove("opacity-50");
-        if (applyBtn) applyBtn.disabled = false;
+        if (requestVersion === receivingQueueRequestVersion) {
+            if (listEl) listEl.classList.remove("opacity-50");
+            if (applyBtn) applyBtn.disabled = false;
+        }
     }
 }
 
@@ -901,14 +942,14 @@ function renderReceivingImportProgress() {
                 ? "alert-warning"
                 : "alert-info";
     const stepMarkup = RECEIVING_IMPORT_STEPS.map((step, index) => {
-        const done = index < activeIndex || percent >= step.target;
+        const done = index < activeIndex || (index === activeIndex && state.type === "success");
         const active = index === activeIndex;
         const cls = done
             ? "text-success"
             : active
               ? "text-primary fw-semibold"
               : "text-muted";
-        const mark = done ? "OK" : active ? "Now" : "Next";
+        const mark = done ? "OK" : active ? (["warning","danger"].includes(state.type) ? "Error" : "Now") : "Next";
         return `<span class="${cls}">${mark} ${escapeHtml(receivingT(step.label))}</span>`;
     }).join("");
     const details = Array.isArray(state.details)
@@ -1004,7 +1045,7 @@ function startReceivingImportProgress(file) {
                 step === "saving"
                     ? "Saving receipts..."
                     : step === "rows"
-                      ? "Importing rows..."
+                      ? "Validating rows..."
                       : step === "preview"
                         ? "Preparing preview..."
                         : "Reading Excel...",
@@ -1285,12 +1326,12 @@ async function processReceivingImportFile(file) {
             },
         });
         const data = payload.data || {};
-        receivingImportPreviewToken = data.preview_token || null;
+        receivingImportPreviewToken = data.is_valid ? (data.preview_token || null) : null;
         renderReceivingImportPreview(data);
         setReceivingImportProgress({
             type: data.is_valid ? "success" : "warning",
             step: "preview",
-            percent: data.is_valid ? 88 : 100,
+            percent: 88,
             message: data.is_valid ? "Preview ready. Review and import." : "Preview has errors.",
             rowsText: receivingImportRowsText(data),
             details: [
@@ -1387,8 +1428,7 @@ async function commitReceivingImport() {
                 rows: result.row_count || 0,
             }),
         );
-        applyFilters();
-        loadReceivableOrders();
+        await applyFilters();
         renderReceivingImportPreview({
             rows: [],
             errors: [],
@@ -1581,6 +1621,8 @@ function receiveOrderById(orderId) {
     searchEl.dataset.selectedId = String(orderId);
     searchEl.dataset.declaredCbm = String(dcbm);
     searchEl.dataset.declaredWeight = String(dw);
+    delete searchEl.dataset.receivedCbm;
+    delete searchEl.dataset.receivedDamage;
     idEl.value = String(orderId);
     const exportBtn = document.getElementById("receiveOrderExportBtn");
     if (exportBtn) {
@@ -1753,14 +1795,7 @@ function renderSchedule() {
 }
 
 async function loadReceivableOrders() {
-    try {
-        const qs = getFilterParams();
-        const res = await api("GET", "/receiving/queue?" + qs);
-        warehouseQueueData = res.data || [];
-        renderReceiveDropdown();
-    } catch (e) {
-        showToast(e.message, "danger");
-    }
+    await applyFilters(false);
 }
 
 document.getElementById("toggleItemLevel")?.addEventListener("click", () => {
@@ -1836,9 +1871,9 @@ function fillReceiveActualsFromDeclared() {
     }
     const totals = receiveOrderItems.reduce(
         (acc, item) => {
-            acc.cartons += parseFloat(item.cartons || 0) || 0;
-            acc.cbm += parseFloat(item.declared_cbm || 0) || 0;
-            acc.weight += parseFloat(item.declared_weight || 0) || 0;
+            acc.cartons += parseFloat(item.remaining_cartons ?? item.cartons ?? 0) || 0;
+            acc.cbm += parseFloat(item.declared_cbm || 0) * ((item.remaining_quantity ?? item.quantity ?? 0) / (item.ordered_quantity || item.quantity || 1)) || 0;
+            acc.weight += parseFloat(item.declared_weight || 0) * ((item.remaining_quantity ?? item.quantity ?? 0) / (item.ordered_quantity || item.quantity || 1)) || 0;
             return acc;
         },
         { cartons: 0, cbm: 0, weight: 0 },
@@ -1853,15 +1888,16 @@ function fillReceiveActualsFromDeclared() {
     receiveOrderItems.forEach((item) => {
         const row = document.querySelector(`tr[data-order-item-id="${item.id}"]`);
         if (!row) return;
+        const remainingRatio = (item.remaining_quantity ?? item.quantity ?? 0) / (item.ordered_quantity || item.quantity || 1);
         const cbm = row.querySelector(".item-actual-cbm");
         const weightPerCarton = row.querySelector(".item-weight-per-carton");
         const weight = row.querySelector(".item-actual-weight");
         const height = row.querySelector(".item-actual-height");
         const width = row.querySelector(".item-actual-width");
         const length = row.querySelector(".item-actual-length");
-        if (cbm) cbm.value = formatReceiveInputNumber(item.declared_cbm || 0, 6);
+        if (cbm) cbm.value = formatReceiveInputNumber((item.declared_cbm || 0) * remainingRatio, 6);
         if (weightPerCarton) weightPerCarton.value = formatReceiveInputNumber(receivingDeclaredWeightPerCarton(item), 4);
-        if (weight) weight.value = formatReceiveInputNumber(item.declared_weight || 0, 4);
+        if (weight) weight.value = formatReceiveInputNumber((item.declared_weight || 0) * remainingRatio, 4);
         if (height) height.value = formatReceiveInputNumber(item.item_height ?? item.height ?? 0, 4);
         if (width) width.value = formatReceiveInputNumber(item.item_width ?? item.width ?? 0, 4);
         if (length) length.value = formatReceiveInputNumber(item.item_length ?? item.length ?? 0, 4);
@@ -1870,7 +1906,7 @@ function fillReceiveActualsFromDeclared() {
     });
     updateReceiveOrderLevelTotals();
     updateVariancePhotoAlert();
-    showToast(receivingT("Declared values copied into actual fields"));
+    showToast(receivingT("Declared estimates for remaining quantities copied into actual fields"));
 }
 
 function formatReceiveInputNumber(value, decimals = 4) {
@@ -1953,6 +1989,9 @@ function recalcReceiveItemRow(row, source = "auto") {
     const weightPerCartonInput = row.querySelector(".item-weight-per-carton");
     const weightInput = row.querySelector(".item-actual-weight");
 
+    if (source === "cartons" && cartons === 0) {
+        for (const input of [qtyInput, amountInput, cbmInput, weightInput]) if (input) input.value = "0";
+    }
     if (qtyInput && source !== "quantity" && cartons > 0 && pieces > 0) {
         qtyInput.value = formatReceiveInputNumber(cartons * pieces, 4);
     }
@@ -2031,9 +2070,10 @@ function updateReceiveOrderLevelTotals() {
     const cartonsInput = document.getElementById("actualCartons");
     const cbmInput = document.getElementById("actualCbm");
     const weightInput = document.getElementById("actualWeight");
-    if (cartonsInput && totals.cartons > 0) cartonsInput.value = formatReceiveInputNumber(totals.cartons, 0);
-    if (cbmInput && totals.cbm > 0) cbmInput.value = formatReceiveInputNumber(totals.cbm, 6);
-    if (weightInput && totals.weight > 0) weightInput.value = formatReceiveInputNumber(totals.weight, 4);
+    if (cartonsInput) cartonsInput.value = totals.cartons === 0 ? "0" : formatReceiveInputNumber(totals.cartons, 0);
+    if (cbmInput) cbmInput.value = totals.cbm === 0 ? "0" : formatReceiveInputNumber(totals.cbm, 6);
+    if (weightInput) weightInput.value = totals.weight === 0 ? "0" : formatReceiveInputNumber(totals.weight, 4);
+    updateVariancePhotoAlert();
 }
 
 function bindReceiveItemCalculation(row) {
@@ -2086,7 +2126,7 @@ function bindReceiveItemCalculation(row) {
             recalcReceiveItemRow(row, "dimensions");
         });
     });
-    row.querySelector(".item-condition")?.addEventListener("change", markDirty);
+    row.querySelector(".item-condition")?.addEventListener("change", () => { markDirty(); updateVariancePhotoAlert(); });
     recalcReceiveItemRow(row);
 }
 
@@ -2151,13 +2191,31 @@ function collectReceivePackagingSplits(orderItemId) {
         );
 }
 
-async function loadOrderForReceive(orderId) {
+async function loadOrderForReceive(orderId, preserveDraft = false) {
+    const loadVersion = preserveDraft ? receiveOrderLoadVersion : ++receiveOrderLoadVersion;
+    const preservedRows = preserveDraft ? [...document.querySelectorAll('#itemLevelBody tr[data-order-item-id], #itemLevelBody tr[data-parent-order-item-id]')] : [];
+    const preservedIds = new Set(preservedRows.map(row=>row.dataset.orderItemId).filter(Boolean));
     try {
         const res = await api("GET", "/orders/" + orderId);
+        if (loadVersion !== receiveOrderLoadVersion || document.getElementById("receiveOrderId")?.value !== String(orderId)) return;
         const order = res.data;
+        if (order?.cargo_totals?.quantity_complete === false) {
+            receiveOrderItems = [];
+            document.getElementById('itemLevelBody').innerHTML = '';
+            throw new Error('Historical item quantities require reconciliation before receiving.');
+        }
+        const searchEl = document.getElementById("receiveOrderSearch");
+        if (searchEl) {
+            searchEl.dataset.receivedCbm = String(order?.cargo_totals?.receipt_count ? order.cargo_totals.cbm : 0);
+            searchEl.dataset.receivedDamage = Number(order?.cargo_totals?.has_damage || 0) ? "1" : "0";
+        }
+        updateVariancePhotoAlert();
         receiveOrderItems = order?.items || [];
         const isNewReceiveOrder = String(receiveCurrentOrderId || "") !== String(orderId);
         if (isNewReceiveOrder) {
+            receivingOperationId = null;
+            receivePhotoPaths = [];
+            renderReceivePhotoPreview();
             receiveItemPhotos = {};
             receiveItemRenderLimit = RECEIVING_ITEM_RENDER_CHUNK;
             receiveCurrentOrderId = orderId;
@@ -2176,11 +2234,11 @@ async function loadOrderForReceive(orderId) {
                     const metaText = getReceivingItemMetaText(it);
                     return `
           <tr data-order-item-id="${it.id}">
-            <td>${escapeHtml((typeof descText === "function" ? descText(it) : it.description_en || it.description_cn || "Item " + (i + 1)).substring(0, 40))}${metaText ? `<div class="small text-muted">${escapeHtml(metaText)}</div>` : ""}${it.product_high_alert_note || it.product_required_design ? `<div class="product-alert-badge mt-1" title="${escapeHtml((it.product_required_design ? receivingT("Required design.") + " " : "") + (it.product_high_alert_note || ""))}">${escapeHtml(receivingT("Alert"))}</div>` : ""}<div class="small text-muted item-split-total mt-1"></div><button type="button" class="btn btn-sm btn-outline-primary mt-1 item-add-split-line" data-order-item-id="${it.id}">+ ${escapeHtml(receivingT("Split"))}</button></td>
+            <td>${escapeHtml((typeof descText === "function" ? descText(it) : it.description_en || it.description_cn || "Item " + (i + 1)).substring(0, 40))}${metaText ? `<div class="small text-muted">${escapeHtml(metaText)}</div>` : ""}${it.product_high_alert_note || it.product_required_design ? `<div class="product-alert-badge mt-1" title="${escapeHtml((it.product_required_design ? receivingT("Required design.") + " " : "") + (it.product_high_alert_note || ""))}">${escapeHtml(receivingT("Alert"))}</div>` : ""}<div class="small text-muted receiving-quantity-summary">Ordered: ${Number(it.ordered_quantity ?? it.quantity ?? 0)} &middot; Received: ${Number(it.received_quantity ?? 0)} &middot; Remaining: ${Number(it.remaining_quantity ?? it.quantity ?? 0)}</div><div class="small text-muted item-split-total mt-1"></div><button type="button" class="btn btn-sm btn-outline-primary mt-1 item-add-split-line" data-order-item-id="${it.id}">+ ${escapeHtml(receivingT("Split"))}</button></td>
             <td>${fmtReceivingNumber(it.declared_cbm || 0, 6)} CBM / ${fmtReceivingNumber(it.declared_weight || 0, 4)} kg<br><span class="small text-muted">${fmtReceivingNumber(it.cartons || 0, 4)} ${escapeHtml(receivingT("cartons"))} × ${fmtReceivingNumber(it.qty_per_carton || 0, 4)} = ${fmtReceivingNumber(it.quantity || 0, 4)}</span></td>
-            <td><input type="number" class="form-control form-control-sm item-actual-cartons" min="0" step="1" value="${escapeHtml(formatReceiveInputNumber(it.cartons || 0, 0))}" placeholder="${escapeHtml(String(it.cartons || 0))}"></td>
+            <td><input type="number" class="form-control form-control-sm item-actual-cartons" min="0" step="1" value="${escapeHtml(formatReceiveInputNumber(it.remaining_cartons ?? it.cartons ?? 0, 0))}" placeholder="${escapeHtml(String(it.cartons || 0))}"></td>
             <td><input type="number" class="form-control form-control-sm item-actual-pieces-per-carton" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.qty_per_carton || 0, 4))}"></td>
-            <td><input type="number" class="form-control form-control-sm item-actual-quantity" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.quantity || 0, 4))}"></td>
+            <td><input type="number" class="form-control form-control-sm item-actual-quantity" min="0" step="0.0001" max="${Number(it.remaining_quantity ?? it.quantity ?? 0)}" value="${escapeHtml(formatReceiveInputNumber(it.remaining_quantity ?? it.quantity ?? 0, 4))}"></td>
             <td><input type="number" class="form-control form-control-sm item-unit-price" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.unit_price || 0, 4))}"></td>
             <td><input type="number" class="form-control form-control-sm item-total-amount" min="0" step="0.0001" value="${escapeHtml(formatReceiveInputNumber(it.total_amount || 0, 4))}"></td>
             <td><input type="number" step="0.000001" class="form-control form-control-sm item-actual-cbm" min="0" placeholder="${escapeHtml(fmtReceivingNumber(it.declared_cbm || 0, 6))}"></td>
@@ -2201,10 +2259,19 @@ async function loadOrderForReceive(orderId) {
                     <div class="small text-muted mt-1">${escapeHtml(receivingT("Large order: items are loaded in batches to keep this page responsive."))}</div>
                   </td></tr>`
                 : "");
+        for (const row of preservedRows) {
+            if (row.dataset.orderItemId) tbody.querySelector(`tr[data-order-item-id="${row.dataset.orderItemId}"]`)?.replaceWith(row);
+            else {
+                const lines=[...tbody.querySelectorAll(`tr[data-order-item-id="${row.dataset.parentOrderItemId}"], tr[data-parent-order-item-id="${row.dataset.parentOrderItemId}"]`)];
+                lines.at(-1)?.after(row);
+            }
+        }
         tbody.querySelectorAll("tr[data-order-item-id]").forEach((row) => {
+            if (preservedIds.has(row.dataset.orderItemId)) return;
             bindReceiveItemCalculation(row);
         });
         tbody.querySelectorAll(".item-add-split-line").forEach((btn) => {
+            if (preservedIds.has(btn.dataset.orderItemId)) return;
             btn.addEventListener("click", () => {
                 addReceivePackagingSplitLine(btn.dataset.orderItemId);
             });
@@ -2232,7 +2299,7 @@ async function loadOrderForReceive(orderId) {
                 receiveOrderItems.length,
                 receiveItemRenderLimit + RECEIVING_ITEM_RENDER_CHUNK,
             );
-            loadOrderForReceive(orderId);
+            loadOrderForReceive(orderId, true);
         });
     } catch (e) {
         showToast(e.message, "danger");
@@ -2293,26 +2360,8 @@ async function submitReceive() {
         return;
     }
 
-    const searchEl = document.getElementById("receiveOrderSearch");
-    const declaredCbm = parseFloat(searchEl?.dataset.declaredCbm || 0);
-    const declaredWeight = parseFloat(searchEl?.dataset.declaredWeight || 0);
-    const variancePct =
-        declaredCbm > 0
-            ? (Math.abs(actualCbm - declaredCbm) / declaredCbm) * 100
-            : 0;
-    const varianceAbs = Math.abs(actualCbm - declaredCbm);
-    const hasVariance =
-        variancePct >= 10 || varianceAbs >= 0.1 || condition !== "good";
-    if (hasVariance && photoPaths.length === 0) {
-        showToast(
-            receivingT("Evidence photos required when variance or damage is present"),
-            "danger",
-        );
-        document
-            .getElementById("variancePhotoAlert")
-            ?.classList.remove("d-none");
-        return;
-    }
+    // The service validates evidence using configured thresholds, item totals,
+    // and previous partial receipts. This delivery alone cannot determine that.
 
     const items = [];
     const tbody = document.getElementById("itemLevelBody");
@@ -2372,6 +2421,7 @@ async function submitReceive() {
             const aTotalAmount = parseFloat(
                 row.querySelector(".item-total-amount")?.value || 0,
             );
+            if (aQuantity <= 0 && aCartons <= 0 && aCbm <= 0 && aWeight <= 0) return;
             const itCond =
                 row.querySelector(".item-condition")?.value || "good";
             const itPhotos = receiveItemPhotos[it.id] || [];
@@ -2397,7 +2447,7 @@ async function submitReceive() {
                     total_amount: splitTotals.amount || aTotalAmount || null,
                     packaging_splits: packagingSplits,
                     actual_cbm: aCbm || null,
-                    actual_weight: aWeight || null,
+                    actual_weight: row.querySelector(".item-actual-weight")?.value === "" ? null : aWeight,
                     weight_per_carton: aWeightPerCarton || null,
                     actual_height: aHeight || null,
                     actual_width: aWidth || null,
@@ -2435,13 +2485,17 @@ async function submitReceive() {
         );
         receivingOperationId = null;
         showToast(
-            res.data.variance_detected
+            res.data.idempotent_replay
+                ? receivingT("Receipt already recorded — no duplicate cargo added")
+                : res.data.status === "InTransitToWarehouse"
+                ? receivingT("Partial delivery received — order remains in transit")
+                : res.data.variance_detected
                 ? receivingT(
-                      "Received — auto-confirmed, customer follow-up sent",
+                      "Received — customer review link ready",
                   )
                 : receivingT("Received successfully"),
         );
-        loadReceivableOrders();
+        await loadReceivableOrders();
         document.getElementById("receiveForm").classList.add("d-none");
         document.getElementById("receiveOrderSearch").value = "";
         document.getElementById("receiveOrderId").value = "";

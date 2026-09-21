@@ -164,6 +164,7 @@ require 'includes/layout.php';
         <div id="hsCatalogImportStatus" class="small text-muted"></div>
         <div id="hsCatalogTranslateStatus" class="small text-muted mt-1"></div>
         <hr>
+        <?php if(in_array(strtolower((string)(getenv('APP_ENV') ?: 'production')),['local','development','testing'],true)): ?>
         <h5 class="mb-3 text-danger">Training Data Reset</h5>
         <div class="alert alert-warning small">
                 SuperAdmin only. Select exactly what should be removed from training data, enter the reset password, then confirm.
@@ -184,6 +185,7 @@ require 'includes/layout.php';
                 </div>
         </div>
         <div id="trainingResetStatus" class="small text-muted mb-3"></div>
+        <?php endif; ?>
         <button type="button" class="btn btn-primary" onclick="saveConfig()">Save</button>
 </form>
         </div>

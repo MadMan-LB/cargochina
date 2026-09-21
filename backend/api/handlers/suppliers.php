@@ -5,6 +5,10 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
+require_once dirname(__DIR__,2).'/services/AuditService.php';
+require_once dirname(__DIR__,2).'/services/CatalogRevisionService.php';
+require_once dirname(__DIR__,2).'/services/SupplierWriteService.php';
+require_once dirname(__DIR__,2).'/services/MasterDataImportService.php';
 
 function supplierTableHasColumn(PDO $pdo, string $table, string $column): bool
 {
@@ -459,7 +463,10 @@ function ensureSupplierDuplicateSafety(PDO $pdo, string $name, ?string $storeId,
 }
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('suppliers', $method, $id, $action);
     $pdo = getDb();
+    if ($method === 'GET') { require_once dirname(__DIR__, 2) . '/services/QueryFilterService.php'; QueryFilterService::validate($_GET, 'suppliers'); }
     $readRoles = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'];
     $buyerRoles = ['ChinaAdmin', 'ChinaEmployee', 'SuperAdmin'];
     $managementReadRoles = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'FieldStaff', 'SuperAdmin'];
@@ -483,6 +490,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         }
     }
 
+    if(($method==='POST'&&$id===null)||$method==='PUT'){
+        $input=SupplierWriteService::normalize($input);
+        MasterDataImportService::lock($pdo,'supplier');
+    }
+    $createClaim=null;
+    if($method==='POST' && $id===null) {
+        $createClaim=OperationReplayService::claim($pdo,'catalog_suppliers',$input,(int)getAuthUserId());
+        if($createClaim['previous_id']) jsonResponse(['data'=>['id'=>$createClaim['previous_id']],'idempotent_replay'=>true]);
+    }
     switch ($method) {
         case 'GET':
             if ($id === 'wechat-qr-duplicate') {
@@ -537,9 +553,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 $settlementExpr = supplierSettlementDeltaExpr($pdo);
                 if ($paymentStatus === 'outstanding') {
-                    $where[] = "EXISTS (SELECT 1 FROM (SELECT currency, SUM(COALESCE(invoice_amount, amount)) as inv, SUM(amount) as paid, SUM($settlementExpr) as settled FROM supplier_payments WHERE supplier_id = s.id GROUP BY currency) x WHERE (inv - paid - settled) > 0)";
+                    $where[] = "EXISTS (SELECT 1 FROM supplier_payments WHERE supplier_id = s.id GROUP BY currency HAVING SUM(COALESCE(invoice_amount, amount)) - SUM(amount) - SUM($settlementExpr) > 0)";
                 } elseif ($paymentStatus === 'fully_paid') {
-                    $where[] = "NOT EXISTS (SELECT 1 FROM (SELECT currency, SUM(COALESCE(invoice_amount, amount)) as inv, SUM(amount) as paid, SUM($settlementExpr) as settled FROM supplier_payments WHERE supplier_id = s.id GROUP BY currency) x WHERE (inv - paid - settled) > 0)";
+                    $where[] = "NOT EXISTS (SELECT 1 FROM supplier_payments WHERE supplier_id = s.id GROUP BY currency HAVING SUM(COALESCE(invoice_amount, amount)) - SUM(amount) - SUM($settlementExpr) > 0)";
                 }
                 $sql = "SELECT s.* FROM suppliers s";
                 if (!empty($where)) {
@@ -569,6 +585,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 jsonResponse(['data' => $rows, 'meta' => ['limit' => $limit, 'offset' => $offset, 'has_more' => $hasMore, 'total' => $total]]);
             }
+            $revisionReadOwned = !$pdo->inTransaction();
+            if ($revisionReadOwned) AuditService::begin($pdo);
             $stmt = $pdo->prepare("SELECT * FROM suppliers WHERE id = ?");
             $stmt->execute([$id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -616,153 +634,36 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if (!$canViewFinancials) {
                 unset($row['commission_rate'], $row['commission_type'], $row['commission_applied_on']);
             }
+            $row['revision']=CatalogRevisionService::revision($pdo,'suppliers',(int)$id);
+            if ($revisionReadOwned) $pdo->commit();
             jsonResponse(['data' => $row]);
 
         case 'POST':
             if ($id === 'import') {
-                $csv = trim($input['csv'] ?? $input['data'] ?? '');
-                if (!$csv) jsonError('No CSV data provided', 400);
-                $lines = preg_split('/\r\n|\r|\n/', $csv);
-                $header = array_map('trim', str_getcsv(array_shift($lines) ?? ''));
-                $headerLower = array_map('strtolower', $header);
-                $codeSearch = array_search('code', $headerLower, true);
-                $nameSearch = array_search('name', $headerLower, true);
-                $codeIdx = $codeSearch !== false ? $codeSearch : null;
-                $nameIdx = $nameSearch !== false ? $nameSearch : ($codeIdx === 0 ? 1 : 0);
-                $storeIdx = array_search('store_id', $headerLower, true) !== false ? array_search('store_id', $headerLower, true) : null;
-                $phoneIdx = array_search('phone', $headerLower, true) !== false ? array_search('phone', $headerLower, true) : null;
-                $factoryIdx = array_search('factory_location', $headerLower, true) !== false ? array_search('factory_location', $headerLower, true) : null;
-                $addressIdx = array_search('address', $headerLower, true) !== false ? array_search('address', $headerLower, true) : null;
-                $notesIdx = array_search('notes', $headerLower, true) !== false ? array_search('notes', $headerLower, true) : null;
-                $hasAddr = supplierTableHasColumn($pdo, 'suppliers', 'address');
-                $created = 0;
-                $skipped = 0;
-                $errors = [];
-                foreach ($lines as $i => $line) {
-                    $row = str_getcsv($line);
-                    if (count($row) < 2) continue;
-                    $code = $codeIdx !== null ? trim($row[$codeIdx] ?? '') : '';
-                    $name = trim($row[$nameIdx] ?? $row[1] ?? '');
-                    if (!$name) {
-                        $skipped++;
-                        continue;
-                    }
-                    if (!$code) {
-                        $code = generateSupplierCode($pdo, $name);
-                    }
-                    $storeId = $storeIdx !== null && isset($row[$storeIdx]) ? trim($row[$storeIdx]) : null;
-                    $phone = $phoneIdx !== null && isset($row[$phoneIdx]) ? trim($row[$phoneIdx]) : null;
-                    $factory = $factoryIdx !== null && isset($row[$factoryIdx]) ? trim($row[$factoryIdx]) : null;
-                    $address = $addressIdx !== null && isset($row[$addressIdx]) ? trim($row[$addressIdx]) : null;
-                    $notes = $notesIdx !== null && isset($row[$notesIdx]) ? trim($row[$notesIdx]) : null;
-                    try {
-                        $columns = "code, store_id, name, phone, factory_location, notes";
-                        $values = "?,?,?,?,?,?";
-                        $params = [$code, $storeId ?: null, $name, $phone ?: null, $factory ?: null, $notes ?: null];
-                        if ($hasAddr) {
-                            $columns .= ", address";
-                            $values .= ",?";
-                            $params[] = $address ?: null;
-                        }
-                        $pdo->prepare("INSERT INTO suppliers ($columns) VALUES ($values)")
-                            ->execute($params);
-                        $created++;
-                    } catch (PDOException $e) {
-                        if ($e->getCode() == 23000) $skipped++;
-                        else $errors[] = "Row " . ($i + 2) . ": " . $e->getMessage();
-                    }
-                }
-                jsonResponse(['data' => ['created' => $created, 'skipped' => $skipped, 'errors' => $errors]]);
+                $result=MasterDataImportService::run($pdo,'supplier',$input,['name'],['code','name','store_id','phone','factory_location','address','notes'],function(array $row)use($pdo):?int{
+                    $row=SupplierWriteService::normalize($row);
+                    if(!empty($row['code'])){$s=$pdo->prepare('SELECT id FROM suppliers WHERE code=?');$s->execute([$row['code']]);if($s->fetchColumn())return null;}
+                    ensureSupplierDuplicateSafety($pdo,$row['name'],$row['store_id']??null,$row['phone']??null);
+                    $fields=['code','name','store_id','phone','factory_location','address','notes'];$row['code']=$row['code']??generateSupplierCode($pdo,$row['name']);$values=[];foreach($fields as $field)$values[]=$row[$field]??null;
+                    $pdo->prepare('INSERT INTO suppliers('.implode(',',$fields).') VALUES (?,?,?,?,?,?,?)')->execute($values);return (int)$pdo->lastInsertId();
+                });
+                jsonResponse(['data'=>$result]);
             }
             if ($id && $action === 'payments') {
-                $stmt = $pdo->prepare("SELECT id FROM suppliers WHERE id = ?");
-                $stmt->execute([$id]);
-                if (!$stmt->fetch()) jsonError('Supplier not found', 404);
-                $amount = clmsFinancialDecimal($input['amount'] ?? null, 'Amount');
-                $currency = trim($input['currency'] ?? 'RMB');
-                if (!in_array($currency, ['USD', 'RMB'], true)) jsonError('Currency must be USD or RMB', 400);
-                $paymentType = in_array($input['payment_type'] ?? '', ['partial', 'full']) ? $input['payment_type'] : 'partial';
-                $paymentChannel = normalizeSupplierPaymentMethodName((string) ($input['payment_channel'] ?? ''));
-                if ($paymentChannel !== '' && !in_array($paymentChannel, ['WeChat', 'Alipay', 'Bank Transfer'], true)) {
-                    jsonError('Unsupported payment channel', 400);
+                require_once dirname(__DIR__,2).'/services/SupplierPaymentService.php';
+                require_once dirname(__DIR__,2).'/services/OperationReplayService.php';
+                $userId=requireAuth();$input['supplier_id']=(int)$id;
+                $claim=OperationReplayService::claim($pdo,'supplier_payment',$input,$userId);
+                if($claim['previous_id']){
+                    $s=$pdo->prepare('SELECT * FROM supplier_payments WHERE id=?');$s->execute([$claim['previous_id']]);$saved=$s->fetch(PDO::FETCH_ASSOC);if(!$saved)jsonError('Original payment no longer exists',409);jsonResponse(['data'=>$saved]);
                 }
-                $paymentAccountLabel = trim((string) ($input['payment_account_label'] ?? '')) ?: null;
-                $paymentAccountValue = trim((string) ($input['payment_account_value'] ?? '')) ?: null;
-                $paymentAccountQrPath = trim((string) ($input['payment_account_qr_path'] ?? '')) ?: null;
-                if ($paymentAccountQrPath !== null && str_contains($paymentAccountQrPath, '..')) {
-                    jsonError('Invalid payment account QR path', 400);
-                }
-                $notes = $input['notes'] ?? null;
-                $orderId = !empty($input['order_id']) ? (int) $input['order_id'] : null;
-                $invoiceAmount = isset($input['invoice_amount']) && $input['invoice_amount'] !== ''
-                    ? clmsFinancialDecimal($input['invoice_amount'], 'Invoice amount')
-                    : null;
-                $markedFull = !empty($input['marked_full_payment']) ? 1 : 0;
-                $settlementMode = trim((string) ($input['settlement_mode'] ?? ''));
-                $settlementNote = trim((string) ($input['settlement_note'] ?? '')) ?: null;
-                $invoiceExceedsPayment = $invoiceAmount !== null && DecimalMath::compare($invoiceAmount, $amount) > 0;
-                $settlementDelta = ($invoiceExceedsPayment && $markedFull)
-                    ? DecimalMath::subtract($invoiceAmount, $amount)
-                    : '0.0000';
-                $discountAmount = $invoiceExceedsPayment ? DecimalMath::subtract($invoiceAmount, $amount) : '0.0000';
-                $userId = getAuthUserId() ?? 1;
-                $markedBy = $markedFull ? $userId : null;
-                if ($orderId) {
-                    $orderStmt = $pdo->prepare("SELECT id FROM orders WHERE id = ? AND (supplier_id = ? OR EXISTS (SELECT 1 FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = orders.id AND COALESCE(oi.supplier_id, p.supplier_id) = ?))");
-                    $orderStmt->execute([$orderId, $id, $id]);
-                    if (!$orderStmt->fetchColumn()) {
-                        jsonError('Selected order does not belong to this supplier', 400);
-                    }
-                }
-                if ($markedFull && DecimalMath::compare($settlementDelta, '0') > 0 && $settlementMode === '') {
-                    $settlementMode = 'fully_settled_by_agreement';
-                }
-
-                $columns = ['supplier_id', 'order_id', 'amount', 'invoice_amount', 'discount_amount', 'marked_full_payment', 'marked_by', 'currency', 'payment_type', 'notes'];
-                $values = ['?', '?', '?', '?', '?', '?', '?', '?', '?', '?'];
-                $params = [$id, $orderId, $amount, $invoiceAmount, $discountAmount, $markedFull, $markedBy, $currency, $paymentType, $notes];
-                if (supplierTableHasColumn($pdo, 'supplier_payments', 'payment_channel')) {
-                    $columns[] = 'payment_channel';
-                    $values[] = '?';
-                    $params[] = $paymentChannel ?: null;
-                }
-                if (supplierTableHasColumn($pdo, 'supplier_payments', 'payment_account_label')) {
-                    $columns[] = 'payment_account_label';
-                    $values[] = '?';
-                    $params[] = $paymentAccountLabel;
-                }
-                if (supplierTableHasColumn($pdo, 'supplier_payments', 'payment_account_value')) {
-                    $columns[] = 'payment_account_value';
-                    $values[] = '?';
-                    $params[] = $paymentAccountValue;
-                }
-                if (supplierTableHasColumn($pdo, 'supplier_payments', 'payment_account_qr_path')) {
-                    $columns[] = 'payment_account_qr_path';
-                    $values[] = '?';
-                    $params[] = $paymentAccountQrPath;
-                }
-                if (supplierTableHasColumn($pdo, 'supplier_payments', 'settlement_delta')) {
-                    $columns[] = 'settlement_delta';
-                    $values[] = '?';
-                    $params[] = $settlementDelta;
-                }
-                if (supplierTableHasColumn($pdo, 'supplier_payments', 'settlement_mode')) {
-                    $columns[] = 'settlement_mode';
-                    $values[] = '?';
-                    $params[] = $settlementMode ?: null;
-                }
-                if (supplierTableHasColumn($pdo, 'supplier_payments', 'settlement_note')) {
-                    $columns[] = 'settlement_note';
-                    $values[] = '?';
-                    $params[] = $settlementNote;
-                }
-                $pdo->prepare("INSERT INTO supplier_payments (" . implode(', ', $columns) . ") VALUES (" . implode(', ', $values) . ")")
-                    ->execute($params);
-                $newId = (int) $pdo->lastInsertId();
-                logClms('supplier_payment', ['supplier_id' => (int)$id, 'payment_id' => $newId, 'amount' => $amount, 'invoice_amount' => $invoiceAmount, 'discount' => $discountAmount, 'settlement_delta' => $settlementDelta, 'settlement_mode' => $settlementMode, 'marked_full' => $markedFull]);
-                $row = $pdo->prepare("SELECT * FROM supplier_payments WHERE id = ?");
-                $row->execute([$newId]);
-                jsonResponse(['data' => $row->fetch(PDO::FETCH_ASSOC)], 201);
+                $pdo->beginTransaction();register_shutdown_function(static function()use($pdo){if($pdo->inTransaction())$pdo->rollBack();});
+                try {
+                    $newId=SupplierPaymentService::insert($pdo,(int)$id,$input,$userId);
+                    $s=$pdo->prepare('SELECT * FROM supplier_payments WHERE id=?');$s->execute([$newId]);$saved=$s->fetch(PDO::FETCH_ASSOC);
+                    OperationReplayService::record($pdo,'supplier_payment',$newId,$claim,$saved,$userId);
+                    $pdo->commit();jsonResponse(['data'=>$saved],201);
+                }catch(Throwable $e){if($pdo->inTransaction())$pdo->rollBack();throw $e;}
             }
             if ($id && $action === 'balance') {
                 $stmt = $pdo->prepare("SELECT id FROM suppliers WHERE id = ?");
@@ -793,6 +694,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $type = in_array($input['interaction_type'] ?? '', ['visit', 'quote', 'note']) ? $input['interaction_type'] : 'visit';
                 $content = isset($input['content']) ? json_encode($input['content']) : null;
                 $userId = getAuthUserId();
+                AuditService::begin($pdo);
                 $pdo->prepare("INSERT INTO supplier_interactions (supplier_id, interaction_type, content, created_by) VALUES (?,?,?,?)")
                     ->execute([$id, $type, $content, $userId]);
                 $newId = (int) $pdo->lastInsertId();
@@ -800,6 +702,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $row->execute([$newId]);
                 $r = $row->fetch(PDO::FETCH_ASSOC);
                 $r['content'] = $r['content'] ? json_decode($r['content'], true) : null;
+                AuditService::record($pdo,'supplier_interaction',$newId,'create',null,$r,$userId);$pdo->commit();
                 jsonResponse(['data' => $r], 201);
             }
             $code = trim($input['code'] ?? '');
@@ -824,6 +727,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             [$commissionRate, $commissionType, $commissionAppliedOn] = normalizeSupplierCommission($input);
             ensureSupplierDuplicateSafety($pdo, $name, $storeId, $phone);
             ensureSupplierQrDuplicateSafety($pdo, $paymentLinks, null);
+            AuditService::begin($pdo);
             try {
                 $hasAddr = supplierTableHasColumn($pdo, 'suppliers', 'address');
                 $hasFax = supplierTableHasColumn($pdo, 'suppliers', 'fax');
@@ -869,6 +773,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $row['contacts'] = $row['contacts'] ? json_decode($row['contacts'], true) : [];
                 $row['additional_ids'] = $row['additional_ids'] ? json_decode($row['additional_ids'], true) : [];
                 $row['payment_links'] = decodeSupplierPaymentLinks($row['payment_links'] ?? null);
+                AuditService::record($pdo,'supplier',$newId,'create',null,AuditService::snapshot($pdo,'suppliers',$newId),getAuthUserId());
+                OperationReplayService::record($pdo,'catalog_suppliers',$newId,$createClaim,[],(int)getAuthUserId());$pdo->commit();
                 jsonResponse(['data' => $row], 201);
             } catch (PDOException $e) {
                 if ($e->getCode() == 23000) {
@@ -881,6 +787,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if (!$id) {
                 jsonError('ID required', 400);
             }
+            AuditService::begin($pdo);
+            $auditBefore=AuditService::snapshot($pdo,'suppliers',(int)$id,true);
+            CatalogRevisionService::assertCurrent($pdo,'suppliers',(int)$id,$input);
             $stmt = $pdo->prepare("SELECT id, code FROM suppliers WHERE id = ?");
             $stmt->execute([$id]);
             $existingSupplier = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -946,17 +855,22 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $row['contacts'] = $row['contacts'] ? json_decode($row['contacts'], true) : [];
             $row['additional_ids'] = $row['additional_ids'] ? json_decode($row['additional_ids'], true) : [];
             $row['payment_links'] = decodeSupplierPaymentLinks($row['payment_links'] ?? null);
+            AuditService::record($pdo,'supplier',(int)$id,'update',$auditBefore,AuditService::snapshot($pdo,'suppliers',(int)$id),getAuthUserId());$pdo->commit();
             jsonResponse(['data' => $row]);
 
         case 'DELETE':
             if (!$id) {
                 jsonError('ID required', 400);
             }
+            AuditService::begin($pdo);
+            $auditBefore=AuditService::snapshot($pdo,'suppliers',(int)$id,true);
+            CatalogRevisionService::assertCurrent($pdo,'suppliers',(int)$id,$input);
             $stmt = $pdo->prepare("DELETE FROM suppliers WHERE id = ?");
             $stmt->execute([$id]);
             if ($stmt->rowCount() === 0) {
                 jsonError('Supplier not found', 404);
             }
+            AuditService::record($pdo,'supplier',(int)$id,'delete',$auditBefore,null,getAuthUserId());$pdo->commit();
             jsonResponse(['message' => 'Deleted']);
 
         default:

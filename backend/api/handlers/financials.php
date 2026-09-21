@@ -188,6 +188,8 @@ function financialsBuildOrderItemAnalysis(PDO $pdo, array $orderIds): array
 }
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('financials', $method, $id, $action);
     $pdo = getDb();
     if (!getAuthUserId()) jsonError('Unauthorized', 401);
     requirePageAccess('financials');

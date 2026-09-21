@@ -1,3 +1,5 @@
+let productRevision = "", productCreateRequest = null, productSaving = false, productEditorVersion = 0;
+let productsListLoadVersion = 0;
 let productImagePaths = [];
 let productDescEntries = [];
 let productSupplierAutocomplete = null;
@@ -625,6 +627,7 @@ function updateProductsOverview(rows) {
 }
 
 async function loadProducts(resetOffset = true) {
+    const listRequest = ++productsListLoadVersion;
     if (resetOffset) productsOffset = 0;
     try {
         const filters = getProductFilters();
@@ -647,7 +650,9 @@ async function loadProducts(resetOffset = true) {
             "GET",
             "/products" + (params.toString() ? "?" + params.toString() : ""),
         );
+        if(listRequest !== productsListLoadVersion) return;
         const rows = res.data || [];
+        if (!rows.length && productsOffset > 0 && Number.isFinite(Number(res.meta?.total))) { productsOffset = Math.max(0, Math.floor((Number(res.meta.total)-1)/productsLimit)*productsLimit); return loadProducts(false); }
         const prev=document.getElementById("productsPrevBtn"),next=document.getElementById("productsNextBtn");if(prev)prev.disabled=productsOffset<=0;if(next)next.disabled=!res.meta?.has_more;const pageSummary=document.getElementById("productsPageSummary");if(pageSummary)pageSummary.textContent=typeof t==="function"?t("Showing {from}-{to} of {total}",{from:rows.length?productsOffset+1:0,to:productsOffset+rows.length,total:res.meta?.total??rows.length}):`Showing ${rows.length?productsOffset+1:0}-${productsOffset+rows.length} of ${res.meta?.total??rows.length}`;
         updateProductsOverview(rows);
         tbody.innerHTML =
@@ -679,6 +684,8 @@ async function loadProducts(resetOffset = true) {
                 .join("") ||
             '<tr><td colspan="12" class="text-center text-muted py-4">No products match the current filters.</td></tr>';
     } catch (e) {
+        if(listRequest !== productsListLoadVersion) return;
+        ["productsPrevBtn","productsNextBtn"].forEach(id=>{ const button=document.getElementById(id); if(button)button.disabled=true; });
         updateProductsOverview([]);
         const tbody = document.querySelector("#productsTable tbody");
         if (tbody) {
@@ -711,6 +718,7 @@ window.clearProductFilters = function () {
 };
 
 function openProductForm() {
+    ++productEditorVersion; productRevision=""; productCreateRequest=null;
     document.getElementById("productForm").reset();
     document.getElementById("productId").value = "";
     document.getElementById("productSupplierId").value = "";
@@ -745,9 +753,12 @@ function openProductForm() {
 }
 
 async function editProduct(id) {
+    const editorVersion=++productEditorVersion;
     try {
         const res = await api("GET", "/products/" + id);
         const d = res.data;
+        if(editorVersion !== productEditorVersion) return;
+        productRevision=d.revision;
         document.getElementById("productId").value = d.id;
         document.getElementById("productItemType").value=d.item_type_code === "unclassified" ? "" : (d.item_type_code || "");
         productDescEntries = (d.description_entries || []).map((e) => ({
@@ -847,6 +858,7 @@ async function editProduct(id) {
 }
 
 async function saveProduct() {
+    if(productSaving) return;
     const btn = document.getElementById("productSaveBtn");
     const id = document.getElementById("productId").value;
     const cbmRaw = document.getElementById("productCbm").value;
@@ -918,6 +930,13 @@ async function saveProduct() {
         return;
     }
     if(!payload.item_type_code){showToast("Choose and confirm an item type before saving","danger");return;}
+    if(id) payload.revision=productRevision;
+    else {
+        const signature=JSON.stringify(payload);
+        if(productCreateRequest?.signature!==signature) productCreateRequest={signature,key:clmsRequestKey('product-create')};
+        payload.idempotency_key=productCreateRequest.key;
+    }
+    productSaving=true;
     try {
         setLoading(btn, true);
         if (id) {
@@ -930,26 +949,31 @@ async function saveProduct() {
         bootstrap.Modal.getInstance(
             document.getElementById("productModal"),
         ).hide();
-        loadProducts();
+        loadProducts(false);
     } catch (e) {
         showToast(e.message, "danger");
     } finally {
+        productSaving=false;
         setLoading(btn, false);
     }
 }
 
 async function deleteProduct(id) {
-    if (!confirm("Delete this product?")) return;
+
     try {
-        await api("DELETE", "/products/" + id);
+        const current=(await api("GET", "/products/"+id)).data;
+    if (!confirm("Delete this product?")) return;
+        await api("DELETE", "/products/" + id, {revision:current.revision});
         showToast("Product deleted");
-        loadProducts();
+        loadProducts(false);
     } catch (e) {
         showToast(e.message, "danger");
     }
 }
 
 window.openImportModal = function (entity) {
+    window._productImportRequestKey=clmsRequestKey('product-import');
+    window._productImportCsv=null;
     window._importEntity = entity || "products";
     window._importOnSuccess = loadProducts;
     const ta = document.getElementById("importCsvData");
@@ -978,7 +1002,8 @@ window.doImport = async function () {
             resultEl.classList.add("d-none");
             resultEl.textContent = "";
         }
-        const res = await api("POST", "/" + entity + "/import", { csv });
+        if(window._productImportCsv!==csv){window._productImportRequestKey=clmsRequestKey("product-import");window._productImportCsv=csv;}
+        const res = await api("POST", "/" + entity + "/import", { csv,idempotency_key:window._productImportRequestKey });
         const d = res.data;
         let msg = `Created: ${d.created}, Skipped: ${d.skipped}`;
         if (d.errors?.length) msg += `; Errors: ${d.errors.join("; ")}`;
@@ -993,6 +1018,7 @@ window.doImport = async function () {
         showToast(msg);
         if (d.created > 0 && window._importOnSuccess) window._importOnSuccess();
     } catch (e) {
+        if(resultEl){resultEl.textContent=e.message;resultEl.className="alert alert-danger mt-2";}
         showToast(e.message, "danger");
     } finally {
         setLoading(btn, false);

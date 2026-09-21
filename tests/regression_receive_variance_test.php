@@ -137,9 +137,10 @@ try {
         $pdo->commit();
 
         $result = (new OrderReceivingService())->receive($pdo, $calcOrderId, [
+            'idempotency_key'=>'derived-metrics-'.$calcOrderId,
             'actual_cartons' => 10,
-            'actual_cbm' => 0,
-            'actual_weight' => 0,
+            'actual_cbm' => 6,
+            'actual_weight' => 25,
             'condition' => 'good',
             'photo_paths' => [],
             'items' => [[
@@ -188,7 +189,7 @@ try {
         }
 
         $secondKey = 'audit-partial-final-' . $partialOrderId;
-        $second = $service->receive($pdo, $partialOrderId, [
+        $secondPayload = [
             'idempotency_key' => $secondKey,
             'actual_cartons' => 6,
             'actual_cbm' => 0.6,
@@ -201,14 +202,13 @@ try {
                 'actual_weight' => 6,
                 'condition' => 'good',
             ]],
-        ], (int) $user['id']);
+        ];
+        $second = $service->receive($pdo,$partialOrderId,$secondPayload,(int)$user['id']);
         if ($second['status'] !== 'ReadyForConsolidation' || !empty($second['variance_detected'])) {
             throw new Exception('Cumulative final receipt was incorrectly treated as a variance');
         }
 
-        $replay = $service->receive($pdo, $partialOrderId, [
-            'idempotency_key' => $secondKey,
-        ], (int) $user['id']);
+        $replay = $service->receive($pdo, $partialOrderId, $secondPayload, (int) $user['id']);
         if (empty($replay['idempotent_replay']) || (int) $replay['receipt_id'] !== (int) $second['receipt_id']) {
             throw new Exception('Idempotent replay did not return the original receipt');
         }

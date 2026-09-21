@@ -47,6 +47,8 @@ function diagnosticsCountRows(PDO $pdo, string $table): ?int
 }
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('diagnostics', $method, $id, $action);
     requireRole(['SuperAdmin']);
     $pdo = getDb();
 

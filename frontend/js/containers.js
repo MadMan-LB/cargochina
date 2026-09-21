@@ -1,3 +1,4 @@
+let containersListLoadVersion = 0;
 const CONTAINERS_API_BASE = window.API_BASE || "/cargochina/api/v1";
 
 // Status display config
@@ -14,29 +15,34 @@ let _searchTimer = null;
 let containersOffset = 0;
 const containersLimit = 50;
 const fmtContainerAmount = (value) =>
-    typeof window.formatDisplayAmount === "function"
+    value === null ? "—" : typeof window.formatDisplayAmount === "function"
         ? window.formatDisplayAmount(value)
         : String(parseFloat(value || 0) || 0);
 const fmtContainerCbm = (value, maxDecimals = 3) =>
-    typeof window.formatDisplayCbm === "function"
+    value === null ? "—" : typeof window.formatDisplayCbm === "function"
         ? window.formatDisplayCbm(value, maxDecimals)
         : String(parseFloat(value || 0) || 0);
 const fmtContainerWeight = (value, maxDecimals = 2) =>
-    typeof window.formatDisplayWeight === "function"
+    value === null ? "—" : typeof window.formatDisplayWeight === "function"
         ? window.formatDisplayWeight(value, maxDecimals)
         : String(parseFloat(value || 0) || 0);
 const fmtContainerQty = (value, maxDecimals = 2) =>
-    typeof window.formatDisplayQuantity === "function"
+    value === null ? "—" : typeof window.formatDisplayQuantity === "function"
         ? window.formatDisplayQuantity(value, maxDecimals)
         : String(parseFloat(value || 0) || 0);
 const fmtContainerPercent = (value, maxDecimals = 1) =>
-    typeof window.formatDisplayPercent === "function"
+    value === null ? "—" : typeof window.formatDisplayPercent === "function"
         ? window.formatDisplayPercent(value, maxDecimals)
         : String(parseFloat(value || 0) || 0);
 
 function containerStatusDisplay(status) {
     const label = CONTAINER_STATUS[status]?.label || status || "—";
     return typeof t === "function" ? t(label) : label;
+}
+
+function containerFillPercent(container) {
+    if (container.capacity_known === false) return null;
+    return Math.max(Number(container.used_cbm || 0)/Number(container.max_cbm || 1),Number(container.used_weight || 0)/Number(container.max_weight || 1))*100;
 }
 
 function getContainerDestinationCountryId(container) {
@@ -97,7 +103,7 @@ function updateContainerOverview(rows) {
     );
     setText(
         "containersHighLoadCount",
-        list.filter((c) => (parseFloat(c.fill_pct_cbm) || 0) >= 85).length,
+        list.filter((c) => containerFillPercent(c) >= 85).length,
     );
     setText(
         "containersAssignedOrders",
@@ -174,6 +180,7 @@ window.clearContainerStatusFilter = function () {
 };
 
 async function loadContainers(resetOffset = true) {
+    const listRequest = ++containersListLoadVersion;
     if(resetOffset)containersOffset=0;
     const tbody = document.getElementById("containersTbody");
     const label = document.getElementById("containerCountLabel");
@@ -204,10 +211,13 @@ async function loadContainers(resetOffset = true) {
                     : (typeof t === "function" ? t("Failed to load containers") : "Failed to load containers"),
             );
         const data = await res.json();
+        if(listRequest !== containersListLoadVersion) return;
         _allContainers = data.data || [];
+        if (!_allContainers.length && containersOffset > 0 && Number.isFinite(Number(data.meta?.total))) { containersOffset=Math.max(0,Math.floor((Number(data.meta.total)-1)/containersLimit)*containersLimit);return loadContainers(false); }
         const prev=document.getElementById("containersPrevBtn"),next=document.getElementById("containersNextBtn");if(prev)prev.disabled=containersOffset<=0;if(next)next.disabled=!data.meta?.has_more;const summary=document.getElementById("containersPageSummary");if(summary)summary.textContent=typeof t==="function"?t("Showing {from}-{to} of {total}",{from:_allContainers.length?containersOffset+1:0,to:containersOffset+_allContainers.length,total:data.meta?.total??_allContainers.length}):`Showing ${_allContainers.length?containersOffset+1:0}-${containersOffset+_allContainers.length} of ${data.meta?.total??_allContainers.length}`;
         applyClientFilters();
     } catch (e) {
+        if(listRequest !== containersListLoadVersion) return;
         updateContainerOverview([]);
         tbody.innerHTML = `<tr><td colspan="10" class="text-center text-danger py-4">${escHtml(e.message)}</td></tr>`;
     }
@@ -259,9 +269,10 @@ function applyClientFilters() {
     let rows = _allContainers;
     if (fill) {
         rows = rows.filter((c) => {
-            const pct = c.fill_pct_cbm || 0;
-            if (fill === "empty") return pct === 0;
-            if (fill === "partial") return pct > 0 && pct < 85;
+            const pct = containerFillPercent(c);
+            if (pct === null && fill !== 'launching_soon') return false;
+            if (fill === "empty") return Number(c.order_count || 0) === 0;
+            if (fill === "partial") return Number(c.order_count || 0)>0 && pct < 85;
             if (fill === "almost") return pct >= 85 && pct < 100;
             if (fill === "full") return pct >= 100;
             if (fill === "launching_soon") {
@@ -301,9 +312,9 @@ function applyClientFilters() {
             const barC = (p) =>
                 p >= 100 ? "#dc2626" : p >= 85 ? "#d97706" : "#16a34a";
             const bar = (p) =>
-                `<div style="height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;"><div style="height:100%;width:${Math.min(100, p)}%;background:${barC(p)};border-radius:3px;"></div></div><small class="text-muted">${fmtContainerCbm(c.used_cbm || 0, 2)}/${fmtContainerCbm(c.max_cbm, 2)}</small>`;
+                c.capacity_known === false ? '<span class="text-warning">Reconciliation required</span>' : `<div style="height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;"><div style="height:100%;width:${Math.min(100, p)}%;background:${barC(p)};border-radius:3px;"></div></div><small class="text-muted">${fmtContainerCbm(c.used_cbm || 0, 6)}/${fmtContainerCbm(c.max_cbm, 4)}</small>`;
             const wBar = (p) =>
-                `<div style="height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;"><div style="height:100%;width:${Math.min(100, p)}%;background:${barC(p)};border-radius:3px;"></div></div><small class="text-muted">${fmtContainerWeight(c.used_weight || 0, 0)}/${fmtContainerWeight(c.max_weight, 0)} kg</small>`;
+                c.capacity_known === false ? '—' : `<div style="height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;"><div style="height:100%;width:${Math.min(100, p)}%;background:${barC(p)};border-radius:3px;"></div></div><small class="text-muted">${fmtContainerWeight(c.used_weight || 0, 4)}/${fmtContainerWeight(c.max_weight, 4)} kg</small>`;
             const destination = getContainerDestinationDisplay(c);
             const eta = c.eta_date || "";
             const shipDate = c.expected_ship_date || "";
@@ -333,7 +344,7 @@ function applyClientFilters() {
             <td>${escHtml(String(c.max_weight ?? ""))}</td>
             <td class="d-flex gap-1 flex-wrap">
               <button class="btn btn-sm btn-outline-secondary js-edit-container" data-id="${c.id}" data-code="${escHtml(c.code || "")}" title="Edit container info">Edit</button>
-              <button class="btn btn-sm btn-success js-assign-btn" data-id="${c.id}" data-code="${escHtml(c.code || "")}" data-max-cbm="${c.max_cbm}" data-max-weight="${c.max_weight}" data-used-cbm="${parseFloat(c.used_cbm || 0).toFixed(4)}" data-used-weight="${parseFloat(c.used_weight || 0).toFixed(2)}" title="Assign orders to this container">+ Assign</button>
+              <button class="btn btn-sm btn-success js-assign-btn" ${c.capacity_known === false || c.assignment_locked ? 'disabled' : ''} data-id="${c.id}" data-code="${escHtml(c.code || "")}" data-max-cbm="${c.max_cbm}" data-max-weight="${c.max_weight}" data-used-cbm="${parseFloat(c.used_cbm || 0).toFixed(6)}" data-used-weight="${parseFloat(c.used_weight || 0).toFixed(4)}" title="Assign orders to this container">+ Assign</button>
               <button class="btn btn-sm btn-outline-info js-view-container" data-id="${c.id}" data-code="${escHtml(c.code || "")}" title="View orders in this container">View</button>
               <a class="btn btn-sm btn-outline-success" href="${CONTAINERS_API_BASE}/containers/${c.id}/export?format=xlsx" download title="${escapeHtml(typeof t === "function" ? t("Download") : "Download")}">${escapeHtml(typeof t === "function" ? t("Download") : "Download")}</a>
             </td>
@@ -365,14 +376,32 @@ function applyClientFilters() {
     });
 }
 
-function openStatusModal(containerId) {
+let containerStatusRevision = null;
+let containerEditRevision = null;
+async function openStatusModal(containerId) {
+    containerStatusRevision = null;
     document.getElementById("statusModalContainerId").value = containerId;
+    const buttons = [...document.querySelectorAll('#statusModal [onclick^="setContainerStatus"]')];
+    buttons.forEach(button => button.disabled = true);
     bootstrap.Modal.getOrCreateInstance(
         document.getElementById("statusModal"),
     ).show();
+    try {
+        const response = await fetch(CONTAINERS_API_BASE + '/containers/' + containerId, {credentials:'same-origin'});
+        const result = await response.json();
+        if (!response.ok || result.error) throw new Error(result.message || 'Could not load container transitions');
+        if (Number(document.getElementById('statusModalContainerId').value) !== Number(containerId)) return;
+        containerStatusRevision = result.data.revision;
+        buttons.forEach(button => {
+            const target = button.getAttribute('onclick').match(/'([^']+)'/)?.[1];
+            button.disabled = !(result.data.allowed_status_transitions || []).includes(target);
+        });
+    } catch (error) { showToast(error.message, 'danger'); }
 }
 
 async function openContainerEditModal(id, code) {
+    containerEditRevision = null;
+    document.getElementById('containerEditSaveBtn').disabled = true;
     document.getElementById("containerEditId").value = id;
     const modal = bootstrap.Modal.getOrCreateInstance(
         document.getElementById("containerEditModal"),
@@ -399,6 +428,8 @@ async function openContainerEditModal(id, code) {
         });
         if (!res.ok) throw new Error("Failed to load");
         const data = (await res.json()).data || {};
+        if(Number(document.getElementById('containerEditId').value)!==Number(id))return;
+        containerEditRevision = data.revision;
         set("containerEditCode", data.code);
         set("containerEditMaxCbm", data.max_cbm);
         set("containerEditMaxWeight", data.max_weight);
@@ -410,6 +441,10 @@ async function openContainerEditModal(id, code) {
         set("containerEditDestCountry", data.destination_country);
         set("containerEditDest", data.destination);
         set("containerEditNotes", data.notes);
+        for (const field of ['Code','MaxCbm','MaxWeight','Vessel','DestCountry','Dest']) {
+            document.getElementById('containerEdit' + field).disabled = !!data.assignment_locked;
+        }
+        document.getElementById('containerEditSaveBtn').disabled = false;
     } catch (e) {
         if (typeof showToast === "function") {
             showToast(e.message || "Failed to load", "danger");
@@ -429,6 +464,7 @@ async function saveContainerEdit() {
         return Number.isFinite(x) ? x : null;
     };
     const payload = {
+        revision: containerEditRevision,
         code: v("containerEditCode") || null,
         max_cbm: vNum("containerEditMaxCbm"),
         max_weight: vNum("containerEditMaxWeight"),
@@ -441,6 +477,9 @@ async function saveContainerEdit() {
         destination: v("containerEditDest") || null,
         notes: v("containerEditNotes") || null,
     };
+    for (const [field, control] of Object.entries({code:'Code',max_cbm:'MaxCbm',max_weight:'MaxWeight',vessel_name:'Vessel',destination_country:'DestCountry',destination:'Dest'})) {
+        if (document.getElementById('containerEdit' + control).disabled) delete payload[field];
+    }
     try {
         if (btn) btn.disabled = true;
         const res = await fetch(CONTAINERS_API_BASE + "/containers/" + id, {
@@ -482,7 +521,7 @@ async function setContainerStatus(status) {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             credentials: "same-origin",
-            body: JSON.stringify({ status }),
+            body: JSON.stringify({ status, revision: containerStatusRevision }),
         });
         if (!res.ok) {
             const j = await res.json().catch(() => ({}));
@@ -562,14 +601,15 @@ async function viewContainer(id, code) {
         const totalOrders = parseInt(totals.order_count, 10) || orders.length;
         const totalItems = parseInt(totals.item_count, 10) || 0;
         const totalCartons = parseFloat(totals.cartons || 0);
-        const totalQty = parseFloat(totals.quantity || 0);
-        const totalCbm = parseFloat(totals.cbm || 0);
-        const totalWeight = parseFloat(totals.weight || 0);
-        const totalAmt = parseFloat(totals.amount || 0);
+        const totalQty = totals.quantity === null ? null : parseFloat(totals.quantity || 0);
+        const totalCbm = totals.cbm===null?null:parseFloat(totals.cbm || 0);
+        const totalWeight = totals.weight===null?null:parseFloat(totals.weight || 0);
+        const totalAmt = totals.amount === null ? null : parseFloat(totals.amount || 0);
+        const amountDisplay = Object.entries(totals.amounts_by_currency || {}).map(([currency,amount]) => `${fmtContainerAmount(amount)} ${escHtml(currency)}`).join(' · ') || fmtContainerAmount(totalAmt);
         const maxCbm = parseFloat(container.max_cbm) || 1;
         const maxWt = parseFloat(container.max_weight) || 1;
-        const cbmPct = Math.min(100, (totalCbm / maxCbm) * 100);
-        const wtPct = Math.min(100, (totalWeight / maxWt) * 100);
+        const cbmPct = totalCbm===null?null:Math.min(100, (totalCbm / maxCbm) * 100);
+        const wtPct = totalWeight===null?null:Math.min(100, (totalWeight / maxWt) * 100);
         const barColor = (p) =>
             p >= 100 ? "#dc2626" : p >= 85 ? "#d97706" : "#16a34a";
 
@@ -587,7 +627,7 @@ async function viewContainer(id, code) {
               <td>${sBadge}</td>
               <td class="text-end">${o.items || 0}${o.item_identifiers?.length ? `<details class="small text-start mt-1"><summary>${escHtml(typeof t === "function" ? t("Item Identification") : "Item Identification")}</summary>${o.item_identifiers.map(item => `<div class="border-top py-1 text-break">${escHtml(itemIdentifierText(item))}<div class="text-muted">${escHtml(item.description_en || item.description_cn || "")}</div></div>`).join("")}</details>` : ""}</td>
               <td class="text-end">${fmtContainerQty(o.total_ctns || 0, 2)}</td>
-              <td class="text-end">${fmtContainerQty(o.total_qty || 0, 2)}</td>
+              <td class="text-end">${fmtContainerQty(o.total_qty, 2)}</td>
               <td class="text-end">${fmtContainerCbm(o.total_cbm || 0, 3)}</td>
               <td class="text-end">${fmtContainerWeight(o.total_weight || 0, 2)} kg</td>
               <td class="text-end">${fmtContainerAmount(o.total_amount || 0)}</td>
@@ -602,11 +642,11 @@ async function viewContainer(id, code) {
             <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">Items</div><div class="value">${totalItems}</div></div></div>
             <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">Cartons</div><div class="value">${fmtContainerQty(totalCartons, 2)}</div></div></div>
             <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">Quantity</div><div class="value">${fmtContainerQty(totalQty, 2)}</div></div></div>
-            <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">CBM Used</div><div class="value">${fmtContainerCbm(totalCbm, 3)}</div><div class="small text-muted">${fmtContainerCbm(container.max_cbm, 3)} max</div></div></div>
-            <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">Weight Used</div><div class="value">${fmtContainerWeight(totalWeight, 2)}</div><div class="small text-muted">${fmtContainerWeight(container.max_weight, 2)} kg max</div></div></div>
+            <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">CBM Used</div><div class="value">${fmtContainerCbm(totalCbm, 6)}</div><div class="small text-muted">${fmtContainerCbm(container.max_cbm, 4)} max · ${container.remaining_cbm == null ? '—' : fmtContainerCbm(container.remaining_cbm,6)} remaining</div></div></div>
+            <div class="col-12 col-md-2"><div class="order-info-stat-card"><div class="label">Weight Used</div><div class="value">${fmtContainerWeight(totalWeight, 4)}</div><div class="small text-muted">${fmtContainerWeight(container.max_weight, 4)} kg max · ${container.remaining_weight == null ? '—' : fmtContainerWeight(container.remaining_weight,4)} remaining</div></div></div>
           </div>
           <div class="row g-3 mb-3">
-            <div class="col-12 col-md-4"><div class="order-info-stat-card"><div class="label">Sell-side amount</div><div class="value">${fmtContainerAmount(totalAmt)}</div></div></div>
+            <div class="col-12 col-md-4"><div class="order-info-stat-card"><div class="label">Sell-side amount</div><div class="value">${amountDisplay}</div></div></div>
           </div>
           <div class="mb-3">
             <div class="d-flex justify-content-between small text-muted mb-1"><span>CBM Fill</span><span>${fmtContainerPercent(cbmPct, 1)}%</span></div>
@@ -629,7 +669,7 @@ async function viewContainer(id, code) {
                 <td class="text-end">${fmtContainerQty(totalQty, 2)}</td>
                 <td class="text-end">${fmtContainerCbm(totalCbm, 3)}</td>
                 <td class="text-end">${fmtContainerWeight(totalWeight, 2)} kg</td>
-                <td class="text-end">${fmtContainerAmount(totalAmt)}</td>
+                <td class="text-end">${amountDisplay}</td>
               </tr></tfoot>
             </table>
           </div>
@@ -638,11 +678,11 @@ async function viewContainer(id, code) {
                   ? `
           <div class="mt-4 pt-3 border-top">
             <h6 class="mb-2">Shipment drafts</h6>
-            <p class="small text-muted mb-2">Finalized drafts linked to this container. "Push to tracking" sends shipment data to the external tracking API when you finalize. Edit carrier refs below or <a href="/cargochina/consolidation.php">manage in Consolidation</a>.</p>
+            <p class="small text-muted mb-2">Shipment drafts linked to this container. Tracking delivery depends on the configured integration and is recorded separately from local finalization. Review its current mode and carrier refs in <a href="/cargochina/consolidation.php">Consolidation</a>.</p>
             ${drafts
                 .map(
                     (d) => `
-            <div class="card mb-2" data-draft-id="${d.id}">
+            <div class="card mb-2" data-draft-id="${d.id}" data-revision="${escHtml(d.revision || '')}">
               <div class="card-body py-2">
                 <div class="d-flex justify-content-between align-items-start">
                   <div>
@@ -650,12 +690,12 @@ async function viewContainer(id, code) {
                     <span class="badge ${d.status === "finalized" ? "bg-success" : "bg-secondary"} ms-1">${escHtml(typeof t === "function" ? t(d.status || "") : d.status || "")}</span>
                     <span class="text-muted small ms-1">${d.order_count || 0} orders</span>
                   </div>
-                  <button type="button" class="btn btn-sm btn-outline-primary js-edit-draft-refs" data-draft-id="${d.id}">Edit refs</button>
+                  <button type="button" class="btn btn-sm btn-outline-primary js-edit-draft-refs" data-draft-id="${d.id}" ${d.status==='finalized'?'disabled':''}>Edit refs</button>
                 </div>
                 <div class="small text-muted mt-1">
                   ${d.container_number ? `Container: ${escHtml(d.container_number)}` : ""}
                   ${d.booking_number ? ` • Booking: ${escHtml(d.booking_number)}` : ""}
-                  ${d.tracking_url ? ` • <a href="${escHtml(d.tracking_url)}" target="_blank" rel="noopener">Tracking</a>` : ""}
+                  ${/^https?:\/\//i.test(d.tracking_url || '') ? ` • <a href="${escHtml(d.tracking_url)}" target="_blank" rel="noopener">Tracking</a>` : ""}
                   ${!d.container_number && !d.booking_number && !d.tracking_url ? "—" : ""}
                 </div>
                 <div class="draft-edit-form mt-2 d-none" data-draft-id="${d.id}">
@@ -715,6 +755,7 @@ async function viewContainer(id, code) {
                                 },
                                 credentials: "same-origin",
                                 body: JSON.stringify({
+                                    revision: card?.dataset.revision,
                                     container_number: containerNum.trim() || null,
                                     booking_number: bookingNum.trim() || null,
                                     tracking_url: trackingUrl.trim() || null,
@@ -788,27 +829,17 @@ async function openAssignOrdersModal(dataset) {
     ).show();
 
     try {
-        const [r1, r2] = await Promise.all([
-            fetch(
-                CONTAINERS_API_BASE + "/orders?status=ReadyForConsolidation",
-                { credentials: "same-origin" },
-            ),
-            fetch(CONTAINERS_API_BASE + "/orders?status=Confirmed", {
-                credentials: "same-origin",
-            }),
-        ]);
-        const [d1, d2] = await Promise.all([r1.json(), r2.json()]);
-        const raw = [...(d1.data || []), ...(d2.data || [])];
+        const raw = await loadShipmentEligibleOrders();
         _assignEligibleOrders = raw.map((o) => {
             const items = o.items || [];
             return {
                 ...o,
-                total_cbm: items.reduce(
-                    (s, it) => s + (parseFloat(it.declared_cbm) || 0),
+                total_cbm: o.cargo_totals?.cbm ?? items.reduce(
+                    (s, it) => s + (parseFloat(it.cargo_cbm ?? it.declared_cbm) || 0),
                     0,
                 ),
-                total_weight: items.reduce(
-                    (s, it) => s + (parseFloat(it.declared_weight) || 0),
+                total_weight: o.cargo_totals?.weight ?? items.reduce(
+                    (s, it) => s + (parseFloat(it.cargo_weight ?? it.declared_weight) || 0),
                     0,
                 ),
             };
@@ -902,7 +933,7 @@ function _onAssignSelChange() {
             msgs.push(
                 `Weight ${afterWeight.toFixed(0)} kg > ${c.maxWeight} kg`,
             );
-        warnEl.innerHTML = `<strong>${escHtml(typeof t === "function" ? t("⚠ Over capacity:") : "⚠ Over capacity:")}</strong> ${escHtml(msgs.join(", "))}. ${escHtml(typeof t === "function" ? t("You will be asked to confirm.") : "You will be asked to confirm.")}`;
+        warnEl.innerHTML = `<strong>${escHtml(typeof t === "function" ? t("⚠ Over capacity:") : "⚠ Over capacity:")}</strong> ${escHtml(msgs.join(", "))}. Assignment exceeds container capacity.`;
         warnEl.classList.remove("d-none");
     } else {
         warnEl.classList.add("d-none");
@@ -948,7 +979,7 @@ async function confirmAssignOrders() {
     btn.disabled = true;
     btn.textContent = "Assigning…";
 
-    const doRequest = async (force) =>
+    const doRequest = async () =>
         fetch(
             CONTAINERS_API_BASE +
                 "/containers/" +
@@ -958,29 +989,13 @@ async function confirmAssignOrders() {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 credentials: "same-origin",
-                body: JSON.stringify({ order_ids: orderIds, force }),
+                body: JSON.stringify({ order_ids: orderIds }),
             },
         );
 
     try {
-        let res = await doRequest(false);
+        let res = await doRequest();
         let data = await res.json();
-        if (res.status === 409 && data.over_capacity) {
-            btn.disabled = false;
-            btn.textContent = "Assign to Container";
-            if (
-                !confirm(
-                    "⚠ Over capacity!\n\n" +
-                        data.message +
-                        "\n\nAssign anyway?",
-                )
-            )
-                return;
-            btn.disabled = true;
-            btn.textContent = "Assigning…";
-            res = await doRequest(true);
-            data = await res.json();
-        }
         if (!res.ok) throw new Error(data.message || "Failed");
         bootstrap.Modal.getOrCreateInstance(
             document.getElementById("assignOrdersModal"),

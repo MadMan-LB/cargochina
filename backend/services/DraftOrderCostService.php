@@ -44,14 +44,30 @@ final class DraftOrderCostService
         return ['lines' => $rows, 'totals_by_currency' => $formatted, 'base_currency' => $baseCurrency, 'base_total' => self::fromScaledInt($baseMinor, 4), 'accounting_treatment' => 'shipment_expense_customer_charge', 'posting'=>$accounting];
     }
 
-    public function create(int $orderId, array $input, int $userId): array
+    private function atomic(callable $action)
+    {
+        $owns=!$this->pdo->inTransaction();if($owns)$this->pdo->beginTransaction();
+        try{$result=$action();if($owns)$this->pdo->commit();return $result;}catch(Throwable $e){if($owns&&$this->pdo->inTransaction())$this->pdo->rollBack();throw $e;}
+    }
+    public function create(int $orderId,array $input,int $userId): array {return $this->atomic(fn()=>$this->createInTransaction($orderId,$input,$userId));}
+    public function update(int $id,array $input,int $userId): array {return $this->atomic(fn()=>$this->updateInTransaction($id,$input,$userId));}
+    public function delete(int $id,int $userId): void {$this->atomic(fn()=>$this->deleteInTransaction($id,$userId));}
+
+    private function createInTransaction(int $orderId, array $input, int $userId): array
     {
         $this->assertEditableOrder($orderId, true);
         $row = $this->normalize($input,$orderId);
         $key = self::idempotencyKey($input['idempotency_key'] ?? $input['creation_idempotency_key'] ?? null);
+        if($key===null)throw new InvalidArgumentException('Cost creation requires an idempotency key');
         if ($key !== null) {
             $existing=$this->pdo->prepare('SELECT id FROM draft_order_costs WHERE creation_idempotency_key=?');$existing->execute([$key]);
-            $existingId=(int)$existing->fetchColumn(); if($existingId>0) return $this->get($existingId);
+            $existingId=(int)$existing->fetchColumn();
+            if($existingId>0){
+                $saved=$this->getAny($existingId);
+                if((int)$saved['order_id']!==$orderId || (int)$saved['created_by']!==$userId || !empty($saved['is_deleted']))throw new RuntimeException('Cost idempotency key belongs to another or archived operation');
+                foreach($row as $field=>$value)if((string)($saved[$field]??'')!==(string)($value??''))throw new RuntimeException('Cost idempotency payload differs from the saved operation');
+                return $saved;
+            }
         }
         $sql = "INSERT INTO draft_order_costs (order_id, cost_type_code, description_en, description_zh, amount, currency, exchange_rate, base_currency, base_amount, supplier_id, service_provider, responsible_payer, allocation_method, accounting_treatment, notes, posting_status, creation_idempotency_key, created_by, updated_by)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'customer', 'none', 'shipment_expense_customer_charge', ?, 'provisional', ?, ?, ?)";
@@ -64,12 +80,15 @@ final class DraftOrderCostService
         return $new;
     }
 
-    public function update(int $id, array $input, int $userId): array
+    private function updateInTransaction(int $id, array $input, int $userId): array
     {
         $old = $this->get($id);
         $this->assertEditableOrder((int) $old['order_id'], true);
+        $old = $this->getAnyLocked($id);
+        if(!empty($old['is_deleted']))throw new RuntimeException('Cost line has been archived');
         $row = $this->normalize($input,(int)$old['order_id']);
-        $expectedVersion=array_key_exists('lock_version',$input)?(int)$input['lock_version']:(int)($old['lock_version']??0);
+        if(!array_key_exists('lock_version',$input)||filter_var($input['lock_version'],FILTER_VALIDATE_INT)===false)throw new RuntimeException('Cost version is required; reload before saving');
+        $expectedVersion=(int)$input['lock_version'];
         $sql = "UPDATE draft_order_costs SET cost_type_code=?, description_en=?, description_zh=?, amount=?, currency=?, exchange_rate=?, base_currency=?, base_amount=?, supplier_id=?, service_provider=?, responsible_payer='customer', allocation_method='none', accounting_treatment='shipment_expense_customer_charge', notes=?, updated_by=?, lock_version=lock_version+1 WHERE id=? AND is_deleted=0 AND lock_version=?";
         $stmt=$this->pdo->prepare($sql);$stmt->execute([$row['cost_type_code'], $row['description_en'], $row['description_zh'], $row['amount'], $row['currency'], $row['exchange_rate'], $row['base_currency'], $row['base_amount'], $row['supplier_id'], $row['service_provider'], $row['notes'], $userId, $id,$expectedVersion]);
         if($stmt->rowCount()!==1) throw new RuntimeException('Cost line changed in another request; reload and try again');
@@ -80,11 +99,13 @@ final class DraftOrderCostService
         return $new;
     }
 
-    public function delete(int $id, int $userId): void
+    private function deleteInTransaction(int $id, int $userId): void
     {
         $old = $this->getAny($id);
         if (!empty($old['is_deleted'])) return;
         $this->assertEditableOrder((int) $old['order_id'], true);
+        $old = $this->getAnyLocked($id);
+        if (!empty($old['is_deleted'])) return;
         $this->pdo->prepare('UPDATE draft_order_costs SET is_deleted=1, updated_by=? WHERE id=?')->execute([$userId, $id]);
         (new ShipmentAccountingService($this->pdo))->archiveDraftCost($id, $userId);
         $this->history($id, (int) $old['order_id'], 'delete', $old, null, $userId);
@@ -92,6 +113,13 @@ final class DraftOrderCostService
 
     private function normalize(array $input,int $orderId): array
     {
+        foreach(['cost_type_code','currency','base_currency','description_en','description_zh','service_provider','notes','idempotency_key','creation_idempotency_key'] as $field){
+            if(isset($input[$field])&&!is_string($input[$field]))throw new InvalidArgumentException($field.' must be text');
+        }
+        if(!empty($input['supplier_id'])){
+            if(filter_var($input['supplier_id'],FILTER_VALIDATE_INT)===false||(int)$input['supplier_id']<1)throw new InvalidArgumentException('Invalid supplier');
+            $supplier=$this->pdo->prepare('SELECT id FROM suppliers WHERE id=?');$supplier->execute([$input['supplier_id']]);if(!$supplier->fetchColumn())throw new InvalidArgumentException('Supplier not found');
+        }
         $type = strtolower(trim((string) ($input['cost_type_code'] ?? '')));
         $exists = $this->pdo->prepare('SELECT 1 FROM draft_order_cost_types WHERE code=? AND is_active=1');
         $exists->execute([$type]);
@@ -106,6 +134,7 @@ final class DraftOrderCostService
             ? self::toScaledInt('1', 8)
             : self::positiveScaledInt($input['exchange_rate'] ?? '1', 8, 'Exchange rate');
         $baseInt = self::multiplyScaled($amountInt, 4, $rateInt, 8, 4);
+        if(bccomp(self::fromScaledInt($baseInt,4),'9999999999.9999',4)>0)throw new InvalidArgumentException('Converted cost exceeds the supported amount range');
         $descriptionEn = self::nullableText($input['description_en'] ?? null, 500);
         $descriptionZh = self::nullableText($input['description_zh'] ?? null, 500);
         if ($descriptionEn !== null && $descriptionZh === null) {
@@ -142,6 +171,11 @@ final class DraftOrderCostService
         $stmt=$this->pdo->prepare('SELECT * FROM draft_order_costs WHERE id=?');$stmt->execute([$id]);$row=$stmt->fetch(PDO::FETCH_ASSOC);
         if(!$row) throw new RuntimeException('Cost line not found'); return $row;
     }
+    private function getAnyLocked(int $id): array
+    {
+        $stmt=$this->pdo->prepare('SELECT * FROM draft_order_costs WHERE id=? FOR UPDATE');$stmt->execute([$id]);$row=$stmt->fetch(PDO::FETCH_ASSOC);
+        if(!$row)throw new RuntimeException('Cost line not found');return $row;
+    }
     private function assertEditableOrder(int $orderId, bool $lock): void
     {
         $sql = "SELECT status, order_type FROM orders WHERE id=?" . ($lock ? ' FOR UPDATE' : '');
@@ -155,15 +189,21 @@ final class DraftOrderCostService
             ->execute([$id, $orderId, $action, $old ? json_encode($old, JSON_UNESCAPED_UNICODE) : null, $new ? json_encode($new, JSON_UNESCAPED_UNICODE) : null, $userId]);
     }
     private static function nullableText($value, int $max): ?string { $v=trim((string) $value); return $v==='' ? null : mb_substr($v,0,$max); }
-    private static function positiveScaledInt($value, int $scale, string $label): int { $int=self::toScaledInt((string) $value,$scale); if($int<=0) throw new InvalidArgumentException($label.' must be greater than zero'); return $int; }
+    private static function positiveScaledInt($value, int $scale, string $label): int { if(!is_scalar($value)||is_bool($value))throw new InvalidArgumentException($label.' must be a decimal number'); $int=self::toScaledInt((string) $value,$scale); if($int<=0) throw new InvalidArgumentException($label.' must be greater than zero'); return $int; }
     private static function toScaledInt(string $value, int $scale): int
     {
         $value=trim($value); if(!preg_match('/^([+-]?)(\d+)(?:\.(\d+))?$/',$value,$m)) throw new InvalidArgumentException('Invalid decimal value');
+        if(bccomp($value,'9999999999.'.str_repeat('9',$scale),$scale)>0 || bccomp($value,'-9999999999.'.str_repeat('9',$scale),$scale)<0)throw new InvalidArgumentException('Decimal value exceeds the supported range');
         $fraction=substr(str_pad($m[3]??'', $scale+1, '0'),0,$scale+1); $round=(int)($fraction[$scale]??'0')>=5;
         $base=((int)$m[2])*(10**$scale)+(int)substr($fraction,0,$scale); if($round)$base++; return ($m[1]??'')==='-' ? -$base : $base;
     }
     private static function fromScaledInt(int $value, int $scale): string { $sign=$value<0?'-':''; $digits=str_pad((string)abs($value),$scale+1,'0',STR_PAD_LEFT); return $sign.substr($digits,0,-$scale).'.'.substr($digits,-$scale); }
-    private static function multiplyScaled(int $a,int $as,int $b,int $bs,int $out): int { $divisor=10**($as+$bs-$out); $product=$a*$b; return intdiv($product+intdiv($divisor,2),$divisor); }
+    private static function multiplyScaled(int $a,int $as,int $b,int $bs,int $out): int {
+        $divisor=bcpow('10',(string)($as+$bs-$out),0);
+        $rounded=bcdiv(bcadd(bcmul((string)$a,(string)$b,0),bcdiv($divisor,'2',0),0),$divisor,0);
+        if(bccomp($rounded,(string)PHP_INT_MAX,0)>0)throw new InvalidArgumentException('Converted cost exceeds the supported amount range');
+        return (int)$rounded;
+    }
     private static function idempotencyKey($value): ?string { $v=trim((string)$value); if($v==='')return null; if(!preg_match('/^[A-Za-z0-9._:-]{8,64}$/',$v))throw new InvalidArgumentException('Invalid cost idempotency key'); return $v; }
     private function tableExists(string $table): bool { $stmt=$this->pdo->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?');$stmt->execute([$table]);return (bool)$stmt->fetchColumn(); }
 }

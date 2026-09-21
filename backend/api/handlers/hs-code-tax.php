@@ -172,6 +172,8 @@ function summarizeEstimateLines(array $lines): array
 }
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('hs-code-tax', $method, $id, $action);
     $pdo = getDb();
 
     $tableCheck = @$pdo->query("SHOW TABLES LIKE 'hs_code_tax_rates'");

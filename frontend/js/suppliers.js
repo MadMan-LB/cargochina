@@ -1,3 +1,5 @@
+let supplierRevision = "", supplierCreateRequest = null, supplierSaving = false, supplierEditorVersion = 0;
+let suppliersListLoadVersion = 0;
 document.addEventListener("DOMContentLoaded", () => {
     loadSuppliers();
     registerUnsavedChangesGuard?.("#supplierForm");
@@ -68,12 +70,15 @@ function applySupplierFilters() {
 }
 
 async function loadSuppliers() {
+    const listRequest = ++suppliersListLoadVersion;
     const btn = document.getElementById("supplierApplyBtn");
     try {
         if (btn) btn.disabled = true;
         const qs = getSupplierParams();
         const res = await api("GET", "/suppliers" + (qs ? "?" + qs : ""));
+        if(listRequest !== suppliersListLoadVersion) return;
         const rows = res.data || [];
+        if (!rows.length && supplierOffset > 0 && Number.isFinite(Number(res.meta?.total))) { supplierOffset = Math.max(0, Math.floor((Number(res.meta.total)-1)/50)*50); return loadSuppliers(); }
         const meta = res.meta || {};
         const tbody = document.querySelector("#suppliersTable tbody");
         const buyer = isBuyer();
@@ -143,9 +148,12 @@ async function loadSuppliers() {
             total: meta.total ?? rows.length,
         });
     } catch (e) {
+        if(listRequest !== suppliersListLoadVersion) return;
+        ["supplierPrevPage","supplierNextPage"].forEach(id=>{ const button=document.getElementById(id); if(button)button.disabled=true; });
+        const failedTable=document.querySelector("#suppliersTable tbody"); if(failedTable)failedTable.innerHTML=`<tr><td colspan="12" class="text-danger">${escapeHtml(e.message)}</td></tr>`;
         showToast(e.message, "danger");
     } finally {
-        if (btn) btn.disabled = false;
+        if (btn && listRequest === suppliersListLoadVersion) btn.disabled = false;
     }
 }
 
@@ -550,6 +558,7 @@ function syncSupplierPaymentAccountSelection() {
 }
 
 function openSupplierForm() {
+    ++supplierEditorVersion; supplierRevision=""; supplierCreateRequest=null;
     document.getElementById("supplierForm").reset();
     document.getElementById("supplierId").value = "";
     document.getElementById("supplierModalTitle").textContent = "Add Supplier";
@@ -571,9 +580,12 @@ function openSupplierForm() {
 }
 
 async function editSupplier(id) {
+    const editorVersion=++supplierEditorVersion;
     try {
         const res = await api("GET", "/suppliers/" + id);
         const d = res.data;
+        if(editorVersion !== supplierEditorVersion) return;
+        supplierRevision=d.revision;
         document.getElementById("supplierId").value = d.id;
         document.getElementById("supplierCode").value = d.code;
         document.getElementById("supplierStoreId").value = d.store_id || "";
@@ -618,6 +630,7 @@ async function editSupplier(id) {
 }
 
 async function saveSupplier() {
+    if(supplierSaving) return;
     const btn = document.getElementById("supplierSaveBtn");
     const id = document.getElementById("supplierId").value;
     const payload = {
@@ -652,6 +665,13 @@ async function saveSupplier() {
         showToast("Name is required", "danger");
         return;
     }
+    if(id) payload.revision=supplierRevision;
+    else {
+        const signature=JSON.stringify(payload);
+        if(supplierCreateRequest?.signature!==signature) supplierCreateRequest={signature,key:clmsRequestKey('supplier-create')};
+        payload.idempotency_key=supplierCreateRequest.key;
+    }
+    supplierSaving=true;
     try {
         setLoading(btn, true);
         let res;
@@ -665,6 +685,7 @@ async function saveSupplier() {
                 document.getElementById("supplierId").value = newId;
                 document.getElementById("supplierModalTitle").textContent =
                     "Edit Supplier";
+                supplierRevision=(await api("GET", "/suppliers/"+newId)).data.revision;
                 await loadSupplierAttachments(newId);
             }
             showToast("Supplier created. You can now add documents and photos.");
@@ -677,10 +698,11 @@ async function saveSupplier() {
         } else {
             refreshUnsavedBaseline?.(document.getElementById("supplierForm"));
         }
-        loadSuppliers();
+        loadSuppliers(false);
     } catch (e) {
         showToast(e.message, "danger");
     } finally {
+        supplierSaving=false;
         setLoading(btn, false);
     }
 }
@@ -912,7 +934,9 @@ function updateDiscountPreview() {
     }
 }
 
+let supplierPaymentRequest=null, supplierPaymentPending=false;
 async function submitPayment() {
+    if(supplierPaymentPending)return;
     const supplierId = document.getElementById("paymentSupplierId").value;
     const amount = parseFloat(document.getElementById("payAmount").value || 0);
     if (amount <= 0) {
@@ -948,10 +972,15 @@ async function submitPayment() {
     if (payload.marked_full_payment && payload.invoice_amount && amount < payload.invoice_amount) {
         payload.settlement_mode = "fully_settled_by_agreement";
     }
+    const signature=JSON.stringify({supplierId,payload});
+    if(supplierPaymentRequest?.signature!==signature)supplierPaymentRequest={signature,key:crypto.randomUUID()};
+    payload.idempotency_key=supplierPaymentRequest.key;
+    supplierPaymentPending=true;
     const btn = document.getElementById("paySubmitBtn");
     try {
         setLoading(btn, true);
         await api("POST", "/suppliers/" + supplierId + "/payments", payload);
+        supplierPaymentRequest=null;
         showToast("Payment recorded");
         refreshUnsavedBaseline?.(
             document.querySelector("#paymentModal .modal-body"),
@@ -962,6 +991,7 @@ async function submitPayment() {
     } catch (e) {
         showToast(e.message, "danger");
     } finally {
+        supplierPaymentPending=false;
         setLoading(btn, false);
     }
 }
@@ -1008,17 +1038,21 @@ async function showPayHistory(supplierId, name) {
 }
 
 async function deleteSupplier(id, name) {
-    if (!confirm('Delete supplier "' + name + '"?')) return;
+
     try {
-        await api("DELETE", "/suppliers/" + id);
+        const current=(await api("GET", "/suppliers/"+id)).data;
+    if (!confirm('Delete supplier "' + name + '"?')) return;
+        await api("DELETE", "/suppliers/" + id, {revision:current.revision});
         showToast("Supplier deleted");
-        loadSuppliers();
+        loadSuppliers(false);
     } catch (e) {
         showToast(e.message, "danger");
     }
 }
 
 window.openImportModal = function (entity) {
+    window._supplierImportRequestKey=clmsRequestKey('supplier-import');
+    window._supplierImportCsv=null;
     window._importEntity = entity || "suppliers";
     window._importOnSuccess = loadSuppliers;
     const ta = document.getElementById("importCsvData");
@@ -1047,7 +1081,8 @@ window.doImport = async function () {
             resultEl.classList.add("d-none");
             resultEl.textContent = "";
         }
-        const res = await api("POST", "/" + entity + "/import", { csv });
+        if(window._supplierImportCsv!==csv){window._supplierImportRequestKey=clmsRequestKey("supplier-import");window._supplierImportCsv=csv;}
+        const res = await api("POST", "/" + entity + "/import", { csv,idempotency_key:window._supplierImportRequestKey });
         const d = res.data;
         let msg = `Created: ${d.created}, Skipped: ${d.skipped}`;
         if (d.errors?.length) msg += `; Errors: ${d.errors.join("; ")}`;
@@ -1062,6 +1097,7 @@ window.doImport = async function () {
         showToast(msg);
         if (d.created > 0 && window._importOnSuccess) window._importOnSuccess();
     } catch (e) {
+        if(resultEl){resultEl.textContent=e.message;resultEl.className="alert alert-danger mt-2";}
         showToast(e.message, "danger");
     } finally {
         setLoading(btn, false);

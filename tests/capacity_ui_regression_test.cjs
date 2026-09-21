@@ -1,0 +1,14 @@
+const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/strict');
+const sandbox={window:{},document:{addEventListener(){},getElementById(){return null}},console};vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync('frontend/js/consolidation.js','utf8'),sandbox);
+const hint={innerHTML:''};sandbox.renderCapacityBars(.6,60,{id:7,max_cbm:1,max_weight:100,used_cbm:.4,used_weight:40},hint);
+assert.match(hint.innerHTML,/1.00 \/ 1/);assert.match(hint.innerHTML,/Full — within capacity/);assert.doesNotMatch(hint.innerHTML,/Capacity exceeded/);
+sandbox.renderCapacityBars(.600001,60,{id:7,max_cbm:1,max_weight:100,used_cbm:.4,used_weight:40},hint);assert.match(hint.innerHTML,/Capacity exceeded/);
+vm.runInContext('draftAssignedContainerId=7',sandbox);sandbox.renderCapacityBars(.6,60,{id:7,max_cbm:1,max_weight:100,used_cbm:1,used_weight:100},hint);assert.match(hint.innerHTML,/1.00 \/ 1/);assert.doesNotMatch(hint.innerHTML,/Capacity exceeded/);
+sandbox.renderCapacityBars(.6,60,{capacity_known:false},hint);assert.match(hint.innerHTML,/reconciliation/);
+const source=fs.readFileSync('frontend/js/containers.js','utf8');
+const fill=source.match(/function containerFillPercent\(container\) \{[\s\S]*?\n\}/)[0];vm.runInContext(fill,sandbox);
+assert.equal(sandbox.containerFillPercent({used_cbm:.4,max_cbm:10,used_weight:100,max_weight:100}),100);
+assert.equal(sandbox.containerFillPercent({capacity_known:false}),null);
+for(const file of ['frontend/js/containers.js','frontend/js/assign_container.js'])assert.doesNotMatch(fs.readFileSync(file,'utf8'),/Assign anyway|force: true/,'Capacity override UI must not return');
+console.log('PASS: existing plus new capacity, exact full, excess, same-container deduplication, unknown cargo and weight-based utilization');

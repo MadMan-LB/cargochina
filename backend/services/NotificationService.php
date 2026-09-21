@@ -156,6 +156,24 @@ class NotificationService
             $payload = json_encode(['title' => $title, 'body' => $body, 'event' => $eventType]);
             $payloadHash = hash('sha256', $payload . $uid);
 
+            // Persist delivery intent with the business transaction. A rollback
+            // must never leave an externally delivered receipt notification.
+            if ($this->pdo->inTransaction()) {
+                $queued = [];
+                foreach (['email','whatsapp'] as $channel) {
+                    if (!in_array($channel,$channels,true) || !$this->isChannelEnabled($uid,$channel,$eventType)) continue;
+                    $this->logDelivery($nid,$channel,$payloadHash,'pending',0);
+                    $queued[] = (int)$this->pdo->lastInsertId();
+                }
+                if ($queued) register_shutdown_function(function () use ($queued) {
+                    if ($this->pdo->inTransaction()) return;
+                    foreach ($queued as $logId) {
+                        try { $this->retryDelivery($logId); } catch (Throwable $e) { error_log('Notification delivery deferred: '.$e->getMessage()); }
+                    }
+                });
+                continue;
+            }
+
             if (in_array('email', $channels, true) && $this->isChannelEnabled($uid, 'email', $eventType) && $email) {
                 if (!$this->alreadyDelivered($nid, 'email', $payloadHash)) {
                     $from = $this->config['email_from_address'] ?? 'noreply@example.com';
@@ -232,18 +250,18 @@ class NotificationService
         unset($GLOBALS['_log_order_id']);
     }
 
-    public function notifyOrderReceived(int $orderId, int $userId, bool $varianceDetected, ?string $confirmToken = null): void
+    public function notifyOrderReceived(int $orderId, int $userId, bool $varianceDetected, ?string $confirmToken = null, bool $isPartial = false): void
     {
-        $eventType = $varianceDetected ? 'variance_confirmation' : 'order_received';
-        $title = $varianceDetected ? 'Order #' . $orderId . ' — customer follow-up link sent' : 'Order #' . $orderId . ' received';
+        $eventType = $isPartial ? 'partial_order_received' : ($varianceDetected ? 'variance_confirmation' : 'order_received');
+        $title = $isPartial ? 'Order #' . $orderId . ' — partial delivery received' : ($varianceDetected ? 'Order #' . $orderId . ' — customer review link ready' : 'Order #' . $orderId . ' received');
         $confirmLink = '';
         if ($varianceDetected && $confirmToken) {
             $base = rtrim($this->config['app_url'] ?? 'http://localhost/cargochina', '/');
             $confirmLink = "\n\nCustomer review link: $base/confirm.php?token=$confirmToken\n(Share with customer so they can accept the warehouse actuals or decline them afterward.)";
         }
-        $body = $varianceDetected
-            ? 'CBM/weight variance detected. The order was auto-confirmed into stock and the customer review link is ready.' . $confirmLink
-            : 'Order received at warehouse.';
+        $body = $isPartial ? 'Partial delivery recorded. The order remains in transit until warehouse receiving is complete.' : ($varianceDetected
+            ? 'CBM variance or damage detected. The order was auto-confirmed into stock and the customer review link is ready.' . $confirmLink
+            : 'Order received at warehouse.');
         $GLOBALS['_log_order_id'] = $orderId;
         $this->notifyAdmins($eventType, $title, $body, ['order_id' => $orderId, 'variance' => $varianceDetected]);
         unset($GLOBALS['_log_order_id']);
@@ -342,15 +360,20 @@ class NotificationService
     /** Retry a failed delivery (safe: skips if payload_hash already succeeded) */
     public function retryDelivery(int $logId): array
     {
+        if ($this->pdo->inTransaction()) return ['success'=>false,'error'=>'Delivery requires a committed transaction'];
         $row = $this->pdo->prepare("SELECT ndl.*, n.user_id, n.type, n.title, n.body FROM notification_delivery_log ndl JOIN notifications n ON ndl.notification_id = n.id WHERE ndl.id = ?");
         $row->execute([$logId]);
         $log = $row->fetch(PDO::FETCH_ASSOC);
         if (!$log) return ['success' => false, 'error' => 'Log not found'];
         if ($log['status'] === 'sent') return ['success' => false, 'error' => 'Already sent'];
+        if (!in_array($log['status'], ['pending','failed'], true)) return ['success'=>false,'error'=>'Delivery is already in progress or its outcome needs review'];
         if (!in_array($log['channel'], ['email', 'whatsapp'], true)) return ['success' => false, 'error' => 'Retry only for email/whatsapp'];
         if ($this->alreadyDelivered((int) $log['notification_id'], $log['channel'], $log['payload_hash'] ?? '')) {
             return ['success' => false, 'error' => 'Duplicate prevented (payload_hash already succeeded)'];
         }
+        $claim=$this->pdo->prepare("UPDATE notification_delivery_log SET status='sending',updated_at=NOW() WHERE id=? AND status IN ('pending','failed')");
+        $claim->execute([$logId]);
+        if (!$claim->rowCount()) return ['success'=>false,'error'=>'Delivery already claimed'];
         $nid = (int) $log['notification_id'];
         $payloadHash = $log['payload_hash'] ?? hash('sha256', json_encode(['title' => $log['title'], 'body' => $log['body']]) . $log['user_id']);
         $attempts = (int) $log['attempts'] + 1;
@@ -378,7 +401,8 @@ class NotificationService
             }
         }
         $status = $err ? 'failed' : 'sent';
-        $this->logDelivery($nid, $log['channel'], $payloadHash, $status, $attempts, $err, $extId);
+        $this->pdo->prepare('UPDATE notification_delivery_log SET status=?,attempts=?,last_error=?,external_id=?,updated_at=NOW() WHERE id=?')
+            ->execute([$status,$attempts,$err,$extId,$logId]);
         return ['success' => !$err, 'status' => $status, 'attempts' => $attempts];
     }
 }

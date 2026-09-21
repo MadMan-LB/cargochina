@@ -6,6 +6,8 @@
  */
 require_once __DIR__ . '/includes/i18n.php';
 require_once __DIR__ . '/backend/config/database.php';
+require_once __DIR__ . '/backend/services/CustomerPortalService.php';
+require_once __DIR__ . '/backend/services/CargoMetricsService.php';
 header('Referrer-Policy: no-referrer');
 header('Cache-Control: no-store, private');
 header('X-Robots-Tag: noindex, nofollow');
@@ -13,7 +15,7 @@ header('X-Robots-Tag: noindex, nofollow');
 $uiLocale = clmsGetUiLocale();
 $clientTranslations = clmsGetClientTranslationPayload();
 
-$token = trim($_GET['token'] ?? '');
+$token = is_string($_GET['token']??null)?trim($_GET['token']):'';
 $error = null;
 $customer = null;
 $orders = [];
@@ -29,15 +31,11 @@ function formatPortalDate(?string $value, string $format = 'Y-m-d'): string
 
 if ($token) {
   $pdo = getDb();
-  $hash = hash('sha256', $token);
-  $stmt = $pdo->prepare("SELECT cpt.*, c.name as customer_name, c.code as customer_code FROM customer_portal_tokens cpt JOIN customers c ON cpt.customer_id = c.id WHERE cpt.token_hash = ? AND cpt.expires_at > NOW() AND cpt.used_at IS NULL");
-  $stmt->execute([$hash]);
-  $row = $stmt->fetch(PDO::FETCH_ASSOC);
+  $row = CustomerPortalService::consume($pdo,$token);
   if (!$row) {
     $error = clmsT('Invalid or expired link. Please request a new link from Salameh Cargo.');
   } else {
     $customer = $row;
-    $pdo->prepare("UPDATE customer_portal_tokens SET used_at = NOW() WHERE id = ?")->execute([$row['id']]);
 
     $latestReceiptSql = "SELECT wr1.* FROM warehouse_receipts wr1
       INNER JOIN (
@@ -70,6 +68,9 @@ if ($token) {
     );
     $stmt->execute([$row['customer_id']]);
     $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $totals=CargoMetricsService::totals($pdo,array_column($orders,'id'));
+    foreach($orders as &$order){$cargo=$totals[(int)$order['id']]??[];foreach(['actual_cbm'=>'cbm','actual_weight'=>'weight','actual_cartons'=>'cartons'] as $target=>$source)$order[$target]=!empty($cargo['receipt_count'])?($cargo[$source]??null):null;}
+    unset($order);
   }
 }
 
@@ -181,7 +182,7 @@ $statusLabels = [
         <div class="row g-4">
             <?php foreach ($orders as $order): ?>
             <?php
-          $pendingReview = trim((string) ($order['confirmation_token'] ?? '')) !== '' && empty($order['declined_at']) && empty($order['confirmed_at']);
+          $pendingReview = in_array($order['status'],['Confirmed','AwaitingCustomerConfirmation'],true) && trim((string) ($order['confirmation_token'] ?? '')) !== '' && empty($order['declined_at']) && empty($order['confirmed_at']);
           switch ($order['status']) {
             case 'CustomerDeclinedAfterAutoConfirm':
             case 'CustomerDeclined':

@@ -1,3 +1,4 @@
+let configRevision="", configSaving=false;
 document.addEventListener("DOMContentLoaded", () => {
     loadConfig();
     loadHsCatalogFiles();
@@ -30,6 +31,7 @@ function toggleWhatsAppSections() {
 async function loadConfig() {
     try {
         const res = await api("GET", "/config");
+        configRevision=res.revision;
         const c = res.data || {};
         document.getElementById("variancePct").value =
             c.variance_threshold_percent ?? 10;
@@ -132,6 +134,7 @@ async function loadHsCatalogFiles() {
     }
 }
 
+let hsCatalogImportRequest=null;
 async function runHsCatalogImport() {
     const btn = document.getElementById("hsCatalogImportBtn");
     const status = document.getElementById("hsCatalogImportStatus");
@@ -141,7 +144,9 @@ async function runHsCatalogImport() {
     btn.disabled = true;
     status.textContent = typeof t === "function" ? t("Importing…") : "Importing…";
     try {
-        const res = await api("POST", "/hs-code-catalog/import", { source });
+        if(hsCatalogImportRequest?.source!==source)hsCatalogImportRequest={source,key:clmsRequestKey("hs-catalog-import")};
+        const res = await api("POST", "/hs-code-catalog/import", { source, idempotency_key:hsCatalogImportRequest.key });
+        hsCatalogImportRequest=null;
         const d = res.data || {};
         status.textContent = typeof t === "function"
             ? t("Imported {count} rows from {file}.", { count: d.imported ?? 0, file: d.file ?? "file" })
@@ -371,6 +376,7 @@ function validateConfig(cfg) {
 }
 
 async function saveConfig() {
+    if(configSaving) return;
     try {
         const cfg = {
             config: {
@@ -469,9 +475,11 @@ async function saveConfig() {
             showToast(errs.join("; "), "danger");
             return;
         }
-        await api("PUT", "/config", cfg);
+        configSaving=true; cfg.revision=configRevision;
+        const saved=await api("PUT", "/config", cfg);
+        configRevision=saved.revision;
         showToast("Configuration saved");
     } catch (e) {
         showToast(e.message, "danger");
-    }
+    } finally {configSaving=false;}
 }

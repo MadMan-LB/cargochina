@@ -42,28 +42,13 @@ test('Config PUT skips masked token placeholder (no overwrite)', function () use
     $pdo->prepare("UPDATE system_config SET key_value = '' WHERE key_name = 'WHATSAPP_API_TOKEN'")->execute();
 });
 
-test('Default preferences seeded on first GET when empty', function () use ($pdo) {
-    $u = $pdo->query("SELECT id FROM users LIMIT 1")->fetch(PDO::FETCH_ASSOC);
-    if (!$u) return;
-    $uid = (int) $u['id'];
-    $pdo->prepare("DELETE FROM user_notification_preferences WHERE user_id = ?")->execute([$uid]);
-    $before = (int) $pdo->query("SELECT COUNT(*) FROM user_notification_preferences WHERE user_id = $uid")->fetchColumn();
-    if ($before !== 0) throw new Exception('Expected 0 prefs before seed');
-    $stmt = $pdo->prepare("SELECT channel, event_type, enabled FROM user_notification_preferences WHERE user_id = ?");
-    $stmt->execute([$uid]);
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    if (empty($rows)) {
-        $ins = $pdo->prepare("INSERT INTO user_notification_preferences (user_id, channel, event_type, enabled) VALUES (?,?,?,?)");
-        $events = ['order_submitted', 'order_approved', 'order_received', 'variance_confirmation', 'shipment_finalized'];
-        foreach ($events as $et) {
-            $ins->execute([$uid, 'dashboard', $et, 1]);
-            $ins->execute([$uid, 'email', $et, 1]);
-            $ins->execute([$uid, 'whatsapp', $et, 1]);
-        }
-    }
-    $after = (int) $pdo->query("SELECT COUNT(*) FROM user_notification_preferences WHERE user_id = $uid")->fetchColumn();
-    if ($after < 10) throw new Exception("Expected at least 10 prefs after seed, got $after");
-    $pdo->prepare("DELETE FROM user_notification_preferences WHERE user_id = ?")->execute([$uid]);
+test('Default preferences are computed without writes', function () use ($pdo,$root) {
+    require $root.'/backend/api/handlers/notification-preferences.php';
+    $uid=(int)$pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn();
+    $before=(int)$pdo->query('SELECT COUNT(*) FROM user_notification_preferences')->fetchColumn();
+    $state=notificationPreferenceState($pdo,$uid);
+    if(count($state)!==15)throw new Exception('Default preference matrix is incomplete');
+    if((int)$pdo->query('SELECT COUNT(*) FROM user_notification_preferences')->fetchColumn()!==$before)throw new Exception('Preference read mutated rows');
 });
 
 test('WhatsApp generic provider builds JSON payload', function () use ($pdo) {

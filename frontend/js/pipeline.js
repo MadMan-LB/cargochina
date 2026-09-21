@@ -55,12 +55,13 @@ const PIPELINE_STAGE_PREVIEW_LIMIT = 3;
 async function fetchOrdersByStatuses(statuses) {
     const params = new URLSearchParams();
     statuses.forEach((status) => params.append("status[]", status));
+    params.set("limit",String(PIPELINE_STAGE_PREVIEW_LIMIT));
     return api("GET", "/orders?" + params.toString());
 }
 
 async function fetchPipelineStage(stage) {
     if (stage.query) {
-        return api("GET", stage.query);
+        return api("GET", stage.query+"&limit="+PIPELINE_STAGE_PREVIEW_LIMIT);
     }
     return fetchOrdersByStatuses(stage.statuses || []);
 }
@@ -259,7 +260,7 @@ async function loadPipeline() {
         const [statsRes, ...stageResponses] = await Promise.all([
             api("GET", "/dashboard/stats"),
             ...stageRequests,
-            api("GET", "/containers"),
+            loadAssignmentContainers().then(data=>({data})),
         ]);
 
         const containersRes = stageResponses.pop();

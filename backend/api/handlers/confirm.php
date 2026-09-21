@@ -10,6 +10,8 @@ require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__, 2) . '/services/OrderReceiptWorkflowService.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('confirm', $method, $id, $action);
     $pdo = getDb();
     header('Cache-Control: no-store, private');
     header('Referrer-Policy: no-referrer');
@@ -33,9 +35,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $stmt->execute([$token]);
         $order = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$order) jsonError('Invalid or expired review link', 404);
-        if (($order['status'] ?? '') === 'FinalizedAndPushedToTracking') {
-            jsonError('This order has already been finalized and can no longer be updated from the portal', 400);
-        }
+        if (!in_array($order['status'], ['Confirmed', 'AwaitingCustomerConfirmation'], true)) jsonError('This order no longer has a pending customer response', 409);
+        $cargo = CargoMetricsService::totals($pdo, [(int)$order['id']])[(int)$order['id']] ?? [];
+        $order['actual_cbm'] = $cargo['cbm'] ?? null;
+        $order['actual_weight'] = $cargo['weight'] ?? null;
+        $order['actual_cartons'] = $cargo['cartons'] ?? null;
+        $order['received_quantity'] = $cargo['received_quantity'] ?? null;
 
         $itemCols = "description_cn, description_en, cartons, quantity, unit,
              declared_cbm, declared_weight, item_no, shipping_code";
@@ -86,10 +91,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         }
 
         if ($decline) {
-            OrderReceiptWorkflowService::declineAutoConfirmedOrder($pdo, (int) $order['id'], $declineReason, null, 'decline_by_token');
+            OrderReceiptWorkflowService::declineAutoConfirmedOrder($pdo, (int) $order['id'], $declineReason, null, 'decline_by_token', $token);
             jsonResponse(['data' => ['status' => 'CustomerDeclinedAfterAutoConfirm', 'order_id' => (int) $order['id']]]);
         } else {
-            OrderReceiptWorkflowService::acceptAutoConfirmedOrder($pdo, (int) $order['id'], null, 'confirm_by_token');
+            OrderReceiptWorkflowService::acceptAutoConfirmedOrder($pdo, (int) $order['id'], null, 'confirm_by_token', $token);
             jsonResponse(['data' => ['status' => 'ReadyForConsolidation', 'order_id' => (int) $order['id']]]);
         }
     }

@@ -1,0 +1,22 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
+let pending=[],toasts=[];const body={children:[],_html:'',set innerHTML(s){this._html=s;if(!s)this.children=[];},get innerHTML(){return this._html;},appendChild(n){this.children.push(n);}};
+const nodes={auditBody:body,auditEmpty:{classList:{toggle(){}}},loadMoreBtn:{style:{}},filterEntityType:{value:''}};
+const context=vm.createContext({URLSearchParams,document:{getElementById:id=>nodes[id],createElement:()=>({innerHTML:''}),addEventListener(){}},escapeHtml:v=>String(v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'),showToast:m=>toasts.push(m),api:()=>new Promise((resolve,reject)=>pending.push({resolve,reject}))});
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../frontend/js/admin_audit_log.js'),'utf8'),context);
+(async()=>{
+ const old=context.loadAuditLog();nodes.filterEntityType.value='order';const current=context.loadAuditLog();pending[1].resolve({data:[{entity_type:'order',entity_id:7,action:'update'}],has_more:true});await current;pending[0].resolve({data:[{entity_type:'stale',entity_id:1}],has_more:false});await old;assert.equal(body.children.length,1);assert.match(body.children[0].innerHTML,/orders.php\?order_id=7/);
+ const next=context.loadAuditLog(false);await context.loadAuditLog(false);assert.equal(pending.length,3);pending[2].resolve({data:[{entity_type:'<script>alert(1)</script>',entity_id:8,action:'create'}],has_more:false});await next;assert.equal(body.children.length,2);assert(!body.children[1].innerHTML.includes('<script>'));
+ const failing=context.loadAuditLog();const latest=context.loadAuditLog();pending[3].reject(Error('old error'));pending[4].resolve({data:[],has_more:false});await Promise.all([failing,latest]);assert.equal(toasts.length,0);assert.equal(body.children.length,0);
+ console.log('PASS: audit stale responses/errors, duplicate pagination clicks, escaped entity labels and exact order links');
+ const pendingAdmin=[],adminNodes={permissionOverrideSaveBtn:{disabled:false}};
+ const admin=vm.createContext({console,document:{addEventListener(){},getElementById:id=>adminNodes[id],querySelectorAll:()=>[{value:'page:orders'}]},window:{},api:(method,url,body)=>new Promise((resolve,reject)=>pendingAdmin.push({method,url,body,resolve,reject})),setLoading:(button,on)=>button.disabled=on,showToast(){}});
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../frontend/js/admin_users.js'),'utf8'),admin);
+ vm.runInContext('selectedPermissionOverrideUserId="42";permissionRevisions={42:"original"};renderPermissionOverrideGrid=()=>{};',admin);
+ const saving=admin.savePermissionOverrides();await admin.savePermissionOverrides();assert.equal(pendingAdmin.length,1,'Double click sent two administrator writes');
+ assert.equal(pendingAdmin[0].body.revision,'original');
+ vm.runInContext('selectedPermissionOverrideUserId="43";',admin);
+ pendingAdmin[0].resolve({data:{overrides:[{permission_key:'page:orders'}],revision:'saved'}});await saving;
+ assert.equal(vm.runInContext('permissionRevisions[42]',admin),'saved');assert.equal(vm.runInContext('permissionRevisions[43]',admin),undefined);
+ assert.equal(adminNodes.permissionOverrideSaveBtn.disabled,false);
+ console.log('PASS: administrator double-click guard, revision precondition and changed user selection retain the correct result');
+})().catch(e=>{console.error(e);process.exitCode=1;});

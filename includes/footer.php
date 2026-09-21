@@ -6,7 +6,17 @@
     <script src="/cargochina/frontend/js/bootstrap.bundle.min.js"></script>
     <script src="/cargochina/frontend/js/upload-utils.js?v=<?= @filemtime(__DIR__ . '/../frontend/js/upload-utils.js') ?: time() ?>"></script>
     <script src="/cargochina/frontend/js/app.js?v=<?= @filemtime(__DIR__ . '/../frontend/js/app.js') ?: time() ?>"></script>
+    <script src="/cargochina/frontend/js/incident_reporter.js"></script>
     <script src="/cargochina/frontend/js/sidebar.js?v=<?= @filemtime(__DIR__ . '/../frontend/js/sidebar.js') ?: time() ?>"></script>
+    <?php
+      require_once __DIR__.'/../backend/services/OwnerAccessService.php';
+      try { $showOwnerControl=OwnerAccessService::allowed(getDb(),(int)($_SESSION['user_id']??0)); }
+      catch(Throwable $e){$showOwnerControl=false;}
+      if($showOwnerControl):
+    ?>
+    <a id="ownerIncidentNotice" class="btn btn-dark position-fixed bottom-0 end-0 m-3" style="z-index:1050" href="/cargochina/owner_control.php">Owner operations</a>
+    <script src="/cargochina/frontend/js/owner_notice.js"></script>
+    <?php endif; ?>
     <script>
       (function() {
         var b = document.getElementById('notifBadge');

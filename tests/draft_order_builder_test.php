@@ -37,6 +37,7 @@ function test(string $name, callable $fn): void
 
 function runHandlerScript(string $root, string $handlerPath, string $method, ?string $id, ?string $action, array $query = [], array $body = []): string
 {
+    if($method==='POST' && $id===null && in_array(basename($handlerPath),['orders.php','draft-orders.php'],true) && !isset($body['idempotency_key']))$body['idempotency_key']='builder-regression-'.bin2hex(random_bytes(8));
     $rootEsc = addslashes(str_replace('\\', '/', $root));
     $handlerEsc = addslashes($handlerPath);
     $queryCode = var_export($query, true);
@@ -118,6 +119,7 @@ function bilingualDescriptionEntry(string $english): array
 
 function startDraftCreateProcess(string $root, array $body): array
 {
+    $body['idempotency_key']??='builder-race-'.bin2hex(random_bytes(8));
     $rootEsc=addslashes(str_replace('\\','/',$root));
     $bodyCode=var_export($body,true);
     $code="<?php\nsession_start();\n\$_SESSION['user_id']=1;\n\$_SESSION['user_roles']=['ChinaAdmin'];\nrequire '$rootEsc/backend/config/database.php';\nrequire '$rootEsc/backend/api/helpers.php';\n\$h=require '$rootEsc/backend/api/handlers/draft-orders.php';\n\$h('POST',null,null,$bodyCode);\n";
@@ -998,7 +1000,7 @@ test('orders list is sorted newest first', function () use ($pdo, $root) {
 
     $createdIds = [];
     try {
-        foreach (['older' => '2098-12-30 10:00:00', 'newer' => '2098-12-31 10:00:00'] as $name => $createdAt) {
+        foreach (['older' => date('Y-m-d H:i:s',time()+3600), 'newer' => date('Y-m-d H:i:s',time()+7200)] as $name => $createdAt) {
             $label = 'Newest-first ' . $name . ' ' . bin2hex(random_bytes(4));
             $created = json_decode(runHandlerScript($root, 'backend/api/handlers/orders.php', 'POST', null, null, [], [
                 'customer_id' => $customerId,
@@ -1180,6 +1182,7 @@ test('draft and confirmed-order exports preserve shipment charges', function () 
     $costId = 0;
     try {
         $cost = (new DraftOrderCostService($pdo))->create($orderId, [
+            'idempotency_key'=>'builder-cost-'.bin2hex(random_bytes(8)),
             'cost_type_code' => 'handling',
             'description_en' => 'Export preservation check',
             'amount' => '12.3400',
@@ -1301,6 +1304,11 @@ test('draft search and advanced filters share exact bilingual, status, party, it
         $created = json_decode(runHandlerScript($root, 'backend/api/handlers/draft-orders.php', 'POST', null, null, [], $payload), true);
         $orderId = (int) ($created['data']['id'] ?? 0);
         if ($orderId <= 0) throw new Exception('Could not create bilingual filter fixture: ' . json_encode($created));
+        // Filter the persisted dates, not PHP's wall clock: MySQL may use a
+        // different timezone, and this test can run across local midnight.
+        $dateStmt = $pdo->prepare('SELECT DATE(created_at) AS created_date, expected_ready_date FROM orders WHERE id=?');
+        $dateStmt->execute([$orderId]);
+        $fixtureDates = $dateStmt->fetch(PDO::FETCH_ASSOC);
 
         foreach ([$english, $chinese, $code] as $query) {
             $result = json_decode(runHandlerScript($root, 'backend/api/handlers/draft-orders.php', 'GET', null, null, ['q' => $query, 'limit' => 10]), true);
@@ -1323,10 +1331,10 @@ test('draft search and advanced filters share exact bilingual, status, party, it
             'supplier_id' => $supplierId,
             'goods_type' => 'dangerous',
             'brand' => $brand,
-            'created_from' => date('Y-m-d'),
-            'created_to' => date('Y-m-d'),
-            'expected_from' => date('Y-m-d'),
-            'expected_to' => date('Y-m-d'),
+            'created_from' => $fixtureDates['created_date'],
+            'created_to' => $fixtureDates['created_date'],
+            'expected_from' => $fixtureDates['expected_ready_date'],
+            'expected_to' => $fixtureDates['expected_ready_date'],
             'page' => 1,
             'limit' => 10,
         ]), true);

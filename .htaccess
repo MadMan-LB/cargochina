@@ -25,6 +25,7 @@ RewriteCond %{THE_REQUEST} \s/+[^\s?]*/backend/api/ [NC]
 RewriteRule ^backend/api/ - [F,L,NC]
 RewriteRule ^backend/(?:config|migrations|services|cache|templates|cron|logs)(?:/|$) - [F,L,NC]
 RewriteRule ^backend/uploads/.*\.(?:php|phtml|phar|cgi|pl|asp|aspx|jsp)$ - [F,L,NC]
+RewriteRule ^backend/uploads/(.+)$ backend/media.php?path=uploads/$1 [QSA,L]
 RewriteRule ^tmp_.*\.php$ - [F,L,NC]
 
 <IfModule mod_expires.c>

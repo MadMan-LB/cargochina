@@ -6,6 +6,8 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
+require_once dirname(__DIR__,2).'/services/ExpenseWriteService.php';
+require_once dirname(__DIR__,2).'/services/QueryFilterService.php';
 
 /**
  * Find expense category by name, or create it if not found.
@@ -59,6 +61,8 @@ function findOrCreateExpenseCategory(PDO $pdo, string $name, ?int $userId = null
 }
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('expenses', $method, $id, $action);
     $pdo = getDb();
     $userId = getAuthUserId();
     if (!$userId) {
@@ -67,6 +71,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     requirePageAccess('expenses');
     if ($method !== 'GET') requirePermission('expenses.write');
 
+    if($method==='GET')QueryFilterService::validate($_GET,'expenses');
     switch ($method) {
         case 'GET':
             if ($id === 'payee-suggestions') {
@@ -75,7 +80,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if (strlen($q) < 1) {
                     jsonResponse(['data' => []]);
                 }
-                $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+                $like = clmsSearchLike($q);
                 $data = [];
                 $payeeSql = "SELECT DISTINCT payee as name FROM expenses WHERE payee IS NOT NULL AND TRIM(payee) != ''";
                 $payeeParams = [];
@@ -111,7 +116,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $sql = "SELECT DISTINCT payee as name FROM expenses WHERE payee IS NOT NULL AND TRIM(payee) != ''";
                 $params = [];
                 if (strlen($q) >= 1) {
-                    $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+                    $like = clmsSearchLike($q);
                     $sql .= " AND payee LIKE ?";
                     $params[] = $like;
                 }
@@ -134,7 +139,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $sql .= " AND category_type = 'warehouse'";
                 }
                 if (strlen($q) >= 1) {
-                    $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+                    $like = clmsSearchLike($q);
                     $sql .= " AND (name LIKE ? OR category_type LIKE ?)";
                     $params = array_merge($params, [$like, $like]);
                 }
@@ -153,8 +158,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $customerId = $_GET['customer_id'] ?? null;
                 $supplierId = $_GET['supplier_id'] ?? null;
                 $q = trim($_GET['q'] ?? '');
-                $limit = min(500, (int) ($_GET['limit'] ?? 100));
-                $offset = (int) ($_GET['offset'] ?? 0);
+                $limit = clmsQueryLimit($_GET['limit'] ?? 100,100,500);
+                $offset = clmsQueryOffset($_GET['offset'] ?? 0);
 
                 $sql = "SELECT e.*, ec.name as category_name, ec.category_type,
                     o.id as order_id_ref, c.name as customer_name, co.code as container_code, s.name as supplier_name
@@ -195,7 +200,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $params[] = $supplierId;
                 }
                 if (strlen($q) >= 1) {
-                    $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+                    $like = clmsSearchLike($q);
                     $chkSupp = @$pdo->query("SHOW COLUMNS FROM expenses LIKE 'supplier_id'");
                     $suppCond = ($chkSupp && $chkSupp->rowCount() > 0)
                         ? " OR (s.name IS NOT NULL AND s.name LIKE ?)"
@@ -214,7 +219,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
                 // Summary (same filters as list)
-                $sumSql = "SELECT currency, SUM(amount) as total FROM expenses e
+                $sumSql = "SELECT currency, SUM(amount) as total, COUNT(*) as record_count FROM expenses e
                     JOIN expense_categories ec ON e.category_id = ec.id
                     LEFT JOIN containers co ON e.container_id = co.id
                     LEFT JOIN suppliers s ON e.supplier_id = s.id
@@ -249,7 +254,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $sumParams[] = $supplierId;
                 }
                 if (strlen($q) >= 1) {
-                    $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+                    $like = clmsSearchLike($q);
                     $sumSql .= " AND (e.payee LIKE ? OR e.notes LIKE ? OR ec.name LIKE ? OR co.code LIKE ? OR (s.name IS NOT NULL AND s.name LIKE ?))";
                     $sumParams[] = $like;
                     $sumParams[] = $like;
@@ -262,7 +267,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if ($sumParams) $sumStmt->execute($sumParams);
                 $summary = $sumStmt->fetchAll(PDO::FETCH_ASSOC);
 
-                jsonResponse(['data' => $rows, 'summary' => $summary]);
+                $total=(int)array_sum(array_column($summary,'record_count'));
+                jsonResponse(['data' => array_map([ExpenseWriteService::class,'present'],$rows), 'summary' => $summary,'meta'=>['limit'=>$limit,'offset'=>$offset,'total_count'=>$total,'has_more'=>$offset+count($rows)<$total]]);
             }
             $expenseSql = "SELECT e.*, ec.name as category_name, o.expected_ready_date as order_expected_ready_date, c.name as customer_name, co.code as container_code, s.name as supplier_name
                 FROM expenses e
@@ -276,114 +282,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $stmt->execute([$id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$row) jsonError('Expense not found', 404);
-            jsonResponse(['data' => $row]);
+            jsonResponse(['data' => ExpenseWriteService::present($row)]);
 
         case 'POST':
-            $categoryId = (int) ($input['category_id'] ?? 0);
-            $categoryName = trim($input['category_name'] ?? '');
-            $amount = clmsFinancialDecimal($input['amount'] ?? null, 'Amount');
-            $currency = trim($input['currency'] ?? 'USD');
-            $expenseDate = trim($input['expense_date'] ?? date('Y-m-d'));
-            $payee = trim($input['payee'] ?? '') ?: null;
-            $notes = trim($input['notes'] ?? '') ?: null;
-            $orderId = !empty($input['order_id']) ? (int) $input['order_id'] : null;
-            $containerId = !empty($input['container_id']) ? (int) $input['container_id'] : null;
-            $customerId = !empty($input['customer_id']) ? (int) $input['customer_id'] : null;
-            $supplierId = !empty($input['supplier_id']) ? (int) $input['supplier_id'] : null;
-
-            if (!$categoryId && $categoryName !== '') {
-                if (hasAnyRole(['WarehouseStaff']) && !hasAnyRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'])) {
-                    jsonError('Warehouse staff must select a category from the dropdown. Cannot create new categories.', 400);
-                }
-                $categoryId = findOrCreateExpenseCategory($pdo, $categoryName, $userId);
-            }
-            if (!$categoryId) {
-                jsonError('Category and amount are required. Type a category name or select one from the search.', 400);
-            }
-            if (hasAnyRole(['WarehouseStaff']) && !hasAnyRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'])) {
-                $chk = $pdo->prepare("SELECT category_type FROM expense_categories WHERE id = ?");
-                $chk->execute([$categoryId]);
-                if ($chk->fetchColumn() !== 'warehouse') jsonError('Warehouse staff can only use warehouse expense categories', 403);
-            }
-            if (!in_array($currency, ['USD', 'RMB', 'EUR'], true)) {
-                $currency = 'USD';
-            }
-            $chkSupp = @$pdo->query("SHOW COLUMNS FROM expenses LIKE 'supplier_id'");
-            $hasSupp = $chkSupp && $chkSupp->rowCount() > 0;
-            if ($hasSupp) {
-                $stmt = $pdo->prepare("INSERT INTO expenses (category_id, amount, currency, expense_date, payee, notes, order_id, container_id, customer_id, supplier_id, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)");
-                $stmt->execute([$categoryId, $amount, $currency, $expenseDate, $payee, $notes, $orderId, $containerId, $customerId, $supplierId, $userId]);
-            } else {
-                $stmt = $pdo->prepare("INSERT INTO expenses (category_id, amount, currency, expense_date, payee, notes, order_id, container_id, customer_id, created_by) VALUES (?,?,?,?,?,?,?,?,?,?)");
-                $stmt->execute([$categoryId, $amount, $currency, $expenseDate, $payee, $notes, $orderId, $containerId, $customerId, $userId]);
-            }
-
-            $newId = (int) $pdo->lastInsertId();
-            logClms('expense_create', ['expense_id' => $newId, 'amount' => $amount, 'currency' => $currency, 'user_id' => $userId]);
-
-            $stmt = $pdo->prepare("SELECT e.*, ec.name as category_name FROM expenses e JOIN expense_categories ec ON e.category_id = ec.id WHERE e.id = ?");
-            $stmt->execute([$newId]);
-            jsonResponse(['data' => $stmt->fetch(PDO::FETCH_ASSOC)], 201);
-
         case 'PUT':
-            if (!$id) jsonError('Expense ID required', 400);
-            $stmt = $pdo->prepare("SELECT id FROM expenses WHERE id = ?");
-            $stmt->execute([$id]);
-            if (!$stmt->fetch()) jsonError('Expense not found', 404);
-
-            $categoryId = array_key_exists('category_id', $input) ? (int) $input['category_id'] : null;
-            if ($categoryId && hasAnyRole(['WarehouseStaff']) && !hasAnyRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'])) {
-                $chk = $pdo->prepare("SELECT category_type FROM expense_categories WHERE id = ?");
-                $chk->execute([$categoryId]);
-                $ct = $chk->fetchColumn();
-                if ($ct !== 'warehouse') jsonError('Warehouse staff can only use warehouse expense categories', 403);
-            }
-            $categoryName = trim($input['category_name'] ?? '');
-            if ($categoryId !== null && !$categoryId && $categoryName !== '') {
-                $categoryId = findOrCreateExpenseCategory($pdo, $categoryName, $userId);
-                $input['category_id'] = $categoryId;
-            }
-
-            $updates = [];
-            $params = [];
-            foreach (['category_id', 'amount', 'currency', 'expense_date', 'payee', 'notes', 'order_id', 'container_id', 'customer_id', 'supplier_id'] as $col) {
-                if (array_key_exists($col, $input)) {
-                    if ($col === 'amount') {
-                        $v = (float) $input[$col];
-                        if ($v <= 0) continue;
-                    } elseif (in_array($col, ['order_id', 'container_id', 'customer_id', 'supplier_id'])) {
-                        $v = !empty($input[$col]) ? (int) $input[$col] : null;
-                    } elseif ($col === 'category_id') {
-                        $v = (int) $input[$col];
-                        if ($v <= 0) continue;
-                    } else {
-                        $v = trim($input[$col] ?? '') ?: null;
-                    }
-                    $updates[] = "$col = ?";
-                    $params[] = $v;
-                }
-            }
-            if (empty($updates)) {
-                jsonError('No fields to update', 400);
-            }
-            $params[] = $id;
-            $pdo->prepare("UPDATE expenses SET " . implode(', ', $updates) . " WHERE id = ?")->execute($params);
-            logClms('expense_update', ['expense_id' => $id, 'user_id' => $userId]);
-
-            $stmt = $pdo->prepare("SELECT e.*, ec.name as category_name FROM expenses e JOIN expense_categories ec ON e.category_id = ec.id WHERE e.id = ?");
-            $stmt->execute([$id]);
-            jsonResponse(['data' => $stmt->fetch(PDO::FETCH_ASSOC)]);
-
         case 'DELETE':
-            if (!$id) jsonError('Expense ID required', 400);
-            if (hasAnyRole(['WarehouseStaff']) && !hasAnyRole(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'])) {
-                jsonError('Warehouse staff cannot delete expenses. Contact admin for removal.', 403);
-            }
-            $stmt = $pdo->prepare("DELETE FROM expenses WHERE id = ?");
-            $stmt->execute([$id]);
-            if ($stmt->rowCount() === 0) jsonError('Expense not found', 404);
-            logClms('expense_delete', ['expense_id' => $id, 'user_id' => $userId]);
-            jsonResponse(['data' => ['deleted' => true]]);
+            if($method!=='POST'&&!$id)jsonError('Expense ID required',422);
+            jsonResponse(['data'=>ExpenseWriteService::save($pdo,$method,$id?(int)$id:null,$input,(int)$userId)],$method==='POST'?201:200);
 
         default:
             jsonError('Method not allowed', 405);

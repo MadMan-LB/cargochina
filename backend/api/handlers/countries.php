@@ -8,6 +8,8 @@
 require_once __DIR__ . '/../helpers.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('countries', $method, $id, $action);
     requirePermission('countries.read');
     $pdo = getDb();
 

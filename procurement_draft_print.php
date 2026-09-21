@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/backend/services/LegacyProcurementMetricsService.php';
 require_once 'includes/auth_check.php';
 require_once 'includes/page_guard.php';
 requireRoleForPage(['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin']);
@@ -7,6 +8,7 @@ require_once __DIR__ . '/backend/config/database.php';
 require_once __DIR__ . '/backend/api/helpers.php';
 $pdo = getDb();
 $basePath = '/cargochina';
+requirePermission('orders.read');
 
 $orderId = isset($_GET['order_id']) ? (int) $_GET['order_id'] : 0;
 $legacyId = isset($_GET['id']) ? (int) $_GET['id'] : 0;
@@ -118,8 +120,8 @@ function printDraftEntryRows(array $sections): string
                 $multiplier = (($item['dimensions_scope'] ?? 'carton') === 'carton')
                     ? (float) ($item['cartons'] ?? 0)
                     : (float) ($item['quantity'] ?? 0);
-                $totalCbm = round((float) (($item['cbm'] ?? 0) * $multiplier), 6);
-                $totalWeight = round((float) (($item['weight'] ?? 0) * $multiplier), 4);
+                $totalCbm = $item['declared_cbm'] ?? round((float) (($item['cbm'] ?? 0) * $multiplier), 6);
+                $totalWeight = $item['declared_weight'] ?? round((float) (($item['weight'] ?? 0) * $multiplier), 4);
                 ?>
                 <tr class="table-warning">
                   <td><?= $itemIndex + 1 ?></td>
@@ -189,8 +191,8 @@ function printDraftEntryRows(array $sections): string
                 $multiplier = (($item['dimensions_scope'] ?? 'carton') === 'carton')
                     ? (float) ($item['cartons'] ?? 0)
                     : (float) ($item['quantity'] ?? 0);
-                $totalCbm = round((float) (($item['cbm'] ?? 0) * $multiplier), 6);
-                $totalWeight = round((float) (($item['weight'] ?? 0) * $multiplier), 4);
+                $totalCbm = $item['declared_cbm'] ?? round((float) (($item['cbm'] ?? 0) * $multiplier), 6);
+                $totalWeight = $item['declared_weight'] ?? round((float) (($item['weight'] ?? 0) * $multiplier), 4);
                 ?>
                 <tr>
                   <td><?= $itemIndex + 1 ?></td>
@@ -296,7 +298,7 @@ if ($orderId > 0) {
                 'description_translated' => $enParts[$i] ?? $cnParts[$i] ?? '',
             ];
         }
-        $scope = strtolower((string) ($row['product_dimensions_scope'] ?? 'carton'));
+        $scope = strtolower((string) ($row['dimensions_scope'] ?? $row['product_dimensions_scope'] ?? 'carton'));
         if (!in_array($scope, ['piece', 'carton'], true)) {
             $scope = 'carton';
         }
@@ -319,6 +321,8 @@ if ($orderId > 0) {
             'unit_price' => $row['unit_price'] !== null ? (float) $row['unit_price'] : null,
             'sell_price' => isset($row['sell_price']) && $row['sell_price'] !== null ? (float) $row['sell_price'] : null,
             'total_amount' => $row['total_amount'] !== null ? (float) $row['total_amount'] : 0,
+            'declared_cbm'=>$row['declared_cbm']!==null?(float)$row['declared_cbm']:null,
+            'declared_weight'=>$row['declared_weight']!==null?(float)$row['declared_weight']:null,
             'cbm' => $multiplier > 0 ? round(((float) ($row['declared_cbm'] ?? 0)) / $multiplier, 6) : 0,
             'weight' => $multiplier > 0 ? round(((float) ($row['declared_weight'] ?? 0)) / $multiplier, 4) : 0,
             'dimensions_scope' => $scope,
@@ -354,9 +358,9 @@ if ($orderId > 0) {
         exit;
     }
 
-    $itemsStmt = $pdo->prepare("SELECT pdi.*, p.description_cn, p.description_en, p.cbm, p.weight, p.unit_price, p.hs_code FROM procurement_draft_items pdi LEFT JOIN products p ON pdi.product_id = p.id WHERE pdi.draft_id = ? ORDER BY pdi.sort_order, pdi.id");
+    $itemsStmt = $pdo->prepare("SELECT pdi.*, p.description_cn, p.description_en, p.cbm, p.weight, p.unit_price, p.hs_code, p.dimensions_scope, p.pieces_per_carton FROM procurement_draft_items pdi LEFT JOIN products p ON pdi.product_id = p.id WHERE pdi.draft_id = ? ORDER BY pdi.sort_order, pdi.id");
     $itemsStmt->execute([$legacyId]);
-    $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+    $items = array_map([LegacyProcurementMetricsService::class, 'normalize'], $itemsStmt->fetchAll(PDO::FETCH_ASSOC));
     $sections = [[
         'supplier_name' => $draft['supplier_name'] ?? '—',
         'items' => array_map(static function ($item) {
@@ -380,6 +384,8 @@ if ($orderId > 0) {
                 'unit_price' => isset($item['unit_price']) ? (float) $item['unit_price'] : null,
                 'sell_price' => isset($item['unit_price']) ? (float) $item['unit_price'] : null,
                 'total_amount' => (float) (($item['unit_price'] ?? 0) * ($item['quantity'] ?? 0)),
+                'declared_cbm' => $item['declared_cbm'],
+                'declared_weight' => $item['declared_weight'],
                 'cbm' => isset($item['cbm']) ? (float) $item['cbm'] : 0,
                 'weight' => isset($item['weight']) ? (float) $item['weight'] : 0,
                 'dimensions_scope' => 'piece',

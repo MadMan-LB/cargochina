@@ -34,6 +34,11 @@ async function check(file, action, data, expectedType, expectedText, error) {
     checks++;
 }
 (async () => {
+    const modeHarness=harness('consolidation.js',{});
+    for(const [mode,label] of [['disabled','Finalize (tracking disabled)'],['dry_run','Finalize (tracking dry-run)'],['live','Finalize & Push to Tracking'],['unknown','Finalize']]){
+        const presentation=vm.runInContext('trackingFinalizationPresentation('+JSON.stringify(mode)+')',modeHarness.ctx);
+        assert.equal(presentation.label,label);if(mode==='disabled'||mode==='dry_run')assert.match(presentation.hint,/no external request will be sent/i);checks++;
+    }
     for (const file of ['consolidation.js', 'admin_tracking_push.js']) {
         await check(file, 'retryPush', { success: true, message: 'Pushed to tracking' }, 'success', /Pushed/);
         await check(file, 'retryPush', { success: false, message: 'Tracking push disabled' }, 'warning', /disabled/);
@@ -43,7 +48,7 @@ async function check(file, action, data, expectedType, expectedText, error) {
     await check('consolidation.js', 'finalizeDraft', { tracking_result: { success: false, message: 'Push disabled' } }, 'warning', /finalized.*disabled/);
     await check('consolidation.js', 'finalizeDraft', { tracking_result: { success: false, message: 'API failed' } }, 'warning', /finalized.*failed/);
     await check('consolidation.js', 'finalizeDraft', { tracking_result: null }, 'warning', /Not pushed/);
-    for (const [status, label, retry] of [['success','Pushed',false], ['failed','Failed',true], ['disabled','Not pushed',true], ['dry_run','Dry-run',true], [null,'Not pushed',true]]) {
+    for (const [status, label, retry] of [['success','Pushed',false], ['failed','Failed',true], ['disabled','Not pushed',true], ['dry_run','Dry-run',true], ['pending','Not pushed',true], [null,'Not pushed',true]]) {
         const h = harness('consolidation.js', [{ id: 66, status: 'finalized', push_status: status, order_ids: [727] }]);
         await vm.runInContext('loadShipmentDrafts()', h.ctx);
         assert.ok(h.list.innerHTML.includes(`>${label}</span>`));

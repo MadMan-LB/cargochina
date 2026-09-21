@@ -6,14 +6,17 @@
  * @param string $area One of: warehouse|buyers|admin|superadmin
  */
 
+require_once __DIR__ . '/../backend/config/runtime.php';
+require_once __DIR__ . '/session_roles.php';
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
 require_once __DIR__ . '/sidebar_permissions.php';
 require_once __DIR__ . '/i18n.php';
+clmsRefreshSessionRolesFromDb();
 
-if (empty($_SESSION['user_id'])) {
+if (empty($_SESSION['user_id']) || !empty($GLOBALS['clms_auth_verification_failed'])) {
     $loginUrl = '/cargochina/login.php';
     header('Location: ' . $loginUrl);
     exit;

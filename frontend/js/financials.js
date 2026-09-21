@@ -816,7 +816,9 @@
         `;
     }
 
+    let financialDepositRequestKey = null;
     window.openFinDepositModal = function (customerId, name) {
+        financialDepositRequestKey = clmsRequestKey('customer-deposit');
         document.getElementById("finDepCustomerId").value = customerId;
         document.getElementById("finDepCustomerName").textContent = name;
         document.getElementById("finDepAmount").value = "";
@@ -1054,9 +1056,10 @@
             showToast(financialsT("Amount must be positive"), "danger");
             return;
         }
-        const orderVal = (finDepOrderAc?.getSelectedId?.() || document.getElementById("finDepOrderId").value?.trim() || "").replace(/^#/, "");
+        const orderVal = String(finDepOrderAc?.getSelectedId?.() || document.getElementById("finDepOrderId").value?.trim() || "").replace(/^#/, "");
         const orderId = orderVal && /^\d+$/.test(String(orderVal)) ? parseInt(orderVal, 10) : null;
         const payload = {
+            idempotency_key: financialDepositRequestKey,
             amount,
             currency: document.getElementById("finDepCurrency").value,
             payment_method: document.getElementById("finDepMethod").value || null,

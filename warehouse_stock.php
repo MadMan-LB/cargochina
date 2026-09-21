@@ -7,7 +7,7 @@ $pageTitle = 'Warehouse Stock';
 require 'includes/layout.php';
 ?>
 <h1 class="mb-4">Warehouse Stock</h1>
-<p class="text-muted mb-4">Current stock at warehouse — auto-confirmed and ready-to-move orders that still remain operationally in stock.</p>
+<p class="text-muted mb-4">Received cargo, reserved cargo awaiting shipment, and remaining inbound quantities. Actual stock comes from active warehouse receipts.</p>
 
 <div class="card">
   <div class="card-header">Stock by Order</div>
@@ -67,9 +67,10 @@ require 'includes/layout.php';
             <th>Supplier</th>
             <th>Status</th>
             <th>Item</th>
-            <th>Qty</th>
+            <th>Received quantity</th>
             <th>Declared CBM</th>
             <th>Actual CBM</th>
+            <th>Actual weight (kg)</th>
             <th>Dimensions</th>
             <th>Actions</th>
           </tr>

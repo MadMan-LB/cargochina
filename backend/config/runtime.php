@@ -1,4 +1,5 @@
 <?php
+require_once dirname(__DIR__).'/services/LogRetentionService.php';
 
 /**
  * Production runtime hardening shared by web pages, API, and CLI tools.
@@ -54,7 +55,8 @@ if (!function_exists('clmsEnvFlag')) {
 if (!function_exists('clmsIsDebugEnabled')) {
     function clmsIsDebugEnabled(): bool
     {
-        return clmsEnvFlag('APP_DEBUG', false);
+        $environment=strtolower(trim((string)(getenv('APP_ENV') ?: ($_ENV['APP_ENV'] ?? 'production'))));
+        return in_array($environment,['local','development','testing'],true) && clmsEnvFlag('APP_DEBUG', false);
     }
 }
 
@@ -68,6 +70,15 @@ if (!function_exists('clmsConfigureRuntime')) {
 
         $rootDir = dirname(__DIR__, 2);
         clmsLoadEnvFile($rootDir . '/.env');
+        if (session_status() === PHP_SESSION_NONE) {
+            @ini_set('session.use_strict_mode','1');
+            // Authentication idle/absolute expiry is enforced separately. Keep
+            // expired material at most 90 days for the explicit retention job.
+            @ini_set('session.gc_maxlifetime','7776000');
+            @ini_set('session.cookie_httponly','1');
+            @ini_set('session.cookie_samesite','Lax');
+            if ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || strtolower((string)parse_url((string)(getenv('APP_URL') ?: ''),PHP_URL_SCHEME))==='https') @ini_set('session.cookie_secure','1');
+        }
 
         $debug = clmsIsDebugEnabled();
         error_reporting(E_ALL);
@@ -78,7 +89,7 @@ if (!function_exists('clmsConfigureRuntime')) {
 
         $logDir = $rootDir . '/logs';
         if (is_dir($logDir) || @mkdir($logDir, 0755, true)) {
-            @ini_set('error_log', $logDir . '/php_errors.log');
+            @ini_set('error_log', LogRetentionService::path('php_errors'));
         }
 
         $configured = true;

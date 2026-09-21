@@ -12,6 +12,25 @@ require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__, 2) . '/services/OrderExcelService.php';
 require_once dirname(__DIR__, 2) . '/services/ReceivingExcelImportService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderReceivingService.php';
+require_once dirname(__DIR__, 2) . '/services/CargoMetricsService.php';
+
+function receivingCsvValue($value) {
+    return is_string($value) && preg_match('/^[\s\x00-\x1f]*[=+@-]/u', $value) ? "'" . $value : $value;
+}
+
+function receivingValidateFilters(): void {
+    foreach (['order_id','customer_id','supplier_id','limit','offset'] as $key) {
+        if (isset($_GET[$key]) && $_GET[$key] !== '' && (!is_scalar($_GET[$key]) || !preg_match('/^\d+$/',(string)$_GET[$key]))) jsonError('Invalid '.$key,400);
+    }
+    foreach (['date_from','date_to'] as $key) {
+        if (empty($_GET[$key])) continue;
+        $value=$_GET[$key];
+        $date=is_string($value)?DateTimeImmutable::createFromFormat('!Y-m-d',$value):false;
+        if (!$date || $date->format('Y-m-d')!==$value) jsonError('Invalid '.$key,400);
+    }
+    if (!empty($_GET['date_from']) && !empty($_GET['date_to']) && $_GET['date_from']>$_GET['date_to']) jsonError('Date from must not follow date to',400);
+    if (isset($_GET['shipping_code']) && !is_string($_GET['shipping_code'])) jsonError('Invalid shipping_code',400);
+}
 
 function receivingOperationalRoles(): array
 {
@@ -85,6 +104,7 @@ function receivingFetchQueueRowsForRequest(PDO $pdo, bool $paginate = true, ?arr
     } else {
         $statuses = is_array($statuses) ? $statuses : explode(',', $statuses);
     }
+    if (!$statuses || array_filter($statuses, static fn($status)=>!in_array($status,['Approved','InTransitToWarehouse'],true))) jsonError('Invalid receiving queue status',400);
     $customerId = $_GET['customer_id'] ?? null;
     $supplierId = $_GET['supplier_id'] ?? null;
     $orderId = $_GET['order_id'] ?? null;
@@ -128,11 +148,11 @@ function receivingFetchQueueRowsForRequest(PDO $pdo, bool $paginate = true, ?arr
     }
     if ($shippingCode !== '') {
         $queueItemClauses = [receivingUtf8LikeExpr('oi.shipping_code') . " LIKE ?"];
-        $queueItemParams = ['%' . $shippingCode . '%'];
+        $queueItemParams = [clmsSearchLike($shippingCode)];
         foreach (['what_brand', 'copy_normal_goods', 'code', 'express_number', 'size'] as $column) {
             if (receivingTableHasColumn($pdo, 'order_items', $column)) {
                 $queueItemClauses[] = receivingUtf8LikeExpr("oi.$column") . " LIKE ?";
-                $queueItemParams[] = '%' . $shippingCode . '%';
+                $queueItemParams[] = clmsSearchLike($shippingCode);
             }
         }
         $sql .= " AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND (" . implode(' OR ', $queueItemClauses) . "))";
@@ -265,7 +285,7 @@ function receivingOutputQueueCsv(array $rows, ?string $filename = null): void
     header('Cache-Control: no-cache, no-store, must-revalidate');
 
     $out = fopen('php://output', 'w');
-    fputcsv($out, array_map('clmsT', ['Order ID', 'Customer', 'Supplier', 'Supplier Phone', 'Expected Ready', 'Status', 'Shipping Codes', 'Total Cartons', 'Declared CBM', 'Declared Weight (kg)', 'Items Summary']));
+    clmsWriteCsv($out, array_map('clmsT', ['Order ID', 'Customer', 'Supplier', 'Supplier Phone', 'Expected Ready', 'Status', 'Shipping Codes', 'Total Cartons', 'Declared CBM', 'Declared Weight (kg)', 'Items Summary']));
     foreach ($rows as $row) {
         $items = is_array($row['items'] ?? null) ? $row['items'] : [];
         $shippingCodes = [];
@@ -307,7 +327,7 @@ function receivingOutputQueueCsv(array $rows, ?string $filename = null): void
             }
             $itemsSummary[] = trim(implode(' ', $summaryParts));
         }
-        fputcsv($out, [
+        clmsWriteCsv($out, array_map('receivingCsvValue', [
             (int) ($row['id'] ?? 0),
             OrderExcelService::formatCustomerDisplay($row, $items),
             (string) ($row['supplier_name'] ?? ''),
@@ -317,9 +337,9 @@ function receivingOutputQueueCsv(array $rows, ?string $filename = null): void
             implode('; ', array_keys($shippingCodes)),
             $totalCartons,
             round((float) ($row['declared_cbm'] ?? 0), 6),
-            round((float) ($row['declared_weight'] ?? 0), 2),
+            round((float) ($row['declared_weight'] ?? 0), 4),
             implode('; ', array_filter($itemsSummary)),
-        ]);
+        ]));
     }
     fclose($out);
     exit;
@@ -385,11 +405,15 @@ function receivingStoreExcelImportPreview(PDO $pdo, array $file, array $preview,
 function receivingLoadExcelImportPreview(PDO $pdo, string $token, int $userId): array
 {
     receivingEnsureExcelImportTable($pdo);
-    $stmt = $pdo->prepare("SELECT * FROM receiving_excel_imports WHERE preview_token = ? AND created_by = ? LIMIT 1");
+    $stmt = $pdo->prepare("SELECT * FROM receiving_excel_imports WHERE preview_token = ? AND created_by = ? LIMIT 1" . ($pdo->inTransaction() ? ' FOR UPDATE' : ''));
     $stmt->execute([$token, $userId]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$row) {
         jsonError('Import preview not found or expired', 404);
+    }
+    if (($row['status'] ?? '') === 'committed') {
+        if ($pdo->inTransaction()) $pdo->commit();
+        jsonResponse(['data'=>json_decode($row['result_json'],true), 'idempotent_replay'=>true]);
     }
     if (($row['status'] ?? '') !== 'preview_ready') {
         jsonError('Import preview has errors and cannot be committed', 400);
@@ -402,9 +426,13 @@ function receivingLoadExcelImportPreview(PDO $pdo, string $token, int $userId): 
 }
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('receiving', $method, $id, $action);
     $operationalRoles = receivingOperationalRoles();
     requirePermission('page:receiving', $operationalRoles);
     $pdo = getDb();
+    if ($method === 'GET') { require_once dirname(__DIR__, 2) . '/services/QueryFilterService.php'; QueryFilterService::validate($_GET, 'receiving'); }
+    if($method==='GET'&&($action==='export'||$id==='export'||str_ends_with((string)$action,'/export')))clmsBeginExportSnapshot($pdo);
     $userId = getAuthUserId() ?? 1;
 
     if ($id === 'import' && $action === 'preview') {
@@ -444,6 +472,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if ($token === '') {
             jsonError('preview_token is required', 400);
         }
+        $pdo->beginTransaction();
+        register_shutdown_function(static function () use ($pdo) { if ($pdo->inTransaction()) $pdo->rollBack(); });
         [$importRow, $preview] = receivingLoadExcelImportPreview($pdo, $token, $userId);
         $importId = (int) $importRow['id'];
         $service = new ReceivingExcelImportService();
@@ -474,16 +504,17 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $startedAt = microtime(true);
         $results = [];
         try {
-            $pdo->beginTransaction();
             if ($isDirectIntake) {
                 $resultPayload = $service->commitDirectIntake($pdo, $revalidated, $userId, $importId);
                 $results = $resultPayload['receipts'] ?? [];
             } else {
                 $receivingService = new OrderReceivingService();
+                ksort($payloads, SORT_NUMERIC);
                 foreach ($payloads as $orderId => $payload) {
                     $results[(int) $orderId] = $receivingService->receive($pdo, (int) $orderId, $payload, $userId, false, [
                         'source' => 'excel_import',
                         'import_id' => $importId,
+                        'idempotency_key' => 'receiving-import-' . $importId . '-order-' . $orderId,
                     ]);
                 }
                 $resultPayload = [
@@ -534,7 +565,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         }
         $statuses = ['Approved', 'InTransitToWarehouse'];
         $placeholders = implode(',', array_fill(0, count($statuses), '?'));
-        $like = '%' . preg_replace('/\s+/', '%', $q) . '%';
+        $like = clmsSearchLike($q);
         $hasCustomerPhone = receivingTableHasColumn($pdo, 'customers', 'phone');
         $hasCustomerCode = receivingTableHasColumn($pdo, 'customers', 'code');
         $hasSupplierPhone = receivingTableHasColumn($pdo, 'suppliers', 'phone');
@@ -631,8 +662,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     }
 
     if ($id === 'export' && $action === 'queue') {
+        receivingValidateFilters();
         $rows = receivingFetchQueueRowsForRequest($pdo,false);
-        $format = strtolower(trim((string) ($_GET['format'] ?? 'xlsx')));
+        $format = clmsExportFormat('xlsx');
         if ($format === 'csv') {
             receivingOutputQueueCsv($rows);
         }
@@ -644,13 +676,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     }
 
     if ($id === 'queue') {
+        receivingValidateFilters();
         $queueMeta=[];$queueRows=receivingFetchQueueRowsForRequest($pdo,true,$queueMeta);
         jsonResponse(['data' => $queueRows,'meta'=>$queueMeta]);
     }
 
     if ($id === 'receipts') {
-        if (is_numeric($action)) {
-            $receiptId = (int) $action;
+        receivingValidateFilters();
+        if (preg_match('#^(\d+)(/export)?$#', (string)$action, $receiptRoute)) {
+            $receiptId = (int) $receiptRoute[1];
             $custCols = 'c.name as customer_name';
             $chkPrio = @$pdo->query("SHOW COLUMNS FROM customers LIKE 'priority_level'");
             if ($chkPrio && $chkPrio->rowCount() > 0) $custCols .= ', c.priority_level as customer_priority_level, c.priority_note as customer_priority_note';
@@ -712,6 +746,19 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 $it['packaging_splits'] = $splits;
             }
+            unset($it);
+            $row['cargo_totals'] = CargoMetricsService::totals($pdo, [(int)$row['order_id']])[(int)$row['order_id']] ?? [];
+            if (!empty($receiptRoute[2])) {
+                $headers=['Receipt','Receipt status','Order','Customer','Supplier','Received at','Item','Ordered quantity','Receipt quantity','Receipt cartons','Receipt CBM','Receipt weight','Condition'];
+                $rows=[];
+                foreach ($row['items'] as $item) $rows[]=[(int)$row['id'],$row['voided_at']?'Voided':'Active',(int)$row['order_id'],$row['customer_name'],$row['supplier_name'],$row['received_at'],$item['description_en']?:$item['description_cn'],(float)$item['quantity'],$item['actual_quantity']!==null?(float)$item['actual_quantity']:null,$item['actual_cartons']!==null?(int)$item['actual_cartons']:null,$item['actual_cbm']!==null?(float)$item['actual_cbm']:null,$item['actual_weight']!==null?(float)$item['actual_weight']:null,$item['receipt_condition']];
+                $rows[]=['','',(int)$row['order_id'],'','','','Receipt total','',(!$row['items']||in_array(null,array_column($row['items'],'actual_quantity'),true))?null:array_sum(array_column($row['items'],'actual_quantity')),$row['actual_cartons']!==null?(int)$row['actual_cartons']:null,$row['actual_cbm']!==null?(float)$row['actual_cbm']:null,$row['actual_weight']!==null?(float)$row['actual_weight']:null,''];
+                if (clmsExportFormat()==='csv') {
+                    header('Content-Type: text/csv; charset=utf-8');header('Content-Disposition: attachment; filename="receipt_'.$receiptId.'.csv"');
+                    $out=fopen('php://output','w');clmsWriteCsv($out,$headers);foreach($rows as $values)clmsWriteCsv($out,array_map('receivingCsvValue',$values));fclose($out);exit;
+                }
+                (new OrderExcelService($pdo))->exportTable('Receipt #'.$receiptId,$headers,$rows,'receipt_'.$receiptId.'.xlsx');
+            }
             jsonResponse(['data' => $row]);
         }
 
@@ -728,7 +775,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $feeSelect = receivingTableExists($pdo, 'warehouse_receipt_fees')
             ? ", (SELECT COALESCE(SUM(wrf.amount), 0) FROM warehouse_receipt_fees wrf WHERE wrf.receipt_id = wr.id) as fees_total"
             : ", 0 as fees_total";
-        $sql = "SELECT wr.id, wr.order_id, wr.actual_cartons, wr.actual_cbm, wr.actual_weight, wr.received_at, wr.receipt_condition$feeSelect,
+        $sql = "SELECT wr.id, wr.order_id, wr.actual_cartons, wr.actual_cbm, wr.actual_weight, wr.received_at, wr.receipt_condition, wr.voided_at, wr.void_reason$feeSelect,
             o.expected_ready_date, o.status as order_status, $custCols, s.name as supplier_name
             FROM warehouse_receipts wr
             JOIN orders o ON wr.order_id = o.id
@@ -752,12 +799,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $sql .= " AND wr.received_at <= ?";
             $params[] = $dateTo . ' 23:59:59';
         }
-        $sql .= " ORDER BY wr.received_at DESC LIMIT " . (int)$limit . " OFFSET " . (int)$offset;
+        $countStmt=$pdo->prepare('SELECT COUNT(*) FROM ('.$sql.') receipt_history');
+        $countStmt->execute($params);$total=(int)$countStmt->fetchColumn();
+        $sql .= " ORDER BY wr.received_at DESC, wr.id DESC LIMIT " . (int)$limit . " OFFSET " . (int)$offset;
 
         $stmt = $params ? $pdo->prepare($sql) : $pdo->query($sql);
         if ($params) $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        jsonResponse(['data' => $rows]);
+        jsonResponse(['data' => $rows, 'meta'=>['total'=>$total,'limit'=>$limit,'offset'=>$offset]]);
     }
 
     jsonError('Not found', 404);

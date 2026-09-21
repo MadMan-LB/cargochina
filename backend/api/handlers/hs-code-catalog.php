@@ -8,6 +8,7 @@
 
 require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__, 2) . '/services/TranslationService.php';
+require_once dirname(__DIR__, 2) . '/services/HsCatalogImportService.php';
 
 function normalizeHsCatalogSearchValue(?string $value): string
 {
@@ -43,6 +44,8 @@ function normalizeHsCatalogCsvHeader(string $header): string
 }
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('hs-code-catalog', $method, $id, $action);
     $pdo = getDb();
     $userId = getAuthUserId();
     if (!$userId) {
@@ -180,6 +183,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 jsonError('Forbidden. Only SuperAdmin can manage the HS catalog.', 403);
             }
             if ($id === 'translate') {
+                MasterDataImportService::lock($pdo,'hs_catalog');
                 if (!hsCatalogHasColumn($pdo, 'name_en') || !hsCatalogHasColumn($pdo, 'name_zh')) {
                     jsonError('Run migration 080 before translating the HS catalog.', 409);
                 }
@@ -272,80 +276,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if (!$csvPath || !is_file($csvPath)) {
                 jsonError('CSV file not found. Place lebanon_customs_tariffs.csv in the "hs codes" folder.', 400);
             }
-            $fp = fopen($csvPath, 'r');
-            if (!$fp) {
-                jsonError('Could not open CSV file', 500);
-            }
-            $header = fgetcsv($fp);
-            if (!$header) {
-                fclose($fp);
-                jsonError('Invalid CSV: could not read header row', 400);
-            }
-            $header = array_map('normalizeHsCatalogCsvHeader', $header);
-            if (!in_array('hs_code', $header, true)) {
-                fclose($fp);
-                jsonError('Invalid CSV: missing hs_code column. Expected: hs_code,name,category,tariff_rate,vat,...', 400);
-            }
-            $hasBilingualNames = hsCatalogHasColumn($pdo, 'name_en') && hsCatalogHasColumn($pdo, 'name_zh');
-            $preservedTranslations = [];
-            if ($hasBilingualNames) {
-                foreach ($pdo->query("SELECT hs_code, name, name_en, name_zh, translated_at FROM hs_code_tariff_catalog") as $existing) {
-                    $preservedTranslations[$existing['hs_code'] . "\0" . (string) $existing['name']] = [
-                        'name_en' => $existing['name_en'],
-                        'name_zh' => $existing['name_zh'],
-                        'translated_at' => $existing['translated_at'],
-                    ];
-                }
-            }
-            $idx = array_flip($header);
-            $get = function ($row, $key) use ($idx) {
-                $i = $idx[$key] ?? -1;
-                return $i >= 0 && isset($row[$i]) ? trim($row[$i]) : null;
-            };
-            $count = 0;
-            try {
-                $pdo->beginTransaction();
-                $pdo->exec("DELETE FROM hs_code_tariff_catalog");
-                $stmt = $pdo->prepare("
-                    INSERT INTO hs_code_tariff_catalog
-                        (hs_code, name, name_en, name_zh, category, tariff_rate, vat, parent_directory_code, parent_directory_name, section_code, section_name, source_file, translated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ");
-                while (($row = fgetcsv($fp)) !== false) {
-                    $hsCode = $get($row, 'hs_code');
-                    if (!$hsCode) continue;
-                    $name = $get($row, 'name') ?: null;
-                    $preserved = $preservedTranslations[$hsCode . "\0" . (string) $name] ?? [];
-                    $csvNameEn = $get($row, 'name_en') ?: $get($row, 'english_name');
-                    $csvNameZh = $get($row, 'name_zh') ?: $get($row, 'chinese_name');
-                    $nameEn = $csvNameEn ?: ($preserved['name_en'] ?? null);
-                    $nameZh = $csvNameZh ?: ($preserved['name_zh'] ?? null);
-                    $stmt->execute([
-                        $hsCode,
-                        $name,
-                        $nameEn ?: null,
-                        $nameZh ?: null,
-                        $get($row, 'category') ?: null,
-                        $get($row, 'tariff_rate') ?: null,
-                        $get($row, 'vat') ?: null,
-                        $get($row, 'parent_directory_code') ?: null,
-                        $get($row, 'parent_directory_name') ?: null,
-                        $get($row, 'section_code') ?: null,
-                        $get($row, 'section_name') ?: null,
-                        basename($csvPath),
-                        ($nameEn || $nameZh) ? ($preserved['translated_at'] ?? date('Y-m-d H:i:s')) : null,
-                    ]);
-                    $count++;
-                }
-                $pdo->commit();
-            } catch (Throwable $e) {
-                if ($pdo->inTransaction()) $pdo->rollBack();
-                fclose($fp);
-                throw $e;
-            }
-            fclose($fp);
-            logClms('hs_catalog_import', ['count' => $count, 'file' => basename($csvPath), 'user_id' => $userId]);
-            jsonResponse(['data' => ['imported' => $count, 'file' => basename($csvPath)]]);
+            if(filesize($csvPath)>16777216)jsonError('Catalog CSV exceeds 16 MB',422);
+            $csv=file_get_contents($csvPath);
+            if($csv===false)jsonError('Could not read CSV file',500);
+            if(!hsCatalogHasColumn($pdo,'name_en')||!hsCatalogHasColumn($pdo,'name_zh'))jsonError('Catalog migration 080 is required',503);
+            jsonResponse(['data'=>HsCatalogImportService::run($pdo,$csv,basename($csvPath),$input,(int)$userId)]);
 
         default:
             jsonError('Method not allowed', 405);

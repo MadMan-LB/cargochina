@@ -319,8 +319,67 @@ function orderIsOperationallyConfirmed(order) {
     return (order?.status || "") === "Confirmed" && !orderHasPendingCustomerReview(order);
 }
 function orderIsShipmentEligible(order) {
+    if (typeof order?.shipment_eligible === 'boolean') return order.shipment_eligible;
     const status = order?.status || "";
-    return status === "ReadyForConsolidation" || orderIsOperationallyConfirmed(order);
+    return !orderHasPendingCustomerReview(order) && (status === "ReadyForConsolidation" || orderIsOperationallyConfirmed(order));
+}
+
+function clmsRequestKey(prefix='operation') {
+    return `${prefix}:${globalThis.crypto?.randomUUID?.() || Date.now().toString(36)+Math.random().toString(36).slice(2)}`;
+}
+
+async function loadShipmentEligibleOrders() {
+    const records=new Map();let offset=0;
+    while(true){
+        const response=await fetch((window.API_BASE||'/cargochina/api/v1')+'/orders?shipment_eligible=1&limit=100&offset='+offset,{credentials:'same-origin'});
+        const payload=await response.json();
+        if(!response.ok || payload.error)throw new Error(payload.message||'Could not load eligible orders');
+        for(const order of payload.data||[])records.set(Number(order.id),order);
+        if(!payload.meta?.has_more)break;
+        if(!payload.data?.length)throw new Error('Eligible order pagination did not advance');
+        offset+=Number(payload.meta.limit||100);
+    }
+    return [...records.values()];
+}
+
+async function clmsLoadAllPages(path, pageSize = 100) {
+    const records = new Map();
+    const [resource, query = ""] = path.split("?");
+    const params = new URLSearchParams(query);
+    let offset = 0;
+    while (true) {
+        params.set("limit", String(pageSize));
+        params.set("offset", String(offset));
+        const payload = await api("GET", resource + "?" + params.toString());
+        for (const row of payload.data || []) records.set(Number(row.id), row);
+        if (!payload.meta?.has_more) return [...records.values()];
+        const step = Number(payload.meta.limit || pageSize);
+        if (!payload.data?.length || !Number.isFinite(step) || step <= 0) throw new Error("Pagination did not advance");
+        offset += step;
+    }
+}
+async function loadOpenShipmentDrafts() {
+    const records=new Map();let offset=0;
+    while(true){
+        const result=await api('GET','/shipment-drafts?status=draft&limit=200&offset='+offset);
+        for(const draft of result.data||[])records.set(Number(draft.id),draft);
+        if(!result.meta?.has_more)return [...records.values()];
+        if(!result.data?.length)throw new Error('Shipment pagination did not advance');
+        offset+=Number(result.meta.limit||200);
+    }
+}
+async function loadAssignmentContainers() {
+    const records = new Map();
+    let offset = 0;
+    while (true) {
+        const response = await fetch((window.API_BASE || '/cargochina/api/v1') + '/containers?limit=200&offset=' + offset, { credentials: 'same-origin' });
+        const payload = await response.json();
+        if (!response.ok || payload.error) throw new Error(payload.message || 'Could not load containers');
+        for (const container of payload.data || []) records.set(Number(container.id), container);
+        if (!payload.meta?.has_more) return [...records.values()];
+        if (!payload.data?.length) throw new Error('Container pagination did not advance');
+        offset += Number(payload.meta.limit || 200);
+    }
 }
 function formatDisplayNumber(value, options = {}) {
     const {
@@ -562,10 +621,11 @@ if (typeof window !== "undefined") {
 
 const UPLOAD_BASE = "/cargochina/api/v1/upload";
 
-/** In-memory cache for read-heavy GET endpoints (departments, roles, config). TTL 60s. */
+/** Only non-operational reference labels are cached. */
 const _apiCache = { data: {}, ts: {} };
-const _cachePaths = ["/departments", "/roles", "/config/receiving"];
+const _cachePaths = ["/departments", "/roles"];
 const _cacheTtlMs = 60000;
+const _failedApiRequests = new Map();
 
 async function api(method, path, body = null) {
     const cacheKey = method + " " + path;
@@ -588,19 +648,22 @@ async function api(method, path, body = null) {
         credentials: "same-origin",
     };
     const debugTiming =
+        // A repeat of the same action can be correlated without retaining its payload.
         typeof window !== "undefined" &&
         typeof localStorage !== "undefined" &&
         localStorage.getItem("clms_debug_timing") === "1";
     if (debugTiming) {
         opts.headers["X-CLMS-Debug-Timing"] = "1";
     }
-    if (body && (method === "POST" || method === "PUT")) {
+    if (_failedApiRequests.has(cacheKey)) opts.headers['X-CLMS-Retry-Of'] = _failedApiRequests.get(cacheKey);
+    if (body && (method === "POST" || method === "PUT" || method === "DELETE")) {
         opts.body = JSON.stringify(body);
     }
     let res;
     try {
         res = await fetch(API_BASE + path, opts);
     } catch (error) {
+        if (typeof window !== 'undefined') window.clmsReportNetworkFailure?.();
         throw new Error(
             t("Network error. Please check your connection and try again."),
         );
@@ -626,6 +689,10 @@ async function api(method, path, body = null) {
             : "";
         const reqId = err.request_id || data.request_id;
         const translatedMsg = t(msg);
+        if (typeof reqId === 'string' && /^[a-f0-9]{16,32}$/.test(reqId)) {
+            if (_failedApiRequests.size >= 100) _failedApiRequests.delete(_failedApiRequests.keys().next().value);
+            _failedApiRequests.set(cacheKey, reqId);
+        }
         const translatedDetails = details ? t(details) : "";
         const apiError = new Error(
             translatedMsg +
@@ -637,6 +704,7 @@ async function api(method, path, body = null) {
         apiError.requestId = reqId;
         throw apiError;
     }
+    _failedApiRequests.delete(cacheKey);
     if (
         method === "GET" &&
         _cachePaths.some((p) => path === p || path.startsWith(p + "?"))
@@ -1005,4 +1073,46 @@ document.addEventListener("DOMContentLoaded", function () {
     startUiTranslationObserver();
     document.documentElement.lang = uiLocale();
     document.title = t(document.title);
+});
+
+// Select an existing editable value on entry, including mouse entry. Search
+// boxes keep normal caret behavior so staff can refine an existing query.
+document.addEventListener("focusin", function (event) {
+    const field=event.target;
+    if (!field?.matches?.('input[type="text"], input[type="number"], input:not([type]), textarea') || field.disabled || field.readOnly || isSearchLikeInput(field)) return;
+    if (!field.closest('form, .modal, [data-enter-scope]')) return;
+    const selectOnMouseUp=event=>{event.preventDefault();field.select();};
+    field.addEventListener('mouseup',selectOnMouseUp,{once:true});
+    field.addEventListener('blur',()=>field.removeEventListener('mouseup',selectOnMouseUp),{once:true});
+    setTimeout(() => { if(document.activeElement===field) field.select(); }, 0);
+});
+
+// Remember navigation state, never business data. Restored filters are used by
+// each page's normal fresh request; Back/Forward also refreshes restored tables.
+document.addEventListener("DOMContentLoaded", function () {
+    const pages={
+        'orders.php':['#orderSearch,#filterStatusMode,#filterOrderType,#filterItemType,#filterCustomerFeedback,.order-status-filter','loadOrders'],
+        'products.php':['#productSearch,#productFilterSupplierSearch,#productFilterSupplierId,#productFilterHsCode,#productAlertFilter,#productImageFilter,#productItemTypeFilter','loadProducts'],
+        'suppliers.php':['#supplierSearch,#supplierPaymentFilter','loadSuppliers'],
+        'containers.php':['#containerSearch,#containerStatusMode,#containerFillFilter,.container-status-filter','loadContainers'],
+        'warehouse_stock.php':['#filterCustomerSearch,#filterCustomerId,#filterSupplierSearch,#filterSupplierId,#filterQ,#filterStockItemType,.stock-status-filter','loadStock']
+    };
+    const name=location.pathname.split('/').pop(), config=pages[name];
+    if(!config) return;
+    const key='clms.filters.'+name;
+    const fields=()=>Array.from(document.querySelectorAll(config[0])).filter(field=>field.id);
+    try {
+        const saved=JSON.parse(sessionStorage.getItem(key)||'{}');
+        if(!location.search) for(const field of fields()) {
+            const value=saved[field.id];
+            if(field.type==='checkbox' && typeof value==='boolean') field.checked=value;
+            else if(typeof value==='string') field.value=value;
+        }
+    } catch(_) {}
+    const remember=()=>{try{sessionStorage.setItem(key,JSON.stringify(Object.fromEntries(fields().map(field=>[field.id,field.type==='checkbox'?field.checked:field.value]))));}catch(_){}};
+    document.addEventListener('input',remember);
+    document.addEventListener('change',remember);
+    document.addEventListener('click',()=>setTimeout(remember,0));
+    window.addEventListener('pagehide',remember);
+    window.addEventListener('pageshow',event=>{if(event.persisted && typeof window[config[1]]==='function') window[config[1]]();});
 });

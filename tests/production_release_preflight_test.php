@@ -26,7 +26,7 @@ try {
     if (($result['read_only'] ?? false) !== true) throw new Exception('Preflight did not declare read-only behavior');
     if (($result['status'] ?? '') === ProductionReleasePreflightService::VERIFIED) throw new Exception('Environment-dependent production gates unexpectedly verified');
     $codes = array_column($result['checks'] ?? [], 'status', 'code');
-    foreach (['database_identity', 'php_extensions', 'release_migrations', 'release_schema', 'receiving_idempotency', 'seed_password_rotation', 'legacy_item_numbers', 'existing_item_classification', 'translation_provider', 'accounting_policy', 'backup_and_restore_rehearsal'] as $code) {
+    foreach (['database_identity', 'php_extensions', 'release_migrations', 'release_schema', 'receiving_idempotency', 'cargo_integrity', 'seed_password_rotation', 'legacy_item_numbers', 'existing_item_classification', 'translation_provider', 'accounting_policy', 'backup_and_restore_rehearsal'] as $code) {
         if (!isset($codes[$code])) throw new Exception("Missing preflight check: $code");
     }
     if (($codes['database_identity'] ?? '') !== ProductionReleasePreflightService::VERIFIED) throw new Exception('Expected database identity did not verify');

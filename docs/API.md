@@ -4,6 +4,16 @@ Base URL: `/cargochina/api/v1/` (or `/api/v1/` if at document root)
 
 **Authentication:** Session-based. Login via `POST /auth/login`. All endpoints except `auth` require an active session.
 
+## Stabilization write and list contracts
+
+- `GET /products/{id}` and `GET /suppliers/{id}` return `data.revision`. Send that revision in the JSON body of `PUT` and `DELETE`. Missing/stale revisions return 409 without changes; reopen the record before reconciling edits.
+- Product/supplier creation requires `idempotency_key`. Reuse the key only for an identical retry. A successful replay returns `{data:{id,idempotent_replay:true}}`; fetch the detail endpoint if the current full record is needed. Reusing a key for another payload/operator returns 409. Imports retain their separate validated import contract.
+- `GET /config` and `GET /business-settings` return a top-level `revision`; send it with the next update. Successful saves return a new revision. `ARRIVAL_NOTIFY_DAYS` is a comma-separated list of whole days 0–365, normalized to unique descending values, including arrival day 0. Arrival scheduling locks and rechecks the container and commits its deduplication marker with notification delivery intents; failed scheduling can be retried safely.
+- User detail and individual permission/visibility/sidebar reads return revisions. Their updates require the matching revision. Bulk permission/visibility reads include per-user `revisions`. Invalid roles/departments/active flags and removal of the last active SuperAdmin are rejected server-side.
+- `GET /orders?view=list` returns the same canonical totals, eligibility, status, supplier display, filters and pagination as the default `view=full`, without nested `items`. Use order detail for editing and the export endpoints for documents. Unknown views are rejected.
+- Legacy `GET /order-templates/{id}` responses with `requires_measurement_review=true` cannot safely be reused until their historical piece/carton basis is verified. The UI preserves the current form instead of replacing it with unverifiable measurements.
+- Business-critical API responses use `Cache-Control: no-store`; saved browser filters contain navigation state only.
+
 ## Audit Log (SuperAdmin, ChinaAdmin)
 - `GET /audit-log?entity_type=&entity_id=&user_id=&action=&date_from=&date_to=&limit=&offset=` — List audit entries with filters.
 - `GET /audit-log/users` — List users (id, email, full_name) for filter dropdown.

@@ -48,6 +48,8 @@ const Autocomplete = {
         let items = [];
         let abortController = null;
         let blurTimer;
+        let searchVersion = 0;
+        let itemsQuery = null;
 
         const hide = () => {
             if (dropdown) {
@@ -85,10 +87,16 @@ const Autocomplete = {
                 });
                 dropdown.appendChild(el);
             });
-            document.body.appendChild(dropdown);
+            // Keep options within Bootstrap's modal focus boundary.
+            (inputEl.closest('.modal') || document.body).appendChild(dropdown);
             const rect = inputEl.getBoundingClientRect();
+            const below = window.innerHeight - rect.bottom - 8;
+            const above = rect.top - 8;
+            const openAbove = below < 120 && above > below;
+            const maxHeight = Math.max(40,Math.min(200,openAbove ? above : below));
+            dropdown.style.maxHeight = maxHeight + 'px';
             dropdown.style.left = rect.left + "px";
-            dropdown.style.top = rect.bottom + 2 + "px";
+            dropdown.style.top = (openAbove ? Math.max(4,rect.top - Math.min(dropdown.scrollHeight,maxHeight) - 2) : rect.bottom + 2) + "px";
             dropdown.style.width = Math.max(rect.width, 200) + "px";
             selectedIndex = 0;
             highlight(0);
@@ -105,6 +113,9 @@ const Autocomplete = {
         const selectItem = (idx) => {
             const item = items[idx];
             if (item) {
+                ++searchVersion;
+                clearTimeout(debounceTimer);
+                abortController?.abort();
                 inputEl.value = displayValue(item);
                 inputEl.dataset.selectedId = String(item.id);
                 inputEl.dataset.selectedJson = JSON.stringify(item);
@@ -141,10 +152,11 @@ const Autocomplete = {
                     },
                 );
                 const data = await res.json();
+                if(!res.ok || data.error)throw new Error(data.message || 'Search failed');
                 return data.data || [];
             } catch (e) {
                 if (e.name === "AbortError") return [];
-                showToast &&
+                typeof showToast === 'function' &&
                     showToast(
                         "Search failed: " + (e.message || "Unknown error"),
                         "danger",
@@ -157,6 +169,11 @@ const Autocomplete = {
         const minChars = Number.isFinite(Number(opts.minChars)) ? Number(opts.minChars) : this.minChars;
         let debounceTimer;
         inputEl.addEventListener("input", () => {
+            const version=++searchVersion;
+            clearTimeout(debounceTimer);
+            abortController?.abort();
+            delete inputEl.dataset.selectedId;
+            delete inputEl.dataset.selectedJson;
             const q = inputEl.value.trim();
             if (q.length < minChars) {
                 hide();
@@ -164,20 +181,20 @@ const Autocomplete = {
                 delete inputEl.dataset.selectedJson;
                 return;
             }
-            clearTimeout(debounceTimer);
             debounceTimer = setTimeout(async () => {
                 const list = await fetchSearch(q);
-                show(list);
+                if(version===searchVersion && document.activeElement===inputEl && inputEl.value.trim()===q){itemsQuery=q;show(list);}
             }, debounceMs);
         });
 
         inputEl.addEventListener("focus", async () => {
             clearTimeout(blurTimer);
             const q = inputEl.value.trim();
-            if (q.length >= minChars && items.length > 0) show(items);
+            if (q.length >= minChars && items.length > 0 && itemsQuery===q) show(items);
             else if (minChars === 0 && q.length === 0 && items.length === 0) {
+                const version=++searchVersion;
                 const list = await fetchSearch("");
-                show(list);
+                if(version===searchVersion && document.activeElement===inputEl){itemsQuery='';show(list);}
             }
         });
 
@@ -201,6 +218,9 @@ const Autocomplete = {
                 e.preventDefault();
                 selectItem(selectedIndex);
             } else if (e.key === "Escape") {
+                ++searchVersion;
+                clearTimeout(debounceTimer);
+                abortController?.abort();
                 hide();
             }
         });
@@ -215,6 +235,10 @@ const Autocomplete = {
                 }
             },
             setValue: (item) => {
+                ++searchVersion;
+                clearTimeout(debounceTimer);
+                abortController?.abort();
+                hide();
                 if (item) {
                     inputEl.value = displayValue(item);
                     inputEl.dataset.selectedId = String(item.id);

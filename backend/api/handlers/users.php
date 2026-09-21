@@ -5,6 +5,10 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
+require_once dirname(__DIR__,2).'/services/AuditService.php';
+require_once dirname(__DIR__,2).'/services/SettingsWriteService.php';
+require_once dirname(__DIR__,2).'/services/MasterDataImportService.php';
+require_once dirname(__DIR__,2).'/services/CredentialEscrowService.php';
 require_once dirname(__DIR__, 3) . '/includes/sidebar_permissions.php';
 
 function normalizeUserLoginIdentifier(string $value): string
@@ -202,18 +206,25 @@ function loadCustomerVisibilitySettings(PDO $pdo, ?int $userId = null): array
 }
 
 return function (string $method, ?string $id, ?string $action, array $input) {
+    require_once __DIR__ . '/../authorization.php';
+    clmsAuthorizeApiRequest('users', $method, $id, $action);
     requireRole(['SuperAdmin']);
+    if($method!=='GET')requireRecentAuthentication();
 
     $pdo = getDb();
 
     if ($method === 'GET') {
+        if (!$pdo->inTransaction()) AuditService::begin($pdo);
         if ($id === 'permission-overrides' && $action === null) {
             ensureUserPermissionOverrideTable($pdo);
             $users = $pdo->query("SELECT id, email, full_name, is_active FROM users ORDER BY full_name, email")->fetchAll(PDO::FETCH_ASSOC);
+            $overrides=loadUserPermissionOverrides($pdo);
+            $revisions=[];foreach($users as $user)$revisions[$user['id']]=SettingsWriteService::revision($overrides[$user['id']]??[]);
             jsonResponse([
                 'data' => [
                     'registry' => buildUserPermissionOverrideRegistry($pdo),
-                    'overrides' => loadUserPermissionOverrides($pdo),
+                    'overrides' => $overrides,
+                    'revisions' => $revisions,
                     'users' => $users,
                 ],
             ]);
@@ -221,10 +232,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if ($id === 'customer-visibility' && $action === null) {
             ensureCustomerVisibilityTables($pdo);
             $users = $pdo->query("SELECT id, email, full_name, is_active FROM users ORDER BY full_name, email")->fetchAll(PDO::FETCH_ASSOC);
+            $settings=loadCustomerVisibilitySettings($pdo);
+            $revisions=[];foreach($users as $user)$revisions[$user['id']]=SettingsWriteService::revision($settings[$user['id']]??['user_id'=>(int)$user['id'],'can_see_all_customers'=>0,'allowed_creator_user_ids'=>[],'mode'=>'own']);
             jsonResponse([
                 'data' => [
                     'users' => $users,
-                    'settings' => loadCustomerVisibilitySettings($pdo),
+                    'settings' => $settings,
+                    'revisions' => $revisions,
                     'full_visibility_roles' => clmsCustomerFullVisibilityRoles(),
                 ],
             ]);
@@ -245,6 +259,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     'assignable' => $assignable,
                     'defaults' => $defaults,
                     'settings' => clmsLoadRoleSidebarPageSettings($pdo),
+                    'revision' => SettingsWriteService::revision(clmsLoadRoleSidebarPageSettings($pdo)),
                 ],
             ]);
         }
@@ -425,6 +440,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     'user' => $user,
                     'registry' => buildUserPermissionOverrideRegistry($pdo),
                     'overrides' => loadUserPermissionOverrides($pdo, $userId),
+                    'revision' => SettingsWriteService::revision(loadUserPermissionOverrides($pdo,$userId)),
                 ],
             ]);
         }
@@ -441,6 +457,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     'user' => $user,
                     'users' => $users,
                     'setting' => loadCustomerVisibilitySettings($pdo, $userId),
+                    'revision' => SettingsWriteService::revision(loadCustomerVisibilitySettings($pdo,$userId)),
                     'full_visibility_roles' => clmsCustomerFullVisibilityRoles(),
                 ],
             ]);
@@ -455,6 +472,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $deptStmt = $pdo->prepare("SELECT d.id, d.code, d.name, ud.is_primary FROM departments d JOIN user_departments ud ON d.id = ud.department_id WHERE ud.user_id = ?");
         $deptStmt->execute([$id]);
         $row['departments'] = $deptStmt->fetchAll(PDO::FETCH_ASSOC);
+        $row['revision']=SettingsWriteService::revision(AuditService::snapshot($pdo,'users',(int)$id));
         jsonResponse(['data' => $row]);
     }
 
@@ -490,6 +508,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $pdo->prepare("INSERT INTO users (email, password_hash, full_name, is_active) VALUES (?, ?, ?, 1)")
                 ->execute([$email, $hash, $fullName]);
             $newId = (int) $pdo->lastInsertId();
+            CredentialEscrowService::store($pdo,$newId,$password,$hash);
 
             $roleMap = [];
             foreach ($pdo->query("SELECT id, code FROM roles")->fetchAll(PDO::FETCH_ASSOC) as $r) {
@@ -556,8 +575,15 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$user) jsonError('User not found', 404);
         $hash = password_hash($newPassword, PASSWORD_DEFAULT);
-        $pdo->prepare("UPDATE users SET password_hash = ? WHERE id = ?")->execute([$hash, $id]);
-        jsonResponse(['data' => ['user_id' => (int) $id, 'email' => $user['email'], 'new_password' => $newPassword]]);
+        AuditService::begin($pdo);
+        try {
+            $before=AuditService::snapshot($pdo,'users',(int)$id,true);
+            $pdo->prepare("UPDATE users SET password_hash = ?, session_version=session_version+1 WHERE id = ?")->execute([$hash, $id]);
+            CredentialEscrowService::store($pdo,(int)$id,$newPassword,$hash);
+            AuditService::record($pdo,'user',(int)$id,'password_reset',$before,AuditService::snapshot($pdo,'users',(int)$id),getAuthUserId());
+            $pdo->commit();
+        } catch(Throwable $e){if($pdo->inTransaction())$pdo->rollBack();throw $e;}
+        jsonResponse(['data' => ['user_id' => (int) $id, 'email' => $user['email'], 'password_changed' => true]]);
     }
 
     if ($method === 'PUT' && $id) {
@@ -590,10 +616,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
             }
 
-            $old = loadCustomerVisibilitySettings($pdo, $targetUserId);
             $adminUserId = getAuthUserId();
             $pdo->beginTransaction();
             try {
+                AuditService::snapshot($pdo,'users',$targetUserId,true);
+                $old=loadCustomerVisibilitySettings($pdo,$targetUserId);
+                SettingsWriteService::assertCurrent($old,$input);
                 $pdo->prepare("DELETE FROM customer_visibility_allowed_creators WHERE user_id = ?")->execute([$targetUserId]);
                 if ($mode === 'own') {
                     $pdo->prepare("DELETE FROM customer_visibility_exceptions WHERE user_id = ?")->execute([$targetUserId]);
@@ -626,7 +654,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     'allowed_creator_user_ids' => $allowedCreatorIds,
                 ]);
                 $pdo->commit();
-                jsonResponse(['data' => ['user_id' => $targetUserId, 'setting' => $new]]);
+                jsonResponse(['data' => ['user_id' => $targetUserId, 'setting' => $new,'revision'=>SettingsWriteService::revision($new)]]);
             } catch (Throwable $e) {
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
@@ -658,10 +686,12 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 jsonError('Unknown permission override key', 400, ['permissions' => implode(', ', $invalid)]);
             }
 
-            $old = loadUserPermissionOverrides($pdo, $targetUserId);
             $adminUserId = getAuthUserId();
             $pdo->beginTransaction();
             try {
+                AuditService::snapshot($pdo,'users',$targetUserId,true);
+                $old=loadUserPermissionOverrides($pdo,$targetUserId);
+                SettingsWriteService::assertCurrent($old,$input);
                 $pdo->prepare("DELETE FROM user_permission_overrides WHERE user_id = ?")->execute([$targetUserId]);
                 if ($selected) {
                     $ins = $pdo->prepare("INSERT INTO user_permission_overrides (user_id, permission_key, is_allowed, granted_by) VALUES (?, ?, 1, ?)");
@@ -683,7 +713,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     'permissions' => $selected,
                 ]);
                 $pdo->commit();
-                jsonResponse(['data' => ['user_id' => $targetUserId, 'overrides' => $new]]);
+                jsonResponse(['data' => ['user_id' => $targetUserId, 'overrides' => $new,'revision'=>SettingsWriteService::revision($new)]]);
             } catch (Throwable $e) {
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
@@ -698,7 +728,10 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 jsonError('Sidebar settings payload is required', 400);
             }
 
-            $oldSettings = clmsLoadRoleSidebarPageSettings($pdo);
+            AuditService::begin($pdo);
+            $pdo->query('SELECT key_name FROM system_config FOR UPDATE')->fetchAll();
+            $oldSettings = clmsLoadRoleSidebarPageSettings($pdo,true);
+            SettingsWriteService::assertCurrent($oldSettings,$input);
             $sanitizedSettings = clmsSanitizeRoleSidebarPageSettings($settings);
             clmsSaveRoleSidebarPageSettings($pdo, $sanitizedSettings);
 
@@ -710,13 +743,26 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $userId,
                 ]);
 
-            jsonResponse(['data' => ['settings' => $sanitizedSettings]]);
+            $pdo->commit();
+            jsonResponse(['data' => ['settings' => $sanitizedSettings,'revision'=>SettingsWriteService::revision($sanitizedSettings)]]);
         }
 
         $roles = $input['roles'] ?? null;
         $departmentIds = $input['department_ids'] ?? null;
         $isActive = isset($input['is_active']) ? (int) (bool) $input['is_active'] : null;
-        $pdo->beginTransaction();
+        if(isset($input['is_active'])&&!in_array($input['is_active'],[0,1,'0','1',false,true],true))jsonError('Invalid active state',422);
+        if($roles!==null){$known=$pdo->query('SELECT code FROM roles')->fetchAll(PDO::FETCH_COLUMN);if(!is_array($roles)||array_filter($roles,static fn($v)=>!is_string($v))||array_diff($roles,$known)||count(array_unique($roles))!==count($roles))jsonError('Select valid unique roles',422);}
+        if($departmentIds!==null){if(!is_array($departmentIds))jsonError('Departments must be an array',422);$known=$pdo->query('SELECT id FROM departments')->fetchAll(PDO::FETCH_COLUMN);foreach($departmentIds as $deptId)if(filter_var($deptId,FILTER_VALIDATE_INT)===false||(int)$deptId<1||!in_array($deptId,$known))jsonError('Select valid departments',422);if(count(array_unique($departmentIds))!==count($departmentIds))jsonError('Duplicate department',422);}
+        MasterDataImportService::lock($pdo,'user-administration');
+        AuditService::begin($pdo);
+        $auditBefore=AuditService::snapshot($pdo,'users',(int)$id,true);
+        if(!$auditBefore)jsonError('User not found',404);
+        SettingsWriteService::assertCurrent($auditBefore,$input);
+        $currentAdmin=$pdo->prepare("SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=? AND r.code='SuperAdmin'");$currentAdmin->execute([$id]);
+        if($currentAdmin->fetchColumn()&&($isActive===0||($roles!==null&&!in_array('SuperAdmin',$roles,true)))){
+            $others=$pdo->prepare("SELECT COUNT(*) FROM users u JOIN user_roles ur ON ur.user_id=u.id JOIN roles r ON r.id=ur.role_id WHERE u.is_active=1 AND r.code='SuperAdmin' AND u.id<>?");$others->execute([$id]);
+            if(!(int)$others->fetchColumn())jsonError('Keep at least one active SuperAdmin account',409);
+        }
         try {
             if ($isActive !== null) {
                 $pdo->prepare("UPDATE users SET is_active = ? WHERE id = ?")->execute([$isActive, $id]);
@@ -743,6 +789,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     }
                 }
             }
+            AuditService::record($pdo,'user',(int)$id,'update',$auditBefore,AuditService::snapshot($pdo,'users',(int)$id),getAuthUserId());
             $pdo->commit();
             $stmt = $pdo->prepare("SELECT id, email, full_name, is_active FROM users WHERE id = ?");
             $stmt->execute([$id]);

@@ -23,6 +23,25 @@ function imageDataMediaCount(string $workbook): int
 }
 
 $pdo = getDb();
+imageDataAssert($pdo->query('SELECT DATABASE()')->fetchColumn()==='clms_hardening_20260919','Disposable image fixtures required');
+$fixtureImage='uploads/qa-excel-'.bin2hex(random_bytes(8)).'.png';
+$fixtureImageFile=dirname(__DIR__).'/backend/'.$fixtureImage;
+$image=imagecreatetruecolor(16,16);imagepng($image,$fixtureImageFile);imagedestroy($image);
+$pdo->beginTransaction();
+register_shutdown_function(static function()use($pdo,$fixtureImageFile){if($pdo->inTransaction())$pdo->rollBack();if(is_file($fixtureImageFile))unlink($fixtureImageFile);});
+$customer=(int)$pdo->query('SELECT id FROM customers ORDER BY id LIMIT 1')->fetchColumn();
+$supplier=(int)$pdo->query('SELECT id FROM suppliers ORDER BY id LIMIT 1')->fetchColumn();
+$pdo->prepare('INSERT INTO products(description_en,cbm,weight,image_paths) VALUES (?,.1,2,?)')->execute(['Bamboo tray photo fixture',json_encode([$fixtureImage])]);$product=(int)$pdo->lastInsertId();
+foreach(['standard','draft_procurement'] as $type){
+    $pdo->prepare("INSERT INTO orders(customer_id,supplier_id,status,order_type,created_by) VALUES (?,?,'Draft',?,1)")->execute([$customer,$supplier,$type]);$oid=(int)$pdo->lastInsertId();
+    $pdo->prepare("INSERT INTO order_items(order_id,product_id,description_en,quantity,cartons,qty_per_carton,unit,declared_cbm,declared_weight,image_paths) VALUES (?,?,'Bamboo trays',4,1,4,'pieces',.1,2,?)")->execute([$oid,$product,json_encode([$fixtureImage])]);$iid=(int)$pdo->lastInsertId();
+    if($type==='standard'){
+        $pdo->prepare("UPDATE orders SET status='ReadyForConsolidation' WHERE id=?")->execute([$oid]);
+        $pdo->prepare("INSERT INTO warehouse_receipts(order_id,actual_cartons,actual_cbm,actual_weight,receipt_condition,received_by) VALUES (?,1,.1,2,'good',1)")->execute([$oid]);$rid=(int)$pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO warehouse_receipt_items(receipt_id,order_item_id,actual_cartons,actual_quantity,actual_cbm,actual_weight,receipt_condition) VALUES (?,?,1,4,.1,2,'good')")->execute([$rid,$iid]);
+        $pdo->prepare('INSERT INTO warehouse_receipt_photos(receipt_id,file_path) VALUES (?,?)')->execute([$rid,$fixtureImage]);
+    }
+}
 $tempDir = rtrim(sys_get_temp_dir(), '/\\') . DIRECTORY_SEPARATOR . 'clms_excel_image_data_' . bin2hex(random_bytes(4));
 if (!mkdir($tempDir, 0770, true) && !is_dir($tempDir)) {
     throw new RuntimeException('Could not create Excel image integration directory.');

@@ -5,6 +5,7 @@ let _containers = [];
 let _selContainerId = null;
 let _searchTimer = null;
 let targetContainerAc = null;
+let selectedOrderIds = new Set();
 
 function escHtml(s) {
     if (s == null) return "";
@@ -98,6 +99,7 @@ function setContainerSelection(containerId, seedItem = null) {
     }
 
     _selContainerId = Number(container.id);
+    if (!_containers.some(c => Number(c.id) === _selContainerId)) _containers.push(container);
     if (hiddenEl) hiddenEl.value = String(container.id);
     if (targetContainerAc?.setValue) {
         targetContainerAc.setValue(container);
@@ -200,30 +202,15 @@ function initContainerAutocomplete() {
 async function loadEligibleOrders() {
     const tbody = document.getElementById("eligibleOrdersTbody");
     try {
-        const responses = await Promise.all([
-            fetch(AC_API + "/orders?status=Confirmed", {
-                credentials: "same-origin",
-            }),
-            fetch(AC_API + "/orders?status=ReadyForConsolidation", {
-                credentials: "same-origin",
-            }),
-        ]);
-        const payloads = await Promise.all(responses.map((res) => res.json()));
-        const deduped = new Map();
-        payloads.forEach((payload) => {
-            (payload.data || []).forEach((order) => {
-                if (!deduped.has(order.id)) deduped.set(order.id, order);
-            });
-        });
-
-        _orders = [...deduped.values()].map((order) => {
+        const eligible = await loadShipmentEligibleOrders();
+        _orders = eligible.map((order) => {
             const items = order.items || [];
-            const totalCbm = items.reduce(
-                (sum, item) => sum + (parseFloat(item.declared_cbm) || 0),
+            const totalCbm = order.cargo_totals?.cbm ?? items.reduce(
+                (sum, item) => sum + (parseFloat(item.cargo_cbm ?? item.declared_cbm) || 0),
                 0,
             );
-            const totalWeight = items.reduce(
-                (sum, item) => sum + (parseFloat(item.declared_weight) || 0),
+            const totalWeight = order.cargo_totals?.weight ?? items.reduce(
+                (sum, item) => sum + (parseFloat(item.cargo_weight ?? item.declared_weight) || 0),
                 0,
             );
             return { ...order, total_cbm: totalCbm, total_weight: totalWeight };
@@ -234,6 +221,10 @@ async function loadEligibleOrders() {
         );
         renderOrders();
     } catch (e) {
+        _orders = [];
+        selectedOrderIds.clear();
+        document.querySelectorAll(".order-cb").forEach((cb) => { cb.checked = false; });
+        onSelectionChange();
         setMetricText("assignEligibleCount", 0);
         if (tbody) {
             tbody.innerHTML = `<tr><td colspan="8" class="text-danger py-3 text-center">${escHtml(e.message)}</td></tr>`;
@@ -242,16 +233,17 @@ async function loadEligibleOrders() {
 }
 
 function renderOrders() {
+    syncSelectedOrdersFromView();
     const tbody = document.getElementById("eligibleOrdersTbody");
     const q = (document.getElementById("orderSearch")?.value || "")
         .trim()
         .toLowerCase();
     const container =
         _containers.find((item) => item.id === _selContainerId) || null;
-    const rows = filterOrdersForContainer(
-        _orders.filter((order) => !q || getOrderSearchText(order).includes(q)),
-        container,
-    );
+    const eligible = filterOrdersForContainer(_orders, container);
+    const eligibleIds = new Set(eligible.map((order) => Number(order.id)));
+    selectedOrderIds = new Set([...selectedOrderIds].filter((id) => eligibleIds.has(id)));
+    const rows = eligible.filter((order) => !q || getOrderSearchText(order).includes(q));
 
     const label = document.getElementById("eligibleCountLabel");
     if (label) label.textContent = rows.length ? `(${rows.length})` : "";
@@ -263,7 +255,7 @@ function renderOrders() {
                 ? `No eligible orders match ${escHtml(getContainerDestinationDisplay(container))}.`
                 : "No eligible orders found. Orders with pending customer review stay out of shipment assignment."
         }</td></tr>`;
-        updateSelectionMetrics([]);
+        onSelectionChange();
         return;
     }
 
@@ -271,7 +263,7 @@ function renderOrders() {
         .map(
             (order) => `
         <tr>
-          <td class="text-center"><input type="checkbox" class="form-check-input order-cb" data-id="${order.id}" data-cbm="${order.total_cbm}" data-weight="${order.total_weight}" onchange="onSelectionChange()"></td>
+          <td class="text-center"><input type="checkbox" class="form-check-input order-cb" data-id="${order.id}" data-cbm="${order.total_cbm}" data-weight="${order.total_weight}" ${selectedOrderIds.has(Number(order.id)) ? 'checked' : ''} onchange="onSelectionChange()"></td>
           <td class="fw-semibold">${order.id}</td>
           <td>
             ${escHtml(order.customer_name || "-")}
@@ -307,17 +299,16 @@ function selectAllOrders() {
     onSelectionChange();
 }
 
-function getSelectedOrders() {
-    return [...document.querySelectorAll(".order-cb:checked")].map((cb) => {
-        const id = parseInt(cb.dataset.id, 10);
-        return (
-            _orders.find((order) => Number(order.id) === id) || {
-                id,
-                total_cbm: parseFloat(cb.dataset.cbm) || 0,
-                total_weight: parseFloat(cb.dataset.weight) || 0,
-            }
-        );
+function syncSelectedOrdersFromView() {
+    document.querySelectorAll(".order-cb").forEach((cb) => {
+        const id = Number(cb.dataset.id);
+        if (cb.checked) selectedOrderIds.add(id);
+        else selectedOrderIds.delete(id);
     });
+}
+
+function getSelectedOrders() {
+    return _orders.filter((order) => selectedOrderIds.has(Number(order.id)));
 }
 
 function updateSelectionMetrics(selectedOrders) {
@@ -361,6 +352,7 @@ function getSuggestedContainer(selectedOrders) {
     );
     const withRoom = _containers
         .filter((container) => {
+            if (container.capacity_known === false || container.assignment_locked) return false;
             const usedCbm = parseFloat(container.used_cbm) || 0;
             const usedWeight = parseFloat(container.used_weight) || 0;
             const maxCbm = parseFloat(container.max_cbm) || 0;
@@ -387,16 +379,18 @@ function getSuggestedContainer(selectedOrders) {
 }
 
 function onSelectionChange() {
+    syncSelectedOrdersFromView();
     const selected = getSelectedOrders();
     updateSelectionMetrics(selected);
 
     const totalCheckboxes = document.querySelectorAll(".order-cb").length;
+    const checkedVisible = document.querySelectorAll(".order-cb:checked").length;
     const masterCheck = document.getElementById("masterCheck");
     if (masterCheck) {
         masterCheck.indeterminate =
-            selected.length > 0 && selected.length < totalCheckboxes;
+            checkedVisible > 0 && checkedVisible < totalCheckboxes;
         masterCheck.checked =
-            totalCheckboxes > 0 && selected.length === totalCheckboxes;
+            totalCheckboxes > 0 && checkedVisible === totalCheckboxes;
     }
 
     if (selected.length > 0 && !_selContainerId) {
@@ -413,11 +407,7 @@ function onSelectionChange() {
 
 async function loadContainers() {
     try {
-        const res = await fetch(AC_API + "/containers", {
-            credentials: "same-origin",
-        });
-        const data = await res.json();
-        _containers = data.data || [];
+        _containers = await loadAssignmentContainers();
         renderContainerSummary();
         if (_selContainerId && !_containers.find((c) => c.id === _selContainerId)) {
             setContainerSelection(null);
@@ -427,8 +417,11 @@ async function loadContainers() {
             );
             onContainerChange();
         }
-    } catch (_) {
+    } catch (error) {
+        _containers = [];
+        setContainerSelection(null);
         renderContainerSummary();
+        showToast(error.message, 'danger');
     }
 }
 
@@ -488,6 +481,14 @@ function onContainerChange() {
     panel?.classList.remove("d-none");
     updateSelectedContainerMeta(container);
     renderOrders();
+    if (container.capacity_known === false) {
+        document.getElementById('cbmCurrentLabel').textContent = 'Reconciliation required';
+        document.getElementById('wCurrentLabel').textContent = 'Unknown actual load';
+        document.getElementById('cbmCurrentBar').style.width = '0%';
+        document.getElementById('wCurrentBar').style.width = '0%';
+        updateAssignBtn();
+        return;
+    }
 
     const maxCbm = parseFloat(container.max_cbm) || 1;
     const maxWeight = parseFloat(container.max_weight) || 1;
@@ -523,6 +524,12 @@ function updateCapacityPreview() {
 
     const container = _containers.find((item) => item.id === _selContainerId);
     if (!container) return;
+    if (container.capacity_known === false) {
+        afterPanel?.classList.add('d-none');
+        warnEl?.classList.remove('d-none');
+        if (warnEl) warnEl.textContent = 'Historical cargo measurements require reconciliation.';
+        return;
+    }
 
     afterPanel?.classList.remove("d-none");
     const maxCbm = parseFloat(container.max_cbm) || 1;
@@ -579,7 +586,8 @@ function updateCapacityPreview() {
 function updateAssignBtn() {
     const btn = document.getElementById("assignBtn");
     if (!btn) return;
-    btn.disabled = getSelectedOrders().length === 0 || !_selContainerId;
+    const container=_containers.find(c=>c.id===_selContainerId);
+    btn.disabled = getSelectedOrders().length === 0 || !_selContainerId || container?.capacity_known === false || !!container?.assignment_locked;
 }
 
 async function doAssign() {
@@ -605,44 +613,25 @@ async function doAssign() {
         );
         let data = await res.json();
 
-        if (res.status === 409 && data.over_capacity) {
-            btn.disabled = false;
-            btn.textContent = "Assign Selected Orders to Container";
-            if (!confirm("Over capacity!\n\n" + data.message + "\n\nAssign anyway?")) {
-                return;
-            }
-            btn.disabled = true;
-            btn.textContent = "Assigning...";
-            res = await fetch(
-                AC_API + "/containers/" + _selContainerId + "/assign-orders",
-                {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    credentials: "same-origin",
-                    body: JSON.stringify({ order_ids: orderIds, force: true }),
-                },
-            );
-            data = await res.json();
-        }
-
         if (!res.ok) throw new Error(data.message || "Assignment failed");
 
         resEl.className = "alert alert-success mt-2";
         resEl.innerHTML = `<strong>${escHtml(typeof t === "function" ? t("Done.") : "Done.")}</strong> ${escHtml(typeof t === "function" ? t("{count} order(s) assigned to container (Draft #{draftId}).", { count: data.data.orders_added, draftId: data.data.draft_id }) : `${data.data.orders_added} order(s) assigned to container (Draft #${data.data.draft_id}).`)}${data.data.over_capacity ? ` <span class="text-danger">${escHtml(typeof t === "function" ? t("Container is now over capacity.") : "Container is now over capacity.")}</span>` : ""}`;
         resEl.classList.remove("d-none");
 
-        await Promise.all([loadEligibleOrders(), loadContainers()]);
+        selectedOrderIds.clear();
         document.querySelectorAll(".order-cb").forEach((cb) => {
             cb.checked = false;
         });
+        await Promise.all([loadEligibleOrders(), loadContainers()]);
         onSelectionChange();
     } catch (e) {
         resEl.className = "alert alert-danger mt-2";
         resEl.textContent = e.message;
         resEl.classList.remove("d-none");
     } finally {
-        btn.disabled = false;
         btn.textContent = "Assign Selected Orders to Container";
+        updateAssignBtn();
     }
 }
 

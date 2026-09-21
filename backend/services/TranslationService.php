@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__.'/LogRetentionService.php';
 
 /**
  * Cached, configurable and non-blocking translation service.
@@ -448,6 +449,6 @@ class TranslationService
     private function safeLog(string $message): void
     {
         $dir = dirname(__DIR__, 2) . '/logs';
-        if (is_dir($dir)) @error_log(date('c') . ' ' . $message . PHP_EOL, 3, $dir . '/translation_errors.log');
+        if (is_dir($dir)) @error_log(date('c') . ' ' . $message . PHP_EOL, 3, LogRetentionService::path('translation_errors'));
     }
 }

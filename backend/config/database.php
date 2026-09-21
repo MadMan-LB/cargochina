@@ -45,6 +45,20 @@ function getDb(): PDO
 {
     static $pdo = null;
     if ($pdo === null) {
+        $pdo = clmsNewDbConnection();
+    }
+    return $pdo;
+}
+
+final class ClmsPDO extends PDO
+{
+    public function beginTransaction(): bool { $ok=parent::beginTransaction();if($ok)$GLOBALS['clms_rollback_state']='unknown';return $ok; }
+    public function commit(): bool { $ok=parent::commit();if($ok)$GLOBALS['clms_rollback_state']='committed';return $ok; }
+    public function rollBack(): bool { try{$ok=parent::rollBack();$GLOBALS['clms_rollback_state']=$ok?'rolled_back':'failed';return $ok;}catch(Throwable $e){$GLOBALS['clms_rollback_state']='failed';throw $e;} }
+}
+
+function clmsNewDbConnection(): PDO
+{
         $host = $_ENV['DB_HOST'] ?? getenv('DB_HOST') ?: 'localhost';
         $port = $_ENV['DB_PORT'] ?? getenv('DB_PORT') ?: '3306';
         $name = $_ENV['DB_NAME'] ?? getenv('DB_NAME') ?: 'clms';
@@ -58,7 +72,5 @@ function getDb(): PDO
         if (defined('PDO::MYSQL_ATTR_USE_BUFFERED_QUERY')) {
             $options[PDO::MYSQL_ATTR_USE_BUFFERED_QUERY] = true;
         }
-        $pdo = new PDO($dsn, $user, $pass, $options);
-    }
-    return $pdo;
+        return new ClmsPDO($dsn, $user, $pass, $options);
 }

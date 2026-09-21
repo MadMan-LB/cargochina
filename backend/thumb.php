@@ -1,8 +1,13 @@
 <?php
 
 require_once __DIR__ . '/api/helpers.php';
+require_once __DIR__ . '/services/UploadAccessService.php';
 
 $path = $_GET['path'] ?? '';
+if(!is_string($path)||isset($_GET['confirmation_token'])&&!is_string($_GET['confirmation_token']))jsonError('Invalid thumbnail request',422);
+UploadAccessService::authorize(getDb(),$path,$_GET['confirmation_token']??null);
+header('Cache-Control: private, no-store');
+header('X-Content-Type-Options: nosniff');
 $width = max(24, min(800, (int) ($_GET['w'] ?? 160)));
 $height = max(24, min(800, (int) ($_GET['h'] ?? 160)));
 $fit = strtolower(trim((string) ($_GET['fit'] ?? 'contain')));
@@ -40,7 +45,7 @@ try {
         $src = clmsCreateImageResourceFromPath($sourcePath, $imageInfo);
         if (!$src) {
             header('Content-Type: ' . $sourceMime);
-            header('Cache-Control: public, max-age=2592000, immutable');
+            header('Cache-Control: private, no-store');
             header('Content-Length: ' . filesize($sourcePath));
             readfile($sourcePath);
             exit;
@@ -84,7 +89,7 @@ try {
     }
 
     header('Content-Type: image/jpeg');
-    header('Cache-Control: public, max-age=2592000, immutable');
+    header('Cache-Control: private, no-store');
     header('Content-Length: ' . filesize($cachePath));
     readfile($cachePath);
     exit;

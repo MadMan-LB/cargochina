@@ -5,7 +5,7 @@ const RECEIPT_ID = window.RECEIPT_ID || 0;
 const RECEIPT_API_BASE = window.API_BASE || "/cargochina/api/v1";
 const AREA_BASE = "/cargochina/warehouse";
 
-async function api(path) {
+async function receivingReceiptApi(path) {
     const res = await fetch(RECEIPT_API_BASE + path, { credentials: "same-origin" });
     const d = await res.json().catch(() => ({}));
     if (!res.ok)
@@ -23,8 +23,8 @@ function receiptStatusText(status) {
         : receiptT(status);
 }
 
-function receiptOrderExcelUrl(orderId) {
-    return `${RECEIPT_API_BASE}/orders/${encodeURIComponent(orderId)}/export?format=xlsx`;
+function receiptOrderExcelUrl() {
+    return `${RECEIPT_API_BASE}/receiving/receipts/${encodeURIComponent(RECEIPT_ID)}/export?format=xlsx`;
 }
 
 function escapeHtml(s) {
@@ -34,6 +34,7 @@ function escapeHtml(s) {
 }
 
 function receiptNumber(value, decimals = 4) {
+    if (value === null || value === undefined) return "—";
     const numeric = parseFloat(value);
     return Number.isFinite(numeric)
         ? numeric.toFixed(decimals).replace(/\.?0+$/, "")
@@ -83,14 +84,19 @@ function receiptPackagingSplitsHtml(item) {
         ? item.packaging_splits
         : [];
     if (!splits.length) {
-        return `${receiptNumber(item.actual_cartons || 0, 4)} × ${receiptNumber(item.actual_pieces_per_carton || 0, 4)} = ${receiptNumber(item.actual_quantity || 0, 4)}`;
+        return receiptPackingText(item.actual_cartons,item.actual_pieces_per_carton,item.actual_quantity);
     }
     return splits
         .map(
             (split, index) =>
-                `<div>${escapeHtml(receiptT("Line {line}", { line: index + 1 }))}: ${receiptNumber(split.cartons || 0, 4)} × ${receiptNumber(split.pieces_per_carton || 0, 4)} = ${receiptNumber(split.quantity || 0, 4)}${split.unit_price != null ? ` · ${receiptNumber(split.unit_price, 4)} / ${receiptNumber(split.total_amount || 0, 4)}` : ""}</div>`,
+                `<div>${escapeHtml(receiptT("Line {line}", { line: index + 1 }))}: ${receiptPackingText(split.cartons,split.pieces_per_carton,split.quantity)}${split.unit_price != null ? ` · ${receiptNumber(split.unit_price, 4)} / ${receiptNumber(split.total_amount || 0, 4)}` : ""}</div>`,
         )
         .join("");
+}
+
+function receiptPackingText(cartons,pieces,quantity) {
+    return pieces == null ? `${receiptNumber(cartons)} ${escapeHtml(receiptT("cartons"))} / ${quantity == null ? "—" : receiptNumber(quantity)} ${escapeHtml(receiptT("quantity"))}`
+        : `${receiptNumber(cartons)} × ${receiptNumber(pieces)} = ${quantity == null ? "—" : receiptNumber(quantity)}`;
 }
 
 function receiptFeesHtml(fees) {
@@ -128,7 +134,7 @@ function receiptFeesHtml(fees) {
 }
 
 async function loadReceipt() {
-    const res = await api("/receiving/receipts/" + RECEIPT_ID);
+    const res = await receivingReceiptApi("/receiving/receipts/" + RECEIPT_ID);
     const r = res.data;
     const exportBtn = document.getElementById("receiptOrderExportBtn");
     if (exportBtn && r.order_id) {
@@ -198,12 +204,14 @@ async function loadReceipt() {
     }
     document.getElementById("receiptContent").innerHTML = `
       <div class="card-body">
+        ${r.voided_at ? `<div class="alert alert-warning">Voided ${escapeHtml(r.voided_at)}: ${escapeHtml(r.void_reason || "")}. This receipt is excluded from active stock.</div>` : ""}
         <p><strong>${escapeHtml(receiptT("Order:"))}</strong> #${r.order_id} ${statusBadge}</p>
         <p><strong>${escapeHtml(receiptT("Customer:"))}</strong> ${escapeHtml(r.customer_name)}</p>
         <p><strong>${escapeHtml(receiptT("Supplier:"))}</strong> ${escapeHtml(r.supplier_name)}</p>
         <p><strong>${escapeHtml(receiptT("Received by:"))}</strong> ${escapeHtml(r.received_by_name || "-")}</p>
         <p><strong>${escapeHtml(receiptT("Received at:"))}</strong> ${escapeHtml(r.received_at || "-")}</p>
-        <p><strong>${escapeHtml(receiptT("Actual totals:"))}</strong> ${r.actual_cartons || 0} ${escapeHtml(receiptT("cartons"))}, ${parseFloat(r.actual_cbm || 0).toFixed(2)} CBM, ${parseFloat(r.actual_weight || 0).toFixed(0)} kg</p>
+        <p><strong>${escapeHtml(receiptT("Actual totals:"))}</strong> ${r.actual_cartons || 0} ${escapeHtml(receiptT("cartons"))}, ${receiptNumber(r.actual_cbm || 0,6)} CBM, ${receiptNumber(r.actual_weight || 0,4)} kg</p>
+        <p><strong>Order quantities:</strong> Ordered ${receiptNumber(r.cargo_totals?.ordered_quantity)}, received ${receiptNumber(r.cargo_totals?.received_quantity)}, remaining ${receiptNumber(r.cargo_totals?.remaining_quantity)}. Cumulative active cargo: ${receiptNumber(r.cargo_totals?.receipt_count ? r.cargo_totals.cbm : 0,6)} CBM / ${receiptNumber(r.cargo_totals?.receipt_count ? r.cargo_totals.weight : 0)} kg.${r.cargo_totals?.quantity_complete === false ? ' <strong>Historical item quantities require reconciliation.</strong>' : ''}</p>
         <p><strong>${escapeHtml(receiptT("Condition:"))}</strong> ${escapeHtml(receiptStatusText(r.receipt_condition || r.condition || "good"))}</p>
         ${receiptFeesHtml(r.fees || [])}
         ${itemsHtml}

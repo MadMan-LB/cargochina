@@ -304,7 +304,7 @@ $clientTranslations = clmsGetClientTranslationPayload();
 
     function renderOrder(app, o) {
       const photosHtml = (o.receipt_photos || []).length ?
-        `<div class="photos-row">${o.receipt_photos.map(p => `<img src="/cargochina/backend/${esc(p)}" alt="Receipt photo" onclick="window.open(this.src)" title="Click to enlarge">`).join('')}</div>` :
+        `<div class="photos-row">${o.receipt_photos.map(p => `<img src="/cargochina/backend/${esc(p)}?confirmation_token=${encodeURIComponent(token)}" alt="Receipt photo" onclick="window.open(this.src)" title="Click to enlarge">`).join('')}</div>` :
         '';
 
       const itemsHtml = (o.items || []).map(it => {

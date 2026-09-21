@@ -18,6 +18,12 @@ require_once __DIR__ . '/sidebar_permissions.php';
 
 function requireRoleForPage(array $allowedRoles): void
 {
+    require_once __DIR__ . '/session_roles.php';
+    clmsRefreshSessionRolesFromDb();
+    if (empty($_SESSION['user_id']) || !empty($GLOBALS['clms_auth_verification_failed'])) {
+        header('Location: /cargochina/login.php');
+        exit;
+    }
     $userRoles = $_SESSION['user_roles'] ?? [];
     $userId = isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null;
     $pageId = clmsResolveCurrentPageId($_SERVER['PHP_SELF'] ?? '');

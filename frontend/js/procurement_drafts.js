@@ -867,9 +867,22 @@
         if (activeSummary) activeSummary.textContent = active.length ? draftT("Active filters: {count}", { count: active.length }) : draftT("No active filters");
     }
 
+    let draftListLoadVersion = 0;
     async function loadDraftOrders() {
+        const listRequest = ++draftListLoadVersion;
         const query = collectDraftFilters(true);
-        const res = await api("GET", `/draft-orders?${query.toString()}`);
+        const res = await api("GET", `/draft-orders?${query.toString()}`).catch(error => {
+            if(listRequest === draftListLoadVersion) {
+                renderDraftOrders([]);
+                draftListMeta = {page:1,limit:20,total:0,pages:1};
+                syncDraftPagination();
+                const body=document.querySelector('#draftOrdersTable tbody');
+                if(body)body.innerHTML=`<tr><td colspan="9" class="text-danger">${escapeHtml(error.message)}</td></tr>`;
+                showToast(error.message, "danger");
+            }
+            return null;
+        });
+        if(!res || listRequest !== draftListLoadVersion) return;
         draftListMeta = res.meta || draftListMeta;
         draftListPage = draftListMeta.page || draftListPage;
         renderDraftFilterOptions(res.filter_options || {});
@@ -1752,6 +1765,17 @@
         }
     }
 
+    async function closeDraftOrderImportGuide() {
+        const el=document.getElementById('draftOrderImportGuideModal');
+        if(!el?.classList.contains('show')||!draftOrderImportGuideModal)return;
+        await new Promise(resolve=>{
+            const hide=()=>draftOrderImportGuideModal.hide();
+            el.addEventListener('shown.bs.modal',hide,{once:true});
+            el.addEventListener('hidden.bs.modal',()=>{el.removeEventListener('shown.bs.modal',hide);resolve();},{once:true});
+            hide();
+        });
+    }
+
     async function processDraftOrderImportFile(file) {
         if (!file || draftOrderImportInProgress) return;
         const ui = draftOrderImportUi();
@@ -1805,7 +1829,7 @@
                 imageText: draftOrderImportImagesText(meta),
                 details: draftOrderImportSummaryDetails(meta),
             });
-            draftOrderImportGuideModal?.hide();
+            await closeDraftOrderImportGuide();
             await applyImportedDraftOrder(imported);
             setDraftOrderImportProgress({
                 type: "success",
@@ -3255,7 +3279,7 @@
                         <div class="draft-item-volume-fields">
                           <div class="draft-item-volume-field">
                             <label class="form-label draft-item-label">CBM</label>
-                            <input type="number" step="0.000001" min="0" class="form-control form-control-sm draft-item-cbm" placeholder="CBM">
+                            <input type="number" step="any" min="0" class="form-control form-control-sm draft-item-cbm" placeholder="CBM">
                           </div>
                           <span class="draft-item-or">or</span>
                           <div class="draft-item-volume-field">
@@ -3272,7 +3296,7 @@
                           </div>
                           <div class="draft-item-volume-field">
                             <label class="form-label draft-item-label">Weight (kg, Optional)</label>
-                            <input type="number" step="0.0001" min="0" class="form-control form-control-sm draft-item-weight" placeholder="Weight">
+                            <input type="number" step="any" min="0" class="form-control form-control-sm draft-item-weight" placeholder="Weight">
                           </div>
                           <div class="draft-item-volume-field">
                             <label class="form-label draft-item-label">Customer Price (Optional)</label>
@@ -3461,7 +3485,7 @@
         if (hasAllDimensions) {
             const computedCbm = (l * w * h) / 1000000;
             if (!cbmInput.value.trim() || isAutoDerived) {
-                cbmInput.value = fmtFieldNumber(computedCbm, 6);
+                cbmInput.value = String(computedCbm);
                 card.dataset.cbmAutoDerived = "1";
             }
             return;
@@ -3544,6 +3568,10 @@
             }
         }
 
+        card.dataset.totalAmount = String(totalAmountValue);
+        card.dataset.totalQty = String(qty);
+        card.dataset.totalCbm = String(cbm * (scope === "carton" ? cartons : qty));
+        card.dataset.totalWeight = String(weight * (scope === "carton" ? cartons : qty));
         card.querySelector(".draft-item-total-qty").textContent = fmtQty(qty);
         const qtyInline = card.querySelector(".draft-item-total-qty-inline");
         if (qtyInline) {
@@ -3559,10 +3587,10 @@
             amountInline.textContent = fmtAmount(totalAmountValue);
         }
         card.querySelector(".draft-item-total-cbm").textContent = fmtCbm(
-            cbm * multiplier,
+            Number(card.dataset.totalCbm),
         );
         card.querySelector(".draft-item-total-weight").textContent = fmtWeight(
-            weight * multiplier,
+            Number(card.dataset.totalWeight),
         );
         const pricingHint = card.querySelector(".draft-item-pricing-hint");
         if (pricingHint) {
@@ -3592,26 +3620,10 @@
             let sectionCbm = 0;
             let sectionWeight = 0;
             section.querySelectorAll(".draft-order-item-card").forEach((card) => {
-                sectionAmount +=
-                    parseFloat(
-                        card.querySelector(".draft-item-total-amount")
-                            ?.textContent || 0,
-                    ) || 0;
-                sectionQty +=
-                    parseFloat(
-                        card.querySelector(".draft-item-total-qty")?.textContent ||
-                            0,
-                    ) || 0;
-                sectionCbm +=
-                    parseFloat(
-                        card.querySelector(".draft-item-total-cbm")?.textContent ||
-                            0,
-                    ) || 0;
-                sectionWeight +=
-                    parseFloat(
-                        card.querySelector(".draft-item-total-weight")
-                            ?.textContent || 0,
-                    ) || 0;
+                sectionAmount += Number(card.dataset.totalAmount || 0);
+                sectionQty += Number(card.dataset.totalQty || 0);
+                sectionCbm += Number(card.dataset.totalCbm || 0);
+                sectionWeight += Number(card.dataset.totalWeight || 0);
             });
             section.querySelector(".draft-section-amount").textContent =
                 fmtAmount(sectionAmount);
@@ -4097,6 +4109,7 @@
     }
 
     function openDraftQuickSupplier(section) {
+        quickSupplierRequest=null;
         quickSupplierModal =
             quickSupplierModal ||
             bootstrap.Modal.getOrCreateInstance(
@@ -4116,7 +4129,10 @@
         quickSupplierModal.show();
     }
 
+    let quickSupplierRequest = null;
     async function saveDraftQuickSupplier() {
+        const saveButton = document.getElementById("draftQuickSupplierSaveBtn");
+        if (saveButton?.disabled) return;
         const targetSectionId =
             document.getElementById("draftQuickSupplierTargetSection").value;
         const targetSection = document.querySelector(
@@ -4152,10 +4168,13 @@
             return;
         }
         const btn = document.getElementById("draftQuickSupplierSaveBtn");
+        const signature=JSON.stringify(payload);
+        if(quickSupplierRequest?.signature!==signature) quickSupplierRequest={signature,key:clmsRequestKey('quick-supplier')};
+        payload.idempotency_key=quickSupplierRequest.key;
         try {
             btn.disabled = true;
             const res = await api("POST", "/suppliers", payload);
-            const supplier = res.data || {};
+            const supplier = (await api("GET", "/suppliers/" + res.data.id)).data;
             const files = Array.from(
                 document.getElementById("draftQuickSupplierFiles")?.files || [],
             );
@@ -4199,7 +4218,9 @@
         );
     }
 
+    let draftQuickCustomerRequestKey = null;
     function openDraftQuickCustomer() {
+        draftQuickCustomerRequestKey = clmsRequestKey('customer');
         quickCustomerModal =
             quickCustomerModal ||
             bootstrap.Modal.getOrCreateInstance(
@@ -4261,7 +4282,7 @@
         const btn = document.getElementById("draftQuickCustomerSaveBtn");
         try {
             btn.disabled = true;
-            const res = await api("POST", "/customers", payload);
+            const res = await api("POST", "/customers", {...payload,idempotency_key:draftQuickCustomerRequestKey || (draftQuickCustomerRequestKey=clmsRequestKey('customer'))});
             const customer = res.data || {};
             if (!customer.id) {
                 throw new Error(
@@ -4933,7 +4954,7 @@
         if (!invalidFields.length) return false;
         showDraftValidationSummary(
             invalidFields.length,
-            draftT("Please complete the highlighted fields before saving."),
+            error.message || draftT("Please complete the highlighted fields before saving."),
         );
         scrollToDraftInvalidField(invalidFields[0]);
         return true;
@@ -5140,7 +5161,7 @@
             const mapped = applyDraftBackendValidation(e);
             showToast(
                 mapped
-                    ? draftT("Please complete the highlighted fields before saving.")
+                    ? (e.message || draftT("Please complete the highlighted fields before saving."))
                     : e.message,
                 "danger",
             );

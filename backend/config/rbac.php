@@ -49,6 +49,8 @@ return [
         'push' => ['LebanonAdmin', 'ContainersStaff', 'SuperAdmin'],
     ],
     'users' => ['SuperAdmin'],
+    'owner-control' => ['SuperAdmin'],
+    'client-incidents' => $operationalRoles,
     'config' => ['SuperAdmin'],
     'expenses' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin', 'WarehouseStaff'],
     'financials' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin'],

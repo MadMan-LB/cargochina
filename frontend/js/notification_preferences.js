@@ -7,6 +7,7 @@ const EVENT_LABELS = {
 };
 
 let prefs = {};
+let preferencesRevision=null, preferencesSaving=false;
 
 document.addEventListener("DOMContentLoaded", loadNotificationPreferences);
 
@@ -14,6 +15,7 @@ async function loadNotificationPreferences() {
     try {
         const res = await api("GET", "/notification-preferences");
         const data = res.data || [];
+        preferencesRevision=res.revision;
         prefs = {};
         data.forEach((p) => {
             const key = `${p.channel}:${p.event_type}`;
@@ -43,6 +45,7 @@ function renderPrefs() {
 }
 
 async function saveNotificationPreferences() {
+    if(preferencesSaving || !preferencesRevision)return;
     const preferences = [];
     Object.keys(EVENT_LABELS).forEach((et) => {
         preferences.push({
@@ -61,13 +64,16 @@ async function saveNotificationPreferences() {
         });
     });
     const btn = document.getElementById("savePrefsBtn");
+    preferencesSaving=true;
     try {
         setLoading(btn, true);
-        await api("PUT", "/notification-preferences", { preferences });
+        const saved=await api("PUT", "/notification-preferences", { preferences, revision:preferencesRevision });
+        preferencesRevision=saved.revision;
         showToast("Preferences saved");
     } catch (e) {
         showToast(e.message || "Failed to save", "danger");
     } finally {
+        preferencesSaving=false;
         setLoading(btn, false);
     }
 }

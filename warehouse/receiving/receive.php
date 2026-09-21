@@ -1,6 +1,10 @@
 <?php
 $area = 'warehouse';
 require __DIR__ . '/../../includes/area_bootstrap.php';
+if (!clmsUserCan('orders.receive', ['WarehouseStaff', 'SuperAdmin'], null, $userId, $userRoles)) {
+  include __DIR__ . '/../../403.php';
+  exit;
+}
 $orderId = isset($_GET['order_id']) ? (int)$_GET['order_id'] : 0;
 if (!$orderId) {
   header('Location: ' . $areaBase . '/receiving/');
@@ -111,7 +115,7 @@ require __DIR__ . '/../../includes/area_layout.php';
 <?php
 // upload-utils is already loaded by the shared footer; loading twice aborts JS.
 $pageScripts = ['/cargochina/frontend/js/photo_uploader.js'];
-$pageScript = '/cargochina/frontend/js/receiving_receive.js';
+$pageScript = '/cargochina/frontend/js/receiving_receive.js?v=' . filemtime(__DIR__ . '/../../frontend/js/receiving_receive.js');
 ?>
 <script>
 window.RECEIVE_ORDER_ID = <?= (int)$orderId ?>;

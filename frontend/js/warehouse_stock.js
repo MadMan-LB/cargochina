@@ -9,6 +9,8 @@
     const stockPageSize = 100;
     let lastStockFilterQuery = null;
     let stockDownloadSelection = null;
+    let stockRequestVersion = 0;
+    let stockInfoVersion = 0;
 
     function stockT(text, replacements = null) {
         return typeof t === "function" ? t(text, replacements) : text;
@@ -56,13 +58,13 @@
     }
 
     function stockOrderExcelUrl(orderId) {
-        return `${API}/orders/${encodeURIComponent(orderId)}/export?format=xlsx`;
+        return `${API}/warehouse-stock/export?order_ids=${encodeURIComponent(orderId)}&format=xlsx`;
     }
 
     function stockDimensionText(row) {
-        const height = row.item_actual_height ?? row.height ?? row.item_height;
-        const width = row.item_actual_width ?? row.width ?? row.item_width;
-        const length = row.item_actual_length ?? row.length ?? row.item_length;
+        const height = row.item_actual_height;
+        const width = row.item_actual_width;
+        const length = row.item_actual_length;
         const parts = [
             height !== null && height !== undefined && height !== "" ? `H:${height}` : "",
             width !== null && width !== undefined && width !== "" ? `W:${width}` : "",
@@ -116,6 +118,7 @@
     }
 
     window.loadStock = async function () {
+        const requestVersion = ++stockRequestVersion;
         const params = buildStockParams();
         const filterQuery = params.toString();
         if (lastStockFilterQuery !== null && lastStockFilterQuery !== filterQuery) stockOffset = 0;
@@ -124,13 +127,23 @@
         params.set("offset", String(stockOffset));
         try {
             const d = await api("/warehouse-stock?" + params.toString());
+            if (requestVersion !== stockRequestVersion) return;
+            if (!d.data?.length && stockOffset > 0) {
+                stockOffset = Math.max(0, Math.floor((Number(d.meta?.total || 0)-1)/stockPageSize)*stockPageSize);
+                return loadStock();
+            }
             renderStock(d.data);
             const prev=document.getElementById("stockPrevPage"), next=document.getElementById("stockNextPage"), summary=document.getElementById("stockPageSummary");
             const total = Number(d.meta?.total || 0);
             if(prev)prev.disabled=stockOffset===0; if(next)next.disabled=!d.meta?.has_more; if(summary)summary.textContent=d.data?.length?`${stockOffset+1}–${stockOffset+d.data.length} ${stockT("of")} ${total}`:`0 ${stockT("results")}`;
             syncStockUrl();
         } catch (e) {
-            alert(e.message || stockT("Failed to load stock"));
+            if (requestVersion !== stockRequestVersion) return;
+            document.getElementById("stockTableBody").innerHTML = `<tr><td colspan="12" class="text-danger">${escapeHtml(e.message || stockT("Failed to load stock"))}</td></tr>`;
+            document.getElementById("stockPageSummary").textContent = "";
+            document.getElementById("stockPrevPage").disabled = true;
+            document.getElementById("stockNextPage").disabled = true;
+            stockDownloadSelection?.bind();
         }
     };
 
@@ -158,11 +171,12 @@
                 <td><a href="/cargochina/orders.php?id=${r.order_id}">#${r.order_id}</a></td>
                 <td>${escapeHtml(r.customer_name || "")}</td>
                 <td>${escapeHtml(r.supplier_name || "—")}</td>
-                <td><span class="badge bg-secondary">${escapeHtml(stockStatusDisplay(r.warehouse_state || r.status || ""))}</span></td>
+                <td><span class="badge bg-secondary">${escapeHtml(stockStatusDisplay(r.warehouse_state || r.status || ""))}</span><div class="small">${escapeHtml(typeof statusLabel === "function" ? statusLabel(r.status) : stockT(r.status))}</div>${Number(r.reconciliation_required) ? `<div class="text-warning small">${escapeHtml(stockT("Reconciliation required"))}</div>` : ""}</td>
                 <td>${escapeHtml(r.description_en || r.description_cn || r.product_desc_en || r.product_desc_cn || "—")}<div class="small text-muted">${escapeHtml(itemIdentifierText(r))}</div></td>
-                <td>${r.item_actual_quantity || r.quantity || "—"}</td>
+                <td>${r.item_actual_quantity ?? "—"}<div class="small text-muted">${escapeHtml(stockT("Ordered"))}: ${r.ordered_quantity ?? "—"}<br>${escapeHtml(stockT("Remaining"))}: ${r.remaining_quantity ?? "—"}</div></td>
                 <td>${r.declared_cbm != null ? formatStockCbm(r.declared_cbm, 2) : "—"}</td>
-                <td>${r.item_actual_cbm != null ? formatStockCbm(r.item_actual_cbm, 2) : r.order_actual_cbm != null ? formatStockCbm(r.order_actual_cbm, 2) : "—"}</td>
+                <td>${r.item_actual_cbm != null ? formatStockCbm(r.item_actual_cbm, 6) : "—"}</td>
+                <td>${r.item_actual_weight ?? "—"}</td>
                 <td>${escapeHtml(stockDimensionText(r))}</td>
                 <td><div class="d-flex flex-wrap gap-1"><button type="button" class="btn btn-sm btn-outline-info" onclick="openStockOrderInfo(${Number(r.order_id)})" title="${escapeHtml(stockT("View full order details"))}">${escapeHtml(stockT("Info"))}</button><a class="btn btn-sm btn-outline-success" href="${stockOrderExcelUrl(r.order_id)}" target="_blank" rel="noopener">${escapeHtml(stockT("Download"))}</a></div></td>
             </tr>
@@ -213,8 +227,9 @@
                         <td>${escapeHtml(item.shipping_code || "—")}</td>
                         <td>${escapeHtml(itemIdentifierText(item) || "—")}</td>
                         <td>${escapeHtml(item.supplier_name || order.supplier_name || "—")}</td>
-                        <td>${item.quantity != null ? escapeHtml(String(item.quantity)) : "—"}</td>
-                        <td>${item.declared_cbm != null ? formatStockCbm(item.declared_cbm || 0, 3) : "—"}</td>
+                        <td>${item.received_quantity ?? "—"}<div class="small text-muted">${escapeHtml(stockT("Ordered"))}: ${item.ordered_quantity ?? "—"}<br>${escapeHtml(stockT("Remaining"))}: ${item.remaining_quantity ?? "—"}</div></td>
+                        <td>${item.received_cbm != null ? formatStockCbm(item.received_cbm, 6) : "—"}</td>
+                        <td>${item.received_weight ?? "—"}</td>
                         <td>${escapeHtml(stockDimensionText(item))}</td>
                     </tr>
                 `,
@@ -245,8 +260,9 @@
                                         <th>${escapeHtml(stockT("Shipping"))}</th>
                                         <th>${escapeHtml(stockT("Item Identification"))}</th>
                                         <th>${escapeHtml(stockT("Supplier"))}</th>
-                                        <th>${escapeHtml(stockT("Qty"))}</th>
-                                        <th>${escapeHtml(stockT("CBM"))}</th>
+                                        <th>${escapeHtml(stockT("Received quantity"))}</th>
+                                        <th>${escapeHtml(stockT("Actual CBM"))}</th>
+                                        <th>${escapeHtml(stockT("Actual weight (kg)"))}</th>
                                         <th>${escapeHtml(stockT("Dims H/W/L"))}</th>
                                     </tr>
                                 </thead>
@@ -274,6 +290,7 @@
     }
 
     window.openStockOrderInfo = async function (orderId) {
+        const infoVersion = ++stockInfoVersion;
         const titleEl = document.getElementById("stockOrderInfoTitle");
         const bodyEl = document.getElementById("stockOrderInfoBody");
         const modalEl = document.getElementById("stockOrderInfoModal");
@@ -288,8 +305,10 @@
 
         try {
             const response = await api(`/orders/${orderId}`);
+            if (infoVersion !== stockInfoVersion) return;
             bodyEl.innerHTML = renderStockOrderInfo(response.data || {});
         } catch (error) {
+            if (infoVersion !== stockInfoVersion) return;
             bodyEl.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml(
                 error.message || stockT("Failed to load order details"),
             )}</div>`;
@@ -305,7 +324,8 @@
 
     document.addEventListener("DOMContentLoaded", function () {
         stockDownloadSelection = window.ClmsBulkExcelDownload?.create({
-            endpoint: `${API}/orders/bulk-export`,
+            method: "GET",
+            endpoint: (ids) => `${API}/warehouse-stock/export?order_ids=${ids.map(encodeURIComponent).join(",")}&format=xlsx`,
             buttonId: "stockDownloadSelectedBtn",
             countId: "stockDownloadSelectedCount",
             selectAllId: "stockDownloadSelectAll",

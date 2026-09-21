@@ -284,9 +284,10 @@ require 'includes/layout.php';
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <p class="text-muted small">Paste CSV or choose file. Columns: <code>description_cn</code>, <code>description_en</code>, <code>cbm</code>, <code>weight</code>, <code>hs_code</code>, <code>pieces_per_carton</code>, <code>unit_price</code>, <code>packaging</code>, <code>supplier_code</code>. Duplicate descriptions skipped.</p>
+        <p class="text-muted small">Paste CSV or choose file. Columns: <code>description_cn</code>, <code>description_en</code>, <code>cbm</code>, <code>weight</code>, <code>hs_code</code>, <code>pieces_per_carton</code>, <code>unit_price</code>, <code>packaging</code>, <code>supplier_code</code>, <code>dimensions_scope</code>, <code>item_type_code</code>, <code>item_type_confirmed</code>. CBM and weight use the specified piece/carton basis.</p>
         <input type="file" class="form-control form-control-sm mb-2" id="importCsvFile" accept=".csv,.txt" title="Choose CSV file">
-        <textarea class="form-control font-monospace" id="importCsvData" rows="10" placeholder="description_cn,description_en,cbm,weight,hs_code,pieces_per_carton,unit_price,packaging,supplier_code&#10;产品A,Product A,0.05,2.5,12345678,24,0.5,Box,S001"></textarea>
+        <textarea class="form-control font-monospace" id="importCsvData" rows="10" placeholder="description_cn,description_en,cbm,weight,hs_code,pieces_per_carton,unit_price,packaging,supplier_code,item_type_code,item_type_confirmed&#10;产品A,Product A,0.05,2.5,12345678,24,0.5,Box,S001,normal,1"></textarea>
+        <p class="form-text">Every row requires a valid item_type_code and item_type_confirmed=1. Invalid rows reject the entire batch; existing exact product/supplier matches are skipped.</p>
         <div id="importResult" class="alert d-none mt-2"></div>
       </div>
       <div class="modal-footer">
