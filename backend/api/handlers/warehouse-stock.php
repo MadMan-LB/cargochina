@@ -187,20 +187,21 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $sql .= ' AND o.id IN (' . implode(',',array_fill(0,count($ids),'?')) . ')';
         $params = array_merge($params,$ids);
     }
-    if ($q) {
+    if ($q !== '') {
         $like = clmsSearchLike($q);
         $searchExpressions = warehouseStockSearchExpressions($pdo);
         $searchClauses = array_map(
             static fn(string $expression): string => clmsUtf8SearchExpr("COALESCE($expression, '')") . ' LIKE ?',
             $searchExpressions
         );
+        $searchParams = array_fill(0, count($searchClauses), $like);
         if (warehouseStockHasColumn($pdo, 'order_items', 'shared_carton_contents')) {
             foreach (['item_no', 'item_number'] as $identifier) {
-                $searchClauses[] = clmsSharedCartonIdentifierSearch('oi.shared_carton_contents', $identifier);
+                $searchClauses[] = clmsSharedCartonIdentifierSearch('oi.shared_carton_contents', $identifier, $pdo, $like, $searchParams);
             }
         }
         $sql .= ' AND (' . implode(' OR ', $searchClauses) . ')';
-        $params = array_merge($params, array_fill(0, count($searchClauses), $like));
+        $params = array_merge($params, $searchParams);
     }
     if ($itemType !== null && warehouseStockHasColumn($pdo, 'item_classifications', 'item_type_code')) {
         $sql .= ' AND ic.item_type_code=?'; $params[] = $itemType;

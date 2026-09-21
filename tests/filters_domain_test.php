@@ -42,6 +42,17 @@ $ids=[];for($offset=0;$offset<3;$offset++){$r=filterCall('orders',['customer_id'
 filterCheck($ids===array_reverse($orders),'Stable newest-first pages duplicate or omit tied rows');
 $r=filterCall('orders',['customer_id'=>$buyer,'offset'=>99999]);filterCheck($r['data']===[]&&$r['meta']['total']===3&&!$r['meta']['has_more'],'Beyond-end page metadata incorrect');
 echo "PASS: literal wildcard matching, contained-supplier filters and stable complete order pages\n";
+$pdo->prepare("INSERT INTO containers(code,status,max_cbm,max_weight) VALUES (?,'planning',28,28000)")->execute([$tag.'-container']);$containerId=(int)$pdo->lastInsertId();
+$pdo->prepare("INSERT INTO shipment_drafts(container_id,status) VALUES (?,'draft')")->execute([$containerId]);$shipmentId=(int)$pdo->lastInsertId();
+$pdo->prepare('INSERT INTO shipment_draft_orders(shipment_draft_id,order_id) VALUES (?,?)')->execute([$shipmentId,$orders[0]]);
+$pdo->prepare('UPDATE order_items SET item_no=?,item_number=?,shared_carton_contents=? WHERE order_id=?')->execute([$tag.'-AUTO',$tag.'-MANUAL',json_encode([['item_no'=>$tag.'-CONTAINED','item_number'=>$tag.'-PACK']]),$orders[0]]);
+foreach([$tag.'-container',$tag.'-AUTO',$tag.'-MANUAL',$tag.'-CONTAINED',$tag.'-PACK',$tag.'%_'] as $query) {
+    foreach([null,'search'] as $route) {
+        $r=filterCall('containers',['q'=>$query],$route);
+        filterCheck(empty($r['error'])&&count($r['data'])===1&&(int)$r['data'][0]['id']===$containerId,'Container list/picker charset and identifier search: '.$query.' '.json_encode($r));
+    }
+}
+echo "PASS: container list/picker searches agree for legacy charsets, code, descriptions, both identifiers and contained references\n";
 $pdo->prepare("INSERT INTO supplier_payments(supplier_id,amount,invoice_amount,currency,payment_type,payment_channel,marked_by) VALUES (?,20,30,'USD','payment','Cash',1)")->execute([$supplier]);
 foreach(['outstanding'=>true,'fully_paid'=>false] as $status=>$expected){$r=filterCall('suppliers',['q'=>$tag.'-0','payment_status'=>$status]);filterCheck(empty($r['error'])&&(count($r['data'])===1)===$expected,'Supplier payment filter failed: '.json_encode($r));}
 $r=filterCall('balances',['q'=>$tag.'%_'],'transactions');filterCheck(empty($r['error'])&&$r['data']===[],'Financial literal filter failed');
@@ -62,4 +73,14 @@ foreach([['customer_id'=>$buyer],['supplier_id'=>$supplier],['q'=>$tag],['limit'
 }
 filterCheck(!empty(filterCall('orders',['view'=>'unknown'])['error']),'Unknown list projection accepted');
 echo "PASS: compact order lists preserve all summary calculations, eligibility, supplier filters and pagination\n";
+$pdo->prepare('INSERT INTO customers(code,name,created_by) VALUES (?,\'Literal stock reference\',1)')->execute(['ZERO-'.strtr(bin2hex(random_bytes(8)),'0123456789','ghijklmnop')]);$zeroBuyer=(int)$pdo->lastInsertId();
+$zeroOrders=[];$candidate=911111;
+foreach(['0','ALPHA'] as $reference) {
+    while(str_contains((string)$candidate,'0') || $pdo->query('SELECT COUNT(*) FROM orders WHERE id='.$candidate)->fetchColumn()) $candidate++;
+    $pdo->prepare("INSERT INTO orders(id,customer_id,status,created_by) VALUES (?,?,'InTransitToWarehouse',1)")->execute([$candidate,$zeroBuyer]);$zeroOrders[]=$candidate;
+    $pdo->prepare("INSERT INTO order_items(order_id,item_no,item_number,quantity,cartons,qty_per_carton,description_en) VALUES (?,'AUTO',?,1,1,1,'Linen')")->execute([$candidate,$reference]);$candidate++;
+}
+$r=filterCall('warehouse-stock',['customer_id'=>$zeroBuyer,'q'=>'0']);
+filterCheck(empty($r['error'])&&count($r['data'])===1&&(int)$r['data'][0]['order_id']===$zeroOrders[0],'Warehouse literal zero was treated as empty search');
+echo "PASS: warehouse searches the literal reference 0 instead of returning every row\n";
 echo json_encode(['tag'=>$tag,'orders'=>$orders,'supplier'=>$supplier]),"\n";

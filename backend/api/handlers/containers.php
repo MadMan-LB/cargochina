@@ -36,6 +36,39 @@ function containerTableHasColumn(PDO $pdo, string $table, string $column): bool
     return $cache[$key];
 }
 
+/** Lists and workflow pickers share searchable fields and legacy charset handling. */
+function containerSearchPredicate(PDO $pdo, string $search, array &$params): string
+{
+    $like = clmsSearchLike($search);
+    $outer = [clmsUtf8SearchExpr('c.code') . ' LIKE ?'];
+    $params[] = $like;
+    if (containerTableHasColumn($pdo, 'containers', 'notes')) {
+        $outer[] = clmsUtf8SearchExpr('c.notes') . ' LIKE ?';
+        $params[] = $like;
+    }
+    if (ctype_digit($search)) { $outer[] = 'c.id = ?'; $params[] = (int) $search; }
+    $inner = [];
+    foreach (['cu2.name', 'cu2.code', 'oi2.item_number', 'oi2.shipping_code', 'oi2.item_no', 'oi2.description_cn', 'oi2.description_en'] as $column) {
+        $inner[] = clmsUtf8SearchExpr($column) . ' LIKE ?'; $params[] = $like;
+    }
+    if (containerTableHasColumn($pdo, 'customers', 'phone')) {
+        $inner[] = clmsUtf8SearchExpr('cu2.phone') . ' LIKE ?'; $params[] = $like;
+    }
+    if (containerTableHasColumn($pdo, 'order_items', 'shared_carton_contents')) {
+        foreach (['item_no', 'item_number'] as $identifier) {
+            $inner[] = clmsSharedCartonIdentifierSearch('oi2.shared_carton_contents', $identifier, $pdo, $like, $params);
+        }
+    }
+    if (ctype_digit($search)) { $inner[] = 'o2.id = ?'; $params[] = (int) $search; }
+    $outer[] = 'EXISTS (SELECT 1 FROM shipment_draft_orders sdo2
+        JOIN shipment_drafts sd2 ON sdo2.shipment_draft_id = sd2.id
+        JOIN orders o2 ON o2.id = sdo2.order_id
+        JOIN customers cu2 ON cu2.id = o2.customer_id
+        LEFT JOIN order_items oi2 ON oi2.order_id = o2.id
+        WHERE sd2.container_id = c.id AND (' . implode(' OR ', $inner) . '))';
+    return '(' . implode(' OR ', $outer) . ')';
+}
+
 function buildContainerLineMetrics(array $item): array
 {
     $cartons = isset($item['order_cartons']) && $item['order_cartons'] !== null && $item['order_cartons'] !== ''
@@ -333,14 +366,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if (strlen($q) < 1) {
                     jsonResponse(['data' => []]);
                 }
-                $like = clmsSearchLike($q);
-                $coll = 'COLLATE utf8mb4_unicode_ci';
-                $chkNotes = @$pdo->query("SHOW COLUMNS FROM containers LIKE 'notes'");
-                $notesCond = ($chkNotes && $chkNotes->rowCount() > 0) ? " OR (notes $coll LIKE ?)" : '';
-                $sql = "SELECT * FROM containers WHERE ((code $coll LIKE ?) OR id = ?$notesCond) ORDER BY id DESC LIMIT 20";
+                $execParams = [];
+                $sql = 'SELECT c.* FROM containers c WHERE ' . containerSearchPredicate($pdo, $q, $execParams) . ' ORDER BY c.id DESC LIMIT 20';
                 $stmt = $pdo->prepare($sql);
-                $execParams = [$like, is_numeric($q) ? (int) $q : 0];
-                if ($notesCond) $execParams[] = $like;
                 $stmt->execute($execParams);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 foreach ($rows as &$searchRow) $searchRow = enrichContainerDestination($pdo,$searchRow+fetchContainerUsage($pdo,(int)$searchRow['id']));
@@ -527,37 +555,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 WHERE 1=1";
                 $params = [];
                 if ($search !== '') {
-                    $like = clmsSearchLike($search);
-                    $coll = 'COLLATE utf8mb4_unicode_ci';
-                    $innerCond = "(cu2.name $coll LIKE ?) OR (cu2.code $coll LIKE ?)";
-                    $innerParams = [$like, $like];
-                    $chkCust = $pdo->query("SHOW COLUMNS FROM customers LIKE 'phone'");
-                    if ($chkCust && $chkCust->rowCount() > 0) {
-                        $innerCond .= " OR (cu2.phone $coll LIKE ?)";
-                        $innerParams[] = $like;
-                    }
-                    $innerCond .= " OR (oi2.item_number $coll LIKE ?) OR (oi2.shipping_code $coll LIKE ?) OR (oi2.item_no $coll LIKE ?) OR (oi2.description_cn $coll LIKE ?) OR (oi2.description_en $coll LIKE ?)";
-                    $innerParams = array_merge($innerParams, [$like, $like, $like, $like, $like]);
-                    if (containerTableHasColumn($pdo, 'order_items', 'shared_carton_contents')) {
-                        foreach (['item_no', 'item_number'] as $identifier) {
-                            $innerCond .= ' OR (' . clmsSharedCartonIdentifierSearch('oi2.shared_carton_contents', $identifier) . ')';
-                            $innerParams[] = $like;
-                        }
-                    }
-                    if (is_numeric($search)) {
-                        $innerCond .= " OR o2.id = ?";
-                        $innerParams[] = (int) $search;
-                    }
-                    $sql .= " AND ((c.code $coll LIKE ?) OR EXISTS (
-                        SELECT 1 FROM shipment_draft_orders sdo2
-                        JOIN shipment_drafts sd2 ON sdo2.shipment_draft_id = sd2.id
-                        JOIN orders o2 ON sdo2.order_id = o2.id
-                        JOIN customers cu2 ON o2.customer_id = cu2.id
-                        LEFT JOIN order_items oi2 ON oi2.order_id = o2.id
-                        WHERE sd2.container_id = c.id AND (" . $innerCond . ")
-                    ))";
-                    $params[] = $like;
-                    foreach ($innerParams as $p) $params[] = $p;
+                    $sql .= ' AND ' . containerSearchPredicate($pdo, $search, $params);
                 }
                 if (!empty($statusFilter)) {
                     $placeholders = implode(',', array_fill(0, count($statusFilter), '?'));

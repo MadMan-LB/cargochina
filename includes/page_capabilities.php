@@ -34,7 +34,7 @@ function clmsPageCapabilityMap(): array
         'suppliers.import' => ['suppliers'],
         'suppliers.interactions' => ['suppliers'],
         'suppliers.finance' => ['suppliers', 'balances', 'financials'],
-        'products.read' => array_merge($partyReaders, ['products']),
+        'products.read' => array_merge($partyReaders, ['products', 'hs_code_tax']),
         'products.create' => array_merge(['products'], $draftEditors),
         'products.import' => ['products'],
         'products.write' => ['products'],

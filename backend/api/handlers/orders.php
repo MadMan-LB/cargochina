@@ -579,8 +579,7 @@ function buildOrderSearchSql(PDO $pdo, string $query, array &$params, string $or
         }
         if (orderSupportsSharedCartons($pdo)) {
             foreach (['item_no', 'item_number'] as $identifier) {
-                $itemClauses[] = clmsSharedCartonIdentifierSearch('oi.shared_carton_contents', $identifier);
-                $params[] = $like;
+                $itemClauses[] = clmsSharedCartonIdentifierSearch('oi.shared_carton_contents', $identifier, $pdo, $like, $params);
             }
         }
         if ($hasItemCode) {
@@ -868,11 +867,12 @@ function fetchOrdersListRowsForRequest(PDO $pdo, bool $paginate = false, ?array 
     if ($supplierId) {
         $chkItemSupp = @$pdo->query("SHOW COLUMNS FROM order_items LIKE 'supplier_id'");
         if ($chkItemSupp && $chkItemSupp->rowCount() > 0) {
-            $sharedPredicate = orderSupportsSharedCartons($pdo) ? ' OR ' . clmsSharedCartonSupplierPredicate('oi.shared_carton_contents') : '';
+            $sharedParams = [];
+            $sharedPredicate = orderSupportsSharedCartons($pdo) ? ' OR ' . clmsSharedCartonSupplierPredicate('oi.shared_carton_contents', $pdo, (int) $supplierId, $sharedParams) : '';
             $sql .= " AND (o.supplier_id = ? OR EXISTS (SELECT 1 FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = o.id AND (COALESCE(oi.supplier_id, p.supplier_id) = ?$sharedPredicate)))";
             $params[] = $supplierId;
             $params[] = $supplierId;
-            if ($sharedPredicate !== '') array_push($params, (string)(int)$supplierId, (string)(int)$supplierId);
+            array_push($params, ...$sharedParams);
         } else {
             $sql .= " AND o.supplier_id = ?";
             $params[] = $supplierId;
@@ -1187,7 +1187,7 @@ function outputOrdersListCsv(array $rows, ?string $filename = null): void
     header('Cache-Control: no-cache, no-store, must-revalidate');
 
     $out = fopen('php://output', 'w');
-    clmsWriteCsv($out, array_map('clmsT', ['ID', 'Order Type', 'Customer', 'Supplier', 'Expected Ready', 'Status', 'Deposit Status', 'Paid Amount', 'Remaining Balance', 'Shipment Charges', 'Total CBM', 'Total Weight', 'Currency']));
+    clmsWriteCsv($out, array_map('clmsT', ['ID', 'Order Type', 'Customer', 'Supplier', 'Expected Ready', 'Status', 'Deposit Status', 'Paid Amount', 'Remaining Balance', 'Shipment Charges', 'Total CBM', 'Total Weight', 'Currency', 'I.I.N', 'Item Number']));
     foreach ($rows as $row) {
         $cbm = 0.0;
         $weight = 0.0;
@@ -1222,6 +1222,8 @@ function outputOrdersListCsv(array $rows, ?string $filename = null): void
             $cbm===null?null:round($cbm, 6),
             $weight===null?null:round($weight, 4),
             $row['currency']??'',
+            OrderExcelService::identifierSummary($row['items'] ?? [], 'item_no'),
+            OrderExcelService::identifierSummary($row['items'] ?? [], 'item_number'),
         ]);
     }
     fclose($out);

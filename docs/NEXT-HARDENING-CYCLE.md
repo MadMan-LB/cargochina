@@ -1,5 +1,7 @@
 # Next hardening cycle
 
+Scoped follow-up (2026-09-21): search/MySQL 5.5 compatibility and dual-identifier downloads were requested separately. See [search/export compatibility evidence and nine-file deployment list](search-export-compatibility.md). Production deployment and actual MySQL 5.5 smoke verification remain pending; do not reopen the broad hardening cycle for this fix.
+
 Checkpoint: 2026-09-20. **HIGH-COST WORK PAUSED by Houssein. Demo stopped.**
 
 When Houssein's weekly high-performance allowance resets, read this file and docs/final-stabilization.md first. Resume from the remaining blockers/backlog. Do not repeat completed audits or rebuild context unnecessarily.

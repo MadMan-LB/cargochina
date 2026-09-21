@@ -171,8 +171,21 @@ function clmsQueryLimit($value, int $default = 50, int $maximum = 200): int
 }
 
 /** Two parameters: numeric supplier ID as JSON, then its legacy string representation. */
-function clmsSharedCartonSupplierPredicate(string $column): string
+function clmsSharedCartonSupplierPredicate(string $column, ?PDO $pdo = null, ?int $supplierId = null, ?array &$params = null): string
 {
+    if (!preg_match('/^[a-z_][a-z0-9_]*\.shared_carton_contents$/i', $column)) throw new InvalidArgumentException('Invalid shared-carton column.');
+    if ($pdo !== null) {
+        if ($supplierId === null || $params === null) throw new InvalidArgumentException('Supplier and parameters required.');
+        if (!clmsSupportsJsonSearch($pdo)) {
+            $matches = clmsSharedCartonMatchingIds($pdo, static fn(array $content): bool =>
+                (is_int($content['supplier_id'] ?? null) || is_string($content['supplier_id'] ?? null))
+                && (string) $content['supplier_id'] === (string) $supplierId);
+            $params[] = implode(',', $matches);
+            $alias = explode('.', $column)[0];
+            return "FIND_IN_SET($alias.id, ?) > 0";
+        }
+        array_push($params, (string) $supplierId, (string) $supplierId);
+    }
     $ids = "COALESCE(JSON_EXTRACT(CASE WHEN JSON_VALID($column) THEN $column ELSE '[]' END, '$[*].supplier_id'), '[]')";
     return "(JSON_CONTAINS($ids, ?) OR JSON_CONTAINS($ids, JSON_QUOTE(?)))";
 }

@@ -293,6 +293,22 @@ class OrderExcelService
         $this->outputXlsx($spreadsheet, $filename);
     }
 
+    /** One line per saved item/reference; never deduplicate or renumber on download. */
+    public static function identifierSummary(array $items, string $field): string
+    {
+        if (!in_array($field, ['item_no', 'item_number'], true)) throw new InvalidArgumentException('Invalid identifier.');
+        $values = [];
+        foreach ($items as $item) {
+            $values[] = (string) ($item[$field] ?? '');
+            $contents = $item['shared_carton_contents'] ?? [];
+            if (is_string($contents)) $contents = json_decode($contents, true);
+            foreach (is_array($contents) ? $contents : [] as $content) {
+                if (is_array($content)) $values[] = (string) ($content[$field] ?? '');
+            }
+        }
+        return implode("\n", $values);
+    }
+
     public function exportOrdersListSummary(array $rows, string $filename = 'orders_list.xlsx'): void
     {
         $headers = [
@@ -310,6 +326,8 @@ class OrderExcelService
             'Total CBM',
             'Total Weight (kg)',
             'Currency',
+            'I.I.N',
+            'Item Number',
         ];
 
         $bodyRows = array_map(function (array $row): array {
@@ -349,6 +367,8 @@ class OrderExcelService
                 $cbm===null?null:round($cbm, 6),
                 $weight===null?null:round($weight, 4),
                 $row['currency']??'',
+                self::identifierSummary($items, 'item_no'),
+                self::identifierSummary($items, 'item_number'),
             ];
         }, $rows);
 
@@ -370,6 +390,8 @@ class OrderExcelService
             'Declared CBM',
             'Declared Weight (kg)',
             'Items Summary',
+            'I.I.N',
+            'Item Number',
         ];
 
         $bodyRows = array_map(function (array $row): array {
@@ -427,6 +449,8 @@ class OrderExcelService
                 round((float) ($row['declared_cbm'] ?? 0), 6),
                 round((float) ($row['declared_weight'] ?? 0), 4),
                 implode('; ', array_filter($itemsSummary)),
+                self::identifierSummary($items, 'item_no'),
+                self::identifierSummary($items, 'item_number'),
             ];
         }, $rows);
 

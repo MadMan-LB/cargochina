@@ -23,6 +23,27 @@ $single=csvRows(exportCall('orders',(string)$order,'export',['format'=>'csv']));
 $book=readWorkbook(exportCall('orders',(string)$order,'export',['format'=>'xlsx']));$seen=[];foreach($book->getAllSheets() as $sheet)foreach($sheet->getCellCollection()->getCoordinates() as $coordinate){$cell=$sheet->getCell($coordinate);exportCheck($cell->getDataType()!=='f','Untrusted XLSX formula executed');$seen[]=$cell->getValue();}exportCheck(in_array('=2+3',$seen,true)&&in_array(.1001,$seen,true),'XLSX lost literal description or declared precision');$book->disconnectWorksheets();
 $book=readWorkbook(exportCall('orders','export','list',['format'=>'xlsx','customer_id'=>$buyer,'limit'=>1,'offset'=>999]));$rows=$book->getActiveSheet()->toArray(null,false,false,false);$line=array_values(array_filter($rows,fn($r)=>(string)($r[0]??'')===(string)$order))[0];exportCheck((float)$line[11]===.123457&&(float)$line[12]===1.2346&&$line[13]==='USD','XLSX list disagrees with canonical CSV/API');$book->disconnectWorksheets();
 echo "PASS: filtered CSV/XLSX ignore page offsets, preserve actual precision/currency and inert literal strings; procurement totals remain declared\n";
+$pdo->prepare('UPDATE order_items SET item_number=? WHERE id=?')->execute(['00125',$item]);
+foreach ([['orders','export','list',['customer_id'=>$buyer],13,14], ['receiving','export','queue',['customer_id'=>$buyer],11,12], ['receiving','receipts',$receipt.'/export',[],13,14]] as [$resource,$route,$action,$query,$autoColumn,$manualColumn]) {
+    $csv=csvRows(exportCall($resource,$route,$action,$query+['format'=>'csv']));
+    exportCheck(($csv[0][$autoColumn]??'')==='I.I.N'&&($csv[0][$manualColumn]??'')==='Item Number','CSV identifiers missing: '.$resource.'/'.$action);
+    exportCheck(($csv[1][$autoColumn]??'')===$tag.'-1'&&($csv[1][$manualColumn]??'')==='00125','CSV identifier values missing: '.$resource.'/'.$action);
+    $book=readWorkbook(exportCall($resource,$route,$action,$query+['format'=>'xlsx']));
+    $sheet=$book->getActiveSheet(); $found=false;
+    foreach($sheet->getCellCollection()->getCoordinates() as $coordinate) {
+        $cell=$sheet->getCell($coordinate);
+        if($cell->getValue()==='00125') { $found=true; exportCheck($cell->getDataType()==='s','Leading-zero reference must remain Excel text'); }
+    }
+    exportCheck($found,'XLSX reference missing: '.$resource.'/'.$action);$book->disconnectWorksheets();
+}
+echo "PASS: order-list, receiving-queue and receipt CSV/XLSX include both saved identifiers as text\n";
+$pdo->prepare('UPDATE order_items SET shared_carton_enabled=1, shared_carton_contents=? WHERE id=?')->execute([json_encode([['item_no'=>'AUTO-SHARED','item_number'=>'00125'],['item_no'=>'AUTO-SHARED','item_number'=>'00125']]),$item]);
+foreach ([['receiving','export','queue',['customer_id'=>$buyer],11,12], ['receiving','receipts',$receipt.'/export',[],13,14]] as [$resource,$route,$action,$query,$autoColumn,$manualColumn]) {
+    $csv=csvRows(exportCall($resource,$route,$action,$query+['format'=>'csv']));
+    exportCheck($csv[1][$autoColumn]===$tag."-1\nAUTO-SHARED\nAUTO-SHARED" && $csv[1][$manualColumn]==="00125\n00125\n00125",'Contained duplicate references lost in '.$action);
+}
+$pdo->prepare('UPDATE order_items SET shared_carton_enabled=0, shared_carton_contents=NULL WHERE id=?')->execute([$item]);
+echo "PASS: queue and receipt reports preserve all repeated shared-carton identifiers without extra cargo rows\n";
 $before=$pdo->query('SELECT description_cn,description_en FROM order_items WHERE id='.$item)->fetch(PDO::FETCH_ASSOC);$book=readWorkbook(exportCall('orders','bulk-export',null,[],['ids'=>[$order,$order]]));$book->disconnectWorksheets();exportCheck($pdo->query('SELECT description_cn,description_en FROM order_items WHERE id='.$item)->fetch(PDO::FETCH_ASSOC)===$before,'Download translated or mutated order');
 foreach([['ids'=>[$order.'junk']],['ids'=>[$order,4294967295]],['ids'=>[]]] as $body){$bad=json_decode(exportCall('orders','bulk-export',null,[],$body),true);exportCheck(!empty($bad['error']),'Invalid selected export accepted');}
 $bad=json_decode(exportCall('orders',(string)$order,'export',['format'=>'pdf']),true);exportCheck(!empty($bad['error']),'Unsupported format silently exported');

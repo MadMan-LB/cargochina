@@ -212,7 +212,7 @@ function receivingFetchQueueRowsForRequest(PDO $pdo, bool $paginate = true, ?arr
         ? ", COALESCE(oi.hs_code, p.hs_code) as hs_code"
         : ", p.hs_code as hs_code";
     $itemMetaCols = '';
-    foreach (['what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'height', 'width', 'length', 'image_paths'] as $column) {
+    foreach (['item_no', 'item_number', 'what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'height', 'width', 'length', 'image_paths'] as $column) {
         if (receivingTableHasColumn($pdo, 'order_items', $column)) {
             $itemMetaCols .= ", oi.$column";
         }
@@ -264,7 +264,13 @@ function receivingFetchQueueRowsForRequest(PDO $pdo, bool $paginate = true, ?arr
                     ? ($orderReceiptImages[$oid] ?? [])
                     : []
             );
-            unset($item['shared_carton_contents']);
+            // Keep contained identifiers available to queue exports without
+            // duplicating carton/quantity rows or returning the full contents.
+            $contents = json_decode((string) ($item['shared_carton_contents'] ?? ''), true);
+            $item['shared_carton_contents'] = array_map(
+                static fn(array $content): array => array_intersect_key($content, array_flip(['item_no', 'item_number'])),
+                array_values(array_filter(is_array($contents) ? $contents : [], 'is_array'))
+            );
             $itemsByOrder[$oid][] = $item;
         }
     }
@@ -285,7 +291,7 @@ function receivingOutputQueueCsv(array $rows, ?string $filename = null): void
     header('Cache-Control: no-cache, no-store, must-revalidate');
 
     $out = fopen('php://output', 'w');
-    clmsWriteCsv($out, array_map('clmsT', ['Order ID', 'Customer', 'Supplier', 'Supplier Phone', 'Expected Ready', 'Status', 'Shipping Codes', 'Total Cartons', 'Declared CBM', 'Declared Weight (kg)', 'Items Summary']));
+    clmsWriteCsv($out, array_map('clmsT', ['Order ID', 'Customer', 'Supplier', 'Supplier Phone', 'Expected Ready', 'Status', 'Shipping Codes', 'Total Cartons', 'Declared CBM', 'Declared Weight (kg)', 'Items Summary', 'I.I.N', 'Item Number']));
     foreach ($rows as $row) {
         $items = is_array($row['items'] ?? null) ? $row['items'] : [];
         $shippingCodes = [];
@@ -339,6 +345,8 @@ function receivingOutputQueueCsv(array $rows, ?string $filename = null): void
             round((float) ($row['declared_cbm'] ?? 0), 6),
             round((float) ($row['declared_weight'] ?? 0), 4),
             implode('; ', array_filter($itemsSummary)),
+            OrderExcelService::identifierSummary($items, 'item_no'),
+            OrderExcelService::identifierSummary($items, 'item_number'),
         ]));
     }
     fclose($out);
@@ -614,8 +622,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         if ($itemSearchClauses) {
             if (receivingTableHasColumn($pdo, 'order_items', 'shared_carton_contents')) {
                 foreach (['item_no', 'item_number'] as $identifier) {
-                    $itemSearchClauses[] = clmsSharedCartonIdentifierSearch('oi.shared_carton_contents', $identifier);
-                    $itemSearchParams[] = $like;
+                    $itemSearchClauses[] = clmsSharedCartonIdentifierSearch('oi.shared_carton_contents', $identifier, $pdo, $like, $itemSearchParams);
                 }
             }
             $searchClauses[] = "EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND (" . implode(' OR ', $itemSearchClauses) . "))";
@@ -705,7 +712,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $row['photos'] = $rip->fetchAll(PDO::FETCH_ASSOC);
             $row['fees'] = receivingFetchReceiptFees($pdo, $receiptId);
             $receiptItemCols = "oi.declared_cbm, oi.declared_weight, oi.description_cn, oi.description_en, oi.item_no, oi.item_number, oi.shipping_code, oi.cartons, oi.qty_per_carton, oi.quantity, oi.unit_price as declared_unit_price, oi.total_amount as declared_total_amount";
-            foreach (['what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'height', 'width', 'length'] as $column) {
+            foreach (['what_brand', 'brand', 'materials', 'copy_normal_goods', 'code', 'express_number', 'size', 'height', 'width', 'length', 'shared_carton_contents'] as $column) {
                 $chkMeta = @$pdo->query("SHOW COLUMNS FROM order_items LIKE " . $pdo->quote($column));
                 if ($chkMeta && $chkMeta->rowCount() > 0) {
                     $receiptItemCols .= ", oi.$column";
@@ -749,10 +756,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             unset($it);
             $row['cargo_totals'] = CargoMetricsService::totals($pdo, [(int)$row['order_id']])[(int)$row['order_id']] ?? [];
             if (!empty($receiptRoute[2])) {
-                $headers=['Receipt','Receipt status','Order','Customer','Supplier','Received at','Item','Ordered quantity','Receipt quantity','Receipt cartons','Receipt CBM','Receipt weight','Condition'];
+                $headers=['Receipt','Receipt status','Order','Customer','Supplier','Received at','Item','Ordered quantity','Receipt quantity','Receipt cartons','Receipt CBM','Receipt weight','Condition','I.I.N','Item Number'];
                 $rows=[];
                 foreach ($row['items'] as $item) $rows[]=[(int)$row['id'],$row['voided_at']?'Voided':'Active',(int)$row['order_id'],$row['customer_name'],$row['supplier_name'],$row['received_at'],$item['description_en']?:$item['description_cn'],(float)$item['quantity'],$item['actual_quantity']!==null?(float)$item['actual_quantity']:null,$item['actual_cartons']!==null?(int)$item['actual_cartons']:null,$item['actual_cbm']!==null?(float)$item['actual_cbm']:null,$item['actual_weight']!==null?(float)$item['actual_weight']:null,$item['receipt_condition']];
-                $rows[]=['','',(int)$row['order_id'],'','','','Receipt total','',(!$row['items']||in_array(null,array_column($row['items'],'actual_quantity'),true))?null:array_sum(array_column($row['items'],'actual_quantity')),$row['actual_cartons']!==null?(int)$row['actual_cartons']:null,$row['actual_cbm']!==null?(float)$row['actual_cbm']:null,$row['actual_weight']!==null?(float)$row['actual_weight']:null,''];
+                foreach ($row['items'] as $index => $item) {
+                    $rows[$index][] = OrderExcelService::identifierSummary([$item], 'item_no');
+                    $rows[$index][] = OrderExcelService::identifierSummary([$item], 'item_number');
+                }
+                $rows[]=['','',(int)$row['order_id'],'','','','Receipt total','',(!$row['items']||in_array(null,array_column($row['items'],'actual_quantity'),true))?null:array_sum(array_column($row['items'],'actual_quantity')),$row['actual_cartons']!==null?(int)$row['actual_cartons']:null,$row['actual_cbm']!==null?(float)$row['actual_cbm']:null,$row['actual_weight']!==null?(float)$row['actual_weight']:null,'','',''];
                 if (clmsExportFormat()==='csv') {
                     header('Content-Type: text/csv; charset=utf-8');header('Content-Disposition: attachment; filename="receipt_'.$receiptId.'.csv"');
                     $out=fopen('php://output','w');clmsWriteCsv($out,$headers);foreach($rows as $values)clmsWriteCsv($out,array_map('receivingCsvValue',$values));fclose($out);exit;

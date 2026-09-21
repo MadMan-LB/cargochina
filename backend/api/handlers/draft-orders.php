@@ -1950,9 +1950,10 @@ function draftOrderListQuery(PDO $pdo, array $filters, bool $paginate = true): a
             ? " LEFT JOIN item_classifications icq ON icq.entity_type='order_item' AND icq.entity_id=oi.id"
             : '';
         $classificationSearch = $classificationJoin !== '' ? ' OR icq.item_type_code LIKE ?' : '';
+        $sharedParams = [];
         $sharedSearch = draftOrderSupportsSharedCartons($pdo)
-            ? ' OR ' . clmsSharedCartonIdentifierSearch('oi.shared_carton_contents', 'item_no')
-                . ' OR ' . clmsSharedCartonIdentifierSearch('oi.shared_carton_contents', 'item_number')
+            ? ' OR ' . clmsSharedCartonIdentifierSearch('oi.shared_carton_contents', 'item_no', $pdo, $like, $sharedParams)
+                . ' OR ' . clmsSharedCartonIdentifierSearch('oi.shared_carton_contents', 'item_number', $pdo, $like, $sharedParams)
             : '';
         $where[] = "(CAST(o.id AS CHAR) LIKE ? OR c.name LIKE ? OR EXISTS (
             SELECT 1 FROM order_items oi
@@ -1965,7 +1966,7 @@ function draftOrderListQuery(PDO $pdo, array $filters, bool $paginate = true): a
                 OR oi.copy_normal_goods LIKE ? OR si.name LIKE ?$classificationSearch$sharedSearch
             )
         ))";
-        $params = array_merge($params, array_fill(0, ($classificationJoin !== '' ? 14 : 13) + ($sharedSearch !== '' ? 2 : 0), $like));
+        $params = array_merge($params, array_fill(0, $classificationJoin !== '' ? 14 : 13, $like), $sharedParams);
     }
     $statuses = $filters['status'] ?? [];
     if (!is_array($statuses)) $statuses = preg_split('/\s*,\s*/', (string) $statuses) ?: [];
@@ -1984,10 +1985,11 @@ function draftOrderListQuery(PDO $pdo, array $filters, bool $paginate = true): a
     }
     $supplierId = (int) ($filters['supplier_id'] ?? 0);
     if ($supplierId > 0) {
-        $sharedPredicate = draftOrderSupportsSharedCartons($pdo) ? ' OR ' . clmsSharedCartonSupplierPredicate('ois.shared_carton_contents') : '';
+        $sharedParams = [];
+        $sharedPredicate = draftOrderSupportsSharedCartons($pdo) ? ' OR ' . clmsSharedCartonSupplierPredicate('ois.shared_carton_contents', $pdo, $supplierId, $sharedParams) : '';
         $where[] = 'EXISTS (SELECT 1 FROM order_items ois WHERE ois.order_id=o.id AND (ois.supplier_id=?' . $sharedPredicate . '))';
         $params[] = $supplierId;
-        if ($sharedPredicate !== '') array_push($params, (string)$supplierId, (string)$supplierId);
+        array_push($params, ...$sharedParams);
     }
     $goodsType = trim((string) ($filters['goods_type'] ?? ''));
     if ($goodsType !== '') {
