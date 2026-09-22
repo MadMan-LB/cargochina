@@ -51,6 +51,26 @@ $pdo->prepare("INSERT INTO users(email,password_hash,full_name,is_active) VALUES
 echo "PASS: selected exports validate identities, repeat IDs once, preserve saved descriptions and enforce direct authorization\n";
 $draft=exportCall('draft-orders',null,null,[],['customer_id'=>$buyer,'currency'=>'USD','idempotency_key'=>'report-draft-'.bin2hex(random_bytes(8)),'supplier_sections'=>[['supplier_id'=>$supplier,'items'=>[['description_en'=>'Bamboo tray carton','cartons'=>3,'pieces_per_carton'=>2,'cbm'=>.111111,'weight'=>.1234,'dimensions_scope'=>'carton','unit_price'=>2,'sell_price'=>3,'item_type_code'=>'normal']]]]]);$draft=json_decode($draft,true);exportCheck(!empty($draft['data']['id']),'Draft export fixture failed: '.json_encode($draft));$draftId=(int)$draft['data']['id'];$rows=csvRows(exportCall('draft-orders',(string)$draftId,'export',['format'=>'csv']));$subtotal=array_values(array_filter($rows,fn($r)=>($r[4]??'')==='Supplier subtotal'))[0];$grand=array_values(array_filter($rows,fn($r)=>($r[4]??'')==='Grand total'))[0];foreach([$subtotal,$grand] as $line)exportCheck(count($line)===30&&(float)$line[21]===18.0&&(float)$line[23]===.333333&&(float)$line[25]===.3702,'Draft CSV subtotal columns or totals incorrect');
 echo "PASS: draft CSV subtotal/grand-total columns match detail headers and stored totals\n";
+$exportImage='uploads/export-status-'.bin2hex(random_bytes(6)).'.png';$exportImageFile=dirname(__DIR__).'/backend/'.$exportImage;
+try {
+    $im=imagecreatetruecolor(32,24);imagefilledrectangle($im,0,0,31,23,imagecolorallocate($im,30,100,180));imagepng($im,$exportImageFile);imagedestroy($im);
+    $pdo->prepare('UPDATE order_items SET image_paths=?,item_number=? WHERE order_id=?')->execute([json_encode([$exportImage]),'00125',$draftId]);
+    foreach(['Draft','Approved','Confirmed','InShipmentDraft','ConsolidatedIntoShipmentDraft','AssignedToContainer','Finalized'] as $status) {
+        $pdo->prepare('UPDATE orders SET status=? WHERE id=?')->execute([$status,$draftId]);
+        $before=$pdo->query('SELECT item_no,item_number,quantity,declared_cbm,declared_weight FROM order_items WHERE order_id='.$draftId)->fetchAll(PDO::FETCH_ASSOC);
+        foreach(['orders','draft-orders'] as $resource){
+            $book=readWorkbook(exportCall($resource,(string)$draftId,'export',['format'=>'xlsx']));
+            exportCheck(count($book->getActiveSheet()->getDrawingCollection())>0,'Image lost in '.$resource.' '.$status);$book->disconnectWorksheets();
+            exportCheck(!empty(csvRows(exportCall($resource,(string)$draftId,'export',['format'=>'csv']))),'CSV failed at '.$status);
+        }
+        $book=readWorkbook(exportCall('orders','bulk-export',null,[],['ids'=>[$draftId]]));$book->disconnectWorksheets();
+        exportCheck($pdo->query('SELECT item_no,item_number,quantity,declared_cbm,declared_weight FROM order_items WHERE order_id='.$draftId)->fetchAll(PDO::FETCH_ASSOC)===$before,'Status export changed saved cargo');
+    }
+    $pdo->prepare("INSERT INTO user_permission_overrides(user_id,permission_key,is_allowed) VALUES (?,'page:orders',1)")->execute([$reader]);
+    $book=readWorkbook(exportCall('draft-orders',(string)$draftId,'export',['format'=>'xlsx'],[],$reader));$book->disconnectWorksheets();
+    exportCheck(!empty(json_decode(exportCall('draft-orders',(string)$draftId,null,[],[],$reader),true)['error']),'Download grant also opened the draft builder');
+    echo "PASS: image-bearing Draft/Approved/Confirmed/shipment/assigned/finalized XLSX/CSV and bulk downloads; Orders-page export access does not grant builder access\n";
+} finally { @unlink($exportImageFile); }
 $pdo->prepare("INSERT INTO orders(customer_id,supplier_id,status,confirmation_token,created_by) VALUES (?,?,'Draft',?,1)")->execute([$buyer,$supplier,$tag]);$invalidTokenOrder=(int)$pdo->lastInsertId();$stats=json_decode(exportCall('dashboard','stats',null),true)['data'];$expected=(int)$pdo->query("SELECT COUNT(*) FROM orders WHERE COALESCE(confirmation_token,'')<>'' AND status IN ('Confirmed','AwaitingCustomerConfirmation')")->fetchColumn();exportCheck($stats['customer_feedback_pending']===$expected,'Dashboard counts invalid-state feedback tokens');
 echo "PASS: dashboard feedback counts respect canonical review states\n";
 $pdo->prepare("INSERT INTO customer_deposits(customer_id,order_id,amount,currency,payment_method,reference_no,created_by) VALUES (?,?,1234.5678,'USD','Bank Transfer',?,1)")->execute([$buyer,$order,$tag]);

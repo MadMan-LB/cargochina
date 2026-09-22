@@ -4,6 +4,18 @@ require_once __DIR__.'/ContainerCapacityService.php';
 
 final class ContainerWriteService
 {
+    /** Decode audit metadata in PHP: MySQL 5.5 has no JSON_EXTRACT. Caller holds the request lock. */
+    public static function findCreateRequest(PDO $pdo, string $key): ?array
+    {
+        $stmt = $pdo->prepare("SELECT entity_id,new_value,user_id FROM audit_log WHERE entity_type='container' AND action='create' AND new_value LIKE ? ORDER BY id");
+        $stmt->execute(['%' . strtr($key, ['\\'=>'\\\\', '%'=>'\\%', '_'=>'\\_']) . '%']);
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $audit = json_decode((string) $row['new_value'], true);
+            if (is_array($audit) && ($audit['idempotency_key'] ?? null) === $key) return $row;
+        }
+        return null;
+    }
+
     private const TEXT = ['code'=>50,'notes'=>65535,'vessel_name'=>100,'destination_country'=>100,'destination'=>255];
     private const DATES = ['expected_ship_date','eta_date','actual_departure_date','actual_arrival_date'];
 

@@ -822,7 +822,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $s=$pdo->prepare('SELECT GET_LOCK(?,5)');$s->execute([$lock]);if(!(int)$s->fetchColumn())jsonError('Container creation is busy; retry',409);
             register_shutdown_function(static function()use($pdo,$lock){if($pdo->inTransaction())$pdo->rollBack();$pdo->prepare('SELECT RELEASE_LOCK(?)')->execute([$lock]);});
             $startedTransaction=!$pdo->inTransaction();if($startedTransaction)$pdo->beginTransaction();
-            $a=$pdo->prepare("SELECT entity_id,new_value,user_id FROM audit_log WHERE entity_type='container' AND action='create' AND JSON_UNQUOTE(JSON_EXTRACT(new_value,'$.idempotency_key'))=? ORDER BY id LIMIT 1");$a->execute([$key]);$prior=$a->fetch(PDO::FETCH_ASSOC);
+            $prior=ContainerWriteService::findCreateRequest($pdo,$key);
             if($prior){
                 $audit=json_decode($prior['new_value'],true);
                 if((int)$prior['user_id']!==getAuthUserId()||!hash_equals($audit['request_hash']??'',$hash))jsonError('Container request key belongs to another payload or operator',409);

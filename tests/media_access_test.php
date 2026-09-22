@@ -1,5 +1,6 @@
 <?php
 require_once dirname(__DIR__).'/backend/config/database.php';require_once dirname(__DIR__).'/backend/services/UploadAccessService.php';$pdo=getDb();
+if (getenv('CLMS_TEST_LEGACY_JSON')==='1') { require_once __DIR__.'/support/legacy_no_json_pdo.php';$pdo=new LegacyNoJsonPDO($pdo); }
 function mediaCheck($ok,string $message):void{if(!$ok)throw new RuntimeException($message);}
 mediaCheck($pdo->query('SELECT DATABASE()')->fetchColumn()==='clms_hardening_20260919','Media tests require isolated database');
 if(($argv[1]??'')==='--worker'){$input=json_decode($argv[2],true);if(session_status()===PHP_SESSION_NONE)session_start();$_SESSION=empty($input['user'])?[]:['user_id'=>$input['user'],'user_roles'=>(int)$input['user']===1?['SuperAdmin']:[]];UploadAccessService::authorize($pdo,$input['path'],$input['token']??null);jsonResponse(['allowed'=>true]);}

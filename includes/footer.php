@@ -6,6 +6,7 @@
     <script src="/cargochina/frontend/js/bootstrap.bundle.min.js"></script>
     <script src="/cargochina/frontend/js/upload-utils.js?v=<?= @filemtime(__DIR__ . '/../frontend/js/upload-utils.js') ?: time() ?>"></script>
     <script src="/cargochina/frontend/js/app.js?v=<?= @filemtime(__DIR__ . '/../frontend/js/app.js') ?: time() ?>"></script>
+    <script src="/cargochina/frontend/js/export_download.js?v=<?= @filemtime(__DIR__ . '/../frontend/js/export_download.js') ?: time() ?>"></script>
     <script src="/cargochina/frontend/js/incident_reporter.js"></script>
     <script src="/cargochina/frontend/js/sidebar.js?v=<?= @filemtime(__DIR__ . '/../frontend/js/sidebar.js') ?: time() ?>"></script>
     <?php

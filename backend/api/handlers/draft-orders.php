@@ -4482,7 +4482,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     if (!$userId) {
         jsonError('Unauthorized', 401);
     }
-    clmsRequirePermission('page:procurement_drafts', ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'], $pdo, $userId);
+    if ($method === 'GET' && $id !== null && ctype_digit($id) && $action === 'export') {
+        clmsRequirePermission('orders.read', [], $pdo, $userId);
+    } else {
+        clmsRequirePermission('page:procurement_drafts', ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'], $pdo, $userId);
+    }
 
     if ($method === 'GET' && $id === 'numbering-history') {
         $customerId = (int) ($_GET['customer_id'] ?? 0);

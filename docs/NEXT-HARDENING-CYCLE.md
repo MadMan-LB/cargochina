@@ -1,5 +1,7 @@
 # Next hardening cycle
 
+Scoped follow-up (2026-09-22): container creation and image-bearing order downloads fixed for legacy MySQL; safe download errors and Orders-page export permission aligned. See [container/download fix and production file list](container-download-fix.md). Production upload and smoke verification remain pending; broad hardening stays paused.
+
 Scoped follow-up (2026-09-21): search/MySQL 5.5 compatibility and dual-identifier downloads were requested separately. See [search/export compatibility evidence and nine-file deployment list](search-export-compatibility.md). Production deployment and actual MySQL 5.5 smoke verification remain pending; do not reopen the broad hardening cycle for this fix.
 
 Checkpoint: 2026-09-20. **HIGH-COST WORK PAUSED by Houssein. Demo stopped.**

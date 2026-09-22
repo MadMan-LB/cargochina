@@ -42,6 +42,8 @@ if (!in_array($resource, $publicResources)) {
     }
 
     $resourcePermissions = $rbac[$resource] ?? null;
+    $isDraftOrderDownload = $resource === 'draft-orders' && $method === 'GET' && $id !== null && ctype_digit($id) && $action === 'export';
+    if ($isDraftOrderDownload) requirePermission('orders.read');
     // Shared capability policy includes the data dependencies of granted pages.
     $permissionKey = $method === 'GET' ? 'read' : 'write';
     if ($resource === 'products' && $method === 'POST' && $id === null) {
@@ -58,7 +60,7 @@ if (!in_array($resource, $publicResources)) {
         || ($resource === 'products' && $method === 'POST' && ($id === null || $id === 'import'))
         || ($resource === 'containers' && $action === 'assign-orders')
         || ($resource === 'customers' && $method === 'POST' && $action === 'deposits')
-        || $resource === 'balances';
+        || $resource === 'balances' || $isDraftOrderDownload;
     if (
         !$skipGenericPermission &&
         is_array($resourcePermissions) &&
@@ -144,7 +146,7 @@ if (!in_array($resource, $publicResources)) {
     if ($resource === 'design-attachments' && !hasPermission('design-attachments')) {
         jsonError('Forbidden', 403);
     }
-    if ($resource === 'draft-orders' && !hasPermission('page:procurement_drafts', $rbac['draft-orders'] ?? [])) {
+    if ($resource === 'draft-orders' && !$isDraftOrderDownload && !hasPermission('page:procurement_drafts', $rbac['draft-orders'] ?? [])) {
         jsonError('Forbidden', 403);
     }
 }
