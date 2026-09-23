@@ -72,7 +72,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
     $stats['pending_receiving'] = ($stats['approved'] ?? 0) + ($stats['in_transit'] ?? 0);
 
-    $stmt = $pdo->query("SELECT COUNT(*) FROM shipment_drafts WHERE status = 'draft'");
+    $stmt = $pdo->query("SELECT COUNT(*) FROM shipment_drafts WHERE deleted_at IS NULL AND status = 'draft'");
     $stats['draft_shipments'] = (int) $stmt->fetchColumn();
 
     $stmt = $pdo->query(

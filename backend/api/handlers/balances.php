@@ -1016,8 +1016,9 @@ function balancesValidateOrderLink(PDO $pdo, ?int $orderId, string $partyType, i
         jsonError('Invalid order', 404, ['order_id' => 'Invalid order']);
     }
     if($partyType==='supplier'){
-        $shared=clmsSharedCartonSupplierPredicate('oi.shared_carton_contents');
-        $s=$pdo->prepare("SELECT 1 FROM orders o WHERE o.id=? AND (o.supplier_id=? OR EXISTS(SELECT 1 FROM order_items oi LEFT JOIN products p ON p.id=oi.product_id WHERE oi.order_id=o.id AND (COALESCE(oi.supplier_id,p.supplier_id)=? OR $shared)))");$s->execute([$orderId,$partyId,$partyId,$partyId,(string)$partyId]);if(!$s->fetchColumn())jsonError('Selected party does not match the linked order',422);return $order;
+        $sharedParams=[];
+        $shared=clmsSharedCartonSupplierPredicate('oi.shared_carton_contents',$pdo,$partyId,$sharedParams);
+        $s=$pdo->prepare("SELECT 1 FROM orders o WHERE o.id=? AND (o.supplier_id=? OR EXISTS(SELECT 1 FROM order_items oi LEFT JOIN products p ON p.id=oi.product_id WHERE oi.order_id=o.id AND (COALESCE(oi.supplier_id,p.supplier_id)=? OR $shared)))");$s->execute(array_merge([$orderId,$partyId,$partyId],$sharedParams));if(!$s->fetchColumn())jsonError('Selected party does not match the linked order',422);return $order;
     }
     $expectedPartyId = $partyType === 'customer' ? (int) $order['customer_id'] : (int) ($order['supplier_id'] ?? 0);
     if ($expectedPartyId <= 0 || $expectedPartyId !== $partyId) {

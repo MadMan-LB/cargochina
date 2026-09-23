@@ -26,7 +26,7 @@ final class ContainerCapacityService
         if(!$pdo->inTransaction())throw new LogicException('Capacity mutation requires a transaction');
         $maxCbm=self::limit($container['max_cbm']??null,'Max CBM');
         $maxWeight=self::limit($container['max_weight']??null,'Max weight');
-        $existing=$pdo->prepare('SELECT sdo.order_id FROM shipment_drafts sd JOIN shipment_draft_orders sdo ON sdo.shipment_draft_id=sd.id WHERE sd.container_id=? ORDER BY sdo.order_id FOR UPDATE');
+        $existing=$pdo->prepare('SELECT sdo.order_id FROM shipment_drafts sd JOIN shipment_draft_orders sdo ON sdo.shipment_draft_id=sd.id WHERE sd.deleted_at IS NULL AND sd.container_id=? ORDER BY sdo.order_id FOR UPDATE');
         $existing->execute([$container['id']]);
         $ids=array_values(array_unique(array_map('intval',array_merge($existing->fetchAll(PDO::FETCH_COLUMN),$additionalOrderIds))));sort($ids,SORT_NUMERIC);
         $cbm='0.000000';$weight='0.0000';

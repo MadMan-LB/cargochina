@@ -2,7 +2,7 @@
     "name": "clms/cargochina",
     "description": "CLMS Cargo China",
     "require": {
-        "php": ">=7.4",
+        "php": ">=8.1",
         "phpoffice/phpspreadsheet": "^1.29",
         "maennchen/zipstream-php": "^2.4"
     },

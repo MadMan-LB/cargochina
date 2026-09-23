@@ -5,4 +5,4 @@
 ALTER TABLE suppliers
 ADD COLUMN phone VARCHAR
 (50) NULL AFTER notes,
-ADD COLUMN additional_ids JSON NULL AFTER phone;
+ADD COLUMN additional_ids LONGTEXT NULL AFTER phone;

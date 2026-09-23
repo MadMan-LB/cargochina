@@ -9,9 +9,10 @@ final class SupplierPaymentService
         if (!$pdo->inTransaction()) throw new LogicException('Supplier payment requires an active transaction');
         if ($orderId) {
             $s=$pdo->prepare('SELECT id FROM orders WHERE id=? FOR UPDATE');$s->execute([$orderId]);if(!$s->fetchColumn())jsonError('Order not found',404);
-            $shared=clmsSharedCartonSupplierPredicate('oi.shared_carton_contents');
+            $sharedParams=[];
+            $shared=clmsSharedCartonSupplierPredicate('oi.shared_carton_contents',$pdo,$supplierId,$sharedParams);
             $s=$pdo->prepare("SELECT 1 FROM orders o WHERE o.id=? AND (o.supplier_id=? OR EXISTS(SELECT 1 FROM order_items oi LEFT JOIN products p ON p.id=oi.product_id WHERE oi.order_id=o.id AND (COALESCE(oi.supplier_id,p.supplier_id)=? OR $shared)))");
-            $s->execute([$orderId,$supplierId,$supplierId,$supplierId,(string)$supplierId]);
+            $s->execute(array_merge([$orderId,$supplierId,$supplierId],$sharedParams));
             if(!$s->fetchColumn())jsonError('Selected order does not belong to this supplier',422);
         }
         $s=$pdo->prepare('SELECT id FROM suppliers WHERE id=? FOR UPDATE');$s->execute([$supplierId]);if(!$s->fetchColumn())jsonError('Supplier not found',404);

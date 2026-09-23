@@ -278,7 +278,8 @@ require 'includes/layout.php';
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="mb-0">Delete this draft? Orders will return to Ready for Consolidation.</p>
+                    <p class="mb-0">Move this draft to the Recycle Bin? Orders will return to Ready for Consolidation. An administrator can restore the empty draft; cargo must be assigned again.</p>
+                    <label for="deleteDraftReason" class="form-label mt-3">Reason (optional)</label><input id="deleteDraftReason" class="form-control" maxlength="500">
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>

@@ -28,11 +28,8 @@ async function race(name,start,counter,extra={}) {
  vm.runInContext(functionSource(source('app.js'),'async function clmsLoadAllPages('),ctx);const rows=await ctx.clmsLoadAllPages('/orders?customer_id=17',2);assert.deepEqual(Array.from(rows,r=>r.id),[1,2,3]);assert(calls.every(url=>url.includes('customer_id=17')));assert(calls[1].includes('offset=2'));
  ctx.api=async()=>({data:[],meta:{has_more:true,limit:2}});await assert.rejects(ctx.clmsLoadAllPages('/orders'),/did not advance/);
  console.log('PASS: all-page consumers retain filters, fetch subsequent pages, deduplicate and reject stalled pagination');
- const timeline=vm.createContext({escapeLocal:String,statusBadgeClass:()=>'',statusLabel:String});
- vm.runInContext(functionSource(source('calendar.js'),'function renderTimelineTable(','    '),timeline);
- const input=[{id:2,expected_ready_date:'2026-10-12'},{id:3,expected_ready_date:'2026-10-01'},{id:1,expected_ready_date:'2026-10-01'}];
- const html=timeline.renderTimelineTable(input,'orders');assert(html.indexOf('order_id=1')<html.indexOf('order_id=3')&&html.indexOf('order_id=3')<html.indexOf('order_id=2'));assert.equal(input[0].id,2);
- console.log('PASS: calendar timeline sorts dates with stable ID ties and opens exact records');
+ // Calendar now consumes normalized, chronologically ordered server events.
+ await require('./recycle_calendar_ui_test.cjs')();
  const app=source('app.js'),marker='// Remember navigation state, never business data.';
  const handlers={},windowHandlers={},stored={},fields=[{id:'filterQ',type:'search',value:'',addEventListener(){}},{id:'filterStockItemType',type:'select-one',value:''},{id:'stockStatusInWarehouse',type:'checkbox',checked:false}];
  stored['clms.filters.warehouse_stock.php']=JSON.stringify({filterQ:'Cotton towels',filterStockItemType:'normal',stockStatusInWarehouse:true});

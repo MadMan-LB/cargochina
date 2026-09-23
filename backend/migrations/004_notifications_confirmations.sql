@@ -28,7 +28,7 @@ IF NOT EXISTS customer_confirmations
     order_id INT UNSIGNED NOT NULL,
     confirmed_by INT UNSIGNED,
     confirmed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    accepted_actuals JSON,
+    accepted_actuals LONGTEXT,
     FOREIGN KEY
 (order_id) REFERENCES orders
 (id) ON

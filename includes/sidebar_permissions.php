@@ -138,6 +138,14 @@ function clmsSidebarPageRegistry(): array
             'icon_svg' => '<svg class="sidebar-icon" viewBox="0 0 24 24"><path d="M4 4h16v2H4zm0 7h10v2H4zm0 7h16v2H4zm12-8h4v6h-4z" /></svg>',
             'default_roles' => ['ChinaAdmin', 'LebanonAdmin'],
         ],
+        'recycle_bin' => [
+            'title' => 'Recycle Bin',
+            'description' => 'Recover deleted drafts; retention-protected permanent deletion.',
+            'href' => '/cargochina/recycle_bin.php',
+            'section' => 'main',
+            'icon_svg' => '<svg class="sidebar-icon" viewBox="0 0 24 24"><path d="M6 7h12l-1 14H7L6 7zm2-4h8v2h5v2H3V5h5V3z" /></svg>',
+            'default_roles' => ['ChinaAdmin','LebanonAdmin'],
+        ],
         'calendar' => [
             'title' => 'Calendar',
             'description' => 'Timeline and date visibility.',
@@ -301,6 +309,7 @@ function clmsSidebarScriptMap(): array
         'balances.php' => 'balances',
         'hs_code_tax.php' => 'hs_code_tax',
         'calendar.php' => 'calendar',
+        'recycle_bin.php' => 'recycle_bin',
         'warehouse_stock.php' => 'warehouse_stock',
         'procurement_drafts.php' => 'procurement_drafts',
         'downloads.php' => 'downloads',

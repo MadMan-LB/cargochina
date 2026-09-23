@@ -16,4 +16,4 @@ ADD COLUMN unit_price DECIMAL
 ADD COLUMN total_amount DECIMAL
 (12,4) NULL AFTER unit_price,
 ADD COLUMN notes TEXT NULL AFTER total_amount,
-ADD COLUMN image_paths JSON NULL AFTER notes;
+ADD COLUMN image_paths LONGTEXT NULL AFTER notes;

@@ -52,9 +52,9 @@ class TrackingPushService
 
     private function prepareLocked(int $shipmentDraftId): array
     {
-        $parent=$this->pdo->prepare('SELECT container_id FROM shipment_drafts WHERE id=?');$parent->execute([$shipmentDraftId]);$containerId=$parent->fetchColumn();
+        $parent=$this->pdo->prepare('SELECT container_id FROM shipment_drafts WHERE deleted_at IS NULL AND id=?');$parent->execute([$shipmentDraftId]);$containerId=$parent->fetchColumn();
         if($containerId){$lock=$this->pdo->prepare('SELECT id FROM containers WHERE id=? FOR UPDATE');$lock->execute([$containerId]);}
-        $stmt = $this->pdo->prepare("SELECT sd.*, c.id as container_id, c.code as container_code FROM shipment_drafts sd LEFT JOIN containers c ON sd.container_id = c.id WHERE sd.id = ? FOR UPDATE");
+        $stmt = $this->pdo->prepare("SELECT sd.*, c.id as container_id, c.code as container_code FROM shipment_drafts sd LEFT JOIN containers c ON sd.container_id = c.id WHERE sd.deleted_at IS NULL AND sd.id = ? FOR UPDATE");
         $stmt->execute([$shipmentDraftId]);
         $sd = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$sd) {

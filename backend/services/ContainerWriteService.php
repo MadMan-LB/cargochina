@@ -57,7 +57,7 @@ final class ContainerWriteService
         if(!array_key_exists('destination_country',$input)&&!array_key_exists('destination',$input))return;
         $candidate=array_replace($existing,$input);
         if(($candidate['destination_country']??null)===($existing['destination_country']??null)&&($candidate['destination']??null)===($existing['destination']??null))return;
-        $s=$pdo->prepare('SELECT o.id,o.destination_country_id FROM shipment_drafts sd JOIN shipment_draft_orders sdo ON sdo.shipment_draft_id=sd.id JOIN orders o ON o.id=sdo.order_id WHERE sd.container_id=? FOR UPDATE');$s->execute([$existing['id']]);
+        $s=$pdo->prepare('SELECT o.id,o.destination_country_id FROM shipment_drafts sd JOIN shipment_draft_orders sdo ON sdo.shipment_draft_id=sd.id JOIN orders o ON o.id=sdo.order_id WHERE sd.deleted_at IS NULL AND sd.container_id=? FOR UPDATE');$s->execute([$existing['id']]);
         foreach($s->fetchAll(PDO::FETCH_ASSOC) as $order){
             if(!OrderCountryService::resolveContainerDestinationCountryId($pdo,$candidate)||!OrderCountryService::orderMatchesContainer($pdo,$order,$candidate))throw new ShipmentAssignmentException('Destination must match every assigned order; move the cargo before changing country');
         }

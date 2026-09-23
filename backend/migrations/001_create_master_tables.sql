@@ -17,8 +17,10 @@ CREATE TABLE
 IF NOT EXISTS users
 (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    -- 255 utf8mb4 characters exceed the 767-byte index limit on MySQL 5.5.
+    -- Email identifiers are BMP/ASCII; the full unique key stays 255 characters.
     email VARCHAR
-(255) NOT NULL UNIQUE,
+(255) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL UNIQUE,
     password_hash VARCHAR
 (255) NOT NULL,
     full_name VARCHAR
@@ -54,8 +56,8 @@ IF NOT EXISTS customers
 (50) NOT NULL UNIQUE,
     name VARCHAR
 (255) NOT NULL,
-    contacts JSON,
-    addresses JSON,
+    contacts LONGTEXT,
+    addresses LONGTEXT,
     payment_terms VARCHAR
 (255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -70,7 +72,7 @@ IF NOT EXISTS suppliers
 (50) NOT NULL UNIQUE,
     name VARCHAR
 (255) NOT NULL,
-    contacts JSON,
+    contacts LONGTEXT,
     factory_location VARCHAR
 (255),
     notes TEXT,
@@ -95,7 +97,7 @@ IF NOT EXISTS products
 (500),
     description_en VARCHAR
 (500),
-    image_paths JSON,
+    image_paths LONGTEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NULL,
     FOREIGN KEY

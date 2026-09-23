@@ -846,8 +846,8 @@ function fetchOrdersListRowsForRequest(PDO $pdo, bool $paginate = false, ?array 
         ? ' LEFT JOIN countries co ON o.destination_country_id = co.id'
         : '';
     $sql = "SELECT o.*, $custCols, s.name as supplier_name,
-        (SELECT c.code FROM containers c JOIN shipment_drafts sd ON sd.container_id = c.id JOIN shipment_draft_orders sdo ON sdo.shipment_draft_id = sd.id WHERE sdo.order_id = o.id LIMIT 1) as container_code,
-        (SELECT c.eta_date FROM containers c JOIN shipment_drafts sd ON sd.container_id = c.id JOIN shipment_draft_orders sdo ON sdo.shipment_draft_id = sd.id WHERE sdo.order_id = o.id LIMIT 1) as container_eta
+        (SELECT c.code FROM containers c JOIN shipment_drafts sd ON sd.deleted_at IS NULL AND sd.container_id = c.id JOIN shipment_draft_orders sdo ON sdo.shipment_draft_id = sd.id WHERE sdo.order_id = o.id LIMIT 1) as container_code,
+        (SELECT c.eta_date FROM containers c JOIN shipment_drafts sd ON sd.deleted_at IS NULL AND sd.container_id = c.id JOIN shipment_draft_orders sdo ON sdo.shipment_draft_id = sd.id WHERE sdo.order_id = o.id LIMIT 1) as container_eta
         $destCols
         FROM orders o
         JOIN customers c ON o.customer_id = c.id LEFT JOIN suppliers s ON o.supplier_id = s.id$destJoin WHERE 1=1";
@@ -1780,7 +1780,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             $stmt = $pdo->prepare("SELECT c.id, c.code, c.status, c.eta_date, c.expected_ship_date, c.actual_departure_date, c.actual_arrival_date, c.vessel_name, c.destination_country, c.destination, c.notes
                 FROM containers c
-                JOIN shipment_drafts sd ON sd.container_id = c.id
+                JOIN shipment_drafts sd ON sd.deleted_at IS NULL AND sd.container_id = c.id
                 JOIN shipment_draft_orders sdo ON sdo.shipment_draft_id = sd.id
                 WHERE sdo.order_id = ? LIMIT 1");
             $stmt->execute([$id]);

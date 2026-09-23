@@ -58,7 +58,10 @@ if(in_array($argv[1]??'',['--probe','--worker'],true)){
     if($case==='remove')$drafts('POST',(string)$f['drafts'][0],'remove-orders',['order_ids'=>[$f['orders'][0]]]);
     if($case==='foreign-remove')$drafts('POST',(string)$f['drafts'][1],'remove-orders',['order_ids'=>[$f['orders'][0]]]);
     if($case==='move')$drafts('POST',(string)$f['drafts'][0],'assign-container',['container_id'=>$f['containers'][1]]);
-    if($case==='delete')$drafts('DELETE',(string)$f['drafts'][0],null,[]);
+    if($case==='delete'){
+        $row=$pdo->query('SELECT * FROM shipment_drafts WHERE id='.$f['drafts'][0])->fetch(PDO::FETCH_ASSOC);
+        $drafts('DELETE',(string)$f['drafts'][0],null,['deletion_revision'=>RecycleBinService::shipmentDeletionRevision($row,[$f['orders'][0]])]);
+    }
     if(in_array($case,['race-a','race-b'],true))$containers('POST',(string)$f['containers'][$case==='race-a'?0:1],'assign-orders',['order_ids'=>[$f['orders'][1]]]);
     if($case==='edit-received'){
         $ordersHandler=require dirname(__DIR__).'/backend/api/handlers/orders.php';

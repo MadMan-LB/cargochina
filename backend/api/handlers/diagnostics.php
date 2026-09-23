@@ -52,6 +52,41 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     requireRole(['SuperAdmin']);
     $pdo = getDb();
 
+    if ($id === 'runtime-compatibility' && $method === 'GET') {
+        $variables=[];
+        $stmt=$pdo->query("SHOW VARIABLES WHERE Variable_name IN
+            ('version','sql_mode','character_set_server','character_set_client',
+             'character_set_connection','collation_server','collation_connection',
+             'default_storage_engine','lower_case_table_names',
+             'tx_isolation','time_zone','innodb_file_format','innodb_large_prefix','log_bin',
+             'log_bin_trust_function_creators','max_allowed_packet')");
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $variables[$row['Variable_name']]=$row['Value'];
+        $extensions=[];
+        foreach (['pdo_mysql','mysqlnd','mbstring','intl','gd','fileinfo','zip','openssl','curl','exif'] as $extension) {
+            $extensions[$extension]=extension_loaded($extension)?(phpversion($extension)?:'loaded'):null;
+        }
+        try { $emulatedPrepares=(bool)$pdo->getAttribute(PDO::ATTR_EMULATE_PREPARES); }
+        catch (Throwable $e) { $emulatedPrepares=null; }
+        jsonResponse(['data'=>[
+            'php'=>PHP_VERSION,
+            'php_sapi'=>PHP_SAPI,
+            'server_software'=>$_SERVER['SERVER_SOFTWARE']??'unknown',
+            'pdo_driver'=>$pdo->getAttribute(PDO::ATTR_DRIVER_NAME),
+            'pdo_client'=>$pdo->getAttribute(PDO::ATTR_CLIENT_VERSION),
+            'pdo_server'=>$pdo->getAttribute(PDO::ATTR_SERVER_VERSION),
+            'pdo_emulated_prepares'=>$emulatedPrepares,
+            'extensions'=>$extensions,
+            'database'=>$variables,
+            'php_limits'=>[
+                'upload_max_filesize'=>ini_get('upload_max_filesize'),
+                'post_max_size'=>ini_get('post_max_size'),
+                'memory_limit'=>ini_get('memory_limit'),
+                'max_input_vars'=>ini_get('max_input_vars'),
+                'date_timezone'=>date_default_timezone_get(),
+            ],
+        ]]);
+    }
+
     if ($id === 'excel-images' && $method === 'GET' && ctype_digit((string) $action)) {
         $orderId = (int) $action;
         if ($orderId <= 0) {

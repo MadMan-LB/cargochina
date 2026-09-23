@@ -12,7 +12,7 @@ IF NOT EXISTS tracking_push_log
 (64) NOT NULL,
   status VARCHAR
 (20) NOT NULL DEFAULT 'pending',
-  request_payload JSON,
+  request_payload LONGTEXT,
   response_code INT NULL,
   response_body TEXT NULL,
   external_id VARCHAR

@@ -16,7 +16,7 @@ final class CargoStateService
     public static function nextContainerStates(PDO $pdo, array $container): array
     {
         $next = self::CONTAINER_TRANSITIONS[$container['status']] ?? [];
-        $stmt = $pdo->prepare("SELECT id,status FROM shipment_drafts WHERE container_id=?" . ($pdo->inTransaction() ? ' FOR UPDATE' : ''));
+        $stmt = $pdo->prepare("SELECT id,status FROM shipment_drafts WHERE deleted_at IS NULL AND container_id=?" . ($pdo->inTransaction() ? ' FOR UPDATE' : ''));
         $stmt->execute([$container['id']]);
         $drafts = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $finalized = count(array_filter($drafts, static fn($d) => $d['status'] === 'finalized'));

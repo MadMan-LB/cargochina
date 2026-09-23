@@ -55,11 +55,11 @@ final class NotificationTargetService
                 return ['available'=>true,'reason'=>null,'url'=>$draft?'/cargochina/procurement_drafts.php?order_id='.$id:'/cargochina/orders.php?order_id='.$id];
             case 'procurement_draft':
                 if(!$this->pageAllowed('procurement_drafts',$userId,$roles))return $this->unavailable('You no longer have permission to open this record.');
-                $stmt=$this->pdo->prepare('SELECT id FROM procurement_drafts WHERE id=?');$stmt->execute([$id]);
+                $stmt=$this->pdo->prepare('SELECT id FROM procurement_drafts WHERE deleted_at IS NULL AND id=?');$stmt->execute([$id]);
                 return $stmt->fetchColumn()?['available'=>true,'reason'=>null,'url'=>'/cargochina/procurement_drafts.php?legacy_draft_id='.$id]:$this->unavailable('The related record no longer exists.');
             case 'shipment_draft':
                 if(!$this->pageAllowed('consolidation',$userId,$roles))return $this->unavailable('You no longer have permission to open this record.');
-                $stmt=$this->pdo->prepare('SELECT id FROM shipment_drafts WHERE id=?');$stmt->execute([$id]);
+                $stmt=$this->pdo->prepare('SELECT id FROM shipment_drafts WHERE deleted_at IS NULL AND id=?');$stmt->execute([$id]);
                 return $stmt->fetchColumn()?['available'=>true,'reason'=>null,'url'=>'/cargochina/consolidation.php?shipment_draft_id='.$id]:$this->unavailable('The related record no longer exists.');
             case 'container':
                 if(!$this->pageAllowed('containers',$userId,$roles))return $this->unavailable('You no longer have permission to open this record.');

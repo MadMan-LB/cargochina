@@ -89,8 +89,8 @@ IF NOT EXISTS audit_log
     entity_id INT UNSIGNED NOT NULL,
     action VARCHAR
 (50) NOT NULL,
-    old_value JSON,
-    new_value JSON,
+    old_value LONGTEXT,
+    new_value LONGTEXT,
     user_id INT UNSIGNED,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY

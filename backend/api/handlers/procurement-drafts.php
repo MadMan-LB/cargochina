@@ -8,10 +8,11 @@
 require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__, 2) . '/services/OrderWriteService.php';
 require_once dirname(__DIR__, 2) . '/services/LegacyProcurementMetricsService.php';
+require_once dirname(__DIR__, 2) . '/services/RecycleBinService.php';
 
 function procurementDraftRevision(PDO $pdo,int $id): string
 {
-    $s=$pdo->prepare('SELECT name,supplier_id,status,converted_order_id FROM procurement_drafts WHERE id=?');$s->execute([$id]);$header=$s->fetch(PDO::FETCH_ASSOC)?:[];
+    $s=$pdo->prepare('SELECT name,supplier_id,status,converted_order_id,delete_generation FROM procurement_drafts WHERE deleted_at IS NULL AND id=?');$s->execute([$id]);$header=$s->fetch(PDO::FETCH_ASSOC)?:[];
     $s=$pdo->prepare('SELECT id,product_id,quantity,notes,sort_order FROM procurement_draft_items WHERE draft_id=? ORDER BY id');$s->execute([$id]);
     return OrderWriteService::requestHash(['header'=>$header,'items'=>$s->fetchAll(PDO::FETCH_ASSOC)]);
 }
@@ -127,13 +128,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     if(in_array($method,['POST','PUT','DELETE'],true)){
         $pdo->beginTransaction();register_shutdown_function(static function()use($pdo){if($pdo->inTransaction())$pdo->rollBack();});
         if($id){
-            $s=$pdo->prepare('SELECT id FROM procurement_drafts WHERE id=? FOR UPDATE');$s->execute([$id]);if(!$s->fetchColumn())jsonError('Draft not found',404);
+            $s=$pdo->prepare('SELECT id FROM procurement_drafts WHERE deleted_at IS NULL AND id=? FOR UPDATE');$s->execute([$id]);if(!$s->fetchColumn())jsonError('Draft not found',404);
             if(!is_string($input['revision']??null)||!hash_equals(procurementDraftRevision($pdo,(int)$id),$input['revision']))jsonError('Procurement draft changed or revision is missing; reload before saving',409);
         }
     }
 
     if ($method === 'GET' && $id && $action === 'export') {
-        $stmt = $pdo->prepare("SELECT pd.*, s.name as supplier_name FROM procurement_drafts pd LEFT JOIN suppliers s ON pd.supplier_id = s.id WHERE pd.id = ?");
+        $stmt = $pdo->prepare("SELECT pd.*, s.name as supplier_name FROM procurement_drafts pd LEFT JOIN suppliers s ON pd.supplier_id = s.id WHERE pd.deleted_at IS NULL AND pd.id = ?");
         $stmt->execute([$id]);
         $draft = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$draft) jsonError('Draft not found', 404);
@@ -190,7 +191,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
     switch ($method) {
         case 'GET':
             if ($id === null) {
-                $stmt = $pdo->query("SELECT pd.*, s.name as supplier_name FROM procurement_drafts pd LEFT JOIN suppliers s ON pd.supplier_id = s.id ORDER BY pd.created_at DESC");
+                $stmt = $pdo->query("SELECT pd.*, s.name as supplier_name FROM procurement_drafts pd LEFT JOIN suppliers s ON pd.supplier_id = s.id WHERE pd.deleted_at IS NULL ORDER BY pd.created_at DESC");
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 foreach ($rows as &$r) {
                     $items = $pdo->prepare("SELECT pdi.*, p.description_cn, p.description_en FROM procurement_draft_items pdi LEFT JOIN products p ON pdi.product_id = p.id WHERE pdi.draft_id = ? ORDER BY pdi.sort_order, pdi.id");
@@ -200,7 +201,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
                 jsonResponse(['data' => $rows]);
             }
-            $stmt = $pdo->prepare("SELECT pd.*, s.name as supplier_name FROM procurement_drafts pd LEFT JOIN suppliers s ON pd.supplier_id = s.id WHERE pd.id = ?");
+            $stmt = $pdo->prepare("SELECT pd.*, s.name as supplier_name FROM procurement_drafts pd LEFT JOIN suppliers s ON pd.supplier_id = s.id WHERE pd.deleted_at IS NULL AND pd.id = ?");
             $stmt->execute([$id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$row) jsonError('Draft not found', 404);
@@ -215,8 +216,9 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $claimName='clms-legacy-'.substr(hash('sha256',$pdo->query('SELECT DATABASE()')->fetchColumn().$key),0,45);
             $claim=$pdo->prepare('SELECT GET_LOCK(?,5)');$claim->execute([$claimName]);if((int)$claim->fetchColumn()!==1)jsonError('Procurement creation is in progress; retry later',409);
             register_shutdown_function(static function()use($pdo,$claimName){$pdo->prepare('SELECT RELEASE_LOCK(?)')->execute([$claimName]);});
-            $prior=$pdo->prepare("SELECT entity_id,user_id,new_value FROM audit_log WHERE entity_type='procurement_draft' AND action='create' AND JSON_UNQUOTE(JSON_EXTRACT(new_value,'$.idempotency_key'))=? ORDER BY id LIMIT 1 FOR UPDATE");$prior->execute([$key]);$previous=$prior->fetch(PDO::FETCH_ASSOC);
-            if($previous){$audit=json_decode($previous['new_value'],true);if((int)$previous['user_id']!==getAuthUserId()||!hash_equals($audit['request_hash']??'',OrderWriteService::requestHash($input)))jsonError('Procurement idempotency key belongs to another payload',409);$s=$pdo->prepare('SELECT * FROM procurement_drafts WHERE id=?');$s->execute([$previous['entity_id']]);$saved=$s->fetch(PDO::FETCH_ASSOC);if(!$saved)jsonError('Original procurement draft was removed; use a new request',409);$saved['revision']=procurementDraftRevision($pdo,(int)$saved['id']);$pdo->commit();jsonResponse(['data'=>$saved,'idempotent_replay'=>true]);}
+            require_once dirname(__DIR__,2).'/services/AuditReplayLookupService.php';
+            $previous=AuditReplayLookupService::find($pdo,'procurement_draft',$key,true);
+            if($previous){$audit=json_decode($previous['new_value'],true);if((int)$previous['user_id']!==getAuthUserId()||!hash_equals($audit['request_hash']??'',OrderWriteService::requestHash($input)))jsonError('Procurement idempotency key belongs to another payload',409);$s=$pdo->prepare('SELECT * FROM procurement_drafts WHERE deleted_at IS NULL AND id=?');$s->execute([$previous['entity_id']]);$saved=$s->fetch(PDO::FETCH_ASSOC);if(!$saved)jsonError('Original procurement draft was removed; use a new request',409);$saved['revision']=procurementDraftRevision($pdo,(int)$saved['id']);$pdo->commit();jsonResponse(['data'=>$saved,'idempotent_replay'=>true]);}
             if(isset($input['name'])&&!is_string($input['name']))jsonError('Name must be text',422);
             $name = trim($input['name'] ?? '');
             if (!$name) jsonError('Name required', 400);
@@ -232,7 +234,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             foreach ($items as $i => $it) {
                 $ins->execute([$newId, !empty($it['product_id']) ? (int) $it['product_id'] : null, (float) ($it['quantity'] ?? 0), trim($it['notes'] ?? '') ?: null, $i]);
             }
-            $stmt = $pdo->prepare("SELECT pd.*, s.name as supplier_name FROM procurement_drafts pd LEFT JOIN suppliers s ON pd.supplier_id = s.id WHERE pd.id = ?");
+            $stmt = $pdo->prepare("SELECT pd.*, s.name as supplier_name FROM procurement_drafts pd LEFT JOIN suppliers s ON pd.supplier_id = s.id WHERE pd.deleted_at IS NULL AND pd.id = ?");
             $stmt->execute([$newId]);
             $saved=$stmt->fetch(PDO::FETCH_ASSOC);$saved['revision']=procurementDraftRevision($pdo,$newId);
             $pdo->prepare("INSERT INTO audit_log(entity_type,entity_id,action,new_value,user_id) VALUES ('procurement_draft',?,'create',?,?)")->execute([$newId,json_encode(['idempotency_key'=>$key,'request_hash'=>OrderWriteService::requestHash($input)]),$userId]);
@@ -240,7 +242,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
         case 'PUT':
             if (!$id) jsonError('ID required', 400);
-            $stmt = $pdo->prepare("SELECT * FROM procurement_drafts WHERE id = ?");
+            $stmt = $pdo->prepare("SELECT * FROM procurement_drafts WHERE deleted_at IS NULL AND id = ?");
             $stmt->execute([$id]);
             $draft = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$draft) jsonError('Draft not found', 404);
@@ -276,7 +278,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     $ins->execute([$id, !empty($it['product_id']) ? (int) $it['product_id'] : null, (float) ($it['quantity'] ?? 0), trim($it['notes'] ?? '') ?: null, $i]);
                 }
             }
-            $stmt = $pdo->prepare("SELECT pd.*, s.name as supplier_name FROM procurement_drafts pd LEFT JOIN suppliers s ON pd.supplier_id = s.id WHERE pd.id = ?");
+            $stmt = $pdo->prepare("SELECT pd.*, s.name as supplier_name FROM procurement_drafts pd LEFT JOIN suppliers s ON pd.supplier_id = s.id WHERE pd.deleted_at IS NULL AND pd.id = ?");
             $stmt->execute([$id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             $items = $pdo->prepare("SELECT pdi.*, p.description_cn, p.description_en FROM procurement_draft_items pdi LEFT JOIN products p ON pdi.product_id = p.id WHERE pdi.draft_id = ? ORDER BY pdi.sort_order");
@@ -289,13 +291,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
         case 'DELETE':
             if (!$id) jsonError('ID required', 400);
-            $stmt = $pdo->prepare("SELECT status FROM procurement_drafts WHERE id = ?");
+            $stmt = $pdo->prepare("SELECT status FROM procurement_drafts WHERE deleted_at IS NULL AND id = ?");
             $stmt->execute([$id]);
             $d = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$d) jsonError('Draft not found', 404);
             if ($d['status'] !== 'draft' && $d['status'] !== 'cancelled') jsonError('Only draft or cancelled can be deleted', 400);
-            $pdo->prepare("DELETE FROM procurement_drafts WHERE id = ?")->execute([$id]);
-            $pdo->prepare("INSERT INTO audit_log(entity_type,entity_id,action,old_value,user_id) VALUES ('procurement_draft',?,'delete',?,?)")->execute([$id,json_encode($d),getAuthUserId()]);
+            try { RecycleBinService::mark($pdo,'procurement_draft',(int)$id,(int)getAuthUserId(),$input['delete_reason']??null); }
+            catch(DomainException $e){if($pdo->inTransaction())$pdo->rollBack();jsonError($e->getMessage(),$e->getCode()?:409);}
             $pdo->commit();
             jsonResponse(['data' => ['deleted' => true]]);
 

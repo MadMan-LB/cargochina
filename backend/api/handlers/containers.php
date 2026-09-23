@@ -61,7 +61,7 @@ function containerSearchPredicate(PDO $pdo, string $search, array &$params): str
     }
     if (ctype_digit($search)) { $inner[] = 'o2.id = ?'; $params[] = (int) $search; }
     $outer[] = 'EXISTS (SELECT 1 FROM shipment_draft_orders sdo2
-        JOIN shipment_drafts sd2 ON sdo2.shipment_draft_id = sd2.id
+        JOIN shipment_drafts sd2 ON sd2.deleted_at IS NULL AND sdo2.shipment_draft_id = sd2.id
         JOIN orders o2 ON o2.id = sdo2.order_id
         JOIN customers cu2 ON cu2.id = o2.customer_id
         LEFT JOIN order_items oi2 ON oi2.order_id = o2.id
@@ -184,7 +184,7 @@ function fetchContainerUsage(PDO $pdo, int $containerId): array
          FROM (
             SELECT DISTINCT sdo.order_id
             FROM shipment_draft_orders sdo
-            JOIN shipment_drafts sd ON sdo.shipment_draft_id = sd.id
+            JOIN shipment_drafts sd ON sd.deleted_at IS NULL AND sdo.shipment_draft_id = sd.id
             WHERE sd.container_id = ?
          ) ord
          LEFT JOIN ($cargoSql) cargo ON cargo.order_id = ord.order_id"
@@ -389,7 +389,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                             s.name as supplier_name,
                             MIN(sd.id) as draft_id
                      FROM shipment_draft_orders sdo
-                     JOIN shipment_drafts sd ON sdo.shipment_draft_id = sd.id
+                     JOIN shipment_drafts sd ON sd.deleted_at IS NULL AND sdo.shipment_draft_id = sd.id
                      JOIN orders o ON sdo.order_id = o.id
                      JOIN customers c ON o.customer_id = c.id
                      LEFT JOIN suppliers s ON o.supplier_id = s.id
@@ -450,7 +450,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $draftsStmt = $pdo->prepare(
                     "SELECT sd.id, sd.status, sd.container_id, sd.container_number, sd.booking_number, sd.tracking_url,
                             (SELECT COUNT(*) FROM shipment_draft_orders WHERE shipment_draft_id = sd.id) as order_count
-                     FROM shipment_drafts sd WHERE sd.container_id = ? ORDER BY sd.id"
+                     FROM shipment_drafts sd WHERE sd.deleted_at IS NULL AND sd.container_id = ? ORDER BY sd.id"
                 );
                 $draftsStmt->execute([$id]);
                 $drafts = $draftsStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -472,7 +472,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $stmt->execute([$id]);
                 $container = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$container) jsonError('Container not found', 404);
-                $stmt = $pdo->prepare("SELECT DISTINCT sdo.order_id FROM shipment_draft_orders sdo JOIN shipment_drafts sd ON sdo.shipment_draft_id = sd.id WHERE sd.container_id = ? ORDER BY sdo.order_id");
+                $stmt = $pdo->prepare("SELECT DISTINCT sdo.order_id FROM shipment_draft_orders sdo JOIN shipment_drafts sd ON sd.deleted_at IS NULL AND sdo.shipment_draft_id = sd.id WHERE sd.container_id = ? ORDER BY sdo.order_id");
                 $stmt->execute([$id]);
                 $orderIds = array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'order_id');
                 if (empty($orderIds)) jsonError('No orders in this container', 404);
@@ -545,7 +545,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     FROM (
                         SELECT DISTINCT sd.container_id, sdo.order_id
                         FROM shipment_draft_orders sdo
-                        JOIN shipment_drafts sd ON sdo.shipment_draft_id = sd.id
+                        JOIN shipment_drafts sd ON sd.deleted_at IS NULL AND sdo.shipment_draft_id = sd.id
                         JOIN orders ovis ON sdo.order_id = ovis.id
                         WHERE sd.container_id IS NOT NULL
                     ) ord
@@ -752,7 +752,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 }
 
                 // Find or create a non-finalized draft for this container
-                $draftRow = $pdo->prepare("SELECT id FROM shipment_drafts WHERE container_id = ? AND status != 'finalized' ORDER BY id DESC LIMIT 1");
+                $draftRow = $pdo->prepare("SELECT id FROM shipment_drafts WHERE deleted_at IS NULL AND container_id = ? AND status != 'finalized' ORDER BY id DESC LIMIT 1");
                 $draftRow->execute([$id]);
                 $draftId = $draftRow->fetchColumn();
                 if(!$newOrderIds){

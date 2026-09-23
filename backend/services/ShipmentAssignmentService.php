@@ -31,7 +31,7 @@ final class ShipmentAssignmentService
     public static function containerIsOpen(PDO $pdo,array $container,bool $lock=false):bool
     {
         if(!in_array($container['status']??'',['planning','to_go'],true))return false;
-        $s=$pdo->prepare("SELECT id FROM shipment_drafts WHERE container_id=? AND status='finalized' LIMIT 1".($lock?' FOR UPDATE':''));$s->execute([$container['id']]);
+        $s=$pdo->prepare("SELECT id FROM shipment_drafts WHERE deleted_at IS NULL AND container_id=? AND status='finalized' LIMIT 1".($lock?' FOR UPDATE':''));$s->execute([$container['id']]);
         return !$s->fetchColumn();
     }
 
@@ -42,7 +42,7 @@ final class ShipmentAssignmentService
 
     public static function memberships(PDO $pdo,int $orderId):array
     {
-        $s=$pdo->prepare('SELECT sdo.shipment_draft_id,sd.container_id,sd.status FROM shipment_draft_orders sdo JOIN shipment_drafts sd ON sd.id=sdo.shipment_draft_id WHERE sdo.order_id=? ORDER BY sd.id FOR UPDATE');$s->execute([$orderId]);$rows=$s->fetchAll(PDO::FETCH_ASSOC);
+        $s=$pdo->prepare('SELECT sdo.shipment_draft_id,sd.container_id,sd.status FROM shipment_draft_orders sdo JOIN shipment_drafts sd ON sd.deleted_at IS NULL AND sd.id=sdo.shipment_draft_id WHERE sdo.order_id=? ORDER BY sd.id FOR UPDATE');$s->execute([$orderId]);$rows=$s->fetchAll(PDO::FETCH_ASSOC);
         if(count($rows)>1)throw new ShipmentAssignmentException("Order #$orderId has conflicting reservations; reconcile them before changing assignment");
         return $rows;
     }

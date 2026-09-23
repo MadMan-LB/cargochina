@@ -111,45 +111,6 @@ ALTER TABLE balance_transactions
   MODIFY COLUMN direction ENUM('increase_balance', 'reduce_balance') NOT NULL DEFAULT 'reduce_balance',
   MODIFY COLUMN currency ENUM('USD', 'RMB') NOT NULL DEFAULT 'USD';
 
-SET @m065_sidebar_defaults := JSON_OBJECT(
-  'ChinaAdmin', JSON_ARRAY('dashboard', 'orders', 'pipeline', 'consolidation', 'containers', 'assign_container', 'expenses', 'financials', 'balances', 'hs_code_tax', 'calendar', 'warehouse_stock', 'procurement_drafts', 'downloads', 'suppliers', 'customers', 'products', 'notifications', 'notification_preferences'),
-  'ChinaEmployee', JSON_ARRAY('dashboard', 'orders', 'balances', 'procurement_drafts', 'downloads', 'suppliers', 'products', 'notifications'),
-  'LebanonAdmin', JSON_ARRAY('dashboard', 'pipeline', 'consolidation', 'containers', 'assign_container', 'expenses', 'financials', 'balances', 'hs_code_tax', 'calendar', 'warehouse_stock', 'downloads', 'notifications', 'notification_preferences'),
-  'WarehouseStaff', JSON_ARRAY('dashboard', 'receiving', 'expenses', 'warehouse_stock', 'downloads', 'notifications'),
-  'ContainersStaff', JSON_ARRAY('consolidation', 'containers', 'assign_container', 'warehouse_stock'),
-  'FieldStaff', JSON_ARRAY('dashboard', 'suppliers', 'notifications')
-);
-
-INSERT INTO system_config (key_name, key_value)
-SELECT 'ROLE_SIDEBAR_PAGES_JSON', @m065_sidebar_defaults
-WHERE NOT EXISTS (
-  SELECT 1 FROM system_config WHERE key_name = 'ROLE_SIDEBAR_PAGES_JSON'
-);
-
-UPDATE system_config
-SET key_value = @m065_sidebar_defaults
-WHERE key_name = 'ROLE_SIDEBAR_PAGES_JSON'
-  AND NOT JSON_VALID(key_value);
-
-SET @m065_sidebar_cfg := (
-  SELECT key_value FROM system_config WHERE key_name = 'ROLE_SIDEBAR_PAGES_JSON' LIMIT 1
-);
-
-SET @m065_china_admin_pages := COALESCE(JSON_EXTRACT(@m065_sidebar_cfg, '$.ChinaAdmin'), JSON_EXTRACT(@m065_sidebar_defaults, '$.ChinaAdmin'));
-SET @m065_china_admin_pages := IF(JSON_CONTAINS(@m065_china_admin_pages, JSON_QUOTE('balances')), @m065_china_admin_pages, JSON_ARRAY_APPEND(@m065_china_admin_pages, '$', 'balances'));
-
-SET @m065_china_employee_pages := COALESCE(JSON_EXTRACT(@m065_sidebar_cfg, '$.ChinaEmployee'), JSON_EXTRACT(@m065_sidebar_defaults, '$.ChinaEmployee'));
-SET @m065_china_employee_pages := IF(JSON_CONTAINS(@m065_china_employee_pages, JSON_QUOTE('balances')), @m065_china_employee_pages, JSON_ARRAY_APPEND(@m065_china_employee_pages, '$', 'balances'));
-
-SET @m065_lebanon_admin_pages := COALESCE(JSON_EXTRACT(@m065_sidebar_cfg, '$.LebanonAdmin'), JSON_EXTRACT(@m065_sidebar_defaults, '$.LebanonAdmin'));
-SET @m065_lebanon_admin_pages := IF(JSON_CONTAINS(@m065_lebanon_admin_pages, JSON_QUOTE('balances')), @m065_lebanon_admin_pages, JSON_ARRAY_APPEND(@m065_lebanon_admin_pages, '$', 'balances'));
-
-UPDATE system_config
-SET key_value = JSON_SET(
-  key_value,
-  '$.ChinaAdmin', JSON_EXTRACT(@m065_china_admin_pages, '$'),
-  '$.ChinaEmployee', JSON_EXTRACT(@m065_china_employee_pages, '$'),
-  '$.LebanonAdmin', JSON_EXTRACT(@m065_lebanon_admin_pages, '$')
-)
-WHERE key_name = 'ROLE_SIDEBAR_PAGES_JSON'
-  AND JSON_VALID(key_value);
+-- Sidebar JSON is updated by the PHP migration runner after SQL completes.
+-- Raw phpMyAdmin execution cannot apply the sidebar change by itself.
+SELECT 1;

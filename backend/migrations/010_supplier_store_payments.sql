@@ -37,7 +37,7 @@ IF NOT EXISTS supplier_interactions
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   supplier_id INT UNSIGNED NOT NULL,
   interaction_type ENUM('visit', 'quote', 'note') NOT NULL DEFAULT 'visit',
-  content JSON,
+  content LONGTEXT,
   created_by INT UNSIGNED NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY

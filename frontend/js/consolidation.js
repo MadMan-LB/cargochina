@@ -785,19 +785,23 @@ function deleteCurrentDraft() {
     openDeleteConfirmModal(currentDraftId);
 }
 
-function openDeleteConfirmModal(id) {
+async function openDeleteConfirmModal(id) {
     const modal = document.getElementById("deleteDraftConfirmModal");
     const btn = document.getElementById("deleteDraftConfirmBtn");
-    if (btn) btn.onclick = () => doDeleteDraft(id);
-    new bootstrap.Modal(modal).show();
+    try {
+        const result=await api('GET','/shipment-drafts/'+id);
+        if (btn) btn.onclick = () => doDeleteDraft(id,result.data.deletion_revision);
+        document.getElementById('deleteDraftReason').value='';
+        bootstrap.Modal.getOrCreateInstance(modal).show();
+    } catch(e) { showToast(e.message,'danger'); }
 }
 
-async function doDeleteDraft(id) {
+async function doDeleteDraft(id,revision) {
     const btn = document.getElementById("deleteDraftConfirmBtn");
     try {
         setLoading(btn, true);
-        await api("DELETE", "/shipment-drafts/" + id);
-        showToast("Draft deleted");
+        await api("DELETE", "/shipment-drafts/" + id, {deletion_revision:revision,delete_reason:document.getElementById('deleteDraftReason').value});
+        showToast("Draft moved to Recycle Bin");
         bootstrap.Modal.getInstance(
             document.getElementById("deleteDraftConfirmModal"),
         ).hide();

@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__.'/OrderWriteService.php';
+require_once __DIR__.'/AuditReplayLookupService.php';
 
 final class ShipmentWriteService
 {
@@ -28,13 +29,13 @@ final class ShipmentWriteService
         $s=$pdo->prepare('SELECT GET_LOCK(?,5)');$s->execute([$name]);if(!(int)$s->fetchColumn())jsonError('Shipment creation is busy; retry',409);
         $owned=!$pdo->inTransaction();if($owned)$pdo->beginTransaction();
         register_shutdown_function(static function()use($pdo,$name,$owned){if($owned&&$pdo->inTransaction())$pdo->rollBack();$pdo->prepare('SELECT RELEASE_LOCK(?)')->execute([$name]);});
-        $s=$pdo->prepare("SELECT entity_id,user_id FROM audit_log WHERE entity_type='shipment_draft' AND action='create' AND JSON_UNQUOTE(JSON_EXTRACT(new_value,'$.idempotency_key'))=? ORDER BY id LIMIT 1");$s->execute([$key]);$prior=$s->fetch(PDO::FETCH_ASSOC);
+        $prior=AuditReplayLookupService::find($pdo,'shipment_draft',$key);
         if($prior){if((int)$prior['user_id']!==$userId)jsonError('Shipment request key belongs to another operator',409);$id=(int)$prior['entity_id'];}
         else{
             $pdo->exec("INSERT INTO shipment_drafts(status) VALUES ('draft')");$id=(int)$pdo->lastInsertId();
             $pdo->prepare("INSERT INTO audit_log(entity_type,entity_id,action,new_value,user_id) VALUES ('shipment_draft',?,'create',?,?)")->execute([$id,json_encode(['idempotency_key'=>$key,'status'=>'draft']),$userId]);
         }
-        $s=$pdo->prepare('SELECT * FROM shipment_drafts WHERE id=?');$s->execute([$id]);$row=$s->fetch(PDO::FETCH_ASSOC);if(!$row)jsonError('Original shipment draft was removed; use a new request',409);
+        $s=$pdo->prepare('SELECT * FROM shipment_drafts WHERE deleted_at IS NULL AND id=?');$s->execute([$id]);$row=$s->fetch(PDO::FETCH_ASSOC);if(!$row)jsonError('Original shipment draft was removed; use a new request',409);
         if($owned)$pdo->commit();$row['revision']=self::revision($row);$row['already_applied']=(bool)$prior;return $row;
     }
 }

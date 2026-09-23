@@ -174,7 +174,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $params[] = $supplierId;
     }
     if ($containerId) {
-        $sql .= " AND EXISTS (SELECT 1 FROM shipment_draft_orders sdo JOIN shipment_drafts sd ON sdo.shipment_draft_id = sd.id WHERE sdo.order_id = o.id AND sd.container_id = ?)";
+        $sql .= " AND EXISTS (SELECT 1 FROM shipment_draft_orders sdo JOIN shipment_drafts sd ON sd.deleted_at IS NULL AND sdo.shipment_draft_id = sd.id WHERE sdo.order_id = o.id AND sd.container_id = ?)";
         $params[] = $containerId;
     }
     if ($statuses && count($statuses) < count($warehouseStatusGroups)) {

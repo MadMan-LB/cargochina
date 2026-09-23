@@ -50,6 +50,7 @@ return [
     ],
     'users' => ['SuperAdmin'],
     'owner-control' => ['SuperAdmin'],
+    'recycle-bin' => ['read'=>['SuperAdmin','ChinaAdmin','LebanonAdmin'],'restore'=>['SuperAdmin']],
     'client-incidents' => $operationalRoles,
     'config' => ['SuperAdmin'],
     'expenses' => ['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin', 'WarehouseStaff'],

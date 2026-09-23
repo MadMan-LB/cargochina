@@ -1,61 +1,22 @@
 <?php
-require_once 'includes/auth_check.php';
-require_once 'includes/page_guard.php';
-requireRoleForPage(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin', 'WarehouseStaff']);
-$currentPage = 'calendar';
-$pageTitle = 'Calendar / Timeline';
-require 'includes/layout.php';
+require 'includes/auth_check.php';require 'includes/page_guard.php';
+requireRoleForPage(['ChinaAdmin','LebanonAdmin','SuperAdmin','WarehouseStaff']);
+$currentPage='calendar';$pageTitle='Operational Calendar';require 'includes/layout.php';
 ?>
-<h1 class="mb-4">Calendar / Timeline</h1>
-<p class="text-muted mb-4">Switch between a monthly calendar and a detailed timeline for expected-ready orders and container ETA activity.</p>
-
-<div class="card mb-4">
-  <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-    <span>Planner</span>
-    <div class="d-flex align-items-center gap-2 flex-wrap">
-      <button class="btn btn-sm btn-outline-secondary" type="button" id="calendarPrevBtn">←</button>
-      <input type="month" class="form-control form-control-sm" id="calendarMonth" style="width:160px">
-      <button class="btn btn-sm btn-outline-secondary" type="button" id="calendarNextBtn">→</button>
-      <button class="btn btn-sm btn-outline-primary" type="button" id="calendarRefreshBtn">Refresh</button>
-    </div>
-  </div>
-  <div class="card-body">
-    <ul class="nav nav-tabs mb-3" role="tablist">
-      <li class="nav-item" role="presentation">
-        <button class="nav-link active" id="calendar-grid-tab" data-bs-toggle="tab" data-bs-target="#calendar-grid-pane" type="button">Calendar View</button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button class="nav-link" id="calendar-timeline-tab" data-bs-toggle="tab" data-bs-target="#calendar-timeline-pane" type="button">Timeline View</button>
-      </li>
-    </ul>
-
-    <div class="tab-content">
-      <div class="tab-pane fade show active" id="calendar-grid-pane">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-          <div>
-            <h6 class="mb-1">Monthly Calendar</h6>
-            <small class="text-muted">Orders show expected ready dates. Containers show ETA dates.</small>
-          </div>
-          <div class="small text-muted" id="calendarMonthLabel">—</div>
-        </div>
-        <div id="calendarGrid" class="calendar-board"></div>
-      </div>
-
-      <div class="tab-pane fade" id="calendar-timeline-pane">
-        <div class="row g-4">
-          <div class="col-lg-7">
-            <h6>Orders (Expected Ready)</h6>
-            <div id="ordersTimeline" class="table-responsive"></div>
-          </div>
-          <div class="col-lg-5">
-            <h6>Containers (ETA)</h6>
-            <div id="containersTimeline" class="table-responsive"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<?php $pageScript = 'frontend/js/calendar.js';
-require 'includes/footer.php'; ?>
+<h1 class="mb-2">Operational Calendar</h1>
+<p class="text-muted">Expected dates and recorded cargo events. Receiving puts cargo into warehouse stock; container assignment is a reservation, not physical loading.</p>
+<form id="calendarFilters" class="card card-body mb-3"><div class="row g-2">
+<div class="col-md-2"><label class="form-label" for="calendarDate">Date</label><input type="date" id="calendarDate" class="form-control" required></div>
+<div class="col-md-2"><label class="form-label" for="calendarView">View</label><select id="calendarView" class="form-select"><option value="month">Month</option><option value="week">Week</option><option value="day">Day</option><option value="timeline">Timeline (month)</option></select></div>
+<div class="col-md-3"><label class="form-label" for="calendarEvent">Event type</label><select id="calendarEvent" name="event_type" class="form-select"><option value="">All events</option></select></div>
+<div class="col-md-3"><label class="form-label" for="calendarCustomer">Customer name / ID</label><input id="calendarCustomer" name="customer" type="search" maxlength="120" class="form-control"></div>
+<div class="col-md-2"><label class="form-label" for="calendarOrder">Order number</label><input id="calendarOrder" name="order" type="search" maxlength="120" class="form-control"></div>
+<div class="col-md-3"><label class="form-label" for="calendarContainer">Container code / ID</label><input id="calendarContainer" name="container" type="search" maxlength="120" class="form-control"></div>
+<div class="col-md-3"><label class="form-label" for="calendarStatus">Current status</label><input id="calendarStatus" name="status" maxlength="120" class="form-control" placeholder="e.g. Confirmed or planning"></div>
+<div class="col-md-6 d-flex align-items-end gap-2"><button type="submit" class="btn btn-primary">Apply filters</button><button type="reset" class="btn btn-outline-secondary">Clear filters</button></div>
+</div></form>
+<div class="d-flex flex-wrap justify-content-between gap-2 mb-3"><div><button class="btn btn-outline-secondary" id="calendarPrevBtn">Previous</button> <button class="btn btn-outline-secondary" id="calendarTodayBtn">Today</button> <button class="btn btn-outline-secondary" id="calendarNextBtn">Next</button></div><strong id="calendarRange"></strong><span id="calendarCount" role="status" aria-live="polite"></span></div>
+<div id="calendarLegend" class="d-flex flex-wrap gap-2 small mb-3" aria-label="Event legend"></div><div id="calendarError" role="alert"></div>
+<div id="calendarGrid" class="calendar-board"></div>
+<div class="modal fade" id="calendarEventModal" tabindex="-1" aria-labelledby="calendarEventTitle" aria-hidden="true"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 id="calendarEventTitle" class="modal-title">Cargo event</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div><div id="calendarEventDetail" class="modal-body"></div><div class="modal-footer"><a id="calendarEventLink" class="btn btn-primary">Open record</a><button class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div></div></div></div>
+<?php $pageScript='frontend/js/calendar.js?v='.filemtime(__DIR__.'/frontend/js/calendar.js');require 'includes/footer.php'; ?>

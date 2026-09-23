@@ -36,7 +36,7 @@ FROM information_schema.COLUMNS
 WHERE table_schema=DATABASE
 () AND table_name='customers' AND column_name='payment_links');
 SET @sql =
-IF(@m026b=0, 'ALTER TABLE customers ADD COLUMN payment_links JSON NULL AFTER payment_terms', 'DO 0');
+IF(@m026b=0, 'ALTER TABLE customers ADD COLUMN payment_links LONGTEXT NULL AFTER payment_terms', 'DO 0');
 PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;

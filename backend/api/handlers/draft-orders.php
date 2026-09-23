@@ -4514,7 +4514,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
     if ($method === 'POST' && $id === 'legacy' && $action && preg_match('/^(\d+)\/migrate$/', $action, $matches)) {
         $legacyId = (int) $matches[1];
-        $stmt = $pdo->prepare("SELECT * FROM procurement_drafts WHERE id = ?");
+        $stmt = $pdo->prepare("SELECT * FROM procurement_drafts WHERE deleted_at IS NULL AND id = ?");
         $stmt->execute([$legacyId]);
         $legacy = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$legacy) {
@@ -4555,7 +4555,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
         $pdo->beginTransaction();
         try {
             draftOrderLockCustomerNumbering($pdo, $customerId);
-            $legacyLock=$pdo->prepare('SELECT * FROM procurement_drafts WHERE id=? FOR UPDATE');$legacyLock->execute([$legacyId]);$legacy=$legacyLock->fetch(PDO::FETCH_ASSOC);
+            $legacyLock=$pdo->prepare('SELECT * FROM procurement_drafts WHERE deleted_at IS NULL AND id=? FOR UPDATE');$legacyLock->execute([$legacyId]);$legacy=$legacyLock->fetch(PDO::FETCH_ASSOC);
             if(!$legacy)jsonError('Legacy procurement draft not found',404);
             if(!empty($legacy['converted_order_id'])){$pdo->commit();jsonResponse(['data'=>['already_migrated'=>true,'converted_order_id'=>(int)$legacy['converted_order_id'],'order'=>draftOrderFetchOrderPayload($pdo,(int)$legacy['converted_order_id'])]]);}
             if(!in_array($legacy['status'],['draft','pending_review','sent_to_supplier'],true))jsonError('Legacy draft cannot be converted in its current state',409);

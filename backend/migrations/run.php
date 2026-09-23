@@ -14,6 +14,15 @@ sort($files);
 
 $pdo = getDb();
 
+// Migrations rely on atomic writes and foreign keys; fail before any DDL when
+// a legacy server defaults to MyISAM or an existing core table uses it.
+$defaultEngine=(string)$pdo->query('SELECT @@default_storage_engine')->fetchColumn();
+if (strcasecmp($defaultEngine,'InnoDB')!==0) throw new RuntimeException('Migration requires InnoDB default storage engine; current default: '.$defaultEngine);
+$nonTransactional=$pdo->query("SELECT TABLE_NAME FROM information_schema.TABLES
+    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_TYPE='BASE TABLE' AND ENGINE<>'InnoDB'
+      AND TABLE_NAME IN ('users','orders','order_items','warehouse_receipts','warehouse_receipt_items','containers','shipment_drafts','shipment_draft_orders','audit_log')")->fetchAll(PDO::FETCH_COLUMN);
+if ($nonTransactional) throw new RuntimeException('Core tables require InnoDB before migration: '.implode(', ',$nonTransactional));
+
 // Create migrations tracking table if not exists
 $pdo->exec("
     CREATE TABLE IF NOT EXISTS _migrations (
@@ -55,6 +64,10 @@ foreach ($files as $file) {
             }
             throw $e;
         }
+    }
+    if (in_array($name, ['062_balance_sidebar_defaults.sql','065_balances_deployment_hardening.sql'], true)) {
+        require_once __DIR__.'/SidebarConfigMigrationService.php';
+        SidebarConfigMigrationService::apply($pdo,$name==='065_balances_deployment_hardening.sql');
     }
     $pdo->prepare("INSERT INTO _migrations (name) VALUES (?)")->execute([$name]);
     echo "Applied: $name\n";

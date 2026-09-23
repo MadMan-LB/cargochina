@@ -134,7 +134,7 @@ final class OrderReceiptWorkflowService
 
     private static function detachOrderFromShipmentDrafts(PDO $pdo, int $orderId): void
     {
-        $locked = $pdo->prepare("SELECT sd.id FROM shipment_drafts sd JOIN shipment_draft_orders sdo ON sdo.shipment_draft_id=sd.id WHERE sdo.order_id=? AND (sd.status='finalized' OR sd.container_id IS NOT NULL) LIMIT 1 FOR UPDATE");
+        $locked = $pdo->prepare("SELECT sd.id FROM shipment_drafts sd JOIN shipment_draft_orders sdo ON sdo.shipment_draft_id=sd.id WHERE sd.deleted_at IS NULL AND sdo.order_id=? AND (sd.status='finalized' OR sd.container_id IS NOT NULL) LIMIT 1 FOR UPDATE");
         $locked->execute([$orderId]);
         if ($locked->fetchColumn()) throw new RuntimeException('Assigned or finalized cargo cannot be reversed through receiving');
         $draftStmt = $pdo->prepare("SELECT shipment_draft_id FROM shipment_draft_orders WHERE order_id = ?");

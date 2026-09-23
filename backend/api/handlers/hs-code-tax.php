@@ -256,7 +256,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                          WHERE EXISTS (
                              SELECT 1
                              FROM shipment_draft_orders sdo
-                             JOIN shipment_drafts sd ON sd.id = sdo.shipment_draft_id
+                             JOIN shipment_drafts sd ON sd.deleted_at IS NULL AND sd.id = sdo.shipment_draft_id
                              WHERE sdo.order_id = o.id
                                AND sd.container_id = ?
                          )
