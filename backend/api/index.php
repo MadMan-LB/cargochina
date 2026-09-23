@@ -83,6 +83,9 @@ if (in_array($method, ['POST', 'PUT', 'DELETE'])) {
     $raw = file_get_contents('php://input');
     if (str_contains(strtolower($_SERVER['CONTENT_TYPE'] ?? ''), 'application/json')) {
         if (strlen($raw)>32*1024*1024) jsonError('Request body exceeds the supported size',413);
+        // Bodyless actions (e.g. deleting a shipment draft) have no input fields.
+        // Keep rejecting explicit null, arrays, scalars and malformed JSON.
+        if ($raw === '') $raw = '{}';
         $decoded = json_decode($raw);
         if (json_last_error() !== JSON_ERROR_NONE || !is_object($decoded)) jsonError('Request body must be a JSON object',400);
         $input = json_decode($raw,true);

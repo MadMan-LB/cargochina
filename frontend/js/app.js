@@ -656,8 +656,8 @@ async function api(method, path, body = null) {
         opts.headers["X-CLMS-Debug-Timing"] = "1";
     }
     if (_failedApiRequests.has(cacheKey)) opts.headers['X-CLMS-Retry-Of'] = _failedApiRequests.get(cacheKey);
-    if (body && (method === "POST" || method === "PUT" || method === "DELETE")) {
-        opts.body = JSON.stringify(body);
+    if (method === "POST" || method === "PUT" || method === "DELETE") {
+        opts.body = JSON.stringify(body ?? {});
     }
     let res;
     try {

@@ -8,6 +8,7 @@ require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__,2).'/services/AuditService.php';
 require_once dirname(__DIR__,2).'/services/CatalogRevisionService.php';
 require_once dirname(__DIR__,2).'/services/SupplierWriteService.php';
+require_once dirname(__DIR__,2).'/services/SupplierDeletionService.php';
 require_once dirname(__DIR__,2).'/services/MasterDataImportService.php';
 
 function supplierTableHasColumn(PDO $pdo, string $table, string $column): bool
@@ -865,12 +866,27 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             AuditService::begin($pdo);
             $auditBefore=AuditService::snapshot($pdo,'suppliers',(int)$id,true);
             CatalogRevisionService::assertCurrent($pdo,'suppliers',(int)$id,$input);
-            $stmt = $pdo->prepare("DELETE FROM suppliers WHERE id = ?");
-            $stmt->execute([$id]);
-            if ($stmt->rowCount() === 0) {
-                jsonError('Supplier not found', 404);
+            try {
+                $reference = SupplierDeletionService::blockingReference($pdo, (int)$id);
+                if ($reference !== null) {
+                    $pdo->rollBack();
+                    jsonError('Cannot delete this supplier: it is linked to ' . $reference . '. Keep the supplier to preserve these records.', 409);
+                }
+                $stmt = $pdo->prepare("DELETE FROM suppliers WHERE id = ?");
+                $stmt->execute([$id]);
+                if ($stmt->rowCount() === 0) {
+                    $pdo->rollBack();
+                    jsonError('Supplier not found', 404);
+                }
+                AuditService::record($pdo,'supplier',(int)$id,'delete',$auditBefore,null,getAuthUserId());
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                if ($e instanceof PDOException && (int)($e->errorInfo[1] ?? 0) === 1451) {
+                    jsonError('Cannot delete this supplier: it is linked to related business records. Keep the supplier to preserve these records.', 409);
+                }
+                throw $e;
             }
-            AuditService::record($pdo,'supplier',(int)$id,'delete',$auditBefore,null,getAuthUserId());$pdo->commit();
             jsonResponse(['message' => 'Deleted']);
 
         default:

@@ -1037,16 +1037,20 @@ async function showPayHistory(supplierId, name) {
     }
 }
 
+const supplierDeletesInFlight = new Set();
 async function deleteSupplier(id, name) {
-
+    if (supplierDeletesInFlight.has(String(id))) return;
+    supplierDeletesInFlight.add(String(id));
     try {
         const current=(await api("GET", "/suppliers/"+id)).data;
-    if (!confirm('Delete supplier "' + name + '"?')) return;
+        if (!confirm('Delete supplier "' + name + '"? Suppliers linked to business records cannot be deleted.')) return;
         await api("DELETE", "/suppliers/" + id, {revision:current.revision});
         showToast("Supplier deleted");
         loadSuppliers(false);
     } catch (e) {
         showToast(e.message, "danger");
+    } finally {
+        supplierDeletesInFlight.delete(String(id));
     }
 }
 
