@@ -68,6 +68,8 @@ function buildUserPermissionOverrideRegistry(PDO $pdo): array
 
     $operationalRoles = ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'];
     $manual = [
+        'page:recycle_bin' => ['View Recycle Bin', 'Open and search the Recycle Bin for record types the user can already view. Does not grant restore or permanent deletion.', 'Recycle Bin', ['ChinaAdmin','LebanonAdmin','SuperAdmin']],
+        'recycle-bin.restore' => ['Restore deleted drafts', 'Requires Recycle Bin page access and permission to edit the original record type. Does not permit permanent deletion.', 'Recycle Bin', ['SuperAdmin']],
         'customers.create' => ['Add customer', 'Allow creating customers from the customer page.', 'Customer', $operationalRoles],
         'customers.import' => ['Import customers', 'Allow customer CSV import without changing the user role.', 'Customer', ['ChinaAdmin', 'SuperAdmin']],
         'page:customers' => ['View customer page', 'Allow opening the Customers page and seeing it in the sidebar.', 'Customer', $operationalRoles],

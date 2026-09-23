@@ -50,6 +50,7 @@ foreach (clmsPageCapabilityMap() as $key=>$pages) {
     foreach ($pages as $page) checkPolicy(isset(clmsSidebarPageRegistry()[$page]), 'registered dependency '.$key.':'.$page);
 }
 $lookupDependencies = [
+    'recycle_bin'=>['recycle-bin.read'],
     'orders'=>['orders.read','customers.lookup','suppliers.read','products.read','countries.read'],
     'receiving'=>['orders.read','customers.read','suppliers.read'],
     'warehouse_stock'=>['orders.read','customers.read','suppliers.read'],
@@ -71,4 +72,11 @@ foreach (['ContainersStaff','FieldStaff','ChinaEmployee','WarehouseStaff','Leban
         checkPolicy(!$can('page:admin_users',$role),'lookup never grants user administration');
     }
 }
+
+$GLOBALS['pagePolicySettings']=['FieldStaff'=>['recycle_bin']];
+clmsLoadRoleSidebarPageSettings($pdo,true);
+foreach(['recycle-bin.restore','shipment-drafts.read','shipment-drafts.write','page:procurement_drafts'] as $key)checkPolicy(!clmsUserCan($key,['SuperAdmin'],$pdo,42,['FieldStaff']),'Bin page does not grant '.$key);
+$GLOBALS['pagePolicySettings']=['ChinaAdmin'=>[]];
+clmsLoadRoleSidebarPageSettings($pdo,true);
+checkPolicy(!clmsUserCan('recycle-bin.read',['ChinaAdmin'],$pdo,42,['ChinaAdmin']),'Revoked bin page beats legacy admin read fallback');
 echo "PASS: $count page capability assertions (no live database used)\n";

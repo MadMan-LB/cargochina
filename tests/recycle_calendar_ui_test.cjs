@@ -25,10 +25,13 @@ async function run(){
   assert.match(node('calendarGrid').innerHTML,/Show all 4 events/);
   node('calendarGrid').onclick({target:{closest:selector=>selector==='[data-day]'?{dataset:{day:'2026-10-01'}}:null}});assert.equal(node('calendarView').value,'day');assert.equal(node('calendarCustomer').value,'Bamboo');
   const r=harness('recycle-bin.js'),row={id:7,record_type:'shipment_draft',reference:'Cargo planning',original_status:'draft',deleted_at:'2026-09-23',can_restore:true,can_purge:false,version:'v1'};
-  r.calls[0].resolve({data:[row],meta:{total:1}});await tick();assert.match(r.node('recycleRows').innerHTML,/Retention protected/);
+  r.calls[0].resolve({data:[row],meta:{total:1,allowed_types:['shipment_draft']}});await tick();assert.match(r.node('recycleRows').innerHTML,/Retention protected/);
+  assert.match(r.node('recycleType').innerHTML,/shipment_draft/);assert.doesNotMatch(r.node('recycleType').innerHTML,/procurement_draft/,'Only authorized types offered');
   const button={dataset:{index:'0',action:'restore'}},event={target:{closest:()=>button}};
   const a=r.node('recycleRows').listeners.click(event);const b=r.node('recycleRows').listeners.click(event);await tick();assert.equal(r.calls.length,2,'Double restore only sends one POST');assert.equal(r.calls[1].body.version,'v1');assert.equal(r.calls[1].method,'POST');
   r.calls[1].reject(Error('Record changed'));await a;await b;assert.equal(button.disabled,false,'Failure releases retry guard');assert.equal(r.node('recycleNotice').textContent,'Record changed');
+  r.node('recycleFilters').listeners.submit({preventDefault(){}});r.calls[2].resolve({data:[],meta:{total:0,allowed_types:[],deleted_users:[]}});await tick();
+  assert.match(r.node('recycleRows').innerHTML,/Recycle Bin access is enabled/);assert.doesNotMatch(r.node('recycleType').innerHTML,/shipment_draft/);
   console.log('PASS calendar range, retained filters, stale response, failure recovery, navigation, escaping; recycle double-submit, revision and failure controls');
 }
 module.exports=run;

@@ -2,7 +2,6 @@
 require 'includes/auth_check.php';
 require 'includes/page_guard.php';
 requireRoleForPage(['ChinaAdmin','LebanonAdmin','SuperAdmin']);
-if (!array_intersect($_SESSION['user_roles']??[],['ChinaAdmin','LebanonAdmin','SuperAdmin'])) {include '403.php';exit;}
 $currentPage='recycle_bin';$pageTitle='Recycle Bin';require 'includes/layout.php';
 ?>
 <h1 class="mb-3">Recycle Bin</h1>

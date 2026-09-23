@@ -13,14 +13,20 @@ final class RecycleBinService
         return self::TYPES[$type];
     }
 
-    public static function authorize(string $type, bool $write=false): void
+    public static function canAccess(string $type, bool $write=false): bool
     {
         self::table($type);
-        // Recovery is deliberately narrower than ordinary page access.
-        if (!hasAnyRole(['SuperAdmin','ChinaAdmin','LebanonAdmin'])) throw new DomainException('Recovery requires an administrator',403);
-        if($write)requirePermission('recycle-bin.restore',['SuperAdmin']);
-        if ($type==='shipment_draft') requirePermission($write?'shipment-drafts.write':'shipment-drafts.read');
-        else requirePermission('page:procurement_drafts');
+        return hasPageAccess('recycle_bin')
+            && hasPermission($type==='shipment_draft'?'shipment-drafts.read':'page:procurement_drafts')
+            && (!$write || (hasPermission('recycle-bin.restore',['SuperAdmin'])
+                && hasPermission($type==='shipment_draft'?'shipment-drafts.write':'page:procurement_drafts')));
+    }
+
+    public static function authorize(string $type, bool $write=false): void
+    {
+        if (!self::canAccess($type,$write)) throw new DomainException($write
+            ? 'Restore requires Recycle Bin access, Restore permission and access to edit this record type'
+            : 'Recycle Bin and record-type access required',403);
     }
 
     public static function mark(PDO $pdo,string $type,int $id,int $actor,$reason=null,array $releasedOrderIds=[]): void

@@ -12,6 +12,7 @@ function clmsPageCapabilityMap(): array
     $draftEditors = ['orders', 'procurement_drafts'];
     $shippingEditors = ['consolidation', 'containers', 'assign_container'];
     return [
+        'recycle-bin.read' => ['recycle_bin'],
         'dashboard.read' => ['dashboard','pipeline'],
         'orders.read' => $orderReaders,
         'uploads.read' => $partyReaders,

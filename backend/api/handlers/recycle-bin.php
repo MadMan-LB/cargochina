@@ -4,17 +4,14 @@ require_once dirname(__DIR__,2).'/services/RecycleBinService.php';
 return function(string $method,?string $id,?string $action,array $input):void {
     $pdo=getDb();
     if (!getAuthUserId()) jsonError('Unauthorized',401);
-    if (!hasAnyRole(['SuperAdmin','ChinaAdmin','LebanonAdmin'])) jsonError('Recovery requires an administrator',403);
     if (!hasPageAccess('recycle_bin')) jsonError('Recycle Bin access required',403);
     try {
         if ($method==='GET' && $id===null) {
-            $types=[];
-            if (hasPermission('page:procurement_drafts')) $types[]='procurement_draft';
-            if (hasPermission('shipment-drafts.read')) $types[]='shipment_draft';
+            $allowedTypes=array_values(array_filter(array_keys(RecycleBinService::TYPES),static fn($kind)=>RecycleBinService::canAccess($kind)));
+            $types=$allowedTypes;
             $type=$_GET['type']??'';$q=$_GET['q']??'';
             if (!is_string($type)||!is_string($q)||mb_strlen($q)>150) throw new DomainException('Invalid recycle-bin filter',422);
             if ($type!=='') {RecycleBinService::authorize($type);$types=[$type];}
-            if (!$types) jsonError('Forbidden',403);
             $parts=[];
             foreach ($types as $kind) {
                 $table=RecycleBinService::table($kind);
@@ -32,6 +29,7 @@ return function(string $method,?string $id,?string $action,array $input):void {
             $actor=$_GET['deleted_by']??'';
             if($actor!==''){if(!is_string($actor)||!ctype_digit($actor)||(int)$actor<1)throw new DomainException('Invalid deleted-user ID',422);$where[]='deleted_by=?';$params[]=(int)$actor;}
             $limit=clmsQueryLimit($_GET['limit']??null,25,100);$offset=clmsQueryOffset($_GET['offset']??null);
+            if (!$types) jsonResponse(['data'=>[],'meta'=>['total'=>0,'limit'=>$limit,'offset'=>$offset,'deleted_users'=>[],'allowed_types'=>[]]]);
             $sql='FROM ('.implode(' UNION ALL ',$parts).') rb WHERE '.implode(' AND ',$where);
             $actors=$pdo->query('SELECT DISTINCT deleted_by id,deleted_by_name name FROM ('.implode(' UNION ALL ',$parts).') actors WHERE deleted_by IS NOT NULL ORDER BY deleted_by_name,deleted_by LIMIT 200')->fetchAll(PDO::FETCH_ASSOC);
             $s=$pdo->prepare('SELECT COUNT(*) '.$sql);$s->execute($params);$total=(int)$s->fetchColumn();
@@ -48,12 +46,12 @@ return function(string $method,?string $id,?string $action,array $input):void {
             foreach ($rows as $r) {
                 $row=$snapshots[$r['record_type']][(int)$r['id']]??null;if(!$row)continue;
                 $r['version']=RecycleBinService::version($row);
-                $r['can_restore']=hasPermission('recycle-bin.restore',['SuperAdmin']) && hasPermission($r['record_type']==='shipment_draft'?'shipment-drafts.write':'page:procurement_drafts');
+                $r['can_restore']=RecycleBinService::canAccess($r['record_type'],true);
                 $created=$row['created_at']??null;
                 $r['can_purge']=hasAnyRole(['SuperAdmin']) && is_string($created) && $created>'0000-00-00' && $created<date('Y-m-d H:i:s',strtotime('-10 years'));
                 $visible[]=$r;
             }
-            jsonResponse(['data'=>$visible,'meta'=>['total'=>$total,'limit'=>$limit,'offset'=>$offset,'deleted_users'=>$actors]]);
+            jsonResponse(['data'=>$visible,'meta'=>['total'=>$total,'limit'=>$limit,'offset'=>$offset,'deleted_users'=>$actors,'allowed_types'=>$allowedTypes]]);
         }
         if ($method==='POST' && ctype_digit($id??'') && in_array($action,['restore','purge'],true)) {
             if (!is_string($input['type']??null)||!is_string($input['version']??null)) throw new DomainException('Record type and revision required',422);

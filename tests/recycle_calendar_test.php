@@ -5,6 +5,10 @@ if($pdo->query('SELECT DATABASE()')->fetchColumn()!=='clms_hardening_20260919')t
 if(($argv[1]??'')==='--worker'){
     session_start();$r=json_decode($argv[2],true);$_SESSION=['user_id'=>$r['actor']??1,'user_roles'=>['SuperAdmin']];$_GET=$r['query']??[];
     require_once dirname(__DIR__).'/backend/api/helpers.php';
+    if($r['resource']==='recycle-bin'){
+        require_once dirname(__DIR__).'/backend/api/authorization.php';
+        clmsAuthorizeApiRequest($r['resource'],$r['method']??'GET',isset($r['id'])?(string)$r['id']:null,$r['action']??null);
+    }
     if(!empty($r['recent'])){require_once dirname(__DIR__).'/backend/services/SessionPolicyService.php';$u=$pdo->query('SELECT * FROM users WHERE id='.(int)$_SESSION['user_id'])->fetch();SessionPolicyService::establish($_SESSION,(int)$u['session_version'],hash('sha256',$u['password_hash']));}
     $handler=require dirname(__DIR__).'/backend/api/handlers/'.$r['resource'].'.php';
     try{$handler($r['method']??'GET',isset($r['id'])?(string)$r['id']:null,$r['action']??null,$r['body']??[]);}catch(Throwable $e){jsonError($e->getMessage(),$e instanceof DomainException?($e->getCode()?:409):500);}exit;
@@ -106,10 +110,26 @@ rcCheck(!empty(rcCall(['resource'=>'calendar','actor'=>$reader,'query'=>$range])
 $pdo->prepare("INSERT INTO user_permission_overrides(user_id,permission_key,is_allowed) VALUES (?,'page:calendar',1)")->execute([$reader]);
 $restricted=rcCall(['resource'=>'calendar','actor'=>$reader,'query'=>$range]);rcCheck(empty($restricted['error'])&&$restricted['data']===[],'Calendar-only grant leaks no underlying data');
 rcCheck(!empty(rcCall(['resource'=>'recycle-bin','actor'=>$reader])['error']),'Bin read restricted');
-$pdo->prepare("INSERT INTO user_roles(user_id,role_id) SELECT ?,id FROM roles WHERE code='ChinaAdmin'")->execute([$reader]);
-foreach(['page:recycle_bin','page:procurement_drafts'] as $key)$pdo->prepare('INSERT INTO user_permission_overrides(user_id,permission_key,is_allowed) VALUES (?,?,1)')->execute([$reader,$key]);
+$pdo->prepare("DELETE FROM user_permission_overrides WHERE user_id=? AND permission_key='page:calendar'")->execute([$reader]);
+$pdo->prepare("INSERT INTO user_permission_overrides(user_id,permission_key,is_allowed) VALUES (?,'page:recycle_bin',1)")->execute([$reader]);
+$emptyBin=rcCall(['resource'=>'recycle-bin','actor'=>$reader]);rcCheck(empty($emptyBin['error'])&&$emptyBin['data']===[]&&$emptyBin['meta']['deleted_users']===[]&&$emptyBin['meta']['allowed_types']===[],'Explicit page grant opens bin without leaking domain data or actors');
+$pdo->prepare("INSERT INTO user_permission_overrides(user_id,permission_key,is_allowed) VALUES (?,'page:procurement_drafts',1)")->execute([$reader]);
 $adminBin=rcCall(['resource'=>'recycle-bin','actor'=>$reader,'query'=>['type'=>'procurement_draft']]);rcCheck(empty($adminBin['error'])&&!$adminBin['data'][0]['can_restore'],'Bin view alone does not permit restoration');
-rcCheck(!empty(rcCall(array_replace($restore,['actor'=>$reader]))['error']),'Administrator needs separate recovery grant');
+rcCheck(!empty(rcCall(array_replace($restore,['actor'=>$reader]))['error']),'Non-admin viewer needs separate recovery grant');
+rcCheck($adminBin['meta']['allowed_types']===['procurement_draft'],'Type selector limited to authorized domain');
+rcCheck(!empty(rcCall(['resource'=>'recycle-bin','actor'=>$reader,'query'=>['type'=>'shipment_draft']])['error']),'Explicit inaccessible type rejected');
+$pdo->prepare("INSERT INTO user_permission_overrides(user_id,permission_key,is_allowed) VALUES (?,'recycle-bin.restore',1)")->execute([$reader]);
+$grantedBin=rcCall(['resource'=>'recycle-bin','actor'=>$reader]);rcCheck($grantedBin['data'][0]['can_restore'],'Explicit restore grant honored for non-admin');
+$pdo->prepare("INSERT INTO procurement_drafts(name,status,deleted_at,deleted_by) VALUES ('Recovery permission fixture','draft',NOW(),1)")->execute();$recoverId=(int)$pdo->lastInsertId();
+$recoverRow=$pdo->query('SELECT * FROM procurement_drafts WHERE id='.$recoverId)->fetch(PDO::FETCH_ASSOC);
+$recover=['resource'=>'recycle-bin','actor'=>$reader,'method'=>'POST','id'=>$recoverId,'action'=>'restore','body'=>['type'=>'procurement_draft','version'=>RecycleBinService::version($recoverRow)]];
+rcCheck(!empty(rcCall(array_replace($recover,['action'=>'purge','body'=>$recover['body']+['confirmation'=>"DELETE procurement_draft $recoverId"]]))['error']),'Restore grant never permits permanent deletion');
+$pdo->prepare("DELETE FROM user_permission_overrides WHERE user_id=? AND permission_key='page:recycle_bin'")->execute([$reader]);
+rcCheck(!empty(rcCall($recover)['error'])&&!empty(rcCall(['resource'=>'recycle-bin','actor'=>$reader])['error']),'Revoked page blocks next read and restore despite action grant');
+$pdo->prepare("INSERT INTO user_permission_overrides(user_id,permission_key,is_allowed) VALUES (?,'page:recycle_bin',1)")->execute([$reader]);
+rcCheck(empty(rcCall($recover)['error']),'Non-admin explicitly authorized restore succeeds');
+rcCheck($pdo->query('SELECT deleted_at FROM procurement_drafts WHERE id='.$recoverId)->fetchColumn()===null,'Non-admin restore persisted');
+rcCheck((int)$pdo->query("SELECT COUNT(*) FROM audit_log WHERE entity_type='procurement_draft' AND entity_id=$recoverId AND action='restored' AND user_id=$reader")->fetchColumn()===1,'Restoration audit attributes delegated actor');
 // Retention, holds, confirmation and audited purge on an old, child-free disposable draft.
 $pdo->prepare("INSERT INTO procurement_drafts(name,status,created_at,deleted_at,deleted_by) VALUES ('Expired empty draft','cancelled','2010-01-01',NOW(),1)")->execute();$oldId=(int)$pdo->lastInsertId();
 $oldRow=$pdo->query('SELECT * FROM procurement_drafts WHERE id='.$oldId)->fetch(PDO::FETCH_ASSOC);
