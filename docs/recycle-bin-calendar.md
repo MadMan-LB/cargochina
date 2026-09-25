@@ -12,7 +12,8 @@ Implemented and locally verified, 2026-09-23. Local disposable verification only
 | Containers | No delete endpoint exists; retain existing transport/finalization state machine. |
 | Receipts | Existing void/reversal, not recycle-bin deletion. |
 | Draft-order costs | Existing `is_deleted` archive plus accounting reversal/history. Not restored by this new generic bin. |
-| Suppliers / customers | Existing dependency-protected hard deletion of unused records remains outside supported bin types. Deleted drafts deliberately retain supplier dependencies. |
+| Suppliers | Recoverable deletion added 2026-09-24; linked cargo/accounting history stays intact. No supplier purge. See supplier-recovery-items.md and migration 089. |
+| Customers | Existing dependency-protected hard deletion remains outside supported bin types. |
 | Products, HS tax reference rates, design attachments / shipment documents | Existing deletion behavior remains outside this bin. No generic restore of reference/attachment data is claimed. |
 | Expenses | Existing expense deletion is not integrated into this bin. Posted shipment accounting/balance history is not a purge target. |
 | User roles, visibility exceptions, item-set child replacement, assignment removal | Relationship/configuration edits, not independently recoverable business records. |

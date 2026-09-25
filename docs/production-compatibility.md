@@ -4,6 +4,23 @@ Scope: deployed runtime assumptions, MySQL 5.5 SQL paths, operational search/exp
 
 ## Runtime baseline
 
+### Production incident follow-up — 2026-09-24 (confirmed schema mismatch; recovery pending)
+
+Latest screenshots using explicit `TABLE_SCHEMA='clms'` confirm all eight migration-087 columns are missing, while all eight checked business tables exist and use InnoDB. This confirms code/schema incompatibility on the shared soft-delete query paths. It does not yet prove that every reported error has this single cause; the active PHP handler and post-repair behavior still require verification.
+
+Repair artifact: `docs/production-repair-087.sql`, derived from the canonical migration with every metadata lookup and DDL target explicitly pinned to `clms` (phpMyAdmin kept reporting `information_schema` despite USE). Additive and rerunnable; no triggers/SUPER/security relaxation. Back up first and pause writes during ALTER TABLE, which can lock tables on MySQL 5.5. Local disposable MariaDB test passed fresh application, rerun while connected to information_schema, eight added columns and preservation of existing records. No production execution or real MySQL 5.5 trial performed here. After execution, rerun the read-only check and reopen Orders, Consolidation, Assignment, Calendar and Recycle Bin.
+
+Follow-up screenshot of the initial SQL check reports `selected_database=information_schema`, eight missing columns and no matching business tables. Those schema results are **inconclusive for clms**, not proof of missing migration 087. The check now selects `clms` explicitly and pins metadata predicates to `TABLE_SCHEMA='clms'`. Rerun is required. The screenshot confirms MySQL `5.5.62-log` and that phpMyAdmin connection's mode `NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION`, charset `utf8mb4`, collation `utf8mb4_unicode_ci`; these session values do not establish the application's PDO connection settings.
+
+New staff screenshots show generic API failures on Orders, Consolidation, Assignment, Calendar and Recycle Bin. Order autocomplete still returns records; supplier deletion returns the intended linked-order restriction. This is not evidence of all database connectivity being lost or all failures being authorization failures.
+
+Deployment prerequisites and their current evidence:
+
+1. Current order-list container subqueries, container totals, shipment lists, calendar joins and bin queries all reference `shipment_drafts.deleted_at`; the bin also requires the procurement draft deletion columns. Migration `087_recycle_bin.sql` must be fully applied **before** using this feature deployment. Those columns are now confirmed missing in production. `088_calendar_range_indexes.sql` adds performance indexes; it does not substitute for 087.
+2. The supplied BT Panel screenshot lists MySQL 5.5.62, Nginx 1.15.10 and installed PHP 7.4.33, with PHP 8.2 showing Install. The active website PHP handler is still unverified. Current Composer requirement is PHP >=8.1; PHP 7.4 cannot parse some operational service classes (e.g. promoted properties in `ContainerCapacityException`) and cannot support all runtime functions. Local PHP 8.2 success does not verify the production handler.
+
+Remaining evidence: obtain the website-specific PHP selection or owner `GET /api/v1/diagnostics/runtime-compatibility`; retrieve the server error-log entry for `e402fa1d3a658eec` (Orders) if failures persist after schema repair. No authenticated production browser/connection is available in this session. No production database migration, runtime switch or code deployment has been performed here. Do not remove soft-delete predicates as a workaround because that could expose/process deleted cargo.
+
 | Component | Production evidence | Local verification / required production evidence |
 |---|---|---|
 | Database | User's production phpMyAdmin screenshot: `VERSION() = 5.5.62-log`, InnoDB file format `Antelope`, `innodb_large_prefix=OFF`. Treat 767 bytes as the index ceiling. | Local disposable QA: MariaDB 10.4.32. MySQL 5.5 is the compatibility target; local MariaDB success alone is insufficient. |

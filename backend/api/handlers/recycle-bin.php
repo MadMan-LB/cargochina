@@ -16,7 +16,9 @@ return function(string $method,?string $id,?string $action,array $input):void {
             foreach ($types as $kind) {
                 $table=RecycleBinService::table($kind);
                 $ref=$kind==='procurement_draft'?"CONCAT('PD-',r.id,' — ',r.name)":"CONCAT('Shipment draft #',r.id,COALESCE(CONCAT(' — ',r.booking_number),''))";
-                $parts[]="SELECT '$kind' record_type,r.id,$ref reference,r.status original_status,r.deleted_at,r.deleted_by,r.delete_reason,u.full_name deleted_by_name FROM $table r LEFT JOIN users u ON u.id=r.deleted_by WHERE r.deleted_at IS NOT NULL";
+                if($kind==='supplier')$ref="CONCAT(r.code,' — ',r.name)";
+                $status=$kind==='supplier'?"'Active'":'r.status';
+                $parts[]="SELECT '$kind' record_type,r.id,$ref reference,$status original_status,r.deleted_at,r.deleted_by,r.delete_reason,u.full_name deleted_by_name FROM $table r LEFT JOIN users u ON u.id=r.deleted_by WHERE r.deleted_at IS NOT NULL";
             }
             $where=['1=1'];$params=[];
             if ($q!=='') {$where[]='(reference LIKE ? OR delete_reason LIKE ?)';$like=clmsSearchLike($q);array_push($params,$like,$like);}
@@ -48,7 +50,7 @@ return function(string $method,?string $id,?string $action,array $input):void {
                 $r['version']=RecycleBinService::version($row);
                 $r['can_restore']=RecycleBinService::canAccess($r['record_type'],true);
                 $created=$row['created_at']??null;
-                $r['can_purge']=hasAnyRole(['SuperAdmin']) && is_string($created) && $created>'0000-00-00' && $created<date('Y-m-d H:i:s',strtotime('-10 years'));
+                $r['can_purge']=$r['record_type']!=='supplier' && hasAnyRole(['SuperAdmin']) && is_string($created) && $created>'0000-00-00' && $created<date('Y-m-d H:i:s',strtotime('-10 years'));
                 $visible[]=$r;
             }
             jsonResponse(['data'=>$visible,'meta'=>['total'=>$total,'limit'=>$limit,'offset'=>$offset,'deleted_users'=>$actors,'allowed_types'=>$allowedTypes]]);

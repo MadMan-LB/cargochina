@@ -9,8 +9,9 @@ if (($argv[1] ?? '') === '--worker') {
     session_start(); $request = json_decode($argv[2], true);
     $_SESSION = ['user_id'=>1, 'user_roles'=>['SuperAdmin']];
     if (!empty($request['reader'])) $_SESSION=['user_id'=>$request['reader'], 'user_roles'=>[]];
-    $handler = require dirname(__DIR__).'/backend/api/handlers/suppliers.php';
-    try { $handler($request['method'] ?? 'DELETE', (string)$request['id'], null, ['revision'=>$request['revision'] ?? '']); }
+    $_GET=$request['query']??[];
+    $handler = require dirname(__DIR__).'/backend/api/handlers/'.($request['resource']??'suppliers').'.php';
+    try { $handler($request['method'] ?? 'DELETE', isset($request['id'])?(string)$request['id']:null, $request['action']??null, ($request['body']??[])+['revision'=>$request['revision'] ?? '']); }
     catch (Throwable $e) { jsonError($e->getMessage(),500); }
     exit;
 }
@@ -30,6 +31,11 @@ function supplierFixture(PDO $pdo): int {
     $pdo->prepare('INSERT INTO suppliers(code,name) VALUES (?,?)')->execute(['DEL-'.bin2hex(random_bytes(5)),'Supplier deletion regression']); return (int)$pdo->lastInsertId();
 }
 function existsSupplier(PDO $pdo, int $id): bool { $s=$pdo->prepare('SELECT 1 FROM suppliers WHERE id=?');$s->execute([$id]);return (bool)$s->fetchColumn(); }
+function archivedSupplier(PDO $pdo,int $id):bool{return (bool)$pdo->query('SELECT deleted_at FROM suppliers WHERE id='.$id)->fetchColumn();}
+foreach(['087_recycle_bin.sql','089_supplier_recovery.sql','089_supplier_recovery.sql'] as $file){
+    $sql=preg_replace('/^\s*--.*$/m','',file_get_contents(dirname(__DIR__).'/backend/migrations/'.$file));
+    foreach(array_filter(array_map('trim',explode(';',$sql))) as $q){$s=$pdo->query($q);if($s){do{if($s->columnCount())$s->fetchAll();}while($s->nextRowset());$s->closeCursor();}}
+}
 $customer=(int)$pdo->query('SELECT id FROM customers ORDER BY id LIMIT 1')->fetchColumn();
 $pdo->prepare("INSERT INTO orders(customer_id,status,created_by) VALUES (?,'Draft',1)")->execute([$customer]);$order=(int)$pdo->lastInsertId();
 $pdo->exec("INSERT INTO order_templates(name) VALUES ('Supplier deletion regression')");$template=(int)$pdo->lastInsertId();
@@ -56,27 +62,36 @@ foreach ($fixtures as $table=>[$sql,$params]) {
     }
     $pdo->beginTransaction();verify(SupplierDeletionService::blockingReference(new LegacyNoJsonPDO($pdo),$id)!==null,"Legacy guard: $table");$pdo->rollBack();
     $result=callSupplier(['id'=>$id,'revision'=>CatalogRevisionService::revision($pdo,'suppliers',$id)]);
-    verify(!empty($result['error']) && str_contains($result['message'],'Cannot delete this supplier:'),"Readable conflict: $table");
+    verify(empty($result['error']) && archivedSupplier($pdo,$id),"Recoverable deletion with reference: $table");
     verify(existsSupplier($pdo,$id),"Supplier preserved: $table");
     $s=$pdo->prepare("SELECT supplier_id FROM `$table` WHERE id=?");$s->execute([$linkedId]);verify((int)$s->fetchColumn()===$id,"Link preserved: $table");
 }
 $id=supplierFixture($pdo);
 $pdo->prepare("INSERT INTO design_attachments(entity_type,entity_id,file_path) VALUES ('supplier',?,'uploads/deletion-regression.pdf')")->execute([$id]);
 $result=callSupplier(['id'=>$id,'revision'=>CatalogRevisionService::revision($pdo,'suppliers',$id)]);
-verify(!empty($result['error'])&&str_contains($result['message'],'supplier attachments')&&existsSupplier($pdo,$id),'Supplier attachments protected');
+verify(empty($result['error'])&&archivedSupplier($pdo,$id)&&existsSupplier($pdo,$id),'Supplier attachments preserved during archive');
 $id=supplierFixture($pdo);
 $pdo->prepare("INSERT INTO order_items(order_id,quantity,unit,declared_cbm,declared_weight,shared_carton_contents) VALUES (?,1,'pieces',1,10,?)")->execute([$order,json_encode([['supplier_id'=>(string)$id,'description_en'=>'Bamboo tray']])]);
 $result=callSupplier(['id'=>$id,'revision'=>CatalogRevisionService::revision($pdo,'suppliers',$id)]);
-verify(!empty($result['error'])&&str_contains($result['message'],'shared-carton'),'Shared-only supplier protected');
+verify(empty($result['error'])&&archivedSupplier($pdo,$id),'Shared-only supplier archived without breaking items');
 $id=supplierFixture($pdo);$revision=CatalogRevisionService::revision($pdo,'suppliers',$id);
 $result=callSupplier(['id'=>$id,'revision'=>'stale']);verify(!empty($result['error'])&&existsSupplier($pdo,$id),'Stale deletion rejected');
 $pdo->prepare("INSERT INTO users(email,password_hash,full_name,is_active) VALUES (?,'unusable','Read-only regression',1)")->execute(['delete-'.bin2hex(random_bytes(5)).'@example.invalid']);$reader=(int)$pdo->lastInsertId();
 $result=callSupplier(['id'=>$id,'revision'=>$revision,'reader'=>$reader]);verify(!empty($result['error'])&&existsSupplier($pdo,$id),'Unauthorized deletion rejected');
-$pdo->exec("CREATE TRIGGER qa_supplier_delete_audit BEFORE INSERT ON audit_log FOR EACH ROW BEGIN IF NEW.entity_type='supplier' AND NEW.action='delete' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='Injected audit failure'; END IF; END");
-try { $result=callSupplier(['id'=>$id,'revision'=>$revision]);verify(!empty($result['error'])&&existsSupplier($pdo,$id),'Audit failure rolls back deletion'); }
+$pdo->exec("CREATE TRIGGER qa_supplier_delete_audit BEFORE INSERT ON audit_log FOR EACH ROW BEGIN IF NEW.entity_type='supplier' AND NEW.action='deleted' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='Injected audit failure'; END IF; END");
+try { $result=callSupplier(['id'=>$id,'revision'=>$revision]);verify(!empty($result['error'])&&!archivedSupplier($pdo,$id),'Audit failure rolls back deletion'); }
 finally { $pdo->exec('DROP TRIGGER qa_supplier_delete_audit'); }
 $request=['id'=>$id,'revision'=>$revision];$a=workerStart($request);$b=workerStart($request);$results=[workerFinish($a),workerFinish($b)];
-verify(count(array_filter($results,fn($r)=>empty($r['error'])))===1&&!existsSupplier($pdo,$id),'Concurrent delete commits once');
-$s=$pdo->prepare("SELECT COUNT(*) FROM audit_log WHERE entity_type='supplier' AND entity_id=? AND action='delete'");$s->execute([$id]);verify((int)$s->fetchColumn()===1,'One deletion audit event');
-verify(!empty(callSupplier(['method'=>'GET','id'=>$id])['error']),'Reopen confirms deletion');
+verify(count(array_filter($results,fn($r)=>empty($r['error'])))===1&&archivedSupplier($pdo,$id),'New unused supplier: concurrent delete commits once');
+$s=$pdo->prepare("SELECT COUNT(*) FROM audit_log WHERE entity_type='supplier' AND entity_id=? AND action='deleted'");$s->execute([$id]);verify((int)$s->fetchColumn()===1,'One deletion audit event');
+verify(!empty(callSupplier(['method'=>'GET','id'=>$id])['data']['deleted_at']),'Authorized historical detail identifies deletion');
+$list=callSupplier(['method'=>'GET','query'=>['q'=>'Supplier deletion regression']]);verify(!in_array($id,array_column($list['data'],'id')),'Deleted supplier excluded from active list and count');
+$code=$pdo->query('SELECT code FROM suppliers WHERE id='.$id)->fetchColumn();
+verify(callSupplier(['method'=>'GET','id'=>'search','query'=>['q'=>$code]])['data']===[],'Deleted supplier absent from autocomplete');
+$bin=callSupplier(['resource'=>'recycle-bin','method'=>'GET','query'=>['type'=>'supplier','q'=>$code]]);verify(count($bin['data'])===1&&!$bin['data'][0]['can_purge'],'Deleted supplier in recovery; purge not offered');
+$restore=['resource'=>'recycle-bin','method'=>'POST','id'=>$id,'action'=>'restore','body'=>['type'=>'supplier','version'=>$bin['data'][0]['version']]];
+verify(!empty(callSupplier($restore+['reader'=>$reader])['error']),'Unauthorized recovery rejected');
+verify(!empty(callSupplier(array_replace($restore,['action'=>'purge']))['error']),'Supplier permanent deletion rejected even for administrator');
+verify(empty(callSupplier($restore)['error'])&&!archivedSupplier($pdo,$id),'Supplier restored with original identity');
+verify(!empty(callSupplier(['id'=>$id,'revision'=>$revision])['error']),'Stale delete cannot delete restored supplier');
 echo "PASS: $count supplier deletion checks (disposable schema)\n";

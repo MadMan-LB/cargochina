@@ -91,7 +91,7 @@ async function loadSuppliers() {
                             .map(([k, v]) => `${k}: ${v}`)
                             .join("; ") || "-";
                     const nameEsc = escapeHtml(r.name).replace(/'/g, "\\'");
-                    let actions = `<button class="btn btn-sm btn-outline-secondary" onclick="openVisitModal(${r.id}, '${nameEsc}')">Log visit</button>`;
+                    let actions = `<button class="btn btn-sm btn-outline-info" onclick="openSupplierItems(${r.id})">Items &amp; Orders</button> <button class="btn btn-sm btn-outline-secondary" onclick="openVisitModal(${r.id}, '${nameEsc}')">Log visit</button>`;
                     if (buyer) {
                         actions += ` <button class="btn btn-sm btn-outline-primary" onclick="editSupplier(${r.id})">Edit</button>
           <a class="btn btn-sm btn-outline-dark" href="/cargochina/procurement_drafts.php?supplier_id=${r.id}">Draft Order</a>
@@ -1043,9 +1043,9 @@ async function deleteSupplier(id, name) {
     supplierDeletesInFlight.add(String(id));
     try {
         const current=(await api("GET", "/suppliers/"+id)).data;
-        if (!confirm('Delete supplier "' + name + '"? Suppliers linked to business records cannot be deleted.')) return;
+        if (!confirm('Move supplier "' + name + '" to the Recycle Bin? Existing orders, items and payment history will be preserved. Restore the supplier before selecting it for new or edited items.')) return;
         await api("DELETE", "/suppliers/" + id, {revision:current.revision});
-        showToast("Supplier deleted");
+        showToast("Supplier moved to Recycle Bin; linked records preserved");
         loadSuppliers(false);
     } catch (e) {
         showToast(e.message, "danger");

@@ -5,7 +5,7 @@ requireRoleForPage(['ChinaAdmin','LebanonAdmin','SuperAdmin']);
 $currentPage='recycle_bin';$pageTitle='Recycle Bin';require 'includes/layout.php';
 ?>
 <h1 class="mb-3">Recycle Bin</h1>
-<p class="text-muted">Recover deleted procurement and shipment drafts. Restored shipment drafts are empty and unassigned; load eligible orders again through the normal workflow. Business retention and legal holds still apply.</p>
+<p class="text-muted">Recover deleted suppliers, procurement and shipment drafts. Supplier history is preserved. Restored shipment drafts are empty and unassigned; load eligible orders again through the normal workflow. Business retention and legal holds still apply.</p>
 <form id="recycleFilters" class="card card-body mb-3">
  <div class="row g-2">
   <div class="col-md-3"><label for="recycleSearch" class="form-label">Reference / reason</label><input id="recycleSearch" name="q" maxlength="150" class="form-control" type="search"></div>

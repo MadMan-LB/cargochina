@@ -32,3 +32,6 @@ The shared JS API helper declared JSON but omitted the body when no fields were 
 5. `frontend/js/suppliers.js`
 
 No SQL migration. Reload open pages after deploying. Verify an unused disposable supplier can be deleted, an in-use supplier shows its clear conflict, and an editable disposable shipment draft deletes and returns its orders to the correct eligible state. Never delete real business records just to test deployment.
+# Supplier behavior update — 2026-09-24
+
+The supplier hard-delete behavior described below is superseded by recoverable supplier deletion. Linked suppliers now move to the Recycle Bin while cargo and accounting history stay intact. See [supplier-recovery-items.md](supplier-recovery-items.md) for migration 089, the exact deployment list and current verification. Shipment behavior below is unchanged.

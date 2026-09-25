@@ -140,7 +140,7 @@ function clmsSidebarPageRegistry(): array
         ],
         'recycle_bin' => [
             'title' => 'Recycle Bin',
-            'description' => 'Recover deleted drafts; retention-protected permanent deletion.',
+            'description' => 'Recover deleted suppliers and drafts; preserve business history.',
             'href' => '/cargochina/recycle_bin.php',
             'section' => 'main',
             'icon_svg' => '<svg class="sidebar-icon" viewBox="0 0 24 24"><path d="M6 7h12l-1 14H7L6 7zm2-4h8v2h5v2H3V5h5V3z" /></svg>',

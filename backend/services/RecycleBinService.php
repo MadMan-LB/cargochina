@@ -1,11 +1,12 @@
 <?php
 require_once __DIR__.'/AuditService.php';
 require_once __DIR__.'/RetentionPolicyService.php';
+require_once __DIR__.'/SupplierLifecycleService.php';
 
-/** Only reversible, non-finalized draft headers. Cargo memberships are never resurrected. */
+/** Reversible draft headers and supplier identities. Cargo memberships are never resurrected. */
 final class RecycleBinService
 {
-    public const TYPES = ['procurement_draft'=>'procurement_drafts', 'shipment_draft'=>'shipment_drafts'];
+    public const TYPES = ['procurement_draft'=>'procurement_drafts', 'shipment_draft'=>'shipment_drafts', 'supplier'=>'suppliers'];
 
     public static function table(string $type): string
     {
@@ -16,6 +17,8 @@ final class RecycleBinService
     public static function canAccess(string $type, bool $write=false): bool
     {
         self::table($type);
+        if($type==='supplier')return SupplierLifecycleService::ready(getDb()) && hasPageAccess('recycle_bin') && hasPermission('suppliers.manage.read')
+            && (!$write || (hasPermission('recycle-bin.restore',['SuperAdmin']) && hasPermission('suppliers.write')));
         return hasPageAccess('recycle_bin')
             && hasPermission($type==='shipment_draft'?'shipment-drafts.read':'page:procurement_drafts')
             && (!$write || (hasPermission('recycle-bin.restore',['SuperAdmin'])
@@ -53,6 +56,7 @@ final class RecycleBinService
 
     public static function reference(string $type,array $row): string
     {
+        if($type==='supplier')return $row['code'].' — '.$row['name'];
         return $type==='procurement_draft' ? 'PD-'.$row['id'].' — '.$row['name'] : 'Shipment draft #'.$row['id'].(!empty($row['booking_number'])?' — '.$row['booking_number']:'');
     }
 
@@ -65,6 +69,7 @@ final class RecycleBinService
     public static function purge(PDO $pdo,string $type,int $id,int $actor,string $version,string $confirmation): void
     {
         self::authorize($type,true);
+        if($type==='supplier')throw new DomainException('Suppliers are recoverable only; permanent deletion is disabled to preserve business history',409);
         if (!hasAnyRole(['SuperAdmin'])) throw new DomainException('Permanent deletion requires SuperAdmin',403);
         if ($confirmation!=="DELETE $type $id") throw new DomainException('Type the exact permanent-deletion confirmation',422);
         requireRecentAuthentication();
@@ -79,10 +84,10 @@ final class RecycleBinService
             $s=$pdo->prepare("SELECT * FROM $table WHERE id=? FOR UPDATE");$s->execute([$id]);$row=$s->fetch(PDO::FETCH_ASSOC);
             if (!$row || !$row['deleted_at']) throw new DomainException('Record is no longer in the Recycle Bin; refresh the list',409);
             if (!hash_equals(self::version($row),$version)) throw new DomainException('Record changed; refresh before restoring',409);
-            if (!in_array($row['status'],$type==='shipment_draft'?['draft']:['draft','cancelled'],true) || !empty($row['converted_order_id'])) throw new DomainException('Record is no longer a recoverable draft',409);
+            if ($type!=='supplier' && (!in_array($row['status'],$type==='shipment_draft'?['draft']:['draft','cancelled'],true) || !empty($row['converted_order_id']))) throw new DomainException('Record is no longer a recoverable draft',409);
             if ($type==='procurement_draft' && !empty($row['supplier_id'])) {
-                $s=$pdo->prepare('SELECT id FROM suppliers WHERE id=? FOR UPDATE');$s->execute([$row['supplier_id']]);
-                if (!$s->fetchColumn()) throw new DomainException('Original supplier is missing; reconcile the draft before recovery',409);
+                $s=$pdo->prepare('SELECT id FROM suppliers WHERE id=? AND '.SupplierLifecycleService::activeSql($pdo).' FOR UPDATE');$s->execute([$row['supplier_id']]);
+                if (!$s->fetchColumn()) throw new DomainException('Original supplier is missing or deleted; restore the supplier before recovering this draft',409);
             }
             if ($type==='shipment_draft') {
                 $s=$pdo->prepare('SELECT 1 FROM shipment_draft_orders WHERE shipment_draft_id=? LIMIT 1 FOR UPDATE');$s->execute([$id]);

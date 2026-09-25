@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__.'/SupplierLifecycleService.php';
 require_once __DIR__ . '/ReceivingQuantityService.php';
 
 /** Canonical validation shared by standard orders, draft builders and conversion. */
@@ -73,11 +74,14 @@ final class OrderWriteService
             $item['quantity']=$quantity;
             $item['unit']=ReceivingQuantityService::quantityUnit($item);
             $supplier=(int)($item['supplier_id']??$defaultSupplier);
-            if ($supplier>0) { $s=$pdo->prepare('SELECT id FROM suppliers WHERE id=?');$s->execute([$supplier]);if(!$s->fetchColumn())jsonError('Item supplier not found',422); }
+            SupplierLifecycleService::requireActive($pdo,$supplier);
+            $contents=$item['shared_carton_contents']??[];if(is_string($contents))$contents=json_decode($contents,true)??[];
+            foreach(is_array($contents)?$contents:[] as $content)if(is_array($content))SupplierLifecycleService::requireActive($pdo,(int)($content['supplier_id']??0));
             $product=[];
             if (!empty($item['product_id'])) {
                 $s=$pdo->prepare('SELECT supplier_id,description_cn,description_en,dimensions_scope FROM products WHERE id=?');$s->execute([$item['product_id']]);$product=$s->fetch(PDO::FETCH_ASSOC);
                 if (!$product) jsonError('Item product not found',422);
+                SupplierLifecycleService::requireActive($pdo,(int)($product['supplier_id']??0));
                 if ($supplier && !empty($product['supplier_id']) && (int)$product['supplier_id']!==$supplier) jsonError('Selected product belongs to another supplier',422);
                 if (empty($item['description_cn']) && empty($item['description_en'])) { $item['description_cn']=$product['description_cn'];$item['description_en']=$product['description_en']; }
             }

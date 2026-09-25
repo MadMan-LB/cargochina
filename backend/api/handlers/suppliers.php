@@ -8,7 +8,8 @@ require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__,2).'/services/AuditService.php';
 require_once dirname(__DIR__,2).'/services/CatalogRevisionService.php';
 require_once dirname(__DIR__,2).'/services/SupplierWriteService.php';
-require_once dirname(__DIR__,2).'/services/SupplierDeletionService.php';
+require_once dirname(__DIR__,2).'/services/SupplierLifecycleService.php';
+require_once dirname(__DIR__,2).'/services/SupplierItemsService.php';
 require_once dirname(__DIR__,2).'/services/MasterDataImportService.php';
 
 function supplierTableHasColumn(PDO $pdo, string $table, string $column): bool
@@ -520,11 +521,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 // Operational selectors intentionally exclude payment accounts,
                 // notes, commissions, addresses, and interaction history.
                 $stmt = $pdo->prepare("SELECT id, code, name, phone, store_id FROM suppliers
-                    WHERE " . clmsUtf8SearchExpr('name') . " LIKE ?
+                    WHERE ".SupplierLifecycleService::activeSql($pdo)." AND (" . clmsUtf8SearchExpr('name') . " LIKE ?
                        OR " . clmsUtf8SearchExpr('code') . " LIKE ?
                        OR (phone IS NOT NULL AND " . clmsUtf8SearchExpr('phone') . " LIKE ?)
                        OR (store_id IS NOT NULL AND " . clmsUtf8SearchExpr('store_id') . " LIKE ?)
-                    ORDER BY name LIMIT 15");
+                    ) ORDER BY name LIMIT 15");
                 $stmt->execute([$like, $like, $like, $like]);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 jsonResponse(['data' => $rows]);
@@ -541,7 +542,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $sort = clmsQuerySort($_GET['sort'] ?? null, $sortOptions, 'name');
                 $order = clmsQueryDirection($_GET['order'] ?? null, 'ASC');
 
-                $where = [];
+                $where = [SupplierLifecycleService::activeSql($pdo,'s')];
                 $params = [];
                 if (strlen($q) >= 1) {
                     $like = clmsSearchLike($q);
@@ -585,6 +586,11 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                     }
                 }
                 jsonResponse(['data' => $rows, 'meta' => ['limit' => $limit, 'offset' => $offset, 'has_more' => $hasMore, 'total' => $total]]);
+            }
+            if($action==='items-orders'){
+                requirePermission('suppliers.manage.read');
+                $s=$pdo->prepare('SELECT id,code,name FROM suppliers WHERE id=?');$s->execute([$id]);$supplier=$s->fetch(PDO::FETCH_ASSOC);if(!$supplier)jsonError('Supplier not found',404);
+                $result=SupplierItemsService::listing($pdo,(int)$id,$_GET);$result['meta']['supplier']=$supplier;jsonResponse($result);
             }
             $revisionReadOwned = !$pdo->inTransaction();
             if ($revisionReadOwned) AuditService::begin($pdo);
@@ -643,7 +649,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if ($id === 'import') {
                 $result=MasterDataImportService::run($pdo,'supplier',$input,['name'],['code','name','store_id','phone','factory_location','address','notes'],function(array $row)use($pdo):?int{
                     $row=SupplierWriteService::normalize($row);
-                    if(!empty($row['code'])){$s=$pdo->prepare('SELECT id FROM suppliers WHERE code=?');$s->execute([$row['code']]);if($s->fetchColumn())return null;}
+                    if(!empty($row['code'])){$s=$pdo->prepare('SELECT id FROM suppliers WHERE code=?');$s->execute([$row['code']]);if($existing=$s->fetchColumn()){SupplierLifecycleService::requireActive($pdo,(int)$existing);return null;}}
                     ensureSupplierDuplicateSafety($pdo,$row['name'],$row['store_id']??null,$row['phone']??null);
                     $fields=['code','name','store_id','phone','factory_location','address','notes'];$row['code']=$row['code']??generateSupplierCode($pdo,$row['name']);$values=[];foreach($fields as $field)$values[]=$row[$field]??null;
                     $pdo->prepare('INSERT INTO suppliers('.implode(',',$fields).') VALUES (?,?,?,?,?,?,?)')->execute($values);return (int)$pdo->lastInsertId();
@@ -789,6 +795,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 jsonError('ID required', 400);
             }
             AuditService::begin($pdo);
+            SupplierLifecycleService::requireActive($pdo,(int)$id);
             $auditBefore=AuditService::snapshot($pdo,'suppliers',(int)$id,true);
             CatalogRevisionService::assertCurrent($pdo,'suppliers',(int)$id,$input);
             $stmt = $pdo->prepare("SELECT id, code FROM suppliers WHERE id = ?");
@@ -867,27 +874,14 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $auditBefore=AuditService::snapshot($pdo,'suppliers',(int)$id,true);
             CatalogRevisionService::assertCurrent($pdo,'suppliers',(int)$id,$input);
             try {
-                $reference = SupplierDeletionService::blockingReference($pdo, (int)$id);
-                if ($reference !== null) {
-                    $pdo->rollBack();
-                    jsonError('Cannot delete this supplier: it is linked to ' . $reference . '. Keep the supplier to preserve these records.', 409);
-                }
-                $stmt = $pdo->prepare("DELETE FROM suppliers WHERE id = ?");
-                $stmt->execute([$id]);
-                if ($stmt->rowCount() === 0) {
-                    $pdo->rollBack();
-                    jsonError('Supplier not found', 404);
-                }
-                AuditService::record($pdo,'supplier',(int)$id,'delete',$auditBefore,null,getAuthUserId());
+                if(isset($input['delete_reason'])&&!is_string($input['delete_reason']))jsonError('Deletion reason must be text',422);
+                SupplierLifecycleService::archive($pdo,(int)$id,(int)getAuthUserId(),$input['delete_reason']??null);
                 $pdo->commit();
             } catch (Throwable $e) {
                 if ($pdo->inTransaction()) $pdo->rollBack();
-                if ($e instanceof PDOException && (int)($e->errorInfo[1] ?? 0) === 1451) {
-                    jsonError('Cannot delete this supplier: it is linked to related business records. Keep the supplier to preserve these records.', 409);
-                }
                 throw $e;
             }
-            jsonResponse(['message' => 'Deleted']);
+            jsonResponse(['message' => 'Supplier moved to Recycle Bin. Linked records are preserved.']);
 
         default:
             jsonError('Method not allowed', 405);

@@ -20,12 +20,12 @@ function procurementDraftRevision(PDO $pdo,int $id): string
 function procurementValidateItems(PDO $pdo,$items,?int $supplierId): array
 {
     if(!is_array($items)||!$items||count($items)>500)jsonError('Provide between 1 and 500 procurement items',422);
-    if($supplierId){$s=$pdo->prepare('SELECT id FROM suppliers WHERE id=?');$s->execute([$supplierId]);if(!$s->fetchColumn())jsonError('Supplier not found',422);}
+    SupplierLifecycleService::requireActive($pdo,(int)$supplierId);
     foreach($items as &$item){
         if(!is_array($item))jsonError('Procurement item must be an object',422);
         OrderWriteService::validateRawNumbers($item);
         $item['quantity']=OrderWriteService::number($item['quantity']??null,'Quantity');if(!$item['quantity'])jsonError('Procurement quantity must be positive',422);
-        if(!empty($item['product_id'])){$s=$pdo->prepare('SELECT supplier_id FROM products WHERE id=?');$s->execute([$item['product_id']]);$product=$s->fetch(PDO::FETCH_ASSOC);if(!$product)jsonError('Product not found',422);if($supplierId&&!empty($product['supplier_id'])&&(int)$product['supplier_id']!==$supplierId)jsonError('Product belongs to another supplier',422);}
+        if(!empty($item['product_id'])){$s=$pdo->prepare('SELECT supplier_id FROM products WHERE id=?');$s->execute([$item['product_id']]);$product=$s->fetch(PDO::FETCH_ASSOC);if(!$product)jsonError('Product not found',422);SupplierLifecycleService::requireActive($pdo,(int)$product['supplier_id']);if($supplierId&&!empty($product['supplier_id'])&&(int)$product['supplier_id']!==$supplierId)jsonError('Product belongs to another supplier',422);}
         elseif(trim((string)($item['notes']??''))==='')jsonError('Procurement item needs a product or description',422);
     }
     unset($item);return $items;

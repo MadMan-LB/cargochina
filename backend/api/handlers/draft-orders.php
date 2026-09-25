@@ -1040,7 +1040,7 @@ function draftOrderFlattenSections(PDO $pdo, array $sections): array
     foreach ($sections as $section) {
         if(!is_array($section)||!is_array($section['items']??null))jsonError('Supplier sections require an items array',422);
         $supplierId = (int) ($section['supplier_id'] ?? 0);
-        $supplierCheck=$pdo->prepare('SELECT id FROM suppliers WHERE id=?');$supplierCheck->execute([$supplierId]);if(!$supplierCheck->fetchColumn())jsonError('Supplier section not found',422);
+        SupplierLifecycleService::requireActive($pdo,$supplierId);
         if ($supplierId <= 0) {
             jsonError('Each supplier section needs a supplier.', 400, ['supplier_sections.supplier_id' => 'Supplier is required.']);
         }
@@ -1056,7 +1056,10 @@ function draftOrderFlattenSections(PDO $pdo, array $sections): array
                     jsonError('Selected product not found.', 404);
                 }
             }
-            $normalized[] = draftOrderNormalizeItem($pdo, $rawItem, $supplierId, $product);
+            SupplierLifecycleService::requireActive($pdo,(int)($product['supplier_id']??0));
+            $normalizedItem=draftOrderNormalizeItem($pdo, $rawItem, $supplierId, $product);
+            foreach($normalizedItem['shared_carton_contents']??[] as $content)SupplierLifecycleService::requireActive($pdo,(int)($content['supplier_id']??0));
+            $normalized[] = $normalizedItem;
         }
     }
 
@@ -3625,7 +3628,7 @@ function draftOrderImportResolveSupplier(PDO $pdo, string $value): array
         $columns[] = 'store_id';
     }
     $conditions = implode(' OR ', array_map(static fn(string $col): string => "`$col` = ?", $columns));
-    $stmt = $pdo->prepare("SELECT id, name FROM suppliers WHERE $conditions ORDER BY id LIMIT 1");
+    $stmt = $pdo->prepare("SELECT id, name FROM suppliers WHERE ($conditions) AND ".SupplierLifecycleService::activeSql($pdo)." ORDER BY id LIMIT 1");
     $stmt->execute(array_fill(0, count($columns), $value));
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($row) {
@@ -3646,7 +3649,7 @@ function draftOrderImportResolveSupplierFromFields(PDO $pdo, string $name = '', 
     $id = trim($id);
     if ($id !== '' && ctype_digit($id)) {
         try {
-            $stmt = $pdo->prepare("SELECT id, name FROM suppliers WHERE id = ? LIMIT 1");
+            $stmt = $pdo->prepare("SELECT id, name FROM suppliers WHERE id = ? AND ".SupplierLifecycleService::activeSql($pdo)." LIMIT 1");
             $stmt->execute([(int) $id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if ($row) {

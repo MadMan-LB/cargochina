@@ -17,7 +17,7 @@ final class ProductWriteService
         if(max($dims)>0){if(min($dims)<=0)jsonError('Provide all three positive dimensions',422);$input['cbm']=OrderWriteService::number(array_product($dims)/1000000,'Calculated CBM',false,6,999999.999999);}
         if(($input['cbm']??0)<=0)jsonError('Provide positive CBM or all three dimensions',422);
         if(isset($input['pieces_per_carton'])&&$input['pieces_per_carton']<=0)jsonError('Pieces per carton must be positive',422);
-        if(!empty($input['supplier_id'])){$s=$pdo->prepare('SELECT id FROM suppliers WHERE id=?');$s->execute([$input['supplier_id']]);if(!$s->fetchColumn())jsonError('Product supplier not found',422);}
+        SupplierLifecycleService::requireActive($pdo,(int)($input['supplier_id']??0));
         if(isset($input['dimensions_scope'])&&!in_array($input['dimensions_scope'],['piece','carton'],true))jsonError('Invalid dimensions scope',422);
         foreach(['force_create','item_type_confirmed','required_design'] as $field)if(isset($input[$field])&&!in_array($input[$field],[true,false,0,1,'0','1'],true))jsonError("$field must be a boolean",422);
         if(isset($input['image_paths'])){if(!is_array($input['image_paths'])||count($input['image_paths'])>30)jsonError('Invalid product images',422);$input['image_paths']=normalizeStoredUploadPathList($input['image_paths']);}

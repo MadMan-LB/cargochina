@@ -8,6 +8,20 @@ require 'includes/layout.php';
 $isBuyer = clmsUserCan('suppliers.write');
 ?>
 <h1 class="mb-4">Suppliers</h1>
+<div class="modal fade" id="supplierItemsModal" tabindex="-1" aria-labelledby="supplierItemsTitle" aria-hidden="true">
+ <div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content">
+  <div class="modal-header"><h2 class="modal-title fs-5" id="supplierItemsTitle">Supplier — Items &amp; Orders</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+  <div class="modal-body">
+   <form id="supplierItemsFilters" class="d-flex gap-2 mb-3" onsubmit="event.preventDefault(); loadSupplierItems(0)">
+    <select class="form-select w-auto" id="supplierItemsKind" aria-label="Item source" onchange="loadSupplierItems(0)"><option value="orders">Items in orders</option><option value="products">Product catalog</option></select>
+    <input class="form-control" id="supplierItemsSearch" type="search" maxlength="150" placeholder="Description, item number, customer or order ID" aria-label="Search supplier items">
+    <button class="btn btn-primary" type="submit">Search</button>
+   </form>
+   <p class="small text-muted">Order items include direct, order-level and shared-carton supplier links. Shared-carton quantities below describe the full carton row; matching contents are listed separately. Existing order history remains available after supplier deletion.</p>
+   <div class="table-responsive" id="supplierItemsResults" aria-live="polite"></div>
+  </div><div class="modal-footer"><span class="me-auto" id="supplierItemsCount"></span><button class="btn btn-outline-secondary" id="supplierItemsPrev" onclick="loadSupplierItems(supplierItemsOffset-25)">Previous</button><button class="btn btn-outline-secondary" id="supplierItemsNext" onclick="loadSupplierItems(supplierItemsOffset+25)">Next</button><button class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
+ </div></div>
+</div>
 <div class="card mb-3">
   <div class="card-body py-3">
     <div class="row g-2 align-items-end flex-wrap">
@@ -280,6 +294,7 @@ $isBuyer = clmsUserCan('suppliers.write');
 <?php
 $baseAssetPath = $basePath ?? '/cargochina';
 $pageScripts = [
+    $baseAssetPath . '/frontend/js/supplier-items.js?v=' . filemtime(__DIR__ . '/frontend/js/supplier-items.js'),
 ];
 $jsQrPath = __DIR__ . '/frontend/js/lib/jsQR.js';
 if (is_file($jsQrPath)) {

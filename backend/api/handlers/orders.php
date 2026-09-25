@@ -404,7 +404,7 @@ function supplierExists(PDO $pdo, int $supplierId): bool
     }
 
     try {
-        $stmt = $pdo->prepare("SELECT 1 FROM suppliers WHERE id = ? LIMIT 1");
+        $stmt = $pdo->prepare("SELECT 1 FROM suppliers WHERE id = ? AND ".SupplierLifecycleService::activeSql($pdo)." LIMIT 1");
         $stmt->execute([$supplierId]);
         $cache[$supplierId] = (bool) $stmt->fetchColumn();
     } catch (Throwable $e) {

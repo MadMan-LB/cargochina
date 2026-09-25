@@ -130,6 +130,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 if (productHasColumn($pdo, 'required_design')) $searchCols .= ", p.required_design";
                 $params = [];
                 $where = buildProductSearchSql($q, $params, 'p', 's');
+                $where .= ' AND (p.supplier_id IS NULL OR (s.id IS NOT NULL AND '.SupplierLifecycleService::activeSql($pdo,'s').'))';
                 if ($supplierId) {
                     $where .= " AND p.supplier_id = ?";
                     $params[] = $supplierId;
