@@ -79,8 +79,19 @@ class ItemClassificationService
 
     public function get(string $entityType, int $entityId): ?array
     {
-        $stmt = $this->pdo->prepare('SELECT ic.*, it.label_en, it.label_zh FROM item_classifications ic JOIN item_types it ON it.code=ic.item_type_code WHERE ic.entity_type=? AND ic.entity_id=?');
-        $stmt->execute([$entityType, $entityId]);
-        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        return $this->getMany($entityType, [$entityId])[$entityId] ?? null;
+    }
+
+    /** Request-local result, never retained across saves or permission changes. */
+    public function getMany(string $entityType, array $entityIds): array
+    {
+        $result = [];
+        foreach (array_chunk(array_values(array_unique(array_map('intval', $entityIds))), 200) as $ids) {
+            $marks = implode(',', array_fill(0, count($ids), '?'));
+            $stmt = $this->pdo->prepare("SELECT ic.*, it.label_en, it.label_zh FROM item_classifications ic JOIN item_types it ON it.code=ic.item_type_code WHERE ic.entity_type=? AND ic.entity_id IN ($marks)");
+            $stmt->execute(array_merge([$entityType], $ids));
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $result[(int)$row['entity_id']] = $row;
+        }
+        return $result;
     }
 }

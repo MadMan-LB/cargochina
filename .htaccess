@@ -28,26 +28,8 @@ RewriteRule ^backend/uploads/.*\.(?:php|phtml|phar|cgi|pl|asp|aspx|jsp)$ - [F,L,
 RewriteRule ^backend/uploads/(.+)$ backend/media.php?path=uploads/$1 [QSA,L]
 RewriteRule ^tmp_.*\.php$ - [F,L,NC]
 
-<IfModule mod_expires.c>
-    ExpiresActive On
-    ExpiresByType text/css "access plus 1 month"
-    ExpiresByType application/javascript "access plus 1 month"
-    ExpiresByType text/javascript "access plus 1 month"
-    ExpiresByType application/json "access plus 5 minutes"
-    ExpiresByType image/jpeg "access plus 1 month"
-    ExpiresByType image/png "access plus 1 month"
-    ExpiresByType image/webp "access plus 1 month"
-    ExpiresByType image/gif "access plus 1 month"
-    ExpiresByType image/svg+xml "access plus 1 month"
-    ExpiresByType font/woff2 "access plus 1 year"
-    ExpiresByType application/font-woff2 "access plus 1 year"
-</IfModule>
-
-<IfModule mod_headers.c>
-    <FilesMatch "\.(css|js|png|jpg|jpeg|gif|webp|svg|woff2)$">
-        Header set Cache-Control "public, max-age=2592000, immutable"
-    </FilesMatch>
-</IfModule>
+# Cache policy is scoped to public frontend assets in frontend/.htaccess.
+# Authenticated pages, API responses and media must never inherit a public TTL.
 
 <IfModule mod_deflate.c>
     AddOutputFilterByType DEFLATE text/plain

@@ -331,7 +331,7 @@ function clmsRequestKey(prefix='operation') {
 async function loadShipmentEligibleOrders() {
     const records=new Map();let offset=0;
     while(true){
-        const response=await fetch((window.API_BASE||'/cargochina/api/v1')+'/orders?shipment_eligible=1&limit=100&offset='+offset,{credentials:'same-origin'});
+        const response=await fetch((window.API_BASE||'/cargochina/api/v1')+'/orders?shipment_eligible=1&limit=100&offset='+offset,{credentials:'same-origin', cache:'no-store'});
         const payload=await response.json();
         if(!response.ok || payload.error)throw new Error(payload.message||'Could not load eligible orders');
         for(const order of payload.data||[])records.set(Number(order.id),order);
@@ -372,7 +372,7 @@ async function loadAssignmentContainers() {
     const records = new Map();
     let offset = 0;
     while (true) {
-        const response = await fetch((window.API_BASE || '/cargochina/api/v1') + '/containers?limit=200&offset=' + offset, { credentials: 'same-origin' });
+        const response = await fetch((window.API_BASE || '/cargochina/api/v1') + '/containers?limit=200&offset=' + offset, { credentials: 'same-origin', cache: 'no-store' });
         const payload = await response.json();
         if (!response.ok || payload.error) throw new Error(payload.message || 'Could not load containers');
         for (const container of payload.data || []) records.set(Number(container.id), container);
@@ -621,31 +621,15 @@ if (typeof window !== "undefined") {
 
 const UPLOAD_BASE = "/cargochina/api/v1/upload";
 
-/** Only non-operational reference labels are cached. */
-const _apiCache = { data: {}, ts: {} };
-const _cachePaths = ["/departments", "/roles"];
-const _cacheTtlMs = 60000;
 const _failedApiRequests = new Map();
 
 async function api(method, path, body = null) {
     const cacheKey = method + " " + path;
-    if (
-        method === "GET" &&
-        _cachePaths.some((p) => path === p || path.startsWith(p + "?"))
-    ) {
-        const now = Date.now();
-        if (
-            _apiCache.data[cacheKey] &&
-            _apiCache.ts[cacheKey] &&
-            now - _apiCache.ts[cacheKey] < _cacheTtlMs
-        ) {
-            return _apiCache.data[cacheKey];
-        }
-    }
     const opts = {
         method,
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
+        cache: "no-store",
     };
     const debugTiming =
         // A repeat of the same action can be correlated without retaining its payload.
@@ -705,13 +689,6 @@ async function api(method, path, body = null) {
         throw apiError;
     }
     _failedApiRequests.delete(cacheKey);
-    if (
-        method === "GET" &&
-        _cachePaths.some((p) => path === p || path.startsWith(p + "?"))
-    ) {
-        _apiCache.data[cacheKey] = data;
-        _apiCache.ts[cacheKey] = Date.now();
-    }
     return data;
 }
 
@@ -776,6 +753,7 @@ async function uploadFile(file, opts = {}) {
             method: "POST",
             body: fd,
             credentials: "same-origin",
+            cache: "no-store",
         });
     } catch (error) {
         throw new Error(

@@ -107,6 +107,34 @@ function loadCountryShipping(PDO $pdo, int $customerId): array
     }
 }
 
+/** Enrich only this already-authorized page; preserve child ordering and revision inputs. */
+function loadCustomerPageRelations(PDO $pdo, array $ids): array
+{
+    $shipping = $pors = [];
+    foreach (array_chunk(array_values(array_unique(array_map('intval', $ids))), 200) as $chunk) {
+        $marks = implode(',', array_fill(0, count($chunk), '?'));
+        try {
+            $stmt = $pdo->prepare("SELECT ccs.customer_id, ccs.id, ccs.country_id, ccs.shipping_code, co.code as country_code, co.name as country_name FROM customer_country_shipping ccs JOIN countries co ON co.id=ccs.country_id WHERE ccs.customer_id IN ($marks) ORDER BY ccs.customer_id, co.name");
+            $stmt->execute($chunk);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $id = (int)$row['customer_id']; unset($row['customer_id']);
+                $shipping[$id][] = $row;
+            }
+        } catch (Throwable $e) { /* Same optional-schema behavior as detail reads. */ }
+        if (customerHasPorTable($pdo)) {
+            try {
+                $stmt = $pdo->prepare("SELECT customer_id, por_value FROM customer_pors WHERE customer_id IN ($marks) ORDER BY customer_id, sort_order, id");
+                $stmt->execute($chunk);
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                    $value = trim((string)$row['por_value']);
+                    if ($value !== '') $pors[(int)$row['customer_id']][] = $value;
+                }
+            } catch (Throwable $e) { /* Same optional-schema behavior as detail reads. */ }
+        }
+    }
+    return [$shipping, $pors];
+}
+
 function customerLookupRoles(): array
 {
     return ['ChinaAdmin', 'ChinaEmployee', 'LebanonAdmin', 'WarehouseStaff', 'ContainersStaff', 'FieldStaff', 'SuperAdmin'];
@@ -392,12 +420,13 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 $hasMore = count($rows) > $limit;
                 if ($hasMore) $rows = array_slice($rows, 0, $limit);
+                [$shipping, $pors] = loadCustomerPageRelations($pdo, array_column($rows, 'id'));
                 foreach ($rows as &$r) {
                     $r['contacts'] = $r['contacts'] ? json_decode($r['contacts'], true) : [];
                     $r['addresses'] = $r['addresses'] ? json_decode($r['addresses'], true) : [];
                     $r['payment_links'] = isset($r['payment_links']) && $r['payment_links'] ? json_decode($r['payment_links'], true) : [];
-                    $r['country_shipping'] = loadCountryShipping($pdo, (int) $r['id']);
-                    $r['por'] = loadCustomerPorValues($pdo, (int) $r['id']);
+                    $r['country_shipping'] = $shipping[(int)$r['id']] ?? [];
+                    $r['por'] = $pors[(int)$r['id']] ?? [];
                     $r['revision']=CustomerWriteService::revision($r,$r['country_shipping'],$r['por']);
                 }
                 jsonResponse(['data' => $rows, 'meta' => ['limit' => $limit, 'offset' => $offset, 'has_more' => $hasMore, 'total' => $total]]);

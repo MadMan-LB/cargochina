@@ -1237,7 +1237,8 @@ test('manual draft item numbers persist, drive the next value, and create audit 
         if(empty($updated['data']['id']))throw new Exception('Manual update failed: '.json_encode($updated));
         $numbers=$pdo->query("SELECT item_no,item_no_source FROM order_items WHERE order_id=$orderId ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
         if(array_column($numbers,'item_no')!==['ITEM-015','ITEM-016'])throw new Exception('Manual 15 did not drive next 16: '.json_encode($numbers));
-        $audit=$pdo->query("SELECT old_value,new_value,user_id,created_at FROM audit_log WHERE action='item_number_changed' AND JSON_EXTRACT(new_value,'$.draft_id')=$orderId ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+        $audit=$pdo->query("SELECT old_value,new_value,user_id,created_at FROM audit_log WHERE entity_type='order_item' AND action='item_number_changed' AND entity_id IN (SELECT id FROM order_items WHERE order_id=$orderId) ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+        if ((int)(json_decode($audit['new_value'] ?? '{}',true)['draft_id'] ?? 0) !== $orderId) throw new Exception('Manual change audit belongs to another draft');
         if(!$audit||strpos((string)$audit['old_value'],'ITEM-008')===false||strpos((string)$audit['new_value'],'ITEM-015')===false||empty($audit['user_id'])||empty($audit['created_at']))throw new Exception('Manual change audit is incomplete');
         $submit=json_decode(runHandlerScript($root,'backend/api/handlers/orders.php','POST',(string)$orderId,'submit',[],[]),true);
         if(($submit['data']['status']??'')!=='Submitted')throw new Exception('Draft submit failed: '.json_encode($submit));
@@ -1246,7 +1247,7 @@ test('manual draft item numbers persist, drive the next value, and create audit 
         $afterApproval=$pdo->query("SELECT GROUP_CONCAT(item_no ORDER BY id SEPARATOR ',') FROM order_items WHERE order_id=$orderId")->fetchColumn();
         if($afterApproval!=='ITEM-015,ITEM-016')throw new Exception('Approval changed item numbers: '.$afterApproval);
     }finally{
-        if($orderId>0){$pdo->prepare("DELETE FROM audit_log WHERE action='item_number_changed' AND JSON_EXTRACT(new_value,'$.draft_id')=?")->execute([$orderId]);$pdo->prepare('DELETE FROM notifications WHERE target_type=\'order\' AND target_id=?')->execute([$orderId]);cleanupCreatedOrder($pdo,$orderId);}
+        if($orderId>0){$pdo->prepare("DELETE FROM audit_log WHERE entity_type='order_item' AND action='item_number_changed' AND entity_id IN (SELECT id FROM order_items WHERE order_id=?)")->execute([$orderId]);$pdo->prepare('DELETE FROM notifications WHERE target_type=\'order\' AND target_id=?')->execute([$orderId]);cleanupCreatedOrder($pdo,$orderId);}
         $pdo->prepare('DELETE FROM product_description_entries WHERE product_id IN (SELECT id FROM products WHERE description_en IN (?,?))')->execute([$label,$label.' next']);
         $pdo->prepare('DELETE FROM products WHERE description_en IN (?,?)')->execute([$label,$label.' next']);
     }

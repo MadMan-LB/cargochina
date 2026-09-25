@@ -27,6 +27,17 @@ class OrderExcelService
     private array $workbookImageResolutionCache = [];
     private array $workbookContextImageCache = [];
     private array $workbookImageDiagnosticKeys = [];
+    private array $workbookDrawingPrototypes = [];
+
+    private function resetWorkbookImages(): void
+    {
+        // Service instances may be reused by jobs. Never carry row sources into another export.
+        $this->workbookImageCache = [];
+        $this->workbookImageResolutionCache = [];
+        $this->workbookContextImageCache = [];
+        $this->workbookImageDiagnosticKeys = [];
+        $this->workbookDrawingPrototypes = [];
+    }
 
     public const IMAGE_PIPELINE_VERSION = '2026.08.06.1';
 
@@ -140,6 +151,7 @@ class OrderExcelService
 
     private function buildSelectedOrdersSpreadsheet(array $entries): Spreadsheet
     {
+        $this->resetWorkbookImages();
         if (!$entries) throw new InvalidArgumentException('No downloadable records were selected.');
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
@@ -178,6 +190,7 @@ class OrderExcelService
 
     private function buildOrderSpreadsheet(array $order, array $items): Spreadsheet
     {
+        $this->resetWorkbookImages();
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle(substr($this->tr('Order') . ' ' . (int) ($order['id'] ?? 0), 0, 31));
@@ -208,6 +221,7 @@ class OrderExcelService
 
     public function exportOrders(array $ordersWithItems, string $filename = 'container_orders.xlsx', array $context = []): void
     {
+        $this->resetWorkbookImages();
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
         $this->setContainerColumnWidths($sheet);
@@ -1555,9 +1569,8 @@ class OrderExcelService
 
         try {
             $drawing->setCoordinates($cell);
-            $drawing->setResizeProportional(false);
-            $drawing->setWidth($imageWidthPx);
-            $drawing->setHeight($imageHeightPx);
+            $drawing->setResizeProportional(true);
+            $drawing->setWidthAndHeight($imageWidthPx, $imageHeightPx);
             $drawing->setOffsetX($offsetX);
             $drawing->setOffsetY($offsetY);
             $drawing->setWorksheet($sheet);
@@ -1879,15 +1892,7 @@ class OrderExcelService
         if (!is_dir($cacheDir) && !@mkdir($cacheDir, 0770, true) && !is_dir($cacheDir)) {
             return $this->workbookImageResolutionCache[$path] = ['path' => '', 'reason' => 'remote_cache_unavailable'];
         }
-        $target = $cacheDir . DIRECTORY_SEPARATOR . hash('sha256', $path) . '.img';
-        if (is_file($target) && filesize($target) > 0) {
-            $cached = $this->validateWorkbookImageFile($target);
-            if (($cached['path'] ?? '') !== '') {
-                return $this->workbookImageResolutionCache[$path] = $cached;
-            }
-            @unlink($target);
-        }
-
+        // Remote URLs can change content. Fetch once per workbook, not indefinitely per URL.
         $download = $this->downloadRemoteWorkbookImage($path, $host, $ip, (int) ($url['port'] ?? 0));
         if (($download['data'] ?? '') === '') {
             return $this->workbookImageResolutionCache[$path] = [
@@ -1895,8 +1900,18 @@ class OrderExcelService
                 'reason' => (string) ($download['reason'] ?? 'remote_fetch_failed'),
             ];
         }
-        if (@file_put_contents($target, $download['data'], LOCK_EX) === false) {
-            return $this->workbookImageResolutionCache[$path] = ['path' => '', 'reason' => 'remote_cache_write_failed'];
+        $target = $cacheDir . DIRECTORY_SEPARATOR . hash('sha256', $download['data']) . '.img';
+        if (!is_file($target)) {
+            $temporary = tempnam($cacheDir, 'download_');
+            if ($temporary === false || @file_put_contents($temporary, $download['data'], LOCK_EX) === false) {
+                if ($temporary && is_file($temporary)) @unlink($temporary);
+                return $this->workbookImageResolutionCache[$path] = ['path' => '', 'reason' => 'remote_cache_write_failed'];
+            }
+            if (!@rename($temporary, $target)) {
+                @unlink($temporary);
+                // Another export may have published these exact content-hashed bytes.
+                if (!is_file($target)) return $this->workbookImageResolutionCache[$path] = ['path' => '', 'reason' => 'remote_cache_write_failed'];
+            }
         }
         $outcome = $this->validateWorkbookImageFile($target);
         if (($outcome['path'] ?? '') === '') {
@@ -2518,6 +2533,12 @@ class OrderExcelService
 
     private function createWorkbookDrawingOutcome(string $sourcePath, int $targetWidth, int $targetHeight): array
     {
+        $key = $sourcePath . '|' . $targetWidth . 'x' . $targetHeight;
+        if (isset($this->workbookDrawingPrototypes[$key])) {
+            $outcome = $this->workbookDrawingPrototypes[$key];
+            $outcome['drawing'] = clone $outcome['drawing'];
+            return $outcome;
+        }
         $preparedPath = $sourcePath;
         $fallbackReason = '';
         try {
@@ -2537,12 +2558,16 @@ class OrderExcelService
             try {
                 $drawing = new Drawing();
                 $drawing->setPath($preparedPath);
-                return [
-                    'drawing' => $drawing,
+                $outcome = [
+                    // Keep an unattached prototype; every row receives its own anchor.
+                    'drawing' => clone $drawing,
                     'mode' => 'file',
                     'reason' => 'ok',
                     'fallback_reason' => $fallbackReason,
                 ];
+                $this->workbookDrawingPrototypes[$key] = $outcome;
+                $outcome['drawing'] = $drawing;
+                return $outcome;
             } catch (Throwable $e) {
                 $fallbackReason = 'file_drawing_rejected';
             }
@@ -2690,6 +2715,7 @@ class OrderExcelService
 
     private function exportSimpleTable(string $title, array $headers, array $rows, string $filename): void
     {
+        $this->resetWorkbookImages();
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
         $localizedTitle = $this->tr($title);

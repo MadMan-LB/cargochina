@@ -148,6 +148,7 @@ const Autocomplete = {
                         params.toString(),
                     {
                         credentials: "same-origin",
+                        cache: "no-store",
                         signal: abortController.signal,
                     },
                 );

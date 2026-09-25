@@ -83,10 +83,11 @@ function jsonResponse(array $data, int $status = 200): void
     exit;
 }
 
-/** Set Cache-Control for GET responses (departments, roles, config). Use for read-heavy, rarely-changing data. */
+/** Authenticated responses must reflect current permissions and business state. */
 function setCacheHeaders(int $maxAgeSeconds = 60): void
 {
-    header('Cache-Control: private, max-age=' . $maxAgeSeconds);
+    // Keep the argument for existing callers; no authenticated response TTL is safe here.
+    header('Cache-Control: private, no-store, max-age=0');
 }
 
 function jsonError(string $message, int $status = 400, array $errors = [], ?string $requestId = null): void

@@ -17,6 +17,15 @@ function procurementDraftRevision(PDO $pdo,int $id): string
     return OrderWriteService::requestHash(['header'=>$header,'items'=>$s->fetchAll(PDO::FETCH_ASSOC)]);
 }
 
+/** Match the mutation revision exactly, using rows already loaded for the list. */
+function procurementDraftLoadedRevision(array $draft, array $items): string
+{
+    $header = array_intersect_key($draft, array_flip(['name','supplier_id','status','converted_order_id','delete_generation']));
+    usort($items, static fn($a, $b) => (int)$a['id'] <=> (int)$b['id']);
+    $items = array_map(static fn($item) => array_intersect_key($item, array_flip(['id','product_id','quantity','notes','sort_order'])), $items);
+    return OrderWriteService::requestHash(['header'=>$header,'items'=>$items]);
+}
+
 function procurementValidateItems(PDO $pdo,$items,?int $supplierId): array
 {
     if(!is_array($items)||!$items||count($items)>500)jsonError('Provide between 1 and 500 procurement items',422);
@@ -193,12 +202,19 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             if ($id === null) {
                 $stmt = $pdo->query("SELECT pd.*, s.name as supplier_name FROM procurement_drafts pd LEFT JOIN suppliers s ON pd.supplier_id = s.id WHERE pd.deleted_at IS NULL ORDER BY pd.created_at DESC");
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                foreach ($rows as &$r) {
-                    $items = $pdo->prepare("SELECT pdi.*, p.description_cn, p.description_en FROM procurement_draft_items pdi LEFT JOIN products p ON pdi.product_id = p.id WHERE pdi.draft_id = ? ORDER BY pdi.sort_order, pdi.id");
-                    $items->execute([$r['id']]);
-                    $r['items'] = $items->fetchAll(PDO::FETCH_ASSOC);
-                    $r['revision']=procurementDraftRevision($pdo,(int)$r['id']);
+                $itemsByDraft = [];
+                // Bounded IN lists work with native PDO prepares and MySQL 5.5.
+                foreach (array_chunk(array_column($rows, 'id'), 200) as $ids) {
+                    $marks = implode(',', array_fill(0, count($ids), '?'));
+                    $items = $pdo->prepare("SELECT pdi.*, p.description_cn, p.description_en FROM procurement_draft_items pdi LEFT JOIN products p ON pdi.product_id = p.id WHERE pdi.draft_id IN ($marks) ORDER BY pdi.draft_id, pdi.sort_order, pdi.id");
+                    $items->execute($ids);
+                    foreach ($items->fetchAll(PDO::FETCH_ASSOC) as $item) $itemsByDraft[$item['draft_id']][] = $item;
                 }
+                foreach ($rows as &$r) {
+                    $r['items'] = $itemsByDraft[$r['id']] ?? [];
+                    $r['revision'] = procurementDraftLoadedRevision($r, $r['items']);
+                }
+                unset($r);
                 jsonResponse(['data' => $rows]);
             }
             $stmt = $pdo->prepare("SELECT pd.*, s.name as supplier_name FROM procurement_drafts pd LEFT JOIN suppliers s ON pd.supplier_id = s.id WHERE pd.deleted_at IS NULL AND pd.id = ?");

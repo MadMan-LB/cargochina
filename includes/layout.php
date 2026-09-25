@@ -1,5 +1,7 @@
 <?php
 require_once __DIR__ . '/auth_check.php';
+require_once __DIR__ . '/asset_url.php';
+header('Cache-Control: private, no-store, max-age=0');
 require_once __DIR__ . '/sidebar_permissions.php';
 $currentPage = $currentPage ?? 'dashboard';
 $pageTitle = $pageTitle ?? 'CLMS Dashboard';
@@ -27,7 +29,6 @@ $canViewNotifications = !$isContainersOnly;
 $canViewDownloads = $isAdmin || $isBuyer || $isWarehouse || $hasContainersStaffRole;
 $basePath = '/cargochina';
 $breadcrumbs = $breadcrumbs ?? [];
-$layoutCssVersion = @filemtime(__DIR__ . '/../frontend/css/style.css') ?: time();
 $sidebarSections = clmsGetSidebarSectionsForRoles($userRoles, null, $userId);
 $visiblePageIds = clmsGetEffectivePageIdsForRoles($userRoles, null, $userId);
 $uiLocale = clmsGetUiLocale();
@@ -46,8 +47,8 @@ if (empty($_SESSION['logout_csrf_token'])) $_SESSION['logout_csrf_token']=bin2he
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title><?= htmlspecialchars(clmsT($pageTitle)) ?> | CLMS</title>
-  <link rel="stylesheet" href="<?= $basePath ?>/frontend/css/bootstrap.min.css">
-  <link rel="stylesheet" href="<?= $basePath ?>/frontend/css/style.css?v=<?= $layoutCssVersion ?>">
+  <link rel="stylesheet" href="<?= htmlspecialchars(clmsAssetUrl($basePath . '/frontend/css/bootstrap.min.css')) ?>">
+  <link rel="stylesheet" href="<?= htmlspecialchars(clmsAssetUrl($basePath . '/frontend/css/style.css')) ?>">
 </head>
 
 <body>

@@ -13,7 +13,7 @@
         const previousBusy = link.getAttribute('aria-busy');
         link.setAttribute('aria-busy', 'true');
         try {
-            const response = await fetch(url.href, { credentials: 'same-origin' });
+            const response = await fetch(url.href, { credentials: 'same-origin', cache: 'no-store' });
             const type = response.headers.get('Content-Type') || '';
             if (!response.ok || /json/i.test(type)) {
                 let message = 'Download failed. Please try again.';

@@ -1,0 +1,74 @@
+{
+  "dashboard/stats": {
+    "ms": 6.58,
+    "queries": 13,
+    "bytes": 420,
+    "sha256": "e5dee5a8dcd68857c1c27e5a6729b1604a3220528605deac1f2c5edf86157c0e"
+  },
+  "draft-orders": {
+    "ms": 107.961,
+    "queries": 274,
+    "bytes": 80717,
+    "sha256": "e1bc2f2f65d42f17b456461313ee449e910ba518470ce1df96cee3d2de31b860"
+  },
+  "orders": {
+    "ms": 69.737,
+    "queries": 46,
+    "bytes": 315918,
+    "sha256": "a3a45da6cd50b93dad099f54311e78a66df5b255d69610479f0390b9e7bee1a3"
+  },
+  "procurement-drafts": {
+    "ms": 19.479,
+    "queries": 184,
+    "bytes": 75636,
+    "sha256": "da460b6641435032f41caf070356a937be219586bd903f1f5cfa65332ae7c3ec"
+  },
+  "receiving/queue": {
+    "ms": 15.34,
+    "queries": 6,
+    "bytes": 69,
+    "sha256": "6e0d1318a8d77727adf288b301e02e15979c7926215b86f7bad079602180f028"
+  },
+  "warehouse-stock": {
+    "ms": 26.613,
+    "queries": 14,
+    "bytes": 70,
+    "sha256": "27d808ba82df19bcb1b28c2f486468de1f93187d4bdbdddb13b4f8bc0d4f4a2a"
+  },
+  "customers": {
+    "ms": 13.54,
+    "queries": 106,
+    "bytes": 22825,
+    "sha256": "8a446580a2a5e9ea4831e493c369ba667a800f48927770d03f47b5b187636d48"
+  },
+  "suppliers": {
+    "ms": 14.915,
+    "queries": 61,
+    "bytes": 27623,
+    "sha256": "f190c406676cc99d7cd280bd5e42f4ad074e0dbd53b97b70d37f0f27285b563e"
+  },
+  "containers": {
+    "ms": 22.248,
+    "queries": 11,
+    "bytes": 69,
+    "sha256": "6e0d1318a8d77727adf288b301e02e15979c7926215b86f7bad079602180f028"
+  },
+  "orders eligible": {
+    "ms": 63.771,
+    "queries": 46,
+    "bytes": 379057,
+    "sha256": "66318a9c3a9a75b4baac3d82d236c41166a261830ad6f133133381065e89baf4"
+  },
+  "calendar": {
+    "ms": 5.744,
+    "queries": 14,
+    "bytes": 24769,
+    "sha256": "ce89724f9b657d5433bfdecba81915574a669d137962576f58e439c1b097ffca"
+  },
+  "recycle-bin": {
+    "ms": 7.211,
+    "queries": 7,
+    "bytes": 137,
+    "sha256": "c7577ac7106fc6dbad0c7f32ca4872b1330ba48c03e13ce8a016e387ed576b76"
+  }
+}

@@ -1285,7 +1285,7 @@ function draftOrderCollectItemNumberAudit(PDO $pdo, int $orderId, array $items):
 function draftOrderWriteItemNumberAudit(PDO $pdo, int $orderId, array $changes, array $insertedItems, int $userId): void
 {
     if(!$changes) return;
-    $stmt=$pdo->prepare("INSERT INTO audit_log (entity_type,entity_id,action,old_value,new_value,user_id) VALUES ('order_item',?,'item_number_changed',?,?,?)");
+    $stmt=$pdo->prepare("INSERT INTO audit_log (entity_type,entity_id,action,old_value,new_value,user_id,created_at) VALUES ('order_item',?,'item_number_changed',?,?,?,NOW())");
     foreach($changes as $change){
         $newItemId=(int)($insertedItems[$change['item_index']]['id']??0);
         $context=['draft_id'=>$orderId,'old_item_id'=>$change['old_item_id'],'new_item_id'=>$newItemId,'supplier_id'=>$change['supplier_id']??null];
@@ -1541,6 +1541,9 @@ function draftOrderFetchOrderItemRows(PDO $pdo, int $orderId): array
 
     $receiptImages = clmsReceiptItemImagePaths($pdo, $itemIds);
     $orderReceiptImages = clmsOrderReceiptImagePaths($pdo, [$orderId]);
+    $classificationService = new ItemClassificationService($pdo);
+    $classifications = draftOrderTableHasColumn($pdo, 'item_classifications', 'item_type_code')
+        ? $classificationService->getMany('order_item', $itemIds) : [];
     $firstItemId = isset($items[0]['id']) ? (int) $items[0]['id'] : 0;
     foreach ($items as &$item) {
         $item['image_paths'] = clmsMergeImagePathLists(
@@ -1582,10 +1585,8 @@ function draftOrderFetchOrderItemRows(PDO $pdo, int $orderId): array
         $item['shared_carton_contents'] = ($hasSharedCartonEnabled && $hasSharedCartonContents && !empty($item['shared_carton_enabled']))
             ? draftOrderDecodeSharedCartonContents($pdo, $item)
             : [];
-        $classification = draftOrderTableHasColumn($pdo, 'item_classifications', 'item_type_code')
-            ? (new ItemClassificationService($pdo))->get('order_item', (int) $item['id'])
-            : null;
-        $item['item_type_code'] = $classification['item_type_code'] ?? ((new ItemClassificationService($pdo))->normalize($item['copy_normal_goods'] ?? ''));
+        $classification = $classifications[(int)$item['id']] ?? null;
+        $item['item_type_code'] = $classification['item_type_code'] ?? $classificationService->normalize($item['copy_normal_goods'] ?? '');
         $item['item_type_confidence'] = isset($classification['confidence']) ? (float) $classification['confidence'] : null;
         $item['item_type_confirmed'] = !empty($classification['is_confirmed']) ? 1 : 0;
     }

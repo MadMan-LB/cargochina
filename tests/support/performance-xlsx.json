@@ -1,0 +1,96 @@
+{
+  "before": [
+    {
+      "seconds": 4.084,
+      "bytes": 224453,
+      "peak_mb": 50,
+      "rows": 1800,
+      "drawings": 1800,
+      "media": 6,
+      "path": "C:\\Users\\admin\\AppData\\Local\\Temp/clms-perf-paired-before-0.xlsx"
+    },
+    {
+      "seconds": 4.144,
+      "bytes": 224453,
+      "peak_mb": 50,
+      "rows": 1800,
+      "drawings": 1800,
+      "media": 6,
+      "path": "C:\\Users\\admin\\AppData\\Local\\Temp/clms-perf-paired-before-1.xlsx"
+    },
+    {
+      "seconds": 4.086,
+      "bytes": 224454,
+      "peak_mb": 50,
+      "rows": 1800,
+      "drawings": 1800,
+      "media": 6,
+      "path": "C:\\Users\\admin\\AppData\\Local\\Temp/clms-perf-paired-before-2.xlsx"
+    },
+    {
+      "seconds": 3.812,
+      "bytes": 224453,
+      "peak_mb": 50,
+      "rows": 1800,
+      "drawings": 1800,
+      "media": 6,
+      "path": "C:\\Users\\admin\\AppData\\Local\\Temp/clms-perf-paired-before-3.xlsx"
+    },
+    {
+      "seconds": 4.428,
+      "bytes": 224453,
+      "peak_mb": 50,
+      "rows": 1800,
+      "drawings": 1800,
+      "media": 6,
+      "path": "C:\\Users\\admin\\AppData\\Local\\Temp/clms-perf-paired-before-4.xlsx"
+    }
+  ],
+  "after": [
+    {
+      "seconds": 3.786,
+      "bytes": 224454,
+      "peak_mb": 50,
+      "rows": 1800,
+      "drawings": 1800,
+      "media": 6,
+      "path": "C:\\Users\\admin\\AppData\\Local\\Temp/clms-perf-paired-after-0.xlsx"
+    },
+    {
+      "seconds": 3.65,
+      "bytes": 224453,
+      "peak_mb": 50,
+      "rows": 1800,
+      "drawings": 1800,
+      "media": 6,
+      "path": "C:\\Users\\admin\\AppData\\Local\\Temp/clms-perf-paired-after-1.xlsx"
+    },
+    {
+      "seconds": 3.501,
+      "bytes": 224454,
+      "peak_mb": 50,
+      "rows": 1800,
+      "drawings": 1800,
+      "media": 6,
+      "path": "C:\\Users\\admin\\AppData\\Local\\Temp/clms-perf-paired-after-2.xlsx"
+    },
+    {
+      "seconds": 3.858,
+      "bytes": 224454,
+      "peak_mb": 50,
+      "rows": 1800,
+      "drawings": 1800,
+      "media": 6,
+      "path": "C:\\Users\\admin\\AppData\\Local\\Temp/clms-perf-paired-after-3.xlsx"
+    },
+    {
+      "seconds": 3.68,
+      "bytes": 224454,
+      "peak_mb": 50,
+      "rows": 1800,
+      "drawings": 1800,
+      "media": 6,
+      "path": "C:\\Users\\admin\\AppData\\Local\\Temp/clms-perf-paired-after-4.xlsx"
+    }
+  ]
+}
