@@ -13,6 +13,7 @@ require_once dirname(__DIR__, 2) . '/services/ContainerCapacityService.php';
 require_once dirname(__DIR__, 2) . '/services/ShipmentAssignmentService.php';
 require_once dirname(__DIR__, 2) . '/services/CargoStateService.php';
 require_once dirname(__DIR__, 2) . '/services/ContainerWriteService.php';
+require_once dirname(__DIR__, 2) . '/services/ContainerPresetService.php';
 require_once dirname(__DIR__, 2) . '/services/OrderWriteService.php';
 require_once dirname(__DIR__, 2) . '/services/ShipmentWriteService.php';
 
@@ -803,6 +804,16 @@ return function (string $method, ?string $id, ?string $action, array $input) {
 
             if($id!==null||$action!==null)jsonError('Unsupported container action',400);
             $input=ContainerWriteService::normalize($pdo,$input);
+            if (array_key_exists('size', $input)) {
+                $presets = ContainerPresetService::all($pdo);
+                if (!is_string($input['size']) || !isset($presets[$input['size']])) jsonError('Choose 20GP, 40GP or 45GP',422);
+                foreach ($presets[$input['size']] as $field => $value) {
+                    if (array_key_exists($field, $input) && (!is_numeric($input[$field]) || (float) $input[$field] !== (float) $value)) {
+                        jsonError('Capacity must match the selected size. Reopen Add Container to load current settings.',422);
+                    }
+                    $input[$field] = $value;
+                }
+            }
             $code = $input['code'] ?? '';
             $maxCbm = ContainerCapacityService::limit($input['max_cbm']??null,'Max CBM');
             $maxWeight = ContainerCapacityService::limit($input['max_weight']??null,'Max weight');

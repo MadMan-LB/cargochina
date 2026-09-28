@@ -75,11 +75,9 @@ function esc(s) {
     return d.innerHTML;
 }
 
-let containerPresets = {
-    CONTAINER_20HQ_CBM: 28,
-    CONTAINER_40HQ_CBM: 68,
-    CONTAINER_45HQ_CBM: 78,
-};
+let containerPresets = {};
+let selectedContainerSize = '20GP';
+let containerPresetsRequest = 0;
 
 document.addEventListener("DOMContentLoaded", () => {
     el("draftModal")?.addEventListener("hide.bs.modal", () => {
@@ -90,7 +88,7 @@ document.addEventListener("DOMContentLoaded", () => {
         loadContainers();
         loadShipmentDrafts();
         loadReadyTotals();
-        loadContainerPresets();
+        el('containerModal')?.addEventListener('show.bs.modal', loadContainerPresets);
         const exactDraftId = new URLSearchParams(window.location.search).get("shipment_draft_id");
         if (exactDraftId && /^\d+$/.test(exactDraftId)) {
             openDraftModal(parseInt(exactDraftId, 10));
@@ -155,21 +153,25 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 async function loadContainerPresets() {
+    const request = ++containerPresetsRequest;
+    containerPresets = {};
+    el('containerCreateSave').disabled = true;
+    el('containerMaxCbm').value = '';
+    el('containerMaxWeight').value = '';
     try {
         const r = await api("GET", "/config/container-presets");
-        const d = r.data || {};
-        containerPresets = {
-            CONTAINER_20HQ_CBM: parseFloat(d.CONTAINER_20HQ_CBM) || 28,
-            CONTAINER_40HQ_CBM: parseFloat(d.CONTAINER_40HQ_CBM) || 68,
-            CONTAINER_45HQ_CBM: parseFloat(d.CONTAINER_45HQ_CBM) || 78,
-        };
+        if (request !== containerPresetsRequest) return;
+        containerPresets = r.data?.presets || {};
+        if (!['20GP','40GP','45GP'].every(size => Number.isFinite(Number(containerPresets[size]?.max_cbm)) && Number(containerPresets[size]?.max_cbm)>0 && Number(containerPresets[size]?.max_weight)>0)) throw new Error('Unable to load container capacities');
         const btns = document.querySelectorAll("[data-container-preset]");
         btns.forEach((btn) => {
-            const code = btn.dataset.containerPreset;
-            const cbm = containerPresets["CONTAINER_" + code + "_CBM"] || 28;
-            btn.onclick = () => applyContainerPreset(code, cbm, 28000);
+            btn.onclick = () => applyContainerPreset(btn.dataset.containerPreset);
         });
-    } catch (_) {}
+        applyContainerPreset(selectedContainerSize);
+        el('containerCreateSave').disabled = false;
+    } catch (e) {
+        if (request === containerPresetsRequest) showToast(e.message || 'Unable to load container capacities', 'danger');
+    }
 }
 
 function renderDraftDocuments(docs) {
@@ -401,10 +403,17 @@ async function loadShipmentDrafts(reset=true) {
     }
 }
 
-function applyContainerPreset(code, maxCbm, maxWeight) {
-    document.getElementById("containerCode").value = code;
-    document.getElementById("containerMaxCbm").value = maxCbm;
-    document.getElementById("containerMaxWeight").value = maxWeight;
+function applyContainerPreset(size) {
+    const preset = containerPresets[size];
+    if (!preset) return;
+    selectedContainerSize = size;
+    document.getElementById("containerMaxCbm").value = preset.max_cbm;
+    document.getElementById("containerMaxWeight").value = preset.max_weight;
+    document.querySelectorAll('[data-container-preset]').forEach(btn => {
+        const selected = btn.dataset.containerPreset === size;
+        btn.classList.toggle('active', selected);
+        btn.setAttribute('aria-pressed', String(selected));
+    });
 }
 
 let consolidationContainerEditRevision = null;
@@ -461,9 +470,12 @@ function suggestEtaFromOffsets() {
 }
 
 let containerCreateRequestKey = null;
+let containerCreatePayload = null;
+let containerCreateSaving = false;
 async function saveContainer() {
+    if (containerCreateSaving) return;
     if (!canCreateContainers()) {
-        showToast("Only SuperAdmin can create containers", "danger");
+        showToast("You do not have permission to create containers", "danger");
         return;
     }
     const code = document.getElementById("containerCode").value.trim();
@@ -471,19 +483,25 @@ async function saveContainer() {
     const maxWeight = parseFloat(
         document.getElementById("containerMaxWeight").value,
     );
-    if (!code || maxCbm <= 0 || maxWeight <= 0) {
-        showToast("Fill all fields", "danger");
+    if (!code || !containerPresets[selectedContainerSize] || !Number.isFinite(maxCbm) || !Number.isFinite(maxWeight) || maxCbm <= 0 || maxWeight <= 0) {
+        showToast("Enter a container code and select a size", "danger");
         return;
     }
+    const payload = {code, size: selectedContainerSize, max_cbm: maxCbm, max_weight: maxWeight};
+    const signature = JSON.stringify(payload);
+    if (signature !== containerCreatePayload) containerCreateRequestKey = null;
+    containerCreatePayload = signature;
+    containerCreateSaving = true;
+    el('containerCreateSave').disabled = true;
     try {
         await api("POST", "/containers", {
             idempotency_key: containerCreateRequestKey || (containerCreateRequestKey = `container:${globalThis.crypto?.randomUUID?.() || Date.now().toString(36)+Math.random().toString(36).slice(2)}`),
-            code,
-            max_cbm: maxCbm,
-            max_weight: maxWeight,
+            ...payload,
         });
         showToast("Container created");
         containerCreateRequestKey = null;
+        containerCreatePayload = null;
+        el('containerCode').value = '';
         bootstrap.Modal.getInstance(
             document.getElementById("containerModal"),
         ).hide();
@@ -491,6 +509,9 @@ async function saveContainer() {
         loadReadyTotals();
     } catch (e) {
         showToast(e.message, "danger");
+    } finally {
+        containerCreateSaving = false;
+        el('containerCreateSave').disabled = false;
     }
 }
 

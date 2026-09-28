@@ -67,24 +67,26 @@ require 'includes/layout.php';
                             data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
-                        <div class="mb-2"><label class="form-label">Presets</label>
-                            <div class="btn-group btn-group-sm" role="group">
-                                <button type="button" class="btn btn-outline-secondary" data-container-preset="20HQ">20HQ</button>
-                                <button type="button" class="btn btn-outline-secondary" data-container-preset="40HQ">40HQ</button>
-                                <button type="button" class="btn btn-outline-secondary" data-container-preset="45HQ">45HQ</button>
+                        <div class="mb-2"><label class="form-label">Container Size *</label>
+                            <div class="btn-group btn-group-sm" role="group" aria-label="Container size">
+                                <button type="button" class="btn btn-outline-secondary" data-container-preset="20GP" aria-pressed="false">20GP</button>
+                                <button type="button" class="btn btn-outline-secondary" data-container-preset="40GP" aria-pressed="false">40GP</button>
+                                <button type="button" class="btn btn-outline-secondary" data-container-preset="45GP" aria-pressed="false">45GP</button>
                             </div>
                             <small class="text-muted d-block mt-1">CBM from Business Settings</small>
                         </div>
-                        <div class="mb-2"><label class="form-label">Code *</label><input type="text" class="form-control"
-                                id="containerCode"></div>
-                        <div class="mb-2"><label class="form-label">Max CBM *</label><input type="number" step="0.01"
-                                class="form-control" id="containerMaxCbm"></div>
-                        <div class="mb-2"><label class="form-label">Max Weight (kg) *</label><input type="number" step="0.01"
-                                class="form-control" id="containerMaxWeight"></div>
+                        <div class="mb-2"><label class="form-label" for="containerCode">Container Code *</label><input type="text" class="form-control"
+                                id="containerCode" maxlength="50" required placeholder="Enter a unique container number or reference">
+                            <small class="text-muted">Enter the code for this container, separately from its size.</small></div>
+                        <div class="mb-2"><label class="form-label" for="containerMaxCbm">Max CBM</label><input type="number" step="any"
+                                class="form-control" id="containerMaxCbm" readonly></div>
+                        <div class="mb-2"><label class="form-label" for="containerMaxWeight">Max Weight (kg)</label><input type="number" step="any"
+                                class="form-control" id="containerMaxWeight" readonly></div>
+                        <small class="text-muted">Capacity is fixed by the selected size.</small>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-primary" onclick="saveContainer()">Save</button>
+                        <button type="button" class="btn btn-primary" id="containerCreateSave" onclick="saveContainer()" disabled>Save</button>
                     </div>
                 </div>
             </div>

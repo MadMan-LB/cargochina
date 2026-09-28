@@ -16,6 +16,24 @@ $req=['method'=>'POST','body'=>$base];$a=containerStart($req);$b=containerStart(
 assignmentAssert($ra['data']['eta_date']==='2026-10-25'&&$ra['data']['destination']==='Beirut','Creation omitted schedule/destination');
 $bad=$base;$bad['notes']='different';assignmentAssert(!empty(containerCall('POST',null,$bad)['error']),'Changed creation retry accepted');
 echo "PASS: concurrent creation, payload binding, persisted schedule and destination\n";
+require_once dirname(__DIR__).'/backend/services/ContainerPresetService.php';
+$presets=ContainerPresetService::all($pdo);
+foreach(['20GP','40GP','45GP','20GP'] as $size){
+    $gp=['code'=>'GP-REFERENCE-'.bin2hex(random_bytes(5)), 'size'=>$size,'idempotency_key'=>'gp-qa-'.bin2hex(random_bytes(8))];
+    $created=containerCall('POST',null,$gp);
+    assignmentAssert(empty($created['error']),'Preset create failed: '.json_encode($created));
+    $persisted=containerCall('GET',(int)$created['data']['id'])['data'];
+    assignmentAssert($persisted['code']===strtoupper($gp['code']),'Preset overwrote manual code');
+    foreach($presets[$size] as $field=>$value)assignmentAssert((float)$persisted[$field]===(float)$value,'Wrong persisted preset capacity');
+    assignmentAssert((int)containerCall('POST',null,$gp)['data']['id']===(int)$persisted['id'],'Preset retry duplicated container');
+    $gp['idempotency_key']='gp-duplicate-'.bin2hex(random_bytes(8));
+    assignmentAssert(!empty(containerCall('POST',null,$gp)['error']),'Duplicate manual code accepted');
+}
+foreach([['size'=>'20HQ'],['size'=>[]],['size'=>'20GP','max_cbm'=>999],['size'=>'20GP','max_weight'=>1],['size'=>'20GP','code'=>'']] as $invalid){
+    $gp=array_replace(['code'=>'GP-INVALID-'.bin2hex(random_bytes(5)), 'idempotency_key'=>'gp-invalid-'.bin2hex(random_bytes(8))],$invalid);
+    assignmentAssert(!empty(containerCall('POST',null,$gp)['error']),'Invalid preset/code/capacity accepted');
+}
+echo "PASS: GP presets, independent manual codes, same-size containers, persisted capacities, retry and tamper rejection\n";
 foreach(['invalid-day','bad-date','date-array','reversed-dates','country','code-length','missing-key','invalid-capacity'] as $case){
     $input=$base;$input['code']='SG-INVALID-'.bin2hex(random_bytes(4));$input['idempotency_key']='container-invalid-'.bin2hex(random_bytes(6));
     if($case==='invalid-day')$input['eta_date']='2026-02-31';if($case==='bad-date')$input['eta_date']='tomorrow';if($case==='date-array')$input['eta_date']=[];
@@ -46,7 +64,7 @@ $pdo->prepare('DELETE wri FROM warehouse_receipt_items wri JOIN warehouse_receip
 $unknown=containerCall('GET',$container,[],'orders')['data']['totals'];assignmentAssert($unknown['quantity']===null,'Unknown quantity collapsed to zero');
 echo "PASS: mixed currencies, assigned destination guard and unknown physical quantity\n";
 foreach([['status'=>'bogus'],['fill'=>'bogus'],['limit'=>'invalid'],['offset'=>-1]] as $query)assignmentAssert(!empty(containerCall('GET',null,[],null,$query)['error']),'Malformed container filter accepted');
-$literal=containerCall('GET',null,[],null,['q'=>'%']);assignmentAssert(empty($literal['data']),'Search wildcard exposed unrelated containers');
+$literal=containerCall('GET',null,[],null,['q'=>'%']);assignmentAssert(empty($literal['error'])&&!in_array($id,array_column($literal['data'],'id')),'Search wildcard exposed the newly created container without a literal percent');
 $page=containerCall('GET',null,[],null,['limit'=>1,'offset'=>1]);assignmentAssert(count($page['data'])===1&&$page['meta']['total']>1,'Container pagination mismatch');
 $pdo->prepare("INSERT INTO users(email,password_hash,full_name,is_active) VALUES (?,'unusable','Container permission QA',1)")->execute(['container-qa-'.bin2hex(random_bytes(6)).'@example.invalid']);$reader=(int)$pdo->lastInsertId();
 foreach(['GET','PUT','POST'] as $method){$result=containerFinish(containerStart(['method'=>$method,'id'=>$method==='POST'?null:(string)$id,'forbidden'=>$reader]));assignmentAssert(!empty($result['error']),'Roleless direct container handler access');}

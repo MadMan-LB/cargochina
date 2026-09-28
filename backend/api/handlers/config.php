@@ -7,6 +7,7 @@
 require_once __DIR__ . '/../helpers.php';
 require_once dirname(__DIR__,2).'/services/AuditService.php';
 require_once dirname(__DIR__,2).'/services/SettingsWriteService.php';
+require_once dirname(__DIR__,2).'/services/ContainerPresetService.php';
 require_once dirname(__DIR__, 2) . '/services/TrainingDataResetService.php';
 
 return function (string $method, ?string $id, ?string $action, array $input) {
@@ -48,20 +49,8 @@ return function (string $method, ?string $id, ?string $action, array $input) {
                 return;
             }
             if ($id === 'container-presets') {
-                $data = [
-                    'CONTAINER_20HQ_CBM' => '28',
-                    'CONTAINER_40HQ_CBM' => '68',
-                    'CONTAINER_45HQ_CBM' => '78',
-                ];
-                $chk = @$pdo->query("SHOW TABLES LIKE 'business_settings'");
-                if ($chk && $chk->rowCount() > 0) {
-                    $stmt = $pdo->query("SELECT key_name, key_value FROM business_settings WHERE key_name IN ('CONTAINER_20HQ_CBM','CONTAINER_40HQ_CBM','CONTAINER_45HQ_CBM')");
-                    if ($stmt) {
-                        while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
-                            $data[$r['key_name']] = $r['key_value'];
-                        }
-                    }
-                }
+                $data = ['presets' => ContainerPresetService::all($pdo)];
+                foreach ([20, 40, 45] as $size) $data['CONTAINER_' . $size . 'HQ_CBM'] = (string) $data['presets'][$size . 'GP']['max_cbm'];
                 jsonResponse(['data' => $data]);
                 return;
             }
