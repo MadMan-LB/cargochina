@@ -30,6 +30,7 @@ try {
         if (!isset($codes[$code])) throw new Exception("Missing preflight check: $code");
     }
     if (($codes['database_identity'] ?? '') !== ProductionReleasePreflightService::VERIFIED) throw new Exception('Expected database identity did not verify');
+    if (!isset($codes['recycle_schema'])) throw new Exception('Missing recovery-column deployment gate');
     if (($codes['accounting_policy'] ?? '') !== ProductionReleasePreflightService::VERIFIED) throw new Exception('Approved accounting implementation did not verify');
     if (($codes['backup_and_restore_rehearsal'] ?? '') !== ProductionReleasePreflightService::VERIFIED) throw new Exception('Valid backup evidence did not verify');
     echo "PASS: read-only production release preflight verifies approved accounting controls and retains environment gates\n";

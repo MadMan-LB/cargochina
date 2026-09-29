@@ -162,6 +162,9 @@ try {
             'The Chinese header must be directly below the English header.'
         );
     }
+    foreach ($itemRows as $itemRow) {
+        multiExcelAssert($sheet->getCell('Z' . $itemRow)->getValue() === '30 x 8.25 x 12.5', 'Dimensions must preserve integer trailing zeroes.');
+    }
     multiExcelAssert(count($itemRows) === 7, 'Every item from all three orders must be present.');
     foreach ([16 => '2026-07-20', 17 => '2026-07-21', 18 => '2026-08-01'] as $orderId => $expectedDate) {
         $row = $titleRows[$orderId] + 4;

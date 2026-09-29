@@ -2209,7 +2209,7 @@ class OrderExcelService
         $parts = [];
         foreach ([$length, $width, $height] as $value) {
             if ($value !== null && $value !== '' && is_numeric($value) && (float) $value > 0) {
-                $parts[] = rtrim(rtrim((string) round((float) $value, 4), '0'), '.');
+                $parts[] = rtrim(rtrim(number_format((float) $value, 4, '.', ''), '0'), '.');
             }
         }
 

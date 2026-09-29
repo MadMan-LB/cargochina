@@ -34,6 +34,7 @@ final class ProductionReleasePreflightService
         $checks[] = $this->extensionCheck();
         $checks[] = $this->migrationCheck();
         $checks[] = $this->schemaCheck();
+        $checks[] = $this->recycleSchemaCheck();
         $checks[] = $this->receivingIdempotencyCheck();
         $checks[] = $this->cargoIntegrityCheck();
         $checks[] = $this->seedPasswordCheck();
@@ -88,6 +89,8 @@ final class ProductionReleasePreflightService
             '084_release_policy_controls.sql',
             '085_owner_controls.sql',
             '086_credential_recovery_requirement.sql',
+            '087_recycle_bin.sql',
+            '089_supplier_recovery.sql',
         ];
         if (!$this->tableExists('_migrations')) {
             return $this->check('release_migrations', self::BLOCKED, 'Migration tracking table is missing.', ['required' => $required, 'missing' => $required]);
@@ -122,6 +125,23 @@ final class ProductionReleasePreflightService
             $missing ? self::BLOCKED : self::VERIFIED,
             $missing ? 'Required release tables are missing.' : 'Required release tables exist.',
             ['required_tables' => $tables, 'missing_tables' => $missing]
+        );
+    }
+
+    private function recycleSchemaCheck(): array
+    {
+        // Check the actual schema, not only the migration ledger: DDL can apply partially.
+        $missing = [];
+        foreach (['procurement_drafts', 'shipment_drafts', 'suppliers'] as $table) {
+            foreach (['deleted_at', 'deleted_by', 'delete_reason', 'delete_generation'] as $column) {
+                if (!$this->columnExists($table, $column)) $missing[] = $table . '.' . $column;
+            }
+        }
+        return $this->check(
+            'recycle_schema',
+            $missing ? self::BLOCKED : self::VERIFIED,
+            $missing ? 'Recovery schema is incomplete. Apply migrations 087 and 089 before serving this release.' : 'Recovery columns required by active lists and Recycle Bin exist.',
+            ['missing_columns' => $missing]
         );
     }
 
