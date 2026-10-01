@@ -162,7 +162,7 @@ async function loadContainerPresets() {
         const r = await api("GET", "/config/container-presets");
         if (request !== containerPresetsRequest) return;
         containerPresets = r.data?.presets || {};
-        if (!['20GP','40GP','45GP'].every(size => Number.isFinite(Number(containerPresets[size]?.max_cbm)) && Number(containerPresets[size]?.max_cbm)>0 && Number(containerPresets[size]?.max_weight)>0)) throw new Error('Unable to load container capacities');
+        if (!['20GP','40HQ','45HQ'].every(size => Number.isFinite(Number(containerPresets[size]?.max_cbm)) && Number(containerPresets[size]?.max_cbm)>0 && Number(containerPresets[size]?.max_weight)>0)) throw new Error('Unable to load container capacities');
         const btns = document.querySelectorAll("[data-container-preset]");
         btns.forEach((btn) => {
             btn.onclick = () => applyContainerPreset(btn.dataset.containerPreset);

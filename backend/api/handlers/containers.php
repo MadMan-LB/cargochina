@@ -806,7 +806,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             $input=ContainerWriteService::normalize($pdo,$input);
             if (array_key_exists('size', $input)) {
                 $presets = ContainerPresetService::all($pdo);
-                if (!is_string($input['size']) || !isset($presets[$input['size']])) jsonError('Choose 20GP, 40GP or 45GP',422);
+                if (!is_string($input['size']) || !isset($presets[$input['size']])) jsonError('Choose 20GP, 40HQ or 45HQ',422);
                 foreach ($presets[$input['size']] as $field => $value) {
                     if (array_key_exists($field, $input) && (!is_numeric($input[$field]) || (float) $input[$field] !== (float) $value)) {
                         jsonError('Capacity must match the selected size. Reopen Add Container to load current settings.',422);

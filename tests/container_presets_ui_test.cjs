@@ -1,7 +1,7 @@
 const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/strict');
 const nodes={containerCode:{value:'BEY-2026-001'},containerMaxCbm:{},containerMaxWeight:{},containerCreateSave:{}};
-const buttons=['20GP','40GP','45GP'].map(size=>({dataset:{containerPreset:size},classList:{toggle(){}},setAttribute(key,value){this[key]=value}}));
-const sandbox={document:{addEventListener(){},getElementById(id){return nodes[id]},querySelectorAll(){return buttons}},el:id=>nodes[id],showToast(){},api:async()=>({data:{presets:{'20GP':{max_cbm:29,max_weight:28000},'40GP':{max_cbm:68,max_weight:28000},'45GP':{max_cbm:78,max_weight:28000}}}})};
+const buttons=['20GP','40HQ','45HQ'].map(size=>({dataset:{containerPreset:size},classList:{toggle(){}},setAttribute(key,value){this[key]=value}}));
+const sandbox={document:{addEventListener(){},getElementById(id){return nodes[id]},querySelectorAll(){return buttons}},el:id=>nodes[id],showToast(){},api:async()=>({data:{presets:{'20GP':{max_cbm:29,max_weight:28000},'40HQ':{max_cbm:68,max_weight:28000},'45HQ':{max_cbm:78,max_weight:28000}}}})};
 vm.createContext(sandbox);vm.runInContext(fs.readFileSync('frontend/js/consolidation.js','utf8'),sandbox);
 (async()=>{
     await sandbox.loadContainerPresets();
@@ -13,6 +13,6 @@ vm.createContext(sandbox);vm.runInContext(fs.readFileSync('frontend/js/consolida
     assert.equal(nodes.containerCreateSave.disabled,true);assert.equal(nodes.containerMaxCbm.value,'');
     const html=fs.readFileSync('consolidation.php','utf8');
     for(const id of ['containerMaxCbm','containerMaxWeight'])assert.match(html,new RegExp('id="'+id+'" readonly'));
-    assert.doesNotMatch(html,/data-container-preset="\d+HQ"/);
-    console.log('PASS: GP choices, configured capacities, manual code preserved, locked capacity fields, failed config blocks saving');
+    assert.deepEqual([...html.matchAll(/data-container-preset="([^"]+)"/g)].map(m=>m[1]),['20GP','40HQ','45HQ']);
+    console.log('PASS: 20GP/40HQ/45HQ choices, configured capacities, manual code preserved, locked capacity fields, failed config blocks saving');
 })().catch(e=>{console.error(e);process.exitCode=1});

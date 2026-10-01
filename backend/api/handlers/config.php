@@ -50,7 +50,7 @@ return function (string $method, ?string $id, ?string $action, array $input) {
             }
             if ($id === 'container-presets') {
                 $data = ['presets' => ContainerPresetService::all($pdo)];
-                foreach ([20, 40, 45] as $size) $data['CONTAINER_' . $size . 'HQ_CBM'] = (string) $data['presets'][$size . 'GP']['max_cbm'];
+                foreach ([20, 40, 45] as $size) $data['CONTAINER_' . $size . 'HQ_CBM'] = (string) $data['presets'][$size . ($size === 20 ? 'GP' : 'HQ')]['max_cbm'];
                 jsonResponse(['data' => $data]);
                 return;
             }

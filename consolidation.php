@@ -70,8 +70,8 @@ require 'includes/layout.php';
                         <div class="mb-2"><label class="form-label">Container Size *</label>
                             <div class="btn-group btn-group-sm" role="group" aria-label="Container size">
                                 <button type="button" class="btn btn-outline-secondary" data-container-preset="20GP" aria-pressed="false">20GP</button>
-                                <button type="button" class="btn btn-outline-secondary" data-container-preset="40GP" aria-pressed="false">40GP</button>
-                                <button type="button" class="btn btn-outline-secondary" data-container-preset="45GP" aria-pressed="false">45GP</button>
+                                <button type="button" class="btn btn-outline-secondary" data-container-preset="40HQ" aria-pressed="false">40HQ</button>
+                                <button type="button" class="btn btn-outline-secondary" data-container-preset="45HQ" aria-pressed="false">45HQ</button>
                             </div>
                             <small class="text-muted d-block mt-1">CBM from Business Settings</small>
                         </div>

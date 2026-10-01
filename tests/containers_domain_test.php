@@ -18,7 +18,7 @@ $bad=$base;$bad['notes']='different';assignmentAssert(!empty(containerCall('POST
 echo "PASS: concurrent creation, payload binding, persisted schedule and destination\n";
 require_once dirname(__DIR__).'/backend/services/ContainerPresetService.php';
 $presets=ContainerPresetService::all($pdo);
-foreach(['20GP','40GP','45GP','20GP'] as $size){
+foreach(['20GP','40HQ','45HQ','20GP'] as $size){
     $gp=['code'=>'GP-REFERENCE-'.bin2hex(random_bytes(5)), 'size'=>$size,'idempotency_key'=>'gp-qa-'.bin2hex(random_bytes(8))];
     $created=containerCall('POST',null,$gp);
     assignmentAssert(empty($created['error']),'Preset create failed: '.json_encode($created));

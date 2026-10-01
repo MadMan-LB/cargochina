@@ -19,7 +19,7 @@ final class ContainerPresetService
         }
         $presets = [];
         foreach ([20, 40, 45] as $size) {
-            $presets[$size . 'GP'] = ['max_cbm' => $values['CONTAINER_' . $size . 'HQ_CBM'], 'max_weight' => 28000];
+            $presets[$size . ($size === 20 ? 'GP' : 'HQ')] = ['max_cbm' => $values['CONTAINER_' . $size . 'HQ_CBM'], 'max_weight' => 28000];
         }
         return $presets;
     }
