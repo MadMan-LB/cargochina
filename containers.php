@@ -5,8 +5,10 @@ requireRoleForPage(['ChinaAdmin', 'LebanonAdmin', 'SuperAdmin', 'ContainersStaff
 $currentPage = 'containers';
 $pageTitle = 'Containers';
 $isSuperAdmin = in_array('SuperAdmin', $_SESSION['user_roles'] ?? []);
+$summaryView = ($_GET['summary'] ?? '') === '1' && ctype_digit((string)($_GET['container_id'] ?? ''));
 require 'includes/layout.php';
 ?>
+<div <?= $summaryView ? 'class="d-none"' : '' ?>>
 <h1 class="mb-3">Containers</h1>
 <p class="text-muted mb-4">Monitor fill levels, container movement, and assignment pressure with cleaner multi-status filtering.</p>
 
@@ -140,15 +142,16 @@ require 'includes/layout.php';
 </div>
 
 <!-- Container View Modal -->
-<div class="modal fade" id="containerViewModal" tabindex="-1">
-  <div class="modal-dialog modal-xl modal-fullscreen-lg-down">
+</div>
+<div class="<?= $summaryView ? 'card mb-4' : 'modal fade' ?>" id="containerViewModal" data-summary="<?= $summaryView ? '1' : '0' ?>" tabindex="-1">
+  <div class="<?= $summaryView ? '' : 'modal-dialog modal-xl modal-fullscreen-lg-down' ?>">
     <div class="modal-content">
       <div class="modal-header">
         <div>
           <h5 class="modal-title" id="containerViewTitle">Container</h5>
           <div id="containerViewSubtitle" class="text-muted small"></div>
         </div>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <?php if (!$summaryView): ?><button type="button" class="btn-close" data-bs-dismiss="modal"></button><?php endif; ?>
       </div>
       <div class="modal-body" id="containerViewBody">
         <div class="text-center py-5">
@@ -157,7 +160,7 @@ require 'includes/layout.php';
       </div>
       <div class="modal-footer">
         <a id="containerViewDownload" class="btn btn-outline-success" href="#" download><?= htmlspecialchars(clmsT('Download')) ?></a>
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <?php if ($summaryView): ?><a class="btn btn-secondary" href="containers.php">Back to Containers</a><?php else: ?><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><?php endif; ?>
       </div>
     </div>
   </div>

@@ -346,6 +346,7 @@ function applyClientFilters() {
               <button class="btn btn-sm btn-outline-secondary js-edit-container" data-id="${c.id}" data-code="${escHtml(c.code || "")}" title="Edit container info">Edit</button>
               <button class="btn btn-sm btn-success js-assign-btn" ${c.capacity_known === false || c.assignment_locked ? 'disabled' : ''} data-id="${c.id}" data-code="${escHtml(c.code || "")}" data-max-cbm="${c.max_cbm}" data-max-weight="${c.max_weight}" data-used-cbm="${parseFloat(c.used_cbm || 0).toFixed(6)}" data-used-weight="${parseFloat(c.used_weight || 0).toFixed(4)}" title="Assign orders to this container">+ Assign</button>
               <button class="btn btn-sm btn-outline-info js-view-container" data-id="${c.id}" data-code="${escHtml(c.code || "")}" title="View orders in this container">View</button>
+              <a class="btn btn-sm btn-outline-info" href="containers.php?container_id=${Number(c.id)}&amp;summary=1">Summary</a>
               <a class="btn btn-sm btn-outline-success" href="${CONTAINERS_API_BASE}/containers/${c.id}/export?format=xlsx" download title="${escapeHtml(typeof t === "function" ? t("Download") : "Download")}">${escapeHtml(typeof t === "function" ? t("Download") : "Download")}</a>
             </td>
           </tr>`;
@@ -544,7 +545,7 @@ async function viewContainer(id, code) {
     if (!modalEl) return;
     let modal;
     try {
-        modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        if (modalEl.dataset.summary !== '1') modal = bootstrap.Modal.getOrCreateInstance(modalEl);
     } catch (e) {
         console.error(e);
         return;
@@ -562,7 +563,7 @@ async function viewContainer(id, code) {
             '<div class="text-center py-5"><div class="spinner-border text-primary"></div></div>';
     if (dlBtn)
         dlBtn.href = CONTAINERS_API_BASE + "/containers/" + id + "/export?format=xlsx";
-    modal.show();
+    if (modal) modal.show();
 
     try {
         const res = await fetch(
@@ -575,6 +576,7 @@ async function viewContainer(id, code) {
         }
         const data = (await res.json()).data || {};
         const container = data.container || {};
+        if (titleEl) titleEl.textContent = 'Container: ' + (container.code || code || '#' + id);
         const orders = data.orders || [];
         const drafts = data.drafts || [];
         const totals = data.totals || {};
@@ -587,7 +589,7 @@ async function viewContainer(id, code) {
             ? `Ship: ${container.expected_ship_date}${container.vessel_name ? ` • ${container.vessel_name}` : ""}`
             : "";
         const etaInfo = container.eta_date ? `ETA: ${container.eta_date}` : "";
-        const extra = [shipInfo, etaInfo].filter(Boolean).join(" | ");
+        const extra = [shipInfo, etaInfo, 'Destination: ' + getContainerDestinationDisplay(container), container.notes || ''].filter(Boolean).join(" | ");
         if (subtitleEl)
             subtitleEl.innerHTML = `<span class="badge ${st.cls}">${escHtml(st.label)}</span>${extra ? ` <span class="text-muted ms-2">${escHtml(extra)}</span>` : ""}`;
 
@@ -620,7 +622,7 @@ async function viewContainer(id, code) {
                         ? `<span class="badge ${statusBadgeClass(o.status)}">${escHtml(typeof statusLabel === "function" ? statusLabel(o.status) : o.status || "—")}</span>`
                         : escHtml(o.status || "—");
                 return `<tr>
-              <td>${o.id}</td>
+              <td><a href="orders.php?order_id=${Number(o.id)}">${Number(o.id)}</a></td>
               <td>${escHtml(o.customer_name || "—")}${o.customer_priority_level && o.customer_priority_level !== "normal" ? ` <span class="badge bg-warning text-dark ms-1" title="${escHtml(o.customer_priority_note || "")}">${escHtml(typeof t === "function" ? t(o.customer_priority_level) : o.customer_priority_level)}</span>` : ""}${o.high_alert_notes ? ` <span class="badge bg-danger-subtle text-danger border border-danger-subtle ms-1" title="${escHtml(o.high_alert_notes)}">${escHtml(typeof t === "function" ? t("Alert") : "Alert")}</span>` : ""}</td>
               <td>${escHtml(o.supplier_name || "—")}</td>
               <td>${escHtml(o.expected_ready_date || "—")}</td>

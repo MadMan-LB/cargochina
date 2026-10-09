@@ -85,6 +85,6 @@ final class ShipmentAssignmentService
 
     public static function audit(PDO $pdo,string $action,int $entityId,array $old,array $new,int $userId):void
     {
-        $pdo->prepare("INSERT INTO audit_log(entity_type,entity_id,action,old_value,new_value,user_id) VALUES ('shipment_draft',?,?,?,?,?)")->execute([$entityId,$action,json_encode($old),json_encode($new),$userId]);
+        $pdo->prepare("INSERT INTO audit_log(entity_type,entity_id,action,old_value,new_value,user_id,created_at) VALUES ('shipment_draft',?,?,?,?,?,NOW())")->execute([$entityId,$action,json_encode($old),json_encode($new),$userId]);
     }
 }
